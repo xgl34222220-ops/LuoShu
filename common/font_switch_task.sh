@@ -261,7 +261,10 @@ run_worker() {
         write_task "$_task" failed "$_font" "字体切换超过 ${TIMEOUT_SECONDS} 秒，已终止（${_last_stage}）；当前启动字体未被改动" \
             "$_started" "$_finished" '' '' '' "$TIMEOUT_SECONDS" '' false 100
     else
-        _message=$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$_output" 2>/dev/null | tail -n1)
+        # Android toybox/libc regex can crash while extracting JSON messages.
+        # Use the already-bundled bounded parser; if it is unavailable or the
+        # output is malformed, keep the normal generic failure fallback below.
+        _message=$(luoshu_task_helper error-message "$_output" 2>/dev/null || true)
         [ -n "$_message" ] || _message="字体切换失败（代码 $_rc），当前启动字体未被改动"
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
         write_task "$_task" failed "$_font" "$_message" "$_started" "$_finished" '' '' '' 0 '' false 100

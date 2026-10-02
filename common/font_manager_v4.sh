@@ -23,6 +23,18 @@ SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
 FONT_INDEX_JSON="$CONFIG_DIR/native_font_index.json"
 FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 
+# Inventory is independent of ROM/mount setup. One batch process replaces the
+# former per-file manifest forks and per-family O(N²) awk/JSON shell loops.
+case "${1:-}:${2:-}" in
+    action:list|list:*)
+        _inventory_mode=scan
+        if [ "${1:-}" = action ]; then _inventory_arg="${3:-}"; else _inventory_arg="${2:-}"; fi
+        [ "$_inventory_arg" != refresh ] || _inventory_mode=refresh
+        export MODDIR LUOSHU_PUBLIC_DIR
+        exec sh "$MODULE_DIR/common/font_inventory_request.sh" "$_inventory_mode"
+        ;;
+esac
+
 [ -f "$MODULE_DIR/common/util_functions.sh" ] && . "$MODULE_DIR/common/util_functions.sh"
 [ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"
 [ -f "$MODULE_DIR/common/font_validation_cache.sh" ] && . "$MODULE_DIR/common/font_validation_cache.sh"
@@ -433,164 +445,11 @@ notify_user() {
         cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1
 }
 
-font_index_fingerprint() {
-    if type font_library_fingerprint_value >/dev/null 2>&1; then
-        font_library_fingerprint_value
-    else
-        stat -c '%Y:%s' "$USER_FONTS_DIR" 2>/dev/null || printf '0:0\n'
-    fi
-}
-
-font_index_manifest() {
-    _manifest="$1"
-    : > "$_manifest" 2>/dev/null || return 1
-    for _font_file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-            "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_font_file" ] || continue
-        _name=$(basename "$_font_file" 2>/dev/null)
-        _family=$(detect_font_family "$_name")
-        case "$_family" in ''|SysFont*|SysSans*) continue ;; esac
-        case "$_name" in *'|'*) continue ;; esac
-        case "$_family" in *'|'*) continue ;; esac
-        _weight=$(detect_font_weight "$_name")
-        _size=$(stat -c %s "$_font_file" 2>/dev/null)
-        _mtime=$(stat -c %Y "$_font_file" 2>/dev/null)
-        case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        case "$_mtime" in ''|*[!0-9]*) _mtime=0 ;; esac
-        printf '%s|%s|%s|%s|%s|%s
-' "$_family" "$_weight" "$_font_file" "$_name" "$_size" "$_mtime" >> "$_manifest"
-    done
-}
-
 build_font_index_json() {
-    _refresh="$1"
-    _current=$(get_current_font_id)
-    _fingerprint=$(font_index_fingerprint) || { printf '{"status":"error","message":"字体目录暂不可读"}\n'; return 1; }
-    _cache_key="native-v3|${_current}|${_fingerprint}"
-    _saved_key=$(cat "$FONT_INDEX_KEY" 2>/dev/null)
-    if [ "$_refresh" != refresh ] && [ "$_saved_key" = "$_cache_key" ] && [ -s "$FONT_INDEX_JSON" ] && grep -q '"status":"ok"' "$FONT_INDEX_JSON" 2>/dev/null; then
-        cat "$FONT_INDEX_JSON"
-        return 0
-    fi
-
-    _manifest="$CONFIG_DIR/.native-font-manifest.$$"
-    _families="$CONFIG_DIR/.native-font-families.$$"
-    font_index_manifest "$_manifest" || : > "$_manifest"
-    awk -F'|' 'NF >= 6 && !seen[$1]++ {print $1}' "$_manifest" > "$_families" 2>/dev/null || : > "$_families"
-    _output="${FONT_INDEX_JSON}.tmp.$$"
-    {
-        _first=true
-        _font_count=$(grep -c . "$_families" 2>/dev/null)
-        _total_bytes=$(awk -F'|' '{total += $5} END {print total + 0}' "$_manifest" 2>/dev/null)
-        case "$_font_count" in ''|*[!0-9]*) _font_count=0 ;; esac
-        case "$_total_bytes" in ''|*[!0-9]*) _total_bytes=0 ;; esac
-        printf '{"status":"ok","data":{"current":"%s","fingerprint":"%s","scanner":{"primary":"manifest-fast","nativeAvailable":false},"stats":{"count":%s,"totalSize":"%s"},"fonts":[' \
-  "$(json_escape "$_current")" "$(json_escape "$_fingerprint")" "$_font_count" "$(format_filesize "$_total_bytes")"
-
-        while IFS= read -r _family; do
-  [ -n "$_family" ] || continue
-  _weights=$(awk -F'|' -v wanted="$_family" '
-      $1 == wanted {seen[$2] = 1}
-      END {
-          count = split("variable thin extralight light regular medium semibold bold extrabold black", order, " ")
-          out = ""
-          for (i = 1; i <= count; i++) if (seen[order[i]]) out = out (out ? "," : "") order[i]
-          print out
-      }
-  ' "$_manifest")
-  [ -n "$_weights" ] || continue
-  _record=$(awk -F'|' -v wanted="$_family" '
-      BEGIN {
-          priority["regular"]=1; priority["medium"]=2; priority["bold"]=3; priority["semibold"]=4
-          priority["variable"]=5; priority["light"]=6; priority["extralight"]=7; priority["thin"]=8
-          priority["extrabold"]=9; priority["black"]=10; best=999
-      }
-      $1 == wanted {
-          p = ($2 in priority) ? priority[$2] : 50
-          if (p < best) {best=p; line=$0}
-      }
-      END {print line}
-  ' "$_manifest")
-  [ -n "$_record" ] || continue
-  IFS='|' read -r _record_family _record_weight _file _record_name _bytes _record_mtime <<EOF_RECORD
-$_record
-EOF_RECORD
-  [ -f "$_file" ] || continue
-
-  _weights_json=''
-  _variants_json=''
-  _weight_count=0
-  _old_ifs="$IFS"
-  IFS=','
-  for _weight in $_weights; do
-      [ -n "$_weight" ] || continue
-      [ -n "$_weights_json" ] && _weights_json="$_weights_json,"
-      _weights_json="${_weights_json}\"$(json_escape "$_weight")\""
-      _weight_count=$((_weight_count + 1))
-      _variant_name=$(awk -F'|' -v wanted="$_family" -v role="$_weight" '$1 == wanted && $2 == role {print $4; exit}' "$_manifest")
-      if [ -n "$_variant_name" ]; then
-          [ -n "$_variants_json" ] && _variants_json="$_variants_json,"
-          _variants_json="${_variants_json}\"$(json_escape "$_weight")\":\"$(json_escape "$_variant_name")\""
-      fi
-  done
-  IFS="$_old_ifs"
-
-  case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
-  _format=UNKNOWN
-  type font_detect_format >/dev/null 2>&1 && _format=$(font_detect_format "$_file" 2>/dev/null)
-  _valid=true
-  _error=''
-  if [ "$_bytes" -lt 4096 ] 2>/dev/null; then
-      _valid=false; _error='字体文件过小'
-  elif [ -z "$_format" ] || [ "$_format" = UNKNOWN ]; then
-      _valid=false; _error='字体格式无法识别'
-  fi
-  _variable=false
-  case ",$_weights," in *,variable,*) _variable=true ;; esac
-  _family_type=single
-  [ "$_weight_count" -ge 2 ] 2>/dev/null && _family_type=static-family
-  [ "$_variable" = true ] && _family_type=variable
-  _date=$(stat -c '%y' "$_file" 2>/dev/null | cut -c1-10)
-  _display_name="$_family"
-  _supports_cjk=true
-  _cfg="$USER_FONTS_DIR/${_family}.conf"
-  if [ -f "$_cfg" ]; then
-      _configured_name=$(sed -n 's/^name=//p' "$_cfg" 2>/dev/null | head -n1 | tr -d '
-')
-      [ -n "$_configured_name" ] && _display_name="$_configured_name"
-      _configured_cjk=$(sed -n 's/^supports_cjk=//p' "$_cfg" 2>/dev/null | head -n1 | tr -d '
-')
-      case "$_configured_cjk" in true) _supports_cjk=true ;; false) _supports_cjk=false ;; esac
-  fi
-
-  [ "$_first" = true ] || printf ','
-  printf '{"id":"%s","name":"%s","weights":[%s],"variants":{%s},"familyType":"%s","file":"%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"warning":"","error":"%s","variable":%s,"supportsCjk":%s,"date":"%s"}' \
-      "$(json_escape "$_family")" "$(json_escape "$_display_name")" "$_weights_json" "$_variants_json" "$(json_escape "$_family_type")" \
-      "$(json_escape "$_record_name")" "$(format_filesize "$_bytes")" "$_bytes" "$(json_escape "$_format")" "$_valid" \
-      "$(json_escape "$_error")" "$_variable" "$_supports_cjk" "$(json_escape "$_date")"
-  _first=false
-        done < "$_families"
-        printf ']}}
-'
-    } > "$_output" 2>/dev/null
-    _result=$?
-    rm -f "$_manifest" "$_families" 2>/dev/null || true
-    if [ "$_result" -ne 0 ] || [ ! -s "$_output" ]; then
-        rm -f "$_output" 2>/dev/null || true
-        printf '{"status":"error","message":"字体索引生成失败"}
-'
-        return 1
-    fi
-    mv -f "$_output" "$FONT_INDEX_JSON" 2>/dev/null || {
-        rm -f "$_output" 2>/dev/null || true
-        printf '{"status":"error","message":"字体索引缓存写入失败"}
-'
-        return 1
-    }
-    printf '%s
-' "$_cache_key" > "$FONT_INDEX_KEY" 2>/dev/null || true
-    chmod 0644 "$FONT_INDEX_JSON" "$FONT_INDEX_KEY" 2>/dev/null || true
-    cat "$FONT_INDEX_JSON"
+    _inventory_mode=scan
+    [ "${1:-}" != refresh ] || _inventory_mode=refresh
+    MODDIR="$MODULE_DIR" LUOSHU_PUBLIC_DIR="$LUOSHU_PUBLIC_DIR" \
+        sh "$MODULE_DIR/common/font_inventory_request.sh" "$_inventory_mode"
 }
 
 validate_font_json() {

@@ -2,6 +2,7 @@ package io.github.xgl34222220.luoshu
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -44,11 +45,30 @@ internal object RootShell {
         }
     }
 
+    suspend fun fontInventory(action: String, timeoutMs: Long): ShellResult {
+        require(action in setOf("cached", "preview", "scan", "refresh", "fingerprint"))
+        val seconds = (timeoutMs / 1000.0).coerceIn(0.05, 120.0)
+        val command = "sh '/data/adb/modules/LuoShu/common/font_inventory_request.sh' request ${quote(action)} $seconds"
+        return try {
+            executeProcess(listOf("su", "-c", command), timeoutMs + 6_000L,
+                keepStdinOpen = true, cleanupGraceMs = 6_000L)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            ShellResult(127, "", error.message.orEmpty().ifBlank { "无法连接字体库存请求" })
+        }
+    }
+
     fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 }
 
 /** Owns only the request process. Module workers are detached by app_bridge.sh. */
-internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): ShellResult =
+internal suspend fun executeProcess(
+    command: List<String>,
+    timeoutMs: Long,
+    keepStdinOpen: Boolean = false,
+    cleanupGraceMs: Long = 0L,
+): ShellResult =
     withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()
         val process = ProcessBuilder(command).redirectErrorStream(false).start()
@@ -59,7 +79,7 @@ internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): She
         try {
             // No command accepts interactive input. Closing stdin also lets commands waiting
             // for EOF finish normally. Never wait for pipe EOF: descendants may inherit it.
-            process.outputStream.close()
+            if (!keepStdinOpen) process.outputStream.close()
             while (true) {
                 currentCoroutineContext().ensureActive()
                 val outputBytes = drainAvailable(process.inputStream, stdout, buffer) +
@@ -81,6 +101,19 @@ internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): She
             @Suppress("UNREACHABLE_CODE")
             error("Process loop ended unexpectedly")
         } finally {
+            // Only inventory requests use stdin as a lease. EOF asks their finite root
+            // subreaper to terminate/reap owned descendants before we release the request.
+            runCatching { process.outputStream.close() }
+            if (keepStdinOpen && process.isAlive && cleanupGraceMs > 0L) {
+                withContext(NonCancellable) {
+                    val deadline = System.nanoTime() + cleanupGraceMs * 1_000_000L
+                    while (process.isAlive && System.nanoTime() < deadline) {
+                        runCatching { drainAvailable(process.inputStream, stdout, buffer) }
+                        runCatching { drainAvailable(process.errorStream, stderr, buffer) }
+                        delay(25L)
+                    }
+                }
+            }
             if (process.isAlive) process.destroyForcibly()
             runCatching { process.inputStream.close() }
             runCatching { process.errorStream.close() }

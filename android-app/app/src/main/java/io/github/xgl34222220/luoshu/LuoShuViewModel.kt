@@ -92,6 +92,7 @@ internal data class FontItem(
     val weights: List<String>,
     val supportsCjk: Boolean = true,
     val revision: String = "",
+    val provisional: Boolean = false,
 ) {
     val weightLabel: String
         get() = when {
@@ -138,7 +139,7 @@ internal data class MixState(
 
 internal class LuoShuViewModel(application: Application) : AndroidViewModel(application) {
     private val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
-    private val fontLibrarySource = RootFontLibrarySource()
+    private val fontLibrarySource = RootFontLibrarySource(diagnostics = FontLoadDiagnostics::request)
     private val fontIndexStore = FontIndexStore(application)
     private var watchedTaskId: String = ""
     private var cachedFingerprint: String = ""

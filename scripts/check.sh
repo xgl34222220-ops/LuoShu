@@ -324,8 +324,9 @@ test -x "$ROOT/common/python/bin/luoshu-python"
 echo 'LuoShu App-only source checks passed.'
 
 # Font refresh/import/mix performance contracts.
-grep -q 'native-v3' common/font_manager.sh
-grep -q 'manifest-fast' common/font_manager.sh
+grep -q 'font_inventory_request.sh' common/font_manager_v4.sh
+test -f common/font_inventory_batch.py
+test -f common/font_request_scope.py
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
 grep -q 'prepared-v8' common/multiweight_mix_task.sh
 
@@ -333,6 +334,8 @@ python3 "$ROOT/scripts/stable_mount_boundary_test.py"
 python3 "$ROOT/scripts/stable_cleanup_policy_test.py"
 
 python3 "$ROOT/scripts/task_scope_test.py"
+python3 "$ROOT/scripts/font_inventory_batch_test.py"
+python3 "$ROOT/scripts/font_request_scope_test.py"
 
 sh "$ROOT/scripts/system_health_test.sh"
 python3 "$ROOT/scripts/finalize_lock_test.py"

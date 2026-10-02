@@ -611,6 +611,74 @@ def lock_fd(args):
             return 1
 
 
+def error_message_from_file(path):
+    """Read a bounded manager-output tail without Android libc regex calls.
+
+    Managers emit standalone JSON records amongst human-readable log lines.
+    Preserve the last valid top-level string message, never a nested lookalike
+    or a malformed JSON fragment. The persisted task format is one key per line.
+    """
+    limit = 256 * 1024
+    try:
+        if not Path(path).is_file():
+            return ''
+        with open(path, 'rb') as source:
+            source.seek(0, os.SEEK_END)
+            offset = max(0, source.tell() - limit)
+            source.seek(offset)
+            raw = source.read(limit)
+        if offset:
+            # The first bytes may be the middle of a log/UTF-8/JSON record.
+            # Do not reinterpret a cut-off record as an independent response.
+            raw = raw.partition(b'\n')[2]
+        text = raw.decode('utf-8', errors='replace')
+    except OSError:
+        return ''
+
+    def extract(candidate):
+        if not candidate.lstrip().startswith('{'):
+            return ''
+        try:
+            value = json.loads(candidate)
+        except (ValueError, RecursionError):
+            return ''
+        message = value.get('message') if isinstance(value, dict) else None
+        if not isinstance(message, str):
+            return ''
+        # JSON escapes can include newlines, NULs or lone surrogates. Decode
+        # correctly, then prevent them from injecting additional task fields.
+        message = ''.join(' ' if ord(char) < 32 or char in '\x7f\x85\u2028\u2029' else char
+                          for char in message[:4096]).strip()
+        return message.encode('utf-8', errors='replace').decode('utf-8')
+
+    # A complete pretty-printed response is valid too. Otherwise parse separate
+    # log records in reverse; total examined input remains bounded above.
+    complete = extract(text)
+    if complete:
+        return complete
+    try:
+        json.loads(text)
+    except (ValueError, RecursionError):
+        pass
+    else:
+        # A valid whole response without a top-level string message must not
+        # accidentally expose a nested object while scanning individual lines.
+        return ''
+    for line in reversed(text.splitlines()):
+        message = extract(line)
+        if message:
+            return message
+    return ''
+
+
+def error_message(args):
+    message = error_message_from_file(args.path)
+    if not message:
+        return 1
+    print(message)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest='action', required=True)
@@ -630,6 +698,8 @@ def main():
     admission.add_argument('config'); admission.add_argument('command', nargs=argparse.REMAINDER)
     mutex = commands.add_parser('lock-fd')
     mutex.add_argument('fd', type=int); mutex.add_argument('timeout', type=float)
+    message = commands.add_parser('error-message')
+    message.add_argument('path')
     args = parser.parse_args()
     if hasattr(args, 'command'):
         if args.command[:1] == ['--']:
@@ -637,7 +707,8 @@ def main():
         if not args.command:
             parser.error('missing task command')
     return {'launch': launch, 'supervise': supervise, 'stop': stop, 'reconcile': reconcile,
-            'submit': submit, 'tree': terminate_tree, 'lock-fd': lock_fd}[args.action](args)
+            'submit': submit, 'tree': terminate_tree, 'lock-fd': lock_fd,
+            'error-message': error_message}[args.action](args)
 
 
 if __name__ == '__main__':

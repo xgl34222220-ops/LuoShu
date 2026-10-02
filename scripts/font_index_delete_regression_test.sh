@@ -19,6 +19,8 @@ cp "$ROOT/common/util_functions.sh" "$MODULE/common/util_functions.sh"
 cp "$ROOT/common/util_functions_core.sh" "$MODULE/common/util_functions_core.sh"
 cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
 cp "$ROOT/common/font_library_cache.sh" "$MODULE/common/font_library_cache.sh"
+cp "$ROOT/common/font_inventory_batch.py" "$MODULE/common/font_inventory_batch.py"
+cp "$ROOT/common/font_inventory_request.sh" "$MODULE/common/font_inventory_request.sh"
 cp "$FONT" "$PUBLIC/fonts/Alpha-Regular.ttf"
 cp "$FONT" "$PUBLIC/fonts/Beta-Regular.ttf"
 
@@ -38,10 +40,9 @@ printf '%s\n' "$AFTER" | grep -q '"count":1'
 ! printf '%s\n' "$AFTER" | grep -q '"id":"Alpha"'
 printf '%s\n' "$AFTER" | grep -q '"id":"Beta"'
 
-# Inventory/delete implementation remains in the preserved current manager; the
-# root manager is intentionally only a switch router.
+# Inventory uses the batch reader, while delete stays in the current manager.
+# Functional assertions above protect family grouping and surviving entries.
 ! grep -Fq 'case "$_name|$_family"' "$ROOT/common/font_manager_v4.sh"
-grep -Fq 'case "$_name" in' "$ROOT/common/font_manager_v4.sh"
-grep -Fq 'case "$_family" in' "$ROOT/common/font_manager_v4.sh"
+grep -q 'font_inventory_request.sh' "$ROOT/common/font_manager_v4.sh"
 grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROOT/common/font_manager.sh"
 echo 'Deleting one font through the router preserves every remaining font in the native index.'

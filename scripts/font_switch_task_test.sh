@@ -141,4 +141,6 @@ printf '%s\n' "$status_output" | grep -q '"bootId":"'
 printf '%s\n' "$status_output" | grep -q '"percent":100'
 grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
 
+python3 "$ROOT/scripts/font_switch_error_message_test.py"
+
 echo 'font_switch_task_test: PASS'

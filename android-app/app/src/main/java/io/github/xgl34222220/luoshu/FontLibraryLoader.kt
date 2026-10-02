@@ -11,6 +11,7 @@ internal data class FontLibraryFingerprint(val value: String, val currentFont: S
 /** Reads are separate from module status: neither cached rows nor refresh wait for ROM diagnostics. */
 internal interface FontLibrarySource {
     suspend fun cached(): CachedFontIndex?
+    suspend fun preview(): CachedFontIndex? = null
     suspend fun fingerprint(): FontLibraryFingerprint
     suspend fun scan(refresh: Boolean): CachedFontIndex
 }
@@ -26,8 +27,9 @@ internal suspend fun loadFontLibrary(
     // Retain the rows, but revoke action readiness for every new check, including known
     // rows. A directory change must not leave the previous list actionable while scanning.
     initial?.let { publish(it, false) }
+    val preview = if (initial == null) source.preview()?.also { publish(it, false) } else null
     val fingerprint = if (!force && initial != null) source.fingerprint() else null
-    if (initial != null && initial.fingerprint.isNotBlank() && initial.fingerprint == fingerprint?.value) {
+    if (initial != null && initial.fingerprint.startsWith("font-list-v5:") && initial.fingerprint == fingerprint?.value) {
         val verified = initial.copy(currentFont = fingerprint.currentFont).withSourceRevision()
         publish(verified, true)
         return verified
@@ -38,9 +40,9 @@ internal suspend fun loadFontLibrary(
     val scanned = source.scan(refresh = force || initial != null).withSourceRevision()
     // Preserve a known list until this replacement is confirmed. In particular, a failed
     // post-scan permission check must not replace known rows with an unconfirmed empty scan.
-    if (initial == null) publish(scanned, false)
+    if (initial == null && preview == null) publish(scanned, false)
     val afterScan = source.fingerprint()
-    check(scanned.fingerprint.isNotBlank() && scanned.fingerprint == afterScan.value) {
+    check(scanned.fingerprint.startsWith("font-list-v5:") && scanned.fingerprint == afterScan.value) {
         "字体目录在扫描期间发生变化，列表尚未核实，请刷新重试"
     }
     val verified = scanned.copy(currentFont = afterScan.currentFont)
@@ -57,13 +59,21 @@ internal fun fontLibraryContains(verified: Boolean, fonts: List<FontItem>, fontI
         fonts.any { it.id == fontId && (!requireValid || it.valid) }
 
 internal class RootFontLibrarySource(
-    private val execute: suspend (String, Long) -> ShellResult = { command, timeout -> RootShell.exec(command, timeout) },
+    private val diagnostics: (String, Long, Int) -> Unit = { _, _, _ -> },
+    private val execute: suspend (String, Long) -> ShellResult = RootShell::fontInventory,
 ) : FontLibrarySource {
-    private val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
-    private val fingerprintBridge = "/data/adb/modules/LuoShu/common/font_library_cache.sh"
+    private suspend fun request(action: String, timeoutMs: Long): ShellResult {
+        val started = System.nanoTime()
+        var code = -1
+        try {
+            return execute(action, timeoutMs).also { code = it.code }
+        } finally {
+            diagnostics(action, (System.nanoTime() - started) / 1_000_000L, code)
+        }
+    }
 
     override suspend fun cached(): CachedFontIndex? {
-        val result = execute("sh ${RootShell.quote(bridge)} fonts cached", 8_000L)
+        val result = request("cached", 8_000L)
         // Only a successfully read cache may degrade to a cache miss. Execution failures
         // and cancellation still propagate; corruption must not prevent a fresh scan forever.
         val root = if (result.code == 0) parseCachedRoot(result.stdout) else parseRoot(result)
@@ -90,8 +100,18 @@ internal class RootFontLibrarySource(
         }
     }
 
+    override suspend fun preview(): CachedFontIndex {
+        val root = parseRoot(request("preview", 8_000L))
+        require(root.optString("status") == "ok") { root.optString("message", "字体文件预览读取失败") }
+        // Never trust an early file listing as a completed validation, even with bad backend flags.
+        val index = parseIndex(root)
+        return index.copy(fingerprint = "", fonts = index.fonts.map {
+            it.copy(valid = false, error = "等待字体核查", provisional = true)
+        })
+    }
+
     override suspend fun fingerprint(): FontLibraryFingerprint {
-        val result = execute("sh ${RootShell.quote(fingerprintBridge)} fingerprint", 8_000L)
+        val result = request("fingerprint", 8_000L)
         val root = parseRoot(result)
         require(root.optString("status") == "ok") { root.optString("message", "无法核查字体目录或读取权限") }
         val data = root.getJSONObject("data")
@@ -101,8 +121,7 @@ internal class RootFontLibrarySource(
     }
 
     override suspend fun scan(refresh: Boolean): CachedFontIndex {
-        val suffix = if (refresh) " refresh" else ""
-        val root = parseRoot(execute("sh ${RootShell.quote(bridge)} fonts$suffix", 60_000L))
+        val root = parseRoot(request(if (refresh) "refresh" else "scan", 60_000L))
         require(root.optString("status") == "ok") { root.optString("message", "字体库读取失败") }
         return parseIndex(root)
     }
@@ -152,6 +171,7 @@ internal fun parseFontItems(array: JSONArray): List<FontItem> = buildList {
             weights = weights,
             supportsCjk = item.optBoolean("supportsCjk", true),
             revision = item.optString("revision", ""),
+            provisional = item.optBoolean("provisional", false),
         ))
     }
 }

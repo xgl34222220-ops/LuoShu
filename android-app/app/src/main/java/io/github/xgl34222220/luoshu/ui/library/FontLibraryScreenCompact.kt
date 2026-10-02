@@ -363,12 +363,12 @@ private fun CompactFontRow(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (font.valid) cardColor else scheme.errorContainer.copy(alpha = .34f),
+            containerColor = if (font.valid || font.provisional) cardColor else scheme.errorContainer.copy(alpha = .34f),
         ),
         border = BorderStroke(
             0.5.dp,
             when {
-                !font.valid -> scheme.error.copy(alpha = .16f)
+                !font.valid && !font.provisional -> scheme.error.copy(alpha = .16f)
                 dark -> Color.Transparent
                 else -> LuoShuLayoutTokens.LightCardOutline
             },
@@ -420,6 +420,8 @@ private fun CompactFontRow(
                         textSizeSp = 22f, gravity = Gravity.CENTER_VERTICAL, maxLines = 1,
                     )
                 }
+            } else if (font.provisional) {
+                Text("正在后台核查字体文件…", color = textSecondary, fontSize = 13.sp)
             } else if (font.error.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Warning, contentDescription = null, tint = scheme.error, modifier = Modifier.size(20.dp))

@@ -58,7 +58,8 @@ internal class FontIndexStore(context: Context) {
                                 .put("error", font.error)
                                 .put("weights", JSONArray(font.weights))
                                 .put("supportsCjk", font.supportsCjk)
-                                .put("revision", font.revision),
+                                .put("revision", font.revision)
+                                .put("provisional", font.provisional),
                         )
                     }
                 },

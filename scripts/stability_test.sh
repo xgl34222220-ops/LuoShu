@@ -171,8 +171,8 @@ python3 -m py_compile \
 # 字体导入必须淘汰模块端原生索引；三级缓存版本不得回退。
 grep -q 'native_font_index.json' "$ROOT/common/native_import.sh"
 grep -q 'native_font_index.key' "$ROOT/common/native_import.sh"
-grep -q 'native-v3|' "$ROOT/common/font_manager_v4.sh"
-grep -q 'manifest-fast' "$ROOT/common/font_manager.sh"
+grep -q 'font_inventory_request.sh' "$ROOT/common/font_manager_v4.sh"
+grep -q 'native_font_index.json' "$ROOT/common/font_inventory_batch.py"
 grep -q 'font-index-v3.json' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt"
 grep -q 'prepared-v8' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'supportsCjk' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"

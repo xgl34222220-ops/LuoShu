@@ -50,3 +50,25 @@ debug 变体包名为 `io.github.xgl34222220.luoshu.stabletest`，显示名「�
 冷启动以 `app_start` 到第一条 `library_frame` 为App内观测区间；热进入以 `library_open` 到随后的 `library_frame` 计算。另报 `verified=true` 的可操作时间，不能将缓存首显混为最新目录已核查。0/100/1000字体必须验证事件的 `count`。这些是App内时序信号，不等价于设备GPU首帧或从桌面触摸开始的完整体验时延。
 
 字体库根节点测试ID为 `luoshu_font_library`（testTagsAsResourceId），状态描述为「字体列表：数量；加载中/待核查/已核查」。自动化还应核实实际列表内容。
+
+## 首次无缓存库存与同步请求（2026-10-02 后续修复）
+
+真实 Android 验收显示缓存热打开已经较快，但旧版首次 100 个字体的完整 Shell 索引仍约需 100 秒。空列表帧不能算字体库首显。现改为：
+
+- `font_inventory_batch.py` 以一次目录快照、一次字族分组、每个代表文件四字节 header 检查生成库存，不再每个文件/字族启动 basename/stat/awk/sed/tr。
+- App 在没有任何已知索引时先请求 `preview`。它返回真实文件 stat/config 元数据，但每行 `valid=false`、`provisional=true`、索引指纹为空；只展示文件，不允许应用或生成组合，也不启动该行的字体预览导出。
+- 后台 `scan/refresh` 完成后，实时指纹相等才解锁。`font-list-v5:` 指纹包含配置文件及符号链接目标身份，旧 v4 索引只用于待核查展示。
+- 原有家族后缀处理顺序、字重优先级、格式 magic、配置首值、大小显示规则保留；符号链接的列表 size/date 仍保留旧 lstat 行为，目标变化会使指纹失效。深字体检查继续在应用任务执行。
+- 模块缓存读取最多 4 MiB，单个配置文件最多 64 KiB。超大/损坏缓存视为 miss；超大配置明确报错，不执行配置内容。
+
+库存调用改走 `font_inventory_request.sh request <action> <seconds>`，由独立有限 `font_request_scope.py` 管理同步请求。仅这些读请求把 App 的 stdin 管道作为存活凭据；App 取消/超时关闭管道，并给回收最多 6 秒宽限。worker 的 stdin 是 `/dev/null`，其他 fd 不继承；supervisor 是唯一 waitpid owner。
+
+退出码：worker 正常退出沿用其退出码；请求预算超时 124；stdin EOF 130；TERM/INT/HUP 为 128+信号；无法证明全部 owned 子孙清理时返回 125，并保留准确身份供恢复。成功、失败、超时、取消都会尝试回收 double-fork/setsid 与信号处理期间新生的 owned 后代；无关进程不在范围内。没有常驻轮询服务，也不改变分离字体生成任务的生命周期。
+
+新增测试：
+
+- `python3 scripts/font_inventory_batch_test.py`：旧字族/字重函数兼容、格式/config、增删/替换/权限指纹、预览不解锁、有界输入、1000 文件批量输出
+- `python3 scripts/font_request_scope_test.py`：同步 success/error/timeout/SIGTERM/stdin EOF，owned 后代与僵尸归零、无关 sentinel 存活
+- `FontRequestLeaseTest`：实际 JVM Process 管道取消和超时传到实际 Python supervisor，再检查后代身份已消失
+
+调试日志新增 `event=font_request stage=cached|preview|scan|refresh|fingerprint duration_ms=... code=...`；服务端 stderr 另有库存段耗时及 request started/finished 清理结果。必须结合正确字体数的 `library_frame` 与 `verified=true` 分开评估真实 Android 首显/可操作时间，主机批量测试时间不能冒充设备表现。
