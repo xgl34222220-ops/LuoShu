@@ -44,10 +44,12 @@ def extract(archive, dest):
 def app_launch_result(package, launch_output, logcat, hierarchy, process_alive):
     if re.search(r'Process: ' + re.escape(package) + r', PID:', logcat) and 'FATAL EXCEPTION:' in logcat:
         return {'result': 'FAIL', 'reason': 'Actual candidate App fatal exception in logcat'}
-    if "isn't responding" in hierarchy or 'is not responding' in hierarchy:
-        return {'result': 'BLOCKED', 'reason': 'Android system/App ANR dialog prevents UI validation'}
     if not process_alive:
         return {'result': 'FAIL', 'reason': 'Candidate process exited after launch'}
+    if "System UI isn't responding" in hierarchy or 'System UI is not responding' in hierarchy:
+        return {'result': 'BLOCKED', 'reason': 'System UI ANR prevents App UI validation', 'environment_system_ui_anr': True}
+    if "isn't responding" in hierarchy or 'is not responding' in hierarchy:
+        return {'result': 'FAIL', 'reason': 'Application ANR dialog prevents UI validation'}
     if 'Status: ok' not in launch_output:
         return {'result': 'FAIL', 'reason': 'Android activity launch failed'}
     if 'permissioncontroller' in hierarchy:
@@ -153,6 +155,10 @@ def main():
             (args.output / 'candidate-app.xml').write_text(hierarchy.stdout)
             logs = run(['logcat', '-d', '-s', 'LuoShuStartup:I', 'AndroidRuntime:E', '*:S'], required=False)
             (args.output / 'candidate-app.log').write_text(logs.stdout)
+            last_anr = run(['shell', 'dumpsys activity lastanr'], timeout=45, required=False)
+            (args.output / 'android-last-anr.txt').write_text(last_anr.stdout + last_anr.stderr)
+            system_log = run(['logcat', '-b', 'system', '-d', '-v', 'threadtime'], timeout=45, required=False)
+            (args.output / 'android-system.log').write_text(system_log.stdout)
             alive = run(['shell', 'pidof ' + package], required=False)
             report['checks']['app_launch_only'] = app_launch_result(
                 package, launch.stdout, logs.stdout, hierarchy.stdout, bool(alive.stdout.strip()))

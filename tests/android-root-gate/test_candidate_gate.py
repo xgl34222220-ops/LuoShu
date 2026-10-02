@@ -17,6 +17,19 @@ class AppGateTests(unittest.TestCase):
     def test_system_anr_blocks_ui_gate(self):
         self.assertEqual(app_launch_result(PACKAGE, 'Status: ok', '', "System UI isn't responding", True)['result'], 'BLOCKED')
 
+    def test_candidate_anr_is_failure_not_environment_exception(self):
+        self.assertEqual(app_launch_result(PACKAGE, 'Status: ok', '', "LuoShu isn't responding", True)['result'], 'FAIL')
+
+    def test_system_anr_preserves_blocked_marker(self):
+        result = app_launch_result(PACKAGE, 'Status: ok', '', "System UI isn't responding", True)
+        self.assertEqual(result['result'], 'BLOCKED')
+        self.assertTrue(result['environment_system_ui_anr'])
+
+    def test_system_anr_never_masks_dead_candidate(self):
+        result = app_launch_result(PACKAGE, 'Status: ok', '', "System UI isn't responding", False)
+        self.assertEqual(result['result'], 'FAIL')
+        self.assertNotIn('environment_system_ui_anr', result)
+
     def test_permission_modal_is_not_app_readiness(self):
         self.assertEqual(app_launch_result(PACKAGE, 'Status: ok', '', 'permissioncontroller', True)['result'], 'BLOCKED')
 

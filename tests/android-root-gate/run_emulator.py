@@ -116,8 +116,13 @@ def main():
                     # A real cold-start regression must be fixed before adding a
                     # root-manager environment that could obscure its cause.
                     initial = json.loads((output / 'candidate-gate.json').read_text())
-                    if initial['checks'].get('app_launch_only', {}).get('result') != 'PASS':
-                        raise RuntimeError('Candidate cold start is not proven; Magisk stage not started')
+                    stock_ui = initial['checks'].get('app_launch_only', {})
+                    report['stock_app_ui'] = stock_ui
+                    if stock_ui.get('result') != 'PASS' and not stock_ui.get('environment_system_ui_anr'):
+                        raise RuntimeError('Candidate cold start failed or is unproven; Magisk stage not started')
+                    # Preserve a System UI ANR as BLOCKED evidence. Preparing a
+                    # separate authorized cold-boot image does not depend on the
+                    # stock System UI being responsive, and does not pass the UI gate.
                     from magisk_avd import prepare, verify
                     patched = prepare(args.magisk_apk, args.magisk_patch_script, sdk, output, adb)
                     subprocess.run([adb, '-s', 'emulator-5554', 'emu', 'kill'], capture_output=True, timeout=10)
