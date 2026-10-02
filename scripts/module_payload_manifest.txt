@@ -46,6 +46,7 @@ common/font_config_runtime.sh
 common/font_config_targets.py
 common/font_config_weights.sh
 common/font_coverage.py
+common/font_coverage_fields.py
 common/font_coverage.sh
 common/font_coverage_info.py
 common/font_details.sh

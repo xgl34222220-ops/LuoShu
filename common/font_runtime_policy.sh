@@ -93,17 +93,15 @@ if [ -n "${SYSTEM_FONTS_DIR:-}" ] && [ -d "$(_lfrp_payload_root)/system" ]; then
     mkdir -p "$SYSTEM_FONTS_DIR" 2>/dev/null || true
 fi
 
-_lfrp_json_number() {
-    _lfrp_json="$1"
-    _lfrp_key="$2"
-    printf '%s' "$_lfrp_json" | sed -n "s/.*\"${_lfrp_key}\":\([0-9][0-9]*\).*/\1/p" | head -n1
-}
-
 # Structural validity and script coverage are separate questions. A Latin-only
 # font is valid, but it must never replace a CJK slot. Accept usable partial fonts,
 # record their capabilities, and let the mapper keep stock fallbacks for the rest.
 font_validate_global() {
     _lfrp_font="$1"
+    LUOSHU_FONT_HAS_CJK=false
+    LUOSHU_FONT_HAS_LATIN=false
+    LUOSHU_FONT_HAS_MIXED=false
+    export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
     type font_validate >/dev/null 2>&1 || {
         FONT_CHECK_ERROR='字体验证器不可用'
         return 127
@@ -113,7 +111,8 @@ font_validate_global() {
     _lfrp_m="$(_lfrp_module)"
     _lfrp_python="$_lfrp_m/common/python/bin/luoshu-python"
     _lfrp_checker="$_lfrp_m/common/font_coverage.py"
-    [ -x "$_lfrp_python" ] && [ -f "$_lfrp_checker" ] || {
+    _lfrp_parser="$_lfrp_m/common/font_coverage_fields.py"
+    [ -x "$_lfrp_python" ] && [ -f "$_lfrp_checker" ] && [ -f "$_lfrp_parser" ] || {
         FONT_CHECK_ERROR='字形覆盖分析器不可用'
         return 1
     }
@@ -127,20 +126,20 @@ font_validate_global() {
         return 1
     }
 
-    _lfrp_han=$(_lfrp_json_number "$_lfrp_result" coreHan)
-    _lfrp_cjk=$(_lfrp_json_number "$_lfrp_result" cjk)
-    _lfrp_latin=$(_lfrp_json_number "$_lfrp_result" latin)
-    _lfrp_digits=$(_lfrp_json_number "$_lfrp_result" digits)
-    _lfrp_punct=$(_lfrp_json_number "$_lfrp_result" punctuation)
-    case "$_lfrp_han" in ''|*[!0-9]*) _lfrp_han=0 ;; esac
-    case "$_lfrp_cjk" in ''|*[!0-9]*) _lfrp_cjk=0 ;; esac
-    case "$_lfrp_latin" in ''|*[!0-9]*) _lfrp_latin=0 ;; esac
-    case "$_lfrp_digits" in ''|*[!0-9]*) _lfrp_digits=0 ;; esac
-    case "$_lfrp_punct" in ''|*[!0-9]*) _lfrp_punct=0 ;; esac
-
-    LUOSHU_FONT_HAS_CJK=false
-    LUOSHU_FONT_HAS_LATIN=false
-    LUOSHU_FONT_HAS_MIXED=false
+    # Android sed capture expressions crashed on valid compact coverage JSON.
+    # Parse the complete object once; malformed or incomplete analysis must fail
+    # closed instead of becoming zero coverage or retaining a prior capability.
+    _lfrp_fields=$(printf '%s' "$_lfrp_result" | \
+        PYTHONHOME="$_lfrp_pyroot" \
+        PYTHONPATH="$_lfrp_pyroot/lib/python3.14:$_lfrp_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_lfrp_pyroot/lib:$_lfrp_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$_lfrp_python" "$_lfrp_parser" 2>/dev/null) || {
+        FONT_CHECK_ERROR='字形覆盖分析结果无效'
+        return 1
+    }
+    IFS=' ' read -r _lfrp_han _lfrp_cjk _lfrp_latin _lfrp_digits _lfrp_punct <<EOF
+$_lfrp_fields
+EOF
     [ "$_lfrp_han" -ge 6000 ] && [ "$_lfrp_cjk" -ge 95 ] && LUOSHU_FONT_HAS_CJK=true
     # HyperOS splits CJK, Latin and numeric UI glyphs across independent physical slots.
     # Punctuation coverage varies wildly between otherwise complete CJK fonts, so using it as a
