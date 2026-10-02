@@ -157,6 +157,8 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 active_before_failure = root('cat ' + MODULE + '/config/active_font.conf')
                 root('dd if=/dev/zero of=/sdcard/LuoShu/fonts/LuoShuBrokenGate.ttf bs=8192 count=1')
                 cycle['invalid_switch'] = switch('LuoShuBrokenGate', expect_success=False)
+                cycle['prepare_failure_crashes'] = shell('logcat -b crash -d', required=False)
+                cycle['prepare_failure_tombstones'] = root('ls -l /data/tombstones', required=False)
                 root('rm /sdcard/LuoShu/fonts/LuoShuBrokenGate.ttf')
                 if font_hashes() != mounted_fonts or root('cat ' + MODULE + '/config/active_font.conf') != active_before_failure:
                     raise RuntimeError('Failed switch changed prior active font or live mounted bytes')
@@ -179,6 +181,8 @@ def run_gate(adb, magisk, baseline, candidate, output):
                     if (MODULE + '/.luoshu-payload-stage.') not in cycle['commit_failure']['injection_hit']:
                         raise RuntimeError('Commit failure was not injected at the exact rename')
                     cycle['commit_failure']['task_message_specific'] = '提交失败' in cycle['commit_failure'].get('data', {}).get('message', '')
+                    cycle['commit_failure']['crash_buffer'] = shell('logcat -b crash -d', required=False)
+                    cycle['commit_failure']['tombstone_inventory'] = root('ls -l /data/tombstones', required=False)
                     cycle['commit_failure']['core_log'] = root('tail -n 160 ' + MODULE + '/logs/fontswitch.log', required=False)
                     cycle['commit_failure']['evidence_rule'] = 'Exact one-shot rename marker plus matching failed task; UI may expose generic error. Rollback and reboot bytes must independently match.'
                     if root('find -L ' + MODULE + '/.luoshu-payload -type f -exec sha256sum {} \\; | sort') != payload_before:

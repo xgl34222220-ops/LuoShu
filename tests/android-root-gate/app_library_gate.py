@@ -17,18 +17,34 @@ PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 EVENT = re.compile(r'event=(\w+) elapsed_ms=(\d+)(?: count=(\d+) verified=(true|false))?')
 
 
+def candidate_notification_deny(tree):
+    nodes = list(tree.iter('node'))
+    messages = [n.get('text', '') for n in nodes
+                if n.get('package') in ('com.google.android.permissioncontroller', 'com.android.permissioncontroller')
+                and n.get('resource-id', '').endswith('/permission_message')]
+    if messages != ['Allow 洛书·稳定重构测试 to send you notifications?']:
+        return None
+    buttons = [n for n in nodes if n.get('package') in ('com.google.android.permissioncontroller', 'com.android.permissioncontroller')
+               and n.get('resource-id', '').rsplit('/', 1)[-1] in ('permission_deny_button', 'permission_deny_and_dont_ask_again_button')
+               and n.get('text') in ("Don't allow", 'Don’t allow') and n.get('enabled') == 'true']
+    return buttons[0] if len(buttons) == 1 else None
+
+
 def measure(adb, output, count):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     samples = []
     def run(*args, timeout=60):
         p = subprocess.run([adb, '-s', 'emulator-5554', *args], capture_output=True, text=True, timeout=timeout)
+        with (output / 'commands.jsonl').open('a') as log:
+            log.write(json.dumps({'argv': args, 'exit': p.returncode, 'stdout': p.stdout, 'stderr': p.stderr}) + '\n')
         if p.returncode:
             raise RuntimeError('UI ADB failed: ' + p.stderr)
         return p.stdout
     def hierarchy():
         raw = dump_ui([adb, '-s', 'emulator-5554'], '/data/local/tmp/luoshu-library-ui')
         (output / 'last-ui.xml').write_text(raw)
+        (output / 'app-runtime.log').write_text(run('logcat', '-d', '-s', 'LuoShuStartup:I', 'AndroidRuntime:E', '*:S'))
         if "isn't responding" in raw or 'is not responding' in raw:
             raise RuntimeError('An ANR dialog blocks actual App library visibility')
         return ET.fromstring(raw)
@@ -36,6 +52,13 @@ def measure(adb, output, count):
         end = time.monotonic() + 45
         while time.monotonic() < end:
             tree = hierarchy()
+            deny = candidate_notification_deny(tree)
+            if deny is not None:
+                (output / 'notification-declined.xml').write_text(ET.tostring(tree, encoding='unicode'))
+                x, y = center(deny)
+                run('shell', 'input', 'tap', str(x), str(y))
+                time.sleep(.3)
+                continue
             try:
                 x, y = center(tab_target(tree, label, PACKAGE))
                 run('shell', 'input', 'tap', str(x), str(y))
