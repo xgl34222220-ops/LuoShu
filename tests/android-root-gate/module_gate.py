@@ -37,11 +37,21 @@ def resolve_authorized_uid(packages):
 def run_gate(adb, magisk, baseline, candidate, output):
     output = Path(output)
     report = {'delivery_gate': 'BLOCKED', 'cycles': [], 'steps': [], 'app_root': 'NOT_PROVEN'}
+    diagnostic_only = os.environ.get('LUOSHU_APP_DIAGNOSTIC_ONLY') == '1'
+    report['run_scope'] = 'APP_DIAGNOSTIC_ONLY; baseline/module cycles and process gates NOT_RUN' if diagnostic_only else 'FULL_GATE'
     granted_uid = None
     owned_tasks = set()
     def command(args, timeout=120, required=True):
-        p = subprocess.run([adb, '-s', 'emulator-5554'] + args, capture_output=True, text=True, timeout=timeout)
-        report['steps'].append({'argv': args, 'exit': p.returncode, 'stdout': p.stdout, 'stderr': p.stderr})
+        started = time.monotonic()
+        try:
+            p = subprocess.run([adb, '-s', 'emulator-5554'] + args, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            def decoded(value):
+                return value.decode(errors='replace') if isinstance(value, bytes) else (value or '')
+            report['steps'].append({'argv': args, 'result': 'HOST_ADB_TIMEOUT_GUEST_COMPLETION_UNPROVEN', 'elapsed_seconds': time.monotonic() - started,
+                                    'stdout': decoded(error.stdout), 'stderr': decoded(error.stderr)})
+            raise
+        report['steps'].append({'argv': args, 'exit': p.returncode, 'elapsed_seconds': time.monotonic() - started, 'stdout': p.stdout, 'stderr': p.stderr})
         if required and p.returncode:
             raise RuntimeError('Android command failed: ' + shlex.join(args))
         return p.stdout.strip()
@@ -137,7 +147,8 @@ def run_gate(adb, magisk, baseline, candidate, output):
             raise RuntimeError('Only authorized Enforcing disposable AVD is supported')
         report['font_directories'] = root('for d in ' + ' '.join('/' + part + '/fonts' for part in FONT_PARTITIONS) + '; do if [ -d "$d" ]; then echo PRESENT:$d; else echo ABSENT:$d; fi; done')
         original_fonts = font_hashes()
-        for label, archive in [('baseline', baseline), ('candidate', candidate)]:
+        archives = [('candidate', candidate)] if diagnostic_only else [('baseline', baseline), ('candidate', candidate)]
+        for label, archive in archives:
             cycle = {'label': label, 'result': 'FAIL', 'zip_sha256': hashlib.sha256(Path(archive).read_bytes()).hexdigest()}
             report['cycles'].append(cycle)
             try:
@@ -152,6 +163,9 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
                      f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
                      f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-synthetic-fonts.py --output /sdcard/LuoShu/fonts --count 2')
+                if diagnostic_only:
+                    cycle['result'] = 'INSTALL_ONLY'
+                    continue
                 inventory = bridge('fonts', 'refresh')
                 cycle['inventory'] = inventory
                 fonts = inventory.get('data', {}).get('fonts', [])
@@ -226,27 +240,28 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 if font_hashes() != original_fonts:
                     raise RuntimeError('Baseline failure left modified fonts; refusing contaminated candidate comparison')
                 report['baseline_compatibility'] = 'Original module failed unmodified; candidate has explicit nativebridge entry compatibility'
-        # Repeat all four ownership cases in the real Magisk root context with
-        # the installed candidate helper, not just the pre-Magisk adb context.
-        scope_script = Path(__file__).with_name('task_scope_device.py')
-        command(['push', str(scope_script), '/data/local/tmp/luoshu-module-scope.py'])
-        runtime = MODULE + '/common/python'
-        root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
-             f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
-             f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-module-scope.py '
-             f'--helper {MODULE}/common/task_scope.py --output /data/local/tmp/luoshu-module-scope.json', timeout=240)
-        report['magisk_task_scope'] = json.loads(root('cat /data/local/tmp/luoshu-module-scope.json'))
-        if report['magisk_task_scope'].get('result') != 'PASS':
-            raise RuntimeError('Installed candidate task ownership failed under Magisk')
-        request_script = Path(__file__).with_name('font_request_scope_device.py')
-        command(['push', str(request_script), '/data/local/tmp/luoshu-request-scope.py'])
-        root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
-             f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
-             f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-request-scope.py '
-             f'--helper {MODULE}/common/font_request_scope.py --output /data/local/tmp/luoshu-request-scope.json', timeout=360, required=False)
-        report['magisk_request_scope'] = json.loads(root('cat /data/local/tmp/luoshu-request-scope.json'))
-        if report['magisk_request_scope'].get('result') != 'PASS':
-            raise RuntimeError('Installed synchronous request lease cleanup failed under Magisk')
+        if not diagnostic_only:
+            # Repeat all four ownership cases in the real Magisk root context with
+            # the installed candidate helper, not just the pre-Magisk adb context.
+            scope_script = Path(__file__).with_name('task_scope_device.py')
+            command(['push', str(scope_script), '/data/local/tmp/luoshu-module-scope.py'])
+            runtime = MODULE + '/common/python'
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-module-scope.py '
+                 f'--helper {MODULE}/common/task_scope.py --output /data/local/tmp/luoshu-module-scope.json', timeout=240)
+            report['magisk_task_scope'] = json.loads(root('cat /data/local/tmp/luoshu-module-scope.json'))
+            if report['magisk_task_scope'].get('result') != 'PASS':
+                raise RuntimeError('Installed candidate task ownership failed under Magisk')
+            request_script = Path(__file__).with_name('font_request_scope_device.py')
+            command(['push', str(request_script), '/data/local/tmp/luoshu-request-scope.py'])
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-request-scope.py '
+                 f'--helper {MODULE}/common/font_request_scope.py --output /data/local/tmp/luoshu-request-scope.json', timeout=360, required=False)
+            report['magisk_request_scope'] = json.loads(root('cat /data/local/tmp/luoshu-request-scope.json'))
+            if report['magisk_request_scope'].get('result') != 'PASS':
+                raise RuntimeError('Installed synchronous request lease cleanup failed under Magisk')
         with zipfile.ZipFile(candidate) as archive:
             apk_bytes = archive.read('bundled/LuoShu-App.apk')
             expected_apk = hashlib.sha256(apk_bytes).hexdigest()
@@ -301,7 +316,7 @@ def run_gate(adb, magisk, baseline, candidate, output):
                     raise RuntimeError('Pulled synthetic fixture changed in transit')
                 templates.append(data)
             fixture_templates = templates
-        for count in (100, 1000):
+        for count in ((1000,) if diagnostic_only else (100, 1000)):
             # Only fixture duplication runs on the host. Module/runtime/App
             # parsing stays on Android using the unchanged formal ARM64 runtime.
             # This tests N independent filenames with two distinct TTF contents.
@@ -328,17 +343,24 @@ def run_gate(adb, magisk, baseline, candidate, output):
             report['app_root'] = 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY'
             report.setdefault('app_verified_inventory_counts', []).append(count)
         report['app_root'] = 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY'
-        from app_library_gate import apply_fixture
+        from app_library_gate import apply_fixture, capture_apply_evidence
         def task_fields(text):
             return dict(line.split('=', 1) for line in text.splitlines() if '=' in line)
         old_task = task_fields(root('cat ' + MODULE + '/config/switch_task.conf', required=False)).get('task')
         app_boot = shell('cat /proc/sys/kernel/random/boot_id')
-        report['app_apply'] = apply_fixture(adb, 'LuoShuSyntheticGate0000', output / 'app-apply')
-        deadline = time.monotonic() + 420
+        report['app_apply'] = {'font_id': 'LuoShuSyntheticGate0000'}
+        report['app_apply'].update(apply_fixture(adb, 'LuoShuSyntheticGate0000', output / 'app-apply'))
+        apply_started = time.monotonic()
+        deadline = apply_started + 420
+        admission_deadline = apply_started + 75
+        observed_new_task = False
+        next_observation = apply_started + 40
+        report['app_apply']['observations'] = []
         while time.monotonic() < deadline:
             current_task = task_fields(root('cat ' + MODULE + '/config/switch_task.conf', required=False))
             task_id = current_task.get('task')
             if task_id and task_id != old_task and current_task.get('font') == 'LuoShuSyntheticGate0000' and current_task.get('bootId') == app_boot:
+                observed_new_task = True
                 owned_tasks.add(task_id)
                 state = bridge('switch_status', task_id)
                 data = state.get('data', {})
@@ -349,9 +371,14 @@ def run_gate(adb, magisk, baseline, candidate, output):
                     break
                 if state.get('data', {}).get('state') in ('failed', 'error', 'cancelled'):
                     raise RuntimeError('Actual App font apply task failed: ' + json.dumps(state, ensure_ascii=False))
+            if time.monotonic() >= next_observation:
+                report['app_apply']['observations'].append(capture_apply_evidence(adb, output / 'app-apply', 'after-' + str(int(time.monotonic() - apply_started)) + 's'))
+                next_observation = time.monotonic() + 60
+            if not observed_new_task and time.monotonic() >= admission_deadline:
+                raise RuntimeError('No new matching module task within 75s of App confirmation (App validate35s + start20s); final UI/log evidence required')
             time.sleep(1)
         else:
-            raise RuntimeError('No new successful matching task followed the actual App click')
+            raise RuntimeError('Matching App task did not succeed within 420s')
         report['app_apply']['reboot'] = boot()
         _, report['app_apply']['mounted'] = assert_mounted('LuoShuSyntheticGate0000', original_fonts)
         report['app_apply']['result'] = 'PASS'
@@ -365,6 +392,26 @@ def run_gate(adb, magisk, baseline, candidate, output):
                                    'App timings are candidate-only on nativebridge x86_64 AVD, not native ARM64 or OEM-ROM validation.')
     except Exception as error:
         report['error'] = str(error)
+        if 'app_apply' in report:
+            from app_library_gate import capture_apply_evidence
+            report['app_apply']['final_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'final-failure')
+            report['app_apply']['module_task'] = root('cat ' + MODULE + '/config/switch_task.conf', required=False)
+            report['app_apply']['module_log'] = root('tail -n 160 ' + MODULE + '/logs/fontswitch.log', required=False)
+            # This read-only administrative replay is strictly diagnostic. It
+            # cannot satisfy actual-App acceptance or extend its 35s deadline.
+            started = time.monotonic()
+            try:
+                diagnostic = root('sh ' + MODULE + '/common/app_bridge.sh validate LuoShuSyntheticGate0000', timeout=35, required=False)
+                report['app_apply']['diagnostic_validate'] = {'scope': 'DIAGNOSTIC CLI ONLY', 'elapsed_seconds': time.monotonic() - started, 'stdout': diagnostic, 'command_evidence': report['steps'][-1]}
+            except Exception as replay_error:
+                report['app_apply']['diagnostic_validate'] = {'scope': 'DIAGNOSTIC CLI ONLY', 'elapsed_seconds': time.monotonic() - started, 'error': str(replay_error)}
+            trace_started = time.monotonic()
+            try:
+                trace = root('sh -x ' + MODULE + '/common/font_manager_v4.sh action validate LuoShuSyntheticGate0000', timeout=35, required=False)
+                report['app_apply']['diagnostic_manager_trace'] = {'scope': 'DIAGNOSTIC direct manager ONLY; after bridge replay, cache may be warm', 'elapsed_seconds': time.monotonic() - trace_started, 'stdout': trace, 'command_evidence': report['steps'][-1]}
+            except Exception as trace_error:
+                report['app_apply']['diagnostic_manager_trace'] = {'scope': 'DIAGNOSTIC direct manager ONLY', 'error': str(trace_error), 'command_evidence': report['steps'][-1]}
+            report['app_apply']['post_diagnostic_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'after-cli-diagnostic')
     finally:
         if granted_uid is not None:
             try:

@@ -187,3 +187,40 @@ def apply_fixture(adb, font_id, output):
                 run('shell', 'input', 'swipe', str(x), str(bottom - (bottom-top)//5), str(x), str(top + (bottom-top)//5), '400')
         time.sleep(.3)
     raise RuntimeError('Actual App apply button was not available')
+
+
+def capture_apply_evidence(adb, output, label):
+    """Observation only; never treats an error page or CLI result as App success."""
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    target = [adb, '-s', 'emulator-5554']
+    summary = {'label': label, 'files': [], 'errors': []}
+    for suffix, args in (
+        ('runtime.log', ['logcat', '-d', '-v', 'threadtime']),
+        ('crash.log', ['logcat', '-b', 'crash', '-d', '-v', 'threadtime']),
+        ('activity.txt', ['shell', 'dumpsys activity activities']),
+        ('lastanr.txt', ['shell', 'dumpsys activity lastanr']),
+        ('processes.txt', ['shell', 'ps -A -o PID,PPID,NAME,ARGS']),
+    ):
+        try:
+            result = subprocess.run(target + args, capture_output=True, timeout=30)
+            name = label + '-' + suffix
+            (output / name).write_bytes(result.stdout + b'\nSTDERR:\n' + result.stderr)
+            summary['files'].append({'file': name, 'exit': result.returncode})
+        except Exception as error:
+            summary['errors'].append(str(error))
+    try:
+        raw = dump_ui(target, '/data/local/tmp/luoshu-apply-evidence')
+        (output / (label + '.xml')).write_text(raw)
+        summary['files'].append({'file': label + '.xml'})
+    except Exception as error:
+        summary['errors'].append(str(error))
+    try:
+        result = subprocess.run(target + ['exec-out', 'screencap', '-p'], capture_output=True, timeout=30)
+        if result.returncode:
+            raise RuntimeError(result.stderr.decode(errors='replace'))
+        (output / (label + '.png')).write_bytes(result.stdout)
+        summary['files'].append({'file': label + '.png'})
+    except Exception as error:
+        summary['errors'].append(str(error))
+    return summary
