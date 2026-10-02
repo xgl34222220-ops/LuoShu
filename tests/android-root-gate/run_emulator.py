@@ -107,6 +107,10 @@ def main():
             report['probe_exit'] = result.returncode
             if result.returncode != 0:
                 raise RuntimeError('ARM64 Android qualification failed; inspect qualification.json')
+            from verdict import qualification_blockers, preflight_blockers
+            report['qualification_blockers'] = qualification_blockers(json.loads((output / 'qualification.json').read_text()))
+            if report['qualification_blockers']:
+                raise RuntimeError('Original runtime structured evidence incomplete')
             if args.candidate_zip:
                 candidate = subprocess.run([sys.executable, str(Path(__file__).with_name('candidate_gate.py')),
                     '--baseline-zip', str(args.module_zip), '--candidate-zip', str(args.candidate_zip),
@@ -116,6 +120,9 @@ def main():
                     # A real cold-start regression must be fixed before adding a
                     # root-manager environment that could obscure its cause.
                     initial = json.loads((output / 'candidate-gate.json').read_text())
+                    report['preflight_blockers'] = preflight_blockers(initial)
+                    if report['preflight_blockers']:
+                        raise RuntimeError('Preflight runtime/scope/target App failed: ' + str(report['preflight_blockers']))
                     stock_ui = initial['checks'].get('app_launch_only', {})
                     report['stock_app_ui'] = stock_ui
                     if stock_ui.get('result') not in ('PASS', 'BLOCKED'):
@@ -162,7 +169,7 @@ def main():
                     report['module_delivery_gate'] = delivery['delivery_gate']
                     if delivery['delivery_gate'] != 'PASS':
                         raise RuntimeError('Full module gate has failures or unproven coverage; inspect module-gate.json')
-                if candidate.returncode:
+                if candidate.returncode and not args.magisk_apk:
                     raise RuntimeError('Candidate delivery gate is incomplete or failed; inspect candidate-gate.json')
             report['result'] = 'PASS'
     except Exception as error:

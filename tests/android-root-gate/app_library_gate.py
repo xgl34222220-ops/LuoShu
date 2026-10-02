@@ -30,7 +30,7 @@ def candidate_notification_deny(tree):
     return buttons[0] if len(buttons) == 1 else None
 
 
-def measure(adb, output, count):
+def measure(adb, output, count, repetitions=3):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     samples = []
@@ -44,7 +44,10 @@ def measure(adb, output, count):
     def hierarchy():
         raw = dump_ui([adb, '-s', 'emulator-5554'], '/data/local/tmp/luoshu-library-ui')
         (output / 'last-ui.xml').write_text(raw)
-        (output / 'app-runtime.log').write_text(run('logcat', '-d', '-s', 'LuoShuStartup:I', 'AndroidRuntime:E', '*:S'))
+        runtime_log = run('logcat', '-d', '-s', 'LuoShuStartup:I', 'AndroidRuntime:E', '*:S')
+        (output / 'app-runtime.log').write_text(runtime_log)
+        if 'FATAL EXCEPTION' in runtime_log and ('Process: ' + PACKAGE) in runtime_log:
+            raise RuntimeError('Target App FATAL observed, even if Android relaunched a different PID')
         if "isn't responding" in raw or 'is not responding' in raw:
             raise RuntimeError('An ANR dialog blocks actual App library visibility')
         return ET.fromstring(raw)
@@ -89,6 +92,10 @@ def measure(adb, output, count):
                     if not any(n.get('package') == PACKAGE and n.get('resource-id', '').endswith('luoshu_font_library')
                                for n in visible.iter('node')):
                         raise RuntimeError('Verified frame log exists but actual library UI is not visible')
+                    last_anr = run('shell', 'dumpsys', 'activity', 'lastanr')
+                    (output / (label + '-last-anr.txt')).write_text(last_anr)
+                    if re.search(r'ANR in ' + re.escape(PACKAGE) + r'(?:[\s:/]|$)', last_anr):
+                        raise RuntimeError('Target App ANR recorded during actual library observation')
                     alive = run('shell', 'pidof', PACKAGE).strip()
                     if alive.strip() != pid:
                         raise RuntimeError('App exited after readiness marker')
@@ -96,7 +103,7 @@ def measure(adb, output, count):
                     first_event = next((int(ms), int(n or 0), verified == 'true') for event, ms, n, verified in events if event == 'library_frame' and int(ms) >= start)
                     inventory_frames = [int(ms) for event, ms, n, verified in events if event == 'library_frame' and n is not None and int(n) == count and int(ms) >= start]
                     opened = [int(ms) for event, ms, _, _ in events if event == 'library_open' and int(ms) >= start]
-                    return {'pid': pid, 'first_frame_count': first_event[1], 'first_frame_verified': first_event[2],
+                    return {'pid': pid, 'target_fatal': False, 'anr': False, 'first_frame_count': first_event[1], 'first_frame_verified': first_event[2],
                             'first_inventory_frame_ms': min(inventory_frames), 'first_inventory_frame_elapsed_ms': min(inventory_frames) - start,
                             'library_open_to_inventory_first_ms': min(inventory_frames) - opened[-1] if opened else None, 'first_frame_ms': min(frames), 'first_frame_elapsed_ms': min(frames) - start,
                             'library_open_to_verified_ms': frame - opened[-1] if opened else None,
@@ -104,7 +111,7 @@ def measure(adb, output, count):
                             'start_ms': start, 'frame_ms': frame, 'elapsed_ms': frame - start}
             time.sleep(.5)
         raise RuntimeError('No real verified library frame for expected inventory ' + str(count))
-    for repetition in range(3):
+    for repetition in range(repetitions):
         run('shell', 'am', 'force-stop', PACKAGE)
         run('logcat', '-c')
         run('shell', 'am', 'start', '-W', '-n', PACKAGE + '/io.github.xgl34222220.luoshu.MainActivity')
@@ -131,7 +138,7 @@ def measure(adb, output, count):
     for kind in ('app_start', 'library_open'):
         values = sorted(s['elapsed_ms'] for s in samples if s['kind'] == kind)
         result[kind] = {'median_ms': statistics.median(values), 'p95_ms': values[-1],
-                        'samples': len(values), 'p95_method': 'nearest rank; only three samples'}
+                        'samples': len(values), 'p95_method': f'nearest rank; {len(values)} samples'}
     (output / 'timing.json').write_text(json.dumps(result, indent=2) + '\n')
     return result
 

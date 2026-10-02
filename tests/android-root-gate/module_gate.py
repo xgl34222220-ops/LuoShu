@@ -157,6 +157,9 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 cycle['install'] = root(shlex.quote(magisk) + ' --install-module /data/local/tmp/luoshu-module.zip', timeout=300)
                 cycle['install_reboot'] = boot()
                 root('test -f ' + MODULE + '/module.prop')
+                if label == 'candidate' and not diagnostic_only:
+                    from upgrade_evidence import verify as verify_upgrade
+                    verify_upgrade(root, report['upgrade'])
                 generator = Path(__file__).with_name('synthetic_fonts.py')
                 command(['push', str(generator), '/data/local/tmp/luoshu-synthetic-fonts.py'])
                 runtime = MODULE + '/common/python'
@@ -230,7 +233,11 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 cycle['restore_reboot'] = boot()
                 if font_hashes() != original_fonts:
                     raise RuntimeError('Restoring default did not restore exact original system fonts')
+                cycle['restore_hashes_equal_stock'] = True
                 cycle['result'] = 'PASS'
+                if label == 'baseline':
+                    from upgrade_evidence import prepare as prepare_upgrade
+                    report['upgrade'] = prepare_upgrade(root)
             except Exception as error:
                 cycle['error'] = str(error)
                 if label != 'baseline':
@@ -375,10 +382,24 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 report['app_apply']['observations'].append(capture_apply_evidence(adb, output / 'app-apply', 'after-' + str(int(time.monotonic() - apply_started)) + 's'))
                 next_observation = time.monotonic() + 60
             if not observed_new_task and time.monotonic() >= admission_deadline:
-                raise RuntimeError('No new matching module task within 75s of App confirmation (App validate35s + start20s); final UI/log evidence required')
+                raise RuntimeError('No new matching module task within 75s of App confirmation (App preflight35s + start20s); final UI/log evidence required')
             time.sleep(1)
         else:
             raise RuntimeError('Matching App task did not succeed within 420s')
+        from verdict import input_validation_blockers
+        input_log = root('cat ' + MODULE + '/logs/fontswitch.log')
+        (output / 'app-apply' / 'fontswitch-completed.log').write_text(input_log)
+        input_events = []
+        for line in input_log.splitlines():
+            if line.startswith('[font-switch-input] '):
+                event = json.loads(line[len('[font-switch-input] '):])
+                if event.get('task') == task_id:
+                    input_events.append(event)
+        report['app_apply']['input_events'] = input_events
+        errors = input_validation_blockers(input_events, task_id, app_boot)
+        if errors:
+            raise RuntimeError('App input validation chain incomplete: ' + '; '.join(errors))
+        report['app_apply']['completed_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'task-success-before-reboot')
         report['app_apply']['reboot'] = boot()
         _, report['app_apply']['mounted'] = assert_mounted('LuoShuSyntheticGate0000', original_fonts)
         report['app_apply']['result'] = 'PASS'
@@ -386,8 +407,15 @@ def run_gate(adb, magisk, baseline, candidate, output):
         report['app_apply']['restore_reboot'] = boot()
         if font_hashes() != original_fonts:
             raise RuntimeError('Final actual-App apply rollback did not restore stock font bytes')
+        report['app_apply']['restore_hashes_equal_stock'] = True
+        final_ui = measure(adb, output / 'final-ui', 1000, repetitions=1)
+        report['final_ui'] = {'result': final_ui['result'], 'target_fatal': False, 'anr': False,
+                              'note': 'Fresh actual App cold/warm verified library after restore reboot', 'observations': final_ui}
         report['delivery_gate'] = 'BLOCKED'
-        report['remaining_coverage'] = ['Final artifact review of native-crash buffers, UI samples and cleanup evidence is still required']
+        report['scope_limits'] = ['AOSP API35 x86_64 with original ARM64 runtime via nativebridge; no native ARM64 or OEM-ROM claim',
+                                  '100/1000 independent filenames contain two original synthetic TTF contents',
+                                  'Baseline App performance and backup restore API not tested or counted as PASS']
+        report['baseline_native_crash_observed'] = any(c.get('prepare_failure_crashes') or c.get('commit_failure', {}).get('crash_buffer') for c in report['cycles'] if c['label'] == 'baseline')
         report['coverage_note'] = ('Baseline module is CLI/mount reference only; original baseline App was not granted root. '
                                    'App timings are candidate-only on nativebridge x86_64 AVD, not native ARM64 or OEM-ROM validation.')
     except Exception as error:
@@ -420,6 +448,21 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 for task in sorted(owned_tasks):
                     root(f'PYTHONHOME={runtime} LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload {runtime}/bin/luoshu-python {MODULE}/common/task_scope.py stop {MODULE}/config/switch_task_worker.pid ' + shlex.quote(task))
                 report['owned_tasks_cancelled'] = sorted(owned_tasks)
+                transient = ' '.join(MODULE + p for p in ('/.luoshu-payload-stage.*', '/.font-payload-stage.*', '/.luoshu-payload-next', '/config/font-payload-next.conf', '/config/font-requests/*', '/config/switch_task.conf.output.*', '/config/switch_task.conf.progress.*', '/cache/tasks/*', '/config/*.tmp.*', '/config/.*.tmp.*'))
+                query = 'for p in ' + transient + '; do if [ -e "$p" ] || [ -L "$p" ]; then printf "%s\\n" "$p"; fi; done'
+                cleanup_deadline = time.monotonic() + 30
+                while True:
+                    entries = root(query).splitlines()
+                    if not entries:
+                        time.sleep(1)
+                        entries = root(query).splitlines()
+                        if not entries:
+                            report['final_workspace'] = {'result': 'PASS', 'entries': [], 'delayed_recheck_seconds': 1}
+                            break
+                    if time.monotonic() >= cleanup_deadline:
+                        report['final_workspace'] = {'result': 'FAIL', 'entries': entries}
+                        raise RuntimeError('Owned transient module workspaces remain after App stop and scoped cleanup')
+                    time.sleep(1)
             except Exception as error:
                 report['process_cleanup_error'] = str(error)
                 report['delivery_gate'] = 'FAIL'
@@ -432,5 +475,8 @@ def run_gate(adb, magisk, baseline, candidate, output):
             except Exception as error:
                 report['root_policy_cleanup_error'] = str(error)
                 report['delivery_gate'] = 'FAIL'
+        from verdict import delivery_blockers
+        report['blockers'] = delivery_blockers(report)
+        report['delivery_gate'] = 'BLOCKED' if report['blockers'] else 'PASS'
         (output / 'module-gate.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     return report
