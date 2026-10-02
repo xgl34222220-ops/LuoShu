@@ -54,6 +54,8 @@ def prepare(apk, patch_script, sdk, output, adb):
         run(['shell', 'sh /data/local/tmp/host_patch.sh /data/local/tmp/luoshu-ramdisk.img'], timeout=180)
         patched = private / 'ramdisk-magisk.img'
         run(['pull', '/data/local/tmp/luoshu-ramdisk.img.magisk', str(patched)])
+        run(['shell', 'sync'])
+        report['guest_filesystem_synced_before_cold_stop'] = True
         if digest(ramdisk) != original:
             raise RuntimeError('Original SDK ramdisk changed')
         report.update(result='PASS', original_ramdisk_sha256=original, patched_ramdisk_sha256=digest(patched),
@@ -64,7 +66,7 @@ def prepare(apk, patch_script, sdk, output, adb):
         (output / 'magisk-preparation.json').write_text(json.dumps(report, indent=2) + '\n')
 
 
-def verify(adb, output):
+def verify(adb, output, apk=None):
     report = {'result': 'FAIL', 'steps': []}
     def run(command, required=True):
         p = subprocess.run([adb, '-s', 'emulator-5554', 'shell', command], capture_output=True, text=True, timeout=60)
@@ -99,7 +101,7 @@ def verify(adb, output):
         env_state = run('if [ -s /data/adb/magisk/util_functions.sh ] && [ -x /data/adb/magisk/busybox ]; then echo ready; else echo missing; fi')
         report['environment_before_setup'] = env_state
         if env_state != 'ready':
-            complete_setup(adb, output)
+            complete_setup(adb, output, apk)
             report['post_setup_processes'] = run('ps -A -o PID,PPID,NAME,ARGS')
             if not re.search(r'^\s*\d+\s+\d+\s+magiskd(?:\s|$)', report['post_setup_processes'], re.M):
                 raise RuntimeError('Magisk daemon missing after official setup reboot')
@@ -125,7 +127,7 @@ def reviewed_setup_prompt(text):
             'your device needs additional setup for magisk to work properly. do you want to proceed and reboot?' in value)
 
 
-def complete_setup(adb, output):
+def complete_setup(adb, output, apk):
     """Complete only the official manager's expected additional-setup dialog."""
     from adb_ui import dump_ui
     from adb_utils import ensure_root
@@ -160,8 +162,24 @@ def complete_setup(adb, output):
         x1, y1, x2, y2 = map(int, bounds.groups())
         run(['shell', f'input tap {(x1+x2)//2} {(y1+y2)//2}'])
     try:
+        if apk is None or digest(apk) != APK_SHA256:
+            raise RuntimeError('Verified official manager APK is required for setup')
         before = run(['shell', 'cat /proc/sys/kernel/random/boot_id'])
-        run(['shell', 'am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.topjohnwu.magisk'])
+        report['package_before'] = run(['shell', 'pm list packages -f com.topjohnwu.magisk'], required=False)
+        # Reinstall the exact authorized APK after cold boot, then verify bytes;
+        # never assume a just-written stock userdata install survived shutdown.
+        run(['install', '-r', str(apk)], timeout=120)
+        report['package_after'] = run(['shell', 'pm path com.topjohnwu.magisk'])
+        package_paths = [line.removeprefix('package:') for line in report['package_after'].splitlines() if line.startswith('package:')]
+        if len(package_paths) != 1:
+            raise RuntimeError('Official manager package is not uniquely installed')
+        installed_hash = run(['shell', 'sha256sum ' + shlex.quote(package_paths[0])]).split()[0]
+        if installed_hash != APK_SHA256:
+            raise RuntimeError('Installed manager APK bytes do not match official pinned artifact')
+        report['installed_apk_sha256'] = installed_hash
+        report['launcher_resolution'] = run(['shell', 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.topjohnwu.magisk'], required=False)
+        # This exact exported launcher was verified from the pinned APK's manifest.
+        run(['shell', 'am start -W -n com.topjohnwu.magisk/com.topjohnwu.magisk.ui.MainActivity'])
         tree = snapshot('magisk-manager-before')
         texts = ' '.join(n.get('text', '') for n in tree.iter('node'))
         if 'notification' in texts.lower():

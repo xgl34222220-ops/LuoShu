@@ -155,7 +155,7 @@ def main():
                         raise RuntimeError('Patched AVD boot timed out')
                     report['patched_root_handshake'] = []
                     ensure_root([adb, '-s', 'emulator-5554'], report['patched_root_handshake'])
-                    verify(adb, output)
+                    verify(adb, output, args.magisk_apk)
                     report['magisk_boot'] = 'PASS'
                     # Full module/App root validation is a distinct next stage.
                     raise RuntimeError('Magisk boot qualified; module/App-root delivery checks still pending')
