@@ -62,16 +62,16 @@ def run_gate(adb, magisk, baseline, candidate, output):
         if before == after or shell('getenforce') != 'Enforcing':
             raise RuntimeError('Boot identity/SELinux invariant failed')
         return {'before': before, 'after': after}
-    def bridge(*args):
-        text = root('sh ' + MODULE + '/common/app_bridge.sh ' + shlex.join(args), timeout=240)
+    def bridge(*args, prefix=""):
+        text = root(prefix + 'sh ' + MODULE + '/common/app_bridge.sh ' + shlex.join(args), timeout=240)
         for line in reversed(text.splitlines()):
             try:
                 return json.loads(line)
             except ValueError:
                 pass
         raise RuntimeError('Module bridge returned no JSON: ' + text[-1000:])
-    def switch(font, expect_success=True):
-        start = bridge('switch_start', font)
+    def switch(font, expect_success=True, prefix=""):
+        start = bridge('switch_start', font, prefix=prefix)
         if start.get('status') != 'ok':
             raise RuntimeError('Font switch was not admitted: ' + json.dumps(start, ensure_ascii=False))
         task = start['data']['task']
@@ -160,6 +160,35 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 root('rm /sdcard/LuoShu/fonts/LuoShuBrokenGate.ttf')
                 if font_hashes() != mounted_fonts or root('cat ' + MODULE + '/config/active_font.conf') != active_before_failure:
                     raise RuntimeError('Failed switch changed prior active font or live mounted bytes')
+                if label == 'candidate':
+                    from commit_fault import mv_wrapper
+                    fault_dir = '/data/local/tmp/luoshu-commit-fault-' + str(time.monotonic_ns())
+                    marker = fault_dir + '/hit'
+                    root('mkdir ' + shlex.quote(fault_dir))
+                    wrapper_file = output / 'commit-fault-mv.sh'
+                    wrapper_file.write_text(mv_wrapper(MODULE, marker))
+                    command(['push', str(wrapper_file), fault_dir + '/mv'])
+                    root('chmod 0700 ' + shlex.quote(fault_dir + '/mv'))
+                    fault_env = 'PATH=' + shlex.quote(fault_dir) + ':"$PATH" '
+                    resolved = root(fault_env + 'sh -c ' + shlex.quote('command -v mv'))
+                    if resolved != fault_dir + '/mv':
+                        raise RuntimeError('Process-local commit fault wrapper not resolved')
+                    payload_before = root('find -L ' + MODULE + '/.luoshu-payload -type f -exec sha256sum {} \\; | sort')
+                    cycle['commit_failure'] = switch(ids[1], expect_success=False, prefix=fault_env)
+                    cycle['commit_failure']['injection_hit'] = root('cat ' + shlex.quote(marker))
+                    if (MODULE + '/.luoshu-payload-stage.') not in cycle['commit_failure']['injection_hit']:
+                        raise RuntimeError('Commit failure was not injected at the exact rename')
+                    if '提交失败' not in cycle['commit_failure'].get('data', {}).get('message', ''):
+                        raise RuntimeError('Task failed for a reason other than the intended commit failure')
+                    if root('find -L ' + MODULE + '/.luoshu-payload -type f -exec sha256sum {} \\; | sort') != payload_before:
+                        raise RuntimeError('Commit failure changed previous payload bytes')
+                    if font_hashes() != mounted_fonts or root('cat ' + MODULE + '/config/active_font.conf') != active_before_failure:
+                        raise RuntimeError('Commit failure changed live fonts or active selection')
+                    root('test ! -e ' + MODULE + '/.luoshu-payload-next && test ! -e ' + MODULE + '/config/font-payload-next.conf')
+                    cycle['commit_failure']['reboot'] = boot()
+                    if font_hashes() != mounted_fonts or root('cat ' + MODULE + '/config/active_font.conf') != active_before_failure:
+                        raise RuntimeError('Failed commit was activated after reboot')
+                    root('rm -f ' + shlex.quote(fault_dir + '/mv') + ' ' + shlex.quote(marker) + '; rmdir ' + shlex.quote(fault_dir))
                 cycle['switch_b'] = switch(ids[1])
                 cycle['switch_b_reboot'] = boot()
                 mounted_b, cycle['mounted_b'] = assert_mounted(ids[1], original_fonts)

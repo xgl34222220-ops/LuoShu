@@ -127,6 +127,18 @@ def reviewed_setup_prompt(text):
             'your device needs additional setup for magisk to work properly. do you want to proceed and reboot?' in value)
 
 
+def system_ui_anr_wait(tree):
+    """Only the observed System UI ANR's Wait button; never close another App."""
+    nodes = list(tree.iter('node'))
+    titles = [n for n in nodes if n.get('package') == 'android'
+              and n.get('resource-id') == 'android:id/alertTitle'
+              and n.get('text') == "System UI isn't responding"]
+    waits = [n for n in nodes if n.get('package') == 'android'
+             and n.get('resource-id') == 'android:id/aerr_wait'
+             and n.get('text') == 'Wait' and n.get('enabled') == 'true']
+    return waits[0] if len(titles) == 1 and len(waits) == 1 else None
+
+
 def complete_setup(adb, output, apk):
     """Complete only the official manager's expected additional-setup dialog."""
     from adb_ui import dump_ui
@@ -155,6 +167,20 @@ def complete_setup(adb, output, apk):
         if p.returncode == 0:
             (output / (label + '.png')).write_bytes(p.stdout)
         return ET.fromstring(text)
+    def settle_system_ui(tree):
+        for attempt in range(3):
+            wait = system_ui_anr_wait(tree)
+            if wait is None:
+                return tree
+            sequence = len(report.setdefault('environment_system_ui_anr', [])) + 1
+            report['environment_system_ui_anr'].append({'attempt': sequence, 'action': 'Wait', 'ui_validation': 'BLOCKED_REQUIRES_FRESH_FINAL_RETEST'})
+            run(['shell', 'dumpsys activity lastanr'], required=False)
+            tap(wait)
+            time.sleep(10)
+            tree = snapshot('magisk-manager-after-anr-wait-' + str(sequence))
+        if system_ui_anr_wait(tree) is not None:
+            raise RuntimeError('System UI ANR persisted after three bounded Wait observations')
+        return tree
     def tap(node):
         bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.get('bounds', ''))
         if not bounds:
@@ -180,13 +206,13 @@ def complete_setup(adb, output, apk):
         report['launcher_resolution'] = run(['shell', 'cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.topjohnwu.magisk'], required=False)
         # This exact exported launcher was verified from the pinned APK's manifest.
         run(['shell', 'am start -W -n com.topjohnwu.magisk/com.topjohnwu.magisk.ui.MainActivity'])
-        tree = snapshot('magisk-manager-before')
+        tree = settle_system_ui(snapshot('magisk-manager-before'))
         texts = ' '.join(n.get('text', '') for n in tree.iter('node'))
         if 'notification' in texts.lower():
             deny = [n for n in tree.iter('node') if n.get('resource-id', '').endswith('/permission_deny_button')]
             if deny:
                 tap(deny[0]); time.sleep(1)
-                tree = snapshot('magisk-manager-notifications-declined')
+                tree = settle_system_ui(snapshot('magisk-manager-notifications-declined'))
                 texts = ' '.join(n.get('text', '') for n in tree.iter('node'))
         if not reviewed_setup_prompt(texts):
             raise RuntimeError('Exact reviewed setup-and-reboot prompt not observed; no other control accepted')
