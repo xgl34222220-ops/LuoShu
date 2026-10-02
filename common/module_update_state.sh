@@ -36,11 +36,27 @@ luoshu_update_config_value() {
 # fonts: a new routing/subsetting/metric policy must take effect on the next
 # explicit apply. Compare only the small builders, never the active font trees.
 luoshu_update_font_builder_compatible() {
+    # Fixed/Universal XML outputs are generated payload too. A boot-confirmed
+    # old selection must not bypass explicit regeneration after these change.
     for _lufb_relative in \
         common/hyperos_physical_policy.py \
         common/hyperos_metrics_batch.py \
         common/legacy_v14_4/hyperos_full_coverage.sh \
-        common/coloros_metrics_batch.py; do
+        common/coloros_metrics_batch.py \
+        common/composite_font.py \
+        common/font_instance.py \
+        common/universal_mixed_font.py \
+        common/universal_mixed_variable.py \
+        common/universal_font_plan.py \
+        common/minimal_xml_router.py \
+        common/fixed_static_xml_router.py \
+        common/font_route_contract.py \
+        common/universal_font_compiler.py \
+        common/fixed_static_xml_compiler.py \
+        common/fixed_outline_weight_match.py \
+        common/device_font_slot_build_base.py \
+        common/device_font_slot_plan_base.py \
+        common/device_font_template_base.py; do
         [ -e "$1/$_lufb_relative" ] || [ -e "$2/$_lufb_relative" ] || continue
         [ -f "$1/$_lufb_relative" ] && [ -f "$2/$_lufb_relative" ] || return 1
         cmp -s "$1/$_lufb_relative" "$2/$_lufb_relative" || return 1

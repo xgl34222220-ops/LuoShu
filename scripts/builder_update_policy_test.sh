@@ -8,7 +8,7 @@ LUOSHU_PAYLOAD_SCHEMA_CURRENT=builder-update-test-schema
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 . "$ROOT/common/module_update_state.sh"
 
-BUILDERS='common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
+BUILDERS='common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh common/composite_font.py common/font_instance.py common/universal_mixed_font.py common/universal_mixed_variable.py common/universal_font_plan.py common/minimal_xml_router.py common/fixed_static_xml_router.py common/font_route_contract.py common/universal_font_compiler.py common/fixed_static_xml_compiler.py common/fixed_outline_weight_match.py common/device_font_slot_build_base.py common/device_font_slot_plan_base.py common/device_font_template_base.py'
 GENERATED_CACHES='cache/full-composite-v12 cache/full-composite-v7 cache/auto-multiweight-mix/composites-v9 cache/auto-multiweight-mix/composites-v3 cache/auto-multiweight-mix/prepared-v8'
 COPY_TRACE="$TMP/copies.log"
 cp() {
@@ -55,7 +55,7 @@ for _cache in $GENERATED_CACHES; do
     cmp -s "$OLD/$_cache/font.ttf" "$NEW/$_cache/font.ttf"
 done
 
-# Each physical-font builder can independently invalidate derived output. The
+# Each legacy/Universal/XML builder can independently invalidate derived output. The
 # live font, selection, mix sources and source metrics survive without rebuild.
 for _changed_builder in $BUILDERS; do
     rm -rf "$NEW"
@@ -88,6 +88,15 @@ for _changed_builder in $BUILDERS; do
         ! grep -Fq "$OLD/$_cache/" "$COPY_TRACE"
     done
     ! grep -Fq "$OLD/config/device-font-cache/" "$COPY_TRACE"
+    # Reproduce the stale-payload failure after boot confirms the preserved
+    # generation: identical selections must still run the upgraded builder.
+    printf 'system/fonts/Roboto-Regular.ttf|hash|1234\n' > "$NEW/config/font-payload-manifest.conf"
+    printf 'state=confirmed\nfont=mix\n' > "$NEW/config/font-payload-boot.conf"
+    printf 'state=verified\nmode=aligned\nactiveFont=mix\n' > "$NEW/config/device-font-load-verification.conf"
+    if MODULE_DIR="$NEW" sh -c '. "$1/common/font_active_state.sh"; luoshu_mix_request_matches_active CJK Latin Digit wght=400 wght=400 wght=400 fixed fixed fixed' sh "$ROOT"; then
+        echo "changed builder reused old same-selection payload: $_changed_builder" >&2
+        exit 1
+    fi
 done
 
 # Boot confirmation only confirms the preserved payload. Even a much newer
