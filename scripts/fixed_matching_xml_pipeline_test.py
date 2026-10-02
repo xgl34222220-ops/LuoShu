@@ -30,7 +30,7 @@ class MatchingPipelineTest(unittest.TestCase):
         manifest=self.build();self.assertTrue(manifest['summary']['deploymentReady'])
         self.assertEqual(len(manifest['artifacts']),1);artifact=manifest['artifacts'][0]
         self.assertEqual(artifact['mode'],matching.MATCHING)
-        self.assertEqual(self.route['routeRevision'],4)
+        self.assertEqual(self.route['routeRevision'],5)
         self.assertEqual(self.route['summary']['fixedMatchingOperationCount'],1)
         self.assertEqual(self.route['summary']['fixedStaticOperationCount'],0)
         self.assertFalse(self.route['summary']['normalSourceVariationPreserved'])
@@ -41,6 +41,12 @@ class MatchingPipelineTest(unittest.TestCase):
         with patch.dict(os.environ,{'LUOSHU_STOCK_FONT_MAP':str(mapping)}):
             payload=self.root/'payload';deployment=deploy.build_deployment(self.plan,self.route,manifest,payload)
             deploy.validate_deployment(deployment,self.plan,self.route,manifest,payload)
+        import universal_font_cutover_gate as gate
+        result = gate.evaluate(self.plan, self.route, manifest, deployment, payload)
+        self.assertTrue(result['eligible'], result)
+        self.assertEqual(result['summary']['coverage'], 'partial-direct-path-uncovered')
+        self.assertEqual(result['summary']['directPathUnsupportedCount'], 1)
+        self.assertIn('partial-coverage:direct-path-uncovered:1', result['warnings'])
         self.assertEqual(len([x for x in deployment['files'] if x['kind']=='xml-matching-font']),1)
         tree=ET.parse(payload/'system/etc/fonts.xml').getroot();self.assertEqual(len(tree[0]),2)
         self.assertEqual(tree[0].tag,'family-list');self.assertEqual(tree[0].get('name'),'sans-serif')

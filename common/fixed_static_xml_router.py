@@ -6,6 +6,7 @@ font geometry. Compiled static bindings and retained originals are mandatory.
 """
 import copy
 import hashlib
+import math
 from pathlib import Path
 import re
 import xml.etree.ElementTree as ET
@@ -17,6 +18,8 @@ SCHEMA = 'fixed-static-xml-route-plan-v1'
 REVISION = 1
 STYLE_REVISION = 2
 MATCHING_REVISION = 4
+DIRECT_PATH_REVISION = 5
+DIRECT_PATH_SCHEMA = "fixed-xml-direct-path-coverage-v1"
 STYLE_WEIGHTS = tuple(sorted(set(range(100, 1000, 100)) | {450, 520}))
 REPRESENTATION = 'fixed-static-xml-v1'
 ERROR = legacy.RouterError
@@ -66,6 +69,9 @@ def _id(plan):
         'retainedOriginals':plan['retainedOriginals'],'summary':plan['summary'],
         'dynamicFontGeneration':plan['dynamicFontGeneration']}
     if plan.get('styleExpansion'):semantic['styleExpansion']=plan['styleExpansion']
+    if 'directPathCoverage' in plan:
+        semantic['directPathCoverage']=plan['directPathCoverage']
+        semantic['directPathTargets']=plan.get('directPathTargets')
     return 'sha256:' + legacy._canonical_hash(semantic)
 
 
@@ -99,7 +105,91 @@ def _dynamic_generation():
     return result
 
 
-def build_route_plan(font_plan, base, *, expand_styles=False, matching_weights=False):
+def _direct_path_record(target):
+    """Conservative standalone text shell; never alias an XML-generated face.
+
+    This contract covers the original file at face zero, not every Android
+    consumer. Collections, style siblings, scoped scripts and ROM aliases need
+    separate adapters; their XML coverage can still proceed independently.
+    """
+    path = str(target.get('path') or '')
+    stock = target.get('targetContract') or {}
+    identity = stock.get('stockIdentity') or {}
+    source = target.get('source') or {}
+    refs = target.get('xmlRefs') or []
+    reason = ''
+    if not path.startswith(('/system/fonts/', '/product/fonts/', '/vendor/fonts/', '/system_ext/fonts/', '/odm/fonts/')):
+        reason = 'unsupported-direct-path-root'
+    elif target.get('xmlScopedTarget') or target.get('xmlScopePolicy'):
+        reason = 'protected-scoped-container'
+    elif target.get('action') not in legacy.ROUTABLE_ACTIONS or target.get('status') == 'blocked':
+        reason = 'target-not-independently-routable'
+    elif target.get('role') not in {'ui-sans', 'latin', 'cjk'}:
+        reason = 'specialized-direct-path-contract-required'
+    elif not universal_font_plan.is_fixed_composite_selection(source):
+        reason = 'fixed-selection-required'
+    elif stock.get('format') != 'TTF' or Path(path).suffix.lower() != '.ttf' or stock.get('faceIndex') != 0:
+        reason = 'standalone-glyf-face-zero-required'
+    elif (identity.get('logicalPath') != path or identity.get('faceIndex') != 0
+          or not SHA.fullmatch(str(identity.get('sha256') or ''))
+          or (identity.get('provenance') or {}).get('verified') is not True):
+        reason = 'sealed-original-identity-required'
+    elif ((identity.get('provenance') or {}).get('aliasChain') != []
+          or (identity.get('provenance') or {}).get('resolvedLogicalPath') not in (None, '', path)):
+        reason = 'original-path-alias-needs-terminal-contract'
+    elif (not refs or stock.get('italic') or source.get('italic')
+          or any(ref.get('index', 0) != 0 or ref.get('style', 'normal') != 'normal'
+                 or (ref.get('familyAttributes') or {}).get('variant') for ref in refs)):
+        reason = 'mixed-face-style-or-variant-container'
+    axes = {}
+    if not reason:
+        for axis in (stock.get('metrics') or {}).get('variationAxes') or []:
+            tag = str(axis.get('tag') or '')
+            try:
+                lo, default, hi = (float(axis[key]) for key in ('minimum', 'default', 'maximum'))
+            except (TypeError, ValueError, KeyError):
+                reason = 'invalid-original-axis-domain'; break
+            if (tag not in {'wght', 'wdth', 'opsz'} or tag in axes
+                    or not all(math.isfinite(v) for v in (lo, default, hi)) or not lo <= default <= hi):
+                reason = 'unsupported-original-axis-domain'; break
+            axes[tag] = {'min': lo, 'default': default, 'max': hi}
+        if bool(axes) != bool(stock.get('variable')):
+            reason = reason or 'incomplete-original-axis-domain'
+        for ref in refs:
+            for axis in ref.get('axes') or []:
+                tag = str(axis.get('tag') or '')
+                try: value = float(axis.get('stylevalue'))
+                except (TypeError, ValueError): value = math.nan
+                if tag not in axes or not math.isfinite(value) or not axes[tag]['min'] <= value <= axes[tag]['max']:
+                    reason = reason or 'unsupported-original-axis-coordinate'
+    if reason:
+        return {'state': 'unsupported', 'reason': reason}
+    return {'state': 'planned', 'contract': {
+        'policy': 'fixed-selected-stock-shell-direct-v1', 'targetPath': path,
+        'stockSha256': identity['sha256'], 'faceIndex': 0, 'container': 'TTF',
+        'axisRanges': axes, 'role': target['role'], 'sourceSha256': source['fileUid'],
+        'sourceIntentSha256': legacy._canonical_hash(source['mixedSelection']),
+        'targetContractSha256': legacy._canonical_hash(stock),
+        'outlinePolicy': 'fixed-selected-source-with-original-unselected-glyphs',
+        'consumerCoverage': 'not-proven',
+    }}
+
+
+def _add_direct_path_coverage(plan, font_plan):
+    paths = sorted({op['targetPath'] for doc in plan['documents'].values()
+                    for op in doc.get('operations', [])
+                    if op.get('artifact', {}).get('representation') in fixed_match.REPRESENTATIONS})
+    records = {path: _direct_path_record(font_plan['targets'][path]) for path in paths}
+    plan['directPathCoverage'] = {'schema': DIRECT_PATH_SCHEMA, 'targets': records}
+    plan['directPathTargets'] = [path for path, record in records.items() if record['state'] == 'planned']
+    plan['summary'].update(directPathPlannedCount=len(plan['directPathTargets']),
+                           directPathUnsupportedCount=len(paths)-len(plan['directPathTargets']),
+                           directPathConsumersVerified=False)
+
+
+def build_route_plan(font_plan, base, *, expand_styles=False, matching_weights=False, direct_paths=None):
+    if direct_paths is None: direct_paths = matching_weights
+    if direct_paths and not matching_weights: raise ERROR("direct paths require fixed matching routes")
     if matching_weights:expand_styles=True
     weights=(400,) if matching_weights else STYLE_WEIGHTS
     legacy.validate_route_plan(base,font_plan)
@@ -217,15 +307,18 @@ def build_route_plan(font_plan, base, *, expand_styles=False, matching_weights=F
                                fixedStaticOperationCount=static_count-matching_count,
                                normalSourceVariationPreserved=False)
     if not static_count:raise ERROR('no eligible explicitly fixed upright XML route')
+    if direct_paths:
+        plan['routeRevision'] = DIRECT_PATH_REVISION
+        _add_direct_path_coverage(plan, font_plan)
     plan['routeId']=_id(plan)
     return plan
 
 
 def validate_route_plan(plan,font_plan=None):
-    if plan.get('schema')!=SCHEMA or plan.get('routeRevision') not in {REVISION,STYLE_REVISION,MATCHING_REVISION} or plan.get('state')!='planned' or plan.get('mutatesSystem') is not False:
+    if plan.get('schema')!=SCHEMA or plan.get('routeRevision') not in {REVISION,STYLE_REVISION,MATCHING_REVISION,DIRECT_PATH_REVISION} or plan.get('state')!='planned' or plan.get('mutatesSystem') is not False:
         raise ERROR('invalid fixed-static XML representation')
-    matching=plan.get('routeRevision')==MATCHING_REVISION
-    expansion=plan.get('routeRevision') in {STYLE_REVISION,MATCHING_REVISION}
+    matching=plan.get('routeRevision') in {MATCHING_REVISION,DIRECT_PATH_REVISION}
+    expansion=plan.get('routeRevision') in {STYLE_REVISION,MATCHING_REVISION,DIRECT_PATH_REVISION}
     expected_policy={'policy':'fixed-normal-original-italic-v1','weights':[400] if matching else list(STYLE_WEIGHTS)}
     if matching:expected_policy.update(matchingAxis='constant-outline-selection',namedFallbackPolicy='local-original-chain-v1')
     if expansion and plan.get('styleExpansion')!=expected_policy:
@@ -236,8 +329,20 @@ def validate_route_plan(plan,font_plan=None):
     legacy.validate_route_plan(base,font_plan)
     if plan.get('routeId')!=_id(plan):raise ERROR('fixed-static route identity changed')
     if font_plan is not None:
-        expected=build_route_plan(font_plan,base,expand_styles=expansion,matching_weights=matching)
+        expected=build_route_plan(font_plan,base,expand_styles=expansion,matching_weights=matching,
+                                  direct_paths=plan.get('routeRevision')==DIRECT_PATH_REVISION)
         if expected!=plan:raise ERROR('fixed-static route differs from sealed source plan')
+    coverage = plan.get('directPathCoverage')
+    if plan.get('routeRevision') == DIRECT_PATH_REVISION:
+        if not isinstance(coverage, dict) or coverage.get('schema') != DIRECT_PATH_SCHEMA or not isinstance(coverage.get('targets'), dict):
+            raise ERROR('missing direct-path coverage contract')
+        if any(record.get('state') not in {'planned', 'unsupported'} for record in coverage['targets'].values()):
+            raise ERROR('invalid direct-path coverage state')
+        expected_paths = sorted(path for path, record in coverage['targets'].items() if record['state'] == 'planned')
+        if plan.get('directPathTargets') != expected_paths:
+            raise ERROR('direct-path target membership changed')
+    elif coverage is not None or plan.get('directPathTargets') is not None:
+        raise ERROR('unexpected direct-path contract on legacy route')
     for document in plan['documents'].values():
         for op in document['operations']:
             if op.get('operation')=='replace-fixed-static-reference':
@@ -270,7 +375,7 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
     parents={child:parent for parent in root.iter() for child in parent}
     records=legacy._document_nodes(source_xml,tree)
     clones=[];named_clones=[]
-    matching=plan.get('routeRevision')==MATCHING_REVISION
+    matching=plan.get('routeRevision') in {MATCHING_REVISION,DIRECT_PATH_REVISION}
     for fallback in doc.get('fallbackCopies',[]):
         family=parents[fonts[fallback['anchorOrdinal']]];clone=copy.deepcopy(family)
         if not fallback['insideFamilyList']:

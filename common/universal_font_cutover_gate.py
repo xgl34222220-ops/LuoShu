@@ -146,6 +146,9 @@ def evaluate(
     static_deferred = int(route_summary.get("representationDeferralCount") or 0)
     if static_deferred:
         warnings.append(f"partial-coverage:fixed-static-xml-deferred:{static_deferred}")
+    direct_missing = int(route_summary.get("directPathUnsupportedCount") or 0)
+    if direct_missing:
+        warnings.append(f"partial-coverage:direct-path-uncovered:{direct_missing}")
     eligible = not reasons
     return {
         "schema": SCHEMA,
@@ -158,11 +161,15 @@ def evaluate(
         "payloadDigest": str(deployment.get("payloadDigest") or ""),
         "summary": {
             "slotCount": len(targets),
-            "coverage": ("mixed-static-and-retained-adapters" if static_deferred else
+            "coverage": ("partial-direct-path-uncovered" if direct_missing else
+                         "mixed-static-and-retained-adapters" if static_deferred else
                          "partial-protected-typography" if preserved_math or preserved_marks or preserved_clock else
                          "partial-style-preserved" if preserved_count else "planned-targets"),
             "fixedStaticOperationCount": int(route_summary.get("fixedStaticOperationCount") or 0),
             "fixedStaticDeferralCount": static_deferred,
+            "directPathPlannedCount": int(route_summary.get("directPathPlannedCount") or 0),
+            "directPathUnsupportedCount": direct_missing,
+            "directPathConsumersVerified": False,
             "preservedSharedMarks": preserved_marks,
             "preservedMathGlyphs": preserved_math,
             "preservedClockPunctuation": preserved_clock,

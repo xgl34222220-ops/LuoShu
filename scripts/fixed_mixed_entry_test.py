@@ -41,7 +41,7 @@ class FixedEntryTest(unittest.TestCase):
    response=json.loads(result.stdout.strip().splitlines()[-1]);self.assertFalse(response['fallback']);self.assertEqual(response['pipeline'],'universal')
    payload=module/'.luoshu-payload-next';manifest=json.loads((payload/'.luoshu-runtime/deployment/deployment.json').read_text());deployment.validate_payload_integrity(manifest,payload)
    route=json.loads((payload/'.luoshu-runtime/deployment/fixed-static-route-plan.json').read_text())
-   self.assertEqual(route['routeRevision'],4);self.assertGreater(route['summary']['fixedMatchingOperationCount'],0)
+   self.assertEqual(route['routeRevision'],5);self.assertGreater(route['summary']['fixedMatchingOperationCount'],0)
    plan=json.loads((payload/'.luoshu-runtime/deployment/font-plan.json').read_text())
    self.assertEqual(plan['constraints']['xmlScopePolicy'],'fixed-chinese-reference-v1')
    next_state=mixed.conf(config/'universal-font-next.conf');self.assertEqual(next_state['requestId'],state['requestId']);self.assertEqual(next_state['deploymentId'],manifest['deploymentId'])

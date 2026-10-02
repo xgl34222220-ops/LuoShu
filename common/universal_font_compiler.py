@@ -1395,6 +1395,36 @@ def _physical_artifact(target: dict[str, Any], font_plan: dict[str, Any]) -> dic
     }
 
 
+def _direct_path_artifact(target, font_plan, contract):
+    artifact = _physical_artifact(target, font_plan)
+    artifact['directPathContract'] = copy.deepcopy(contract)
+    artifact.pop('artifactId', None)
+    artifact.pop('suggestedFileName', None)
+    key = _canonical_hash(artifact)
+    artifact.update(artifactId='ufc:' + key[:32], suggestedFileName='LuoShu-Direct-' + key[:32] + '.ttf')
+    return artifact
+
+
+def _direct_path_snapshot(path, contract):
+    if _font_container(path) != 'TTF' or contract.get('faceIndex') != 0:
+        raise CompilerError('direct path requires an actual standalone face-zero TrueType font')
+    with _open_face(path, 0, lazy=True) as font:
+        if 'glyf' not in font or any(tag in font for tag in ('CFF ', 'CFF2', 'VARC', 'COLR', 'SVG ')):
+            raise CompilerError('direct path outline engine is unsupported')
+        axes = {str(a.axisTag): {'min': float(a.minValue), 'default': float(a.defaultValue), 'max': float(a.maxValue)}
+                for a in font['fvar'].axes} if 'fvar' in font else {}
+        if axes != contract.get('axisRanges'):
+            raise CompilerError('direct path original axis domain changed')
+        # Force canonical FontTools serialization on both sides. The metadata
+        # and variation selectors must remain the OEM shell, not the XML asset.
+        tables = {}
+        for tag in ('fvar', 'avar', 'STAT', 'name'):
+            if tag in font:
+                font[tag]
+                tables[tag] = hashlib.sha256(font.getTableData(tag)).hexdigest()
+        return {'faceIndex': 0, 'axisRanges': axes, 'selectorTableHashes': tables}
+
+
 def _collect_units(font_plan: dict[str, Any], route_plan: dict[str, Any]) -> list[dict[str, Any]]:
     targets = font_plan.get("targets")
     if not isinstance(targets, dict):
@@ -1453,6 +1483,21 @@ def _collect_units(font_plan: dict[str, Any], route_plan: dict[str, Any]) -> lis
         })
         if "physical-slot" not in unit["deploymentKinds"]:
             unit["deploymentKinds"].append("physical-slot")
+
+    direct_paths = route_plan.get('directPathTargets') or []
+    if direct_paths:
+        import fixed_static_xml_router
+        fixed_static_xml_router.validate_route_plan(route_plan, font_plan)
+        for target_path in direct_paths:
+            if target_path in physical_only or target_path in deferred:
+                raise CompilerError('direct path collides with a legacy physical/dynamic target')
+            target = targets[target_path]
+            record = route_plan['directPathCoverage']['targets'][target_path]
+            if record != fixed_static_xml_router._direct_path_record(target) or record.get('state') != 'planned':
+                raise CompilerError('direct path differs from its independently sealed target')
+            artifact = _direct_path_artifact(target, font_plan, record['contract'])
+            units[artifact['artifactId']] = {'artifact': artifact, 'target': copy.deepcopy(target),
+                                            'deploymentKinds': ['physical-slot'], 'routeNodes': []}
 
     for target_path in sorted(deferred):
         target = targets.get(target_path)
@@ -2195,6 +2240,8 @@ def _compile_unit_in_view(
         stock = _resolve_stock(target_path, stock_paths, allow_live_stock)
         stock_face = max(0, _int(artifact.get("requiredFaceIndex"), 0))
         verified_stock = _validate_stock_contract(target, stock, stock_face)["verifiedStockIdentity"]
+        direct_contract = artifact.get('directPathContract')
+        direct_before = _direct_path_snapshot(stock, direct_contract) if direct_contract else None
         mode = _choose_mode(
             target,
             artifact,
@@ -2210,6 +2257,12 @@ def _compile_unit_in_view(
             report = _compile_source_variable_preserve(target, artifact, stock, output, temp_root, verified_stock)
         else:
             report = _compile_stock_shell(target, artifact, stock, output, temp_root, render_cache, verified_stock)
+
+        if direct_contract:
+            if mode != 'stock-shell' or direct_before != _direct_path_snapshot(output, direct_contract):
+                raise CompilerError('direct path changed original face/axis/name selector contracts')
+            report['directPathCompatibility'] = {'status': 'ready', **direct_before,
+                                                  'consumerCoverage': 'not-proven'}
 
         result.update(
             status="ready",
@@ -2559,6 +2612,12 @@ def validate_manifest(
                     raise CompilerError("fixed static artifact differs from its route contract")
                 fixed_static.validate_artifact(artifact, unit)
                 expected_static_bindings[artifact_id] = copy.deepcopy(artifact["staticXmlContract"])
+            direct_contract = artifact.get('contract', {}).get('directPathContract')
+            if direct_contract:
+                snapshot = _direct_path_snapshot(path, direct_contract)
+                proof = artifact.get('report', {}).get('directPathCompatibility') or {}
+                if artifact.get('mode') != 'stock-shell' or proof != {'status': 'ready', **snapshot, 'consumerCoverage': 'not-proven'}:
+                    raise CompilerError('direct path compatibility proof differs from saved output')
             if "physical-slot" in (artifact.get("deploymentKinds") or []):
                 expected_physical_map[str(artifact.get("targetPath") or "")] = artifact_id
             if "dynamic-slot" in (artifact.get("deploymentKinds") or []):

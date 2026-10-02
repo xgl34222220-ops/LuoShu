@@ -110,17 +110,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: 36713630252
-          name: LuoShu-Mixed-Test-31731dc060612c266e76180f306ea3beab610c8f
+          run-id: 36984081010
+          name: LuoShu-Mixed-Test-4f42c14196573f927d7b5a5ea3e200282a80ef54
           path: retained-audit-app
 
       - name: Verify retained audit App provenance
         if: env.LUOSHU_REUSE_AUDIT_APP == '1'
         run: |
-          git fetch --depth=1 origin 31731dc060612c266e76180f306ea3beab610c8f
-          git diff --exit-code 31731dc060612c266e76180f306ea3beab610c8f HEAD -- android-app
-          apk=retained-audit-app/LuoShu-Core-Audit-v2.0.0-umix-31731dc060612c266e76180f306ea3beab610c8f.apk
-          echo "8d1ba7aaa892bdf98dcf2881842995f4f27e8f920024d22973cf8bb2e44e74e0  $apk" | sha256sum -c -
+          git fetch --depth=1 origin 4f42c14196573f927d7b5a5ea3e200282a80ef54
+          git diff --exit-code 4f42c14196573f927d7b5a5ea3e200282a80ef54 HEAD -- android-app
+          apk=retained-audit-app/LuoShu-Core-Audit-v2.0.0-umix-4f42c14196573f927d7b5a5ea3e200282a80ef54.apk
+          echo "c0ca25fa70556516f9e01de214c242d9f763f035c018ae8b9b19001cfd11db56  $apk" | sha256sum -c -
           mkdir -p android-app/app/build/outputs/apk/debug
           cp "$apk" android-app/app/build/outputs/apk/debug/app-debug.apk
 
@@ -303,7 +303,7 @@ jobs:
             renamed="${file%.*}-${LUOSHU_TEST_BUILD_ID}.${file##*.}"
             case "$file" in *.apk) renamed="dist/LuoShu-Core-Audit-${LUOSHU_ARTIFACT_VERSION}-${LUOSHU_TEST_BUILD_ID}.apk" ;; esac
             if [ "$LUOSHU_REUSE_AUDIT_APP" = 1 ] && [ "${file##*.}" = apk ]; then
-              renamed="dist/LuoShu-Core-Audit-${LUOSHU_ARTIFACT_VERSION}-umix-31731dc060612c266e76180f306ea3beab610c8f.apk"
+              renamed="dist/LuoShu-Core-Audit-${LUOSHU_ARTIFACT_VERSION}-umix-4f42c14196573f927d7b5a5ea3e200282a80ef54.apk"
             fi
             mv "$file" "$renamed"
             rm -f "$file.sha256"
@@ -311,7 +311,7 @@ jobs:
           done
           printf 'commit=%s\nbuildId=%s\nexperimental=true\nhardwareValidated=false\nfixedMixedEntry=fixed-matching-xml-v1\n' "$GITHUB_SHA" "$LUOSHU_TEST_BUILD_ID" > dist/test-build.conf
           if [ "$LUOSHU_REUSE_AUDIT_APP" = 1 ]; then
-            printf 'appSourceCommit=31731dc060612c266e76180f306ea3beab610c8f\nappUnchanged=true\n' >> dist/test-build.conf
+            printf 'appSourceCommit=4f42c14196573f927d7b5a5ea3e200282a80ef54\nappUnchanged=true\n' >> dist/test-build.conf
           fi
 
       - uses: actions/upload-artifact@v4

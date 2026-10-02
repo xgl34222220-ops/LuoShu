@@ -381,6 +381,12 @@ def _assess_font(
     report["coverage"] = coverage_report
 
     axes = snapshot["axes"]
+    direct_contract = contract.get('directPathContract')
+    if direct_contract:
+        if (logical_path != direct_contract.get('targetPath') or face_index != 0
+                or axes != direct_contract.get('axisRanges')):
+            failures.append(f'direct-path-selector-mismatch:{logical_path}')
+        report['directPathCoverage'] = {'fileVisible': True, 'consumerCoverage': 'not-proven'}
     required_axes = contract.get("requiredAxes") if isinstance(contract.get("requiredAxes"), list) else []
     for entry in required_axes:
         tag, value = _axis_value(entry)
@@ -492,6 +498,25 @@ def verify(
         actual_original = {f["logicalPath"]: set(f.get("originalIds") or []) for f in deployment["files"] if f.get("kind") == "xml-original"}
         if expected_static != actual_static or expected_original != actual_original:
             raise VerificationError("fixed-static runtime route membership incomplete")
+        direct_records = (fixed_route.get('directPathCoverage') or {}).get('targets') or {}
+        direct_artifacts = {}
+        for item in artifacts['artifacts']:
+            contract = (item.get('contract') or {}).get('directPathContract')
+            if not contract:
+                continue
+            path = contract.get('targetPath')
+            if (path in direct_artifacts or direct_records.get(path) != {'state': 'planned', 'contract': contract}
+                    or item.get('deploymentKinds') != ['physical-slot']):
+                raise VerificationError('direct-path artifact differs from frozen route')
+            direct_artifacts[path] = item['artifactId']
+        if set(direct_artifacts) != set(fixed_route.get('directPathTargets') or []):
+            raise VerificationError('direct-path artifact membership incomplete')
+        actual_direct = {f['logicalPath']: f.get('artifactId') for f in deployment['files']
+                         if f['logicalPath'] in direct_artifacts and f.get('kind') == 'physical-font'}
+        if actual_direct != direct_artifacts:
+            raise VerificationError('direct-path deployment membership incomplete')
+        if any(record.get('state') == 'unsupported' for record in direct_records.values()):
+            warnings.append('fixed-static-direct-path-coverage-incomplete')
         warnings.append("fixed-static-consumer-proof-pending")
 
     deployment_id = str(deployment.get("deploymentId") or "")
