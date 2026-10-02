@@ -45,14 +45,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          command -v sdkmanager
-          command -v avdmanager
-          sdkmanager --install 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          exec > >(tee root-gate-output/sdk-preparation.txt) 2>&1
+          : "${ANDROID_HOME:=${ANDROID_SDK_ROOT:-}}"
+          test -n "$ANDROID_HOME"
+          echo "Official SDK root: $ANDROID_HOME"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | sort -V | tail -1)
+          fi
+          test -x "$SDKMANAGER"
+          AVDMANAGER="$(dirname "$SDKMANAGER")/avdmanager"
+          test -x "$AVDMANAGER"
+          echo "SDK manager: $SDKMANAGER"
+          echo "AVD manager: $AVDMANAGER"
+          "$SDKMANAGER" --install 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
           export HOME="$RUNNER_TEMP/luoshu-emulator-home"
           export ANDROID_AVD_HOME="$HOME/avd"
           mkdir -p "$ANDROID_AVD_HOME"
-          printf 'no\n' | avdmanager create avd --force --name luoshu_gate --package 'system-images;android-35;google_apis;x86_64' --device pixel_7_pro
+          printf 'no\n' | "$AVDMANAGER" create avd --force --name luoshu_gate --package 'system-images;android-35;google_apis;x86_64' --device pixel_7_pro
           printf '\nhw.ramSize=2048\nvm.heapSize=512\n' >> "$ANDROID_AVD_HOME/luoshu_gate.avd/config.ini"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "HOME=$HOME" >> "$GITHUB_ENV"
           echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
       - name: Qualify original ARM64 runtime under one supervised emulator
