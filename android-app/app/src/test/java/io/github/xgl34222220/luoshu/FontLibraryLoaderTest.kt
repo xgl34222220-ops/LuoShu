@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -253,4 +254,68 @@ class FontLibraryLoaderTest {
         val source = RootFontLibrarySource { _, _ -> ShellResult(1, "", "permission denied") }
         assertTrue(runCatching { source.cached() }.exceptionOrNull()?.message.orEmpty().contains("permission denied"))
     }
+
+    @Test
+    fun successfullyReadDamagedModuleCacheFallsBackToScanEvenForForcedRefresh() = runBlocking {
+        val damagedCaches = listOf(
+            "{broken JSON",
+            """{"status":"ok","data":{}}""",
+            """{"status":"ok"}""",
+            """{"status":"ok","data":{"fonts":"broken"}}""",
+            "{}",
+            "empty or truncated file",
+        )
+        for (damaged in damagedCaches) {
+            for (force in listOf(false, true)) {
+                val commands = mutableListOf<String>()
+                val source = RootFontLibrarySource { command, _ ->
+                    commands += command
+                    if (command.endsWith("fonts cached")) ShellResult(0, damaged, "")
+                    else ShellResult(0, """{"status":"ok","data":{"fonts":[],"fingerprint":"v4:empty","current":"default"}}""", "")
+                }
+                val verifiedStates = mutableListOf<Boolean>()
+                val result = loadFontLibrary(null, force, source) { _, verified -> verifiedStates += verified }
+                assertEquals("v4:empty", result.fingerprint)
+                assertEquals(3, commands.size)
+                assertTrue(commands[1].endsWith(if (force) "fonts refresh" else " fonts"))
+                assertEquals(listOf(false, true), verifiedStates)
+            }
+        }
+    }
+
+    @Test
+    fun damagedOutputWithRootExecutionFailureMustNotFallBackToScan() = runBlocking {
+        var calls = 0
+        val source = RootFontLibrarySource { _, _ ->
+            calls++
+            ShellResult(1, "{broken JSON", "Root execution failed")
+        }
+        assertTrue(runCatching { loadFontLibrary(null, true, source) { _, _ -> } }.isFailure)
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun explicitCacheReadPermissionErrorMustNotFallBackToScan() = runBlocking {
+        var calls = 0
+        val source = RootFontLibrarySource { _, _ ->
+            calls++
+            ShellResult(0, """{"status":"error","message":"permission denied"}""", "")
+        }
+        val failure = runCatching { loadFontLibrary(null, true, source) { _, _ -> } }.exceptionOrNull()
+        assertTrue(failure?.message.orEmpty().contains("permission denied"))
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun cancelledCacheRequestMustNotFallBackToScan() = runBlocking {
+        var calls = 0
+        val source = RootFontLibrarySource { _, _ ->
+            calls++
+            throw CancellationException("request cancelled")
+        }
+        val failure = runCatching { loadFontLibrary(null, true, source) { _, _ -> } }.exceptionOrNull()
+        assertTrue(failure is CancellationException)
+        assertEquals(1, calls)
+    }
+
 }

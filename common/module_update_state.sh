@@ -61,9 +61,9 @@ luoshu_copy_update_tree() {
 
 luoshu_update_config_is_volatile() {
     case "$1" in
-        version_notes.conf|switch_task.conf|mix_task.conf|axes_task.conf|emoji_task.conf|\
+        version_notes.conf|mix-finalize.flock|switch_task.conf|mix_task.conf|axes_task.conf|emoji_task.conf|\
         text_reboot_required.conf|font_weight_reboot_required.conf|emoji_reboot_required.conf|\
-        webui_font_list.json|webui_font_list.key|native_font_index.json|native_font_index.key|\
+        webui_font_list.json|webui_font_list.key|native_font_index.key|\
         composite_progress.json|mix_last_error.txt|app_install_pending|app_install_state.conf|\
         app_install_manual|font-payload-rebuild-pending.conf|font-payload-reapply-notified.conf|font-boot-failures|\
         font-payload-quarantine.conf|mount_compat.conf|self-mount.conf|\
@@ -120,7 +120,6 @@ luoshu_clear_update_volatile() {
         "$_module/config/emoji_reboot_required.conf" \
         "$_module/config/webui_font_list.json" \
         "$_module/config/webui_font_list.key" \
-        "$_module/config/native_font_index.json" \
         "$_module/config/native_font_index.key" \
         "$_module/config/composite_progress.json" \
         "$_module/config/mix_last_error.txt" \
@@ -162,6 +161,13 @@ luoshu_migrate_update_config() {
     for _source in "$_old/config"/*; do
         [ -f "$_source" ] || continue
         _name=${_source##*/}
+        if [ "$_name" = native_font_index.json ]; then
+            # Display-only saved rows speed a fresh App install. The key is
+            # volatile and App actions remain gated on a live fingerprint.
+            _index_bytes=$(stat -c %s "$_source" 2>/dev/null)
+            case "$_index_bytes" in ''|*[!0-9]*) continue ;; esac
+            [ "$_index_bytes" -le 4194304 ] || continue
+        fi
         luoshu_update_config_is_volatile "$_name" && continue
         cp -af "$_source" "$_new/config/$_name" 2>/dev/null || \
             cp -fp "$_source" "$_new/config/$_name" 2>/dev/null || return 1

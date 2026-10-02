@@ -335,3 +335,5 @@ python3 "$ROOT/scripts/stable_cleanup_policy_test.py"
 python3 "$ROOT/scripts/task_scope_test.py"
 
 sh "$ROOT/scripts/system_health_test.sh"
+python3 "$ROOT/scripts/finalize_lock_test.py"
+python3 -m unittest discover -s "$ROOT/tests/android-root-gate" -p 'test_*.py'

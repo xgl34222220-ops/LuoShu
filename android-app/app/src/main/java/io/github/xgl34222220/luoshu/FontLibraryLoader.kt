@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 
 internal data class FontLibraryFingerprint(val value: String, val currentFont: String)
@@ -63,12 +64,30 @@ internal class RootFontLibrarySource(
 
     override suspend fun cached(): CachedFontIndex? {
         val result = execute("sh ${RootShell.quote(bridge)} fonts cached", 8_000L)
-        val root = parseRoot(result)
-        if (root.optString("status") != "ok") {
-            if (root.optString("code") in setOf("cache_miss", "cache-miss")) return null
-            error(root.optString("message", "字体索引读取失败"))
+        // Only a successfully read cache may degrade to a cache miss. Execution failures
+        // and cancellation still propagate; corruption must not prevent a fresh scan forever.
+        val root = if (result.code == 0) parseCachedRoot(result.stdout) else parseRoot(result)
+        if (root == null) return null
+        when (root.optString("status")) {
+            "error" -> {
+                if (root.optString("code") in setOf("cache_miss", "cache-miss")) return null
+                error(root.optString("message", "字体索引读取失败"))
+            }
+            "ok" -> Unit
+            else -> return null
         }
+        if (root.optJSONObject("data")?.optJSONArray("fonts") == null) return null
         return parseIndex(root)
+    }
+
+    private suspend fun parseCachedRoot(raw: String): JSONObject? = withContext(Dispatchers.Default) {
+        val line = raw.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
+            ?: return@withContext null
+        try {
+            JSONObject(line.trim())
+        } catch (_: JSONException) {
+            null
+        }
     }
 
     override suspend fun fingerprint(): FontLibraryFingerprint {

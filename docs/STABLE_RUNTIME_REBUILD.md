@@ -73,6 +73,8 @@ restart or broad configuration broadcast is used.
 
 ## Library loading
 
+Upgrade preserves a bounded saved native index as display-only rows while discarding
+its validation key; a new test App can therefore show known rows before rescanning.
 The App can read the saved module index through `fonts cached` before Root status
 or a full scan. It treats that as an unverified saved list, then reconciles.
 Fresh indexes include the fingerprint used to build them, so a concurrent change

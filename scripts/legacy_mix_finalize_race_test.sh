@@ -4,10 +4,61 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROUTER="$ROOT/common/legacy_v14_4/mix_router.sh"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-mix-finalize)
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+PHASE=setup
+finish_test() {
+    _test_rc=$?
+    if [ "$_test_rc" -ne 0 ]; then
+        printf 'legacy_mix_finalize_race_test failed: phase=%s exit=%s\n' "$PHASE" "$_test_rc" >&2
+        for _test_output in "$TMP"/*.out "$TMP"/*.exit; do
+            [ -f "$_test_output" ] || continue
+            printf '\n--- %s ---\n' "${_test_output##*/}" >&2
+            cat "$_test_output" >&2
+        done
+        for _test_state in "$TMP/module/config"/*.conf; do
+            [ -f "$_test_state" ] || continue
+            printf '\n--- %s ---\n' "${_test_state##*/}" >&2
+            cat "$_test_state" >&2
+        done
+    fi
+    rm -rf "$TMP"
+    exit "$_test_rc"
+}
+trap finish_test EXIT
+trap 'exit 130' HUP INT TERM
+
+# Hold the exact owner-publication window open deterministically. The old
+# mkdir/pid lock lets another caller delete this empty directory during 0.2s;
+# the kernel-fd replacement remains exclusive through the same pause before
+# commit. Both wrappers execute the real operations, never fake success.
+mkdir -p "$TMP/bin"
+export LUOSHU_TEST_MKDIR="$(command -v mkdir)"
+export LUOSHU_TEST_PYTHON="$(command -v python3)"
+cat > "$TMP/bin/mkdir" <<'EOF_MKDIR_PAUSE'
+#!/bin/sh
+"$LUOSHU_TEST_MKDIR" "$@"
+rc=$?
+if [ "$rc" = 0 ]; then
+    case "$*" in *'.mix-stage-finalize.lock'*) /bin/sleep 0.2 ;; esac
+fi
+exit "$rc"
+EOF_MKDIR_PAUSE
+cat > "$TMP/bin/python3" <<'EOF_FLOCK_PAUSE'
+#!/bin/sh
+case " $* " in
+    *' lock-fd '*)
+        "$LUOSHU_TEST_PYTHON" "$@"
+        rc=$?
+        [ "$rc" != 0 ] || /bin/sleep 0.2
+        exit "$rc"
+        ;;
+esac
+exec "$LUOSHU_TEST_PYTHON" "$@"
+EOF_FLOCK_PAUSE
+chmod 0755 "$TMP/bin/mkdir" "$TMP/bin/python3"
+PATH="$TMP/bin:$PATH"; export PATH
 
 MODULE="$TMP/module"
-mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config"
+mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config" "$MODULE/logs"
 printf 'module\n' > "$MODULE/module.prop"
 printf 'new-composite\n' > "$MODULE/.luoshu-mix-stage/system/fonts/MiSansVF.ttf"
 printf 'default\n' > "$MODULE/config/active_font.conf"
@@ -34,10 +85,19 @@ EOF_MANIFEST_A
 # App polling and the outer weighted task may observe child success at the same
 # time. Every caller must see the same idempotent success; none may race between
 # the stage rename and state-file commit.
+PHASE=concurrent-finalize
+FINALIZE_PIDS=''
 for index in 1 2 3 4 5 6; do
     MODDIR="$MODULE" sh "$ROUTER" finalize > "$TMP/finalize-$index.out" 2>&1 &
+    FINALIZE_PIDS="$FINALIZE_PIDS $!:$index"
 done
-wait
+FINALIZE_FAILED=0
+for record in $FINALIZE_PIDS; do
+    pid=${record%:*}; index=${record#*:}
+    if wait "$pid"; then rc=0; else rc=$?; FINALIZE_FAILED=1; fi
+    printf 'pid=%s exit=%s\n' "$pid" "$rc" > "$TMP/finalize-$index.exit"
+done
+[ "$FINALIZE_FAILED" = 0 ]
 for output in "$TMP"/finalize-*.out; do
     grep -q '"status":"ok"' "$output"
 done
@@ -47,6 +107,7 @@ grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-a$' "$MODULE/config/font-payload-next.conf"
 test ! -e "$MODULE/.mix-stage-finalize.lock"
 
+PHASE=interrupted-state-recovery
 # Recover the narrow interrupted state: directory rename completed, state write
 # did not. The preserved stage metadata is sufficient to finish without rebuild.
 rm -f "$MODULE/config/font-payload-next.conf"
@@ -64,6 +125,7 @@ grep -q '"status":"ok"' "$TMP/recover.out"
 grep -q '^font=mix$' "$MODULE/config/font-payload-next.conf"
 grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 
+PHASE=second-generation
 # A later selection is a different generation even though both payloads are named
 # `mix`.  It must replace the already prepared generation instead of returning the
 # old English/digit composite as an idempotent success.
@@ -96,6 +158,7 @@ grep -q '^latin=LatinB$' "$MODULE/config/font-payload-next.conf"
 grep -q '^digit=DigitB$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-b$' "$MODULE/config/font-payload-next.conf"
 
+PHASE=config-fast-path
 # Combination-page refresh must be a config-only fast path. It must not prepare a
 # compatibility runtime or touch payload directories merely to read saved choices.
 cat > "$MODULE/config/axes_mix.conf" <<'EOF_CONFIG'
@@ -115,6 +178,7 @@ grep -q '"latin":"LatinFast"' "$TMP/config-fast.out"
 grep -q '"digit":"DigitFast"' "$TMP/config-fast.out"
 grep -q '"latinWeight":420' "$TMP/config-fast.out"
 
+PHASE=status-fast-path
 # Polling is also config-only. A generated font is not reported successful until
 # its next-boot payload is actually committed, and polling must never run setup_runtime.
 cat > "$MODULE/config/axes_task.conf" <<'EOF_RUNNING'
@@ -147,6 +211,7 @@ MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-failed.out"
 grep -q '"state":"failed"' "$TMP/status-failed.out"
 grep -q '提交校验失败' "$TMP/status-failed.out"
 
+PHASE=old-alias-cleanup
 # A second mix generation must not inherit any prior text aliases from the live
 # payload. Preserve unrelated XML, but clear every font partition and LuoShu XML.
 FUNCTION=$(sed -n '/^clear_mix_text_payload()/,/^}/p' "$ROUTER")
@@ -169,5 +234,8 @@ test -z "$(find "$MIX" -path '*/fonts/*' -type f -print -quit)"
 
 grep -q 'clear_mix_text_payload "$MIX_STAGE"' "$ROUTER"
 grep -q 'font_runtime_legacy_v14_4.conf' "$ROOT/boot-completed.sh"
+
+PHASE=kernel-lock-ownership
+python3 "$ROOT/scripts/finalize_lock_test.py"
 
 echo 'Composite finalization is idempotent, generation-bound, and repeated mixes drop every old text slot.'

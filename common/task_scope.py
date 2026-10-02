@@ -589,6 +589,28 @@ def submit(args):
         return subprocess.call(args.command)
 
 
+def lock_fd(args):
+    """Lock the caller's inherited open-file description, not a PID file.
+
+    The shell keeps its copy of this descriptor open across the critical
+    section. Exiting this short helper does not release the shared flock.
+    Never unlink the backing file: existing waiters must keep the same inode.
+    """
+    if args.fd < 3 or not 0 <= args.timeout <= 3600:
+        return 2
+    deadline = time.monotonic() + args.timeout
+    while True:
+        try:
+            fcntl.flock(args.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return 0
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                return 1
+            time.sleep(.05)
+        except OSError:
+            return 1
+
+
 def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest='action', required=True)
@@ -606,6 +628,8 @@ def main():
     repair.add_argument('pidfile')
     admission = commands.add_parser('submit')
     admission.add_argument('config'); admission.add_argument('command', nargs=argparse.REMAINDER)
+    mutex = commands.add_parser('lock-fd')
+    mutex.add_argument('fd', type=int); mutex.add_argument('timeout', type=float)
     args = parser.parse_args()
     if hasattr(args, 'command'):
         if args.command[:1] == ['--']:
@@ -613,7 +637,7 @@ def main():
         if not args.command:
             parser.error('missing task command')
     return {'launch': launch, 'supervise': supervise, 'stop': stop, 'reconcile': reconcile,
-            'submit': submit, 'tree': terminate_tree}[args.action](args)
+            'submit': submit, 'tree': terminate_tree, 'lock-fd': lock_fd}[args.action](args)
 
 
 if __name__ == '__main__':

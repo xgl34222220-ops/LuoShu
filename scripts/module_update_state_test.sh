@@ -131,7 +131,11 @@ printf '{}\n' >"$CURRENT/config/device-font-cache/current/payload/manifest.json"
 printf '{}\n' >"$CURRENT/config/device-font-cache/current/overlay/overlay-manifest.json"
 printf 'state=ready\nfont=mix\n' >"$CURRENT/config/device-font-cache/current/cache.conf"
 printf 'metric\n' >"$CURRENT/config/metrics_cache/current.font"
+printf '{"status":"ok","data":{"current":"mix","fonts":[{"id":"Qsal"}]}}\n' > "$CURRENT/config/native_font_index.json"
+printf 'obsolete-index-key\n' > "$CURRENT/config/native_font_index.key"
 luoshu_migrate_active_install "$CURRENT" "$CURRENT_NEW"
+cmp "$CURRENT/config/native_font_index.json" "$CURRENT_NEW/config/native_font_index.json"
+test ! -e "$CURRENT_NEW/config/native_font_index.key"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
 test "$(cat "$CURRENT_NEW/config/active_font.conf")" = mix
 grep -q '^cjk=Qsal$' "$CURRENT_NEW/config/font_mix.conf"
@@ -183,3 +187,10 @@ set -e
 test "$FRESH_CODE" -eq 2
 
 echo 'Module updates preserve selection, reject incompatible generated payloads, and rebuild before commit.'
+
+# Oversized/corrupt caches never block migration or become an unbounded first read.
+LARGE="$TMP/large-index"; LARGE_NEW="$TMP/large-index-new"
+mkdir -p "$LARGE/config" "$LARGE_NEW/config"
+dd if=/dev/zero of="$LARGE/config/native_font_index.json" bs=1024 count=4097 2>/dev/null
+luoshu_migrate_update_config "$LARGE" "$LARGE_NEW"
+test ! -e "$LARGE_NEW/config/native_font_index.json"

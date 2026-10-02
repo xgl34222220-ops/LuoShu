@@ -405,35 +405,33 @@ commit_mix_stage_if_needed() {
 }
 
 finalize_lock_acquire() {
-    _tries=0
-    while [ "$_tries" -lt 20 ]; do
-        if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
-            printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
-                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-                return 1
-            }
-            return 0
-        fi
-        _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
-        case "$_owner" in
-            ''|*[!0-9]*) _owner='' ;;
-        esac
-        if [ -z "$_owner" ] || ! kill -0 "$_owner" 2>/dev/null; then
-            rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
-            rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-            continue
-        fi
-        sleep 1
-        _tries=$((_tries + 1))
-    done
+    # A mkdir followed by a pid write has an owner-publication window: another
+    # caller can mistake the empty directory for a dead lock and enter too.
+    # Kernel flock instead follows this inherited open-file description. The
+    # short Python helper exits immediately after acquiring it; this shell's
+    # fd 9 keeps the lock until release or process exit, including SIGKILL.
+    if ! type luoshu_task_helper >/dev/null 2>&1; then
+        for _fla_helper in "$REALMOD/common/background_task.sh" "${0%/*}/../background_task.sh"; do
+            [ -f "$_fla_helper" ] || continue
+            . "$_fla_helper"
+            break
+        done
+    fi
+    type luoshu_task_helper >/dev/null 2>&1 || return 1
+    mkdir -p "$REALMOD/config" 2>/dev/null || return 1
+    exec 9>>"$REALMOD/config/mix-finalize.flock" || return 1
+    chmod 0600 "$REALMOD/config/mix-finalize.flock" 2>/dev/null || true
+    if luoshu_task_helper lock-fd 9 20; then
+        return 0
+    fi
+    exec 9>&-
     return 1
 }
 
 finalize_lock_release() {
-    _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
-    [ -z "$_owner" ] || [ "$_owner" = "$$" ] || return 1
-    rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
-    rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+    # Closing our descriptor releases ownership. Do not unlink the persistent
+    # file: a queued caller may already have opened that same inode.
+    exec 9>&-
 }
 
 write_legacy_mix_mode() {
