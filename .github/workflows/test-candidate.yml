@@ -121,8 +121,14 @@ jobs:
           test -s "$apk"
           rm -rf dist
           mkdir -p dist
+          # Save the exact release-like R8 map; unrelated local maps are unsafe
+          # for retracing crashes observed in this particular CI APK.
+          cp android-app/app/build/outputs/mapping/debug/mapping.txt dist/app-mapping.txt
+          cp android-app/app/build/outputs/mapping/debug/configuration.txt dist/app-r8-configuration.txt
+          printf 'sourceCommit=%s\npackage=%s\n' "$GITHUB_SHA" io.github.xgl34222220.luoshu.stabletest > dist/app-build-provenance.txt
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
           cp -f "$apk" "$app"
+          printf 'apkSha256=%s\n' "$(sha256sum "$app" | cut -d ' ' -f 1)" >> dist/app-build-provenance.txt
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 

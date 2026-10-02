@@ -195,11 +195,16 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     var mixState by mutableStateOf(MixState())
         private set
 
-    private val cacheLoadJob = viewModelScope.launch {
+    private val cacheLoadJob = viewModelScope.createFontCacheRestore {
         val cached = withContext(Dispatchers.IO) { fontIndexStore.load() }
         if (cached != null) publishFontIndex(cached, verified = false)
         fontCacheReady = true
-        // Fonts are independent of the slower module/ROM status probe.
+    }
+
+    init {
+        // Publish the lazy Job field before Main.immediate can execute cache callbacks or
+        // refreshFonts(). Cache IO is allowed to return immediately, including an empty cache.
+        cacheLoadJob.start()
         refreshFonts()
     }
 
