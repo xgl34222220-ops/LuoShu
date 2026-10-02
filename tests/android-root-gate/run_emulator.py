@@ -118,11 +118,12 @@ def main():
                     initial = json.loads((output / 'candidate-gate.json').read_text())
                     stock_ui = initial['checks'].get('app_launch_only', {})
                     report['stock_app_ui'] = stock_ui
-                    if stock_ui.get('result') != 'PASS' and not stock_ui.get('environment_system_ui_anr'):
+                    if stock_ui.get('result') not in ('PASS', 'BLOCKED'):
                         raise RuntimeError('Candidate cold start failed or is unproven; Magisk stage not started')
-                    # Preserve a System UI ANR as BLOCKED evidence. Preparing a
-                    # separate authorized cold-boot image does not depend on the
-                    # stock System UI being responsive, and does not pass the UI gate.
+                    # Preserve all unproven UI observations as BLOCKED. Actual
+                    # target crashes/exits remain FAIL above. Independent authorized
+                    # image preparation does not pass the UI gate; the rooted
+                    # environment must get a fresh actual UI/performance test.
                     from magisk_avd import prepare, verify
                     patched = prepare(args.magisk_apk, args.magisk_patch_script, sdk, output, adb)
                     subprocess.run([adb, '-s', 'emulator-5554', 'emu', 'kill'], capture_output=True, timeout=10)

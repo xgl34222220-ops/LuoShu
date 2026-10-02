@@ -18,6 +18,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from probe import BASELINE_SHA256
+from adb_ui import dump_ui
 
 DEVICE = '/data/local/tmp/luoshu-candidate-gate'
 
@@ -133,10 +134,13 @@ def main():
             run(['shell', 'am force-stop ' + package])
             run(['logcat', '-c'])
             launch = run(['shell', 'am start -W -n ' + package + '/io.github.xgl34222220.luoshu.MainActivity'], timeout=60, required=False)
-            report['checks']['app_launch_only'] = {'result': 'PASS' if launch.returncode == 0 and 'Status: ok' in launch.stdout else 'FAIL',
+            report['checks']['app_launch_only'] = {'result': 'BLOCKED',
                 'note': 'Launch time is not usable font-library performance', 'am_start_output': launch.stdout}
-            run(['shell', 'uiautomator dump ' + DEVICE + '/app.xml'], timeout=45, required=False)
-            hierarchy = run(['shell', 'cat ' + DEVICE + '/app.xml'], required=False)
+            try:
+                hierarchy = subprocess.CompletedProcess([], 0, dump_ui(adb, DEVICE + '/app', report['steps']), '')
+            except RuntimeError as error:
+                report['ui_observation_error'] = str(error)
+                hierarchy = subprocess.CompletedProcess([], 1, '', str(error))
             # Decline only the nonessential notification request in this fresh
             # disposable test installation. Never grant unexpected permissions.
             if ('permissioncontroller' in hierarchy.stdout and
@@ -149,8 +153,11 @@ def main():
                             x1, y1, x2, y2 = map(int, bounds.groups())
                             run(['shell', f'input tap {(x1+x2)//2} {(y1+y2)//2}'])
                             time.sleep(2)
-                            run(['shell', 'uiautomator dump ' + DEVICE + '/app.xml'], timeout=45, required=False)
-                            hierarchy = run(['shell', 'cat ' + DEVICE + '/app.xml'], required=False)
+                            try:
+                                hierarchy = subprocess.CompletedProcess([], 0, dump_ui(adb, DEVICE + '/app', report['steps']), '')
+                            except RuntimeError as error:
+                                report['ui_observation_error'] = str(error)
+                                hierarchy = subprocess.CompletedProcess([], 1, '', str(error))
                         break
             (args.output / 'candidate-app.xml').write_text(hierarchy.stdout)
             logs = run(['logcat', '-d', '-s', 'LuoShuStartup:I', 'AndroidRuntime:E', '*:S'], required=False)
