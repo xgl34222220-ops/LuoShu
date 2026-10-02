@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """One disposable official emulator using the runner's existing sudo policy.
 
-Never alters device permissions, groups, udev, SELinux, or sudoers.
+Never alters host device permissions, groups, udev, or sudoers. The optional
+explicitly authorized guest Magisk ramdisk keeps SELinux Enforcing.
 """
 import argparse
 import json
@@ -11,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+from adb_utils import ensure_root
 
 
 def supervise_root(binary, report, ramdisk=None):
@@ -145,8 +147,8 @@ def main():
                         time.sleep(2)
                     else:
                         raise RuntimeError('Patched AVD boot timed out')
-                    subprocess.run([adb, '-s', 'emulator-5554', 'root'], check=True, timeout=30)
-                    subprocess.run([adb, '-s', 'emulator-5554', 'wait-for-device'], check=True, timeout=60)
+                    report['patched_root_handshake'] = []
+                    ensure_root([adb, '-s', 'emulator-5554'], report['patched_root_handshake'])
                     verify(adb, output)
                     report['magisk_boot'] = 'PASS'
                     # Full module/App root validation is a distinct next stage.

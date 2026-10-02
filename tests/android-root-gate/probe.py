@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 import zipfile
+from adb_utils import ensure_root
 
 BASELINE_SHA256 = 'c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a'
 DEVICE = '/data/local/tmp/luoshu-arm64-qualification'
@@ -132,7 +133,7 @@ def main():
             ['ro.build.fingerprint', 'ro.product.cpu.abilist', 'ro.dalvik.vm.native.bridge',
              'ro.enable.native.bridge.exec', 'ro.build.version.sdk']}
         report['selinux_before'] = run(['shell', 'getenforce'])
-        run(['root']); run(['wait-for-device'])
+        ensure_root(adb, report['steps'])
         if run(['shell', 'id -u']) != '0':
             raise RuntimeError('AVD does not provide root adb')
         with tempfile.TemporaryDirectory(prefix='luoshu-probe-') as tmp:
@@ -150,7 +151,7 @@ def main():
             report['boot_id_after'] = run(['shell', 'cat /proc/sys/kernel/random/boot_id'])
             if report['boot_id_before'] == report['boot_id_after']:
                 raise RuntimeError('Reboot did not change kernel boot ID')
-            run(['root']); run(['wait-for-device'])
+            ensure_root(adb, report['steps'])
             if run(['shell', 'id -u']) != '0':
                 raise RuntimeError('Root unavailable after reboot')
             execute('after_reboot')

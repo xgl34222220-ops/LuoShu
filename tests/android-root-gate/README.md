@@ -9,8 +9,9 @@ font activation, rollback, child cleanup, or persistent font mounts.
 The probe uses the SHA256-pinned official `refactor-v1.1.1` ZIP. It never replaces
 the runtime with host Python or an x86 build. Executable-format errors, missing
 root, permission errors, native bridge failures, and timeouts fail the job.
-There is no `continue-on-error`, skip-to-green, SELinux disabling, security-setting
+There is no `continue-on-error`, skip-to-green, SELinux disabling, host security-setting
 modification, user font inventory, user logs, physical-device access, or release.
+The separately authorized Magisk stage patches only a disposable guest ramdisk copy.
 The generated minimal font consists of synthetic triangle outlines and is test
 code under this repository's license. Only synthetic qualification logs upload.
 
@@ -102,3 +103,27 @@ Cleanup evidence and before/after KVM metadata must agree or the job fails.
 This host privilege does not grant Android App `su` access or install a root
 manager. App-to-su and real module-manager boot hooks remain separate required
 gates before claiming font-library Root loading or module reboot persistence.
+
+
+## Authorized Magisk guest and complete module testing
+
+The official Magisk 30.7 APK is pinned to SHA256
+`e0d32d2123532860f97123d927b1bb86c4e08e6fd8a48bfc6b5bee0afae9ebd5`.
+Its official `v30.7/scripts/host_patch.sh` is pinned to
+`1720669a684f75fe90a7318868dd4528f2e736a5ad5363f92a3c51c848d79703`.
+The source SDK ramdisk is read and hashed, copied into the disposable guest,
+patched using the official script with KEEPVERITY/KEEPFORCEENCRYPT, then booted
+via a separate `-ramdisk` path after confirming the original emulator is reaped.
+SELinux must remain Enforcing. This is an authorized guest security change;
+no host KVM/group/udev/sudo policy is altered. Live Magisk setup is not used.
+
+`module_gate.py` and `app_library_gate.py` are the next-stage harness. They use
+real Magisk module installation, real boot hooks, synthetic A/B font changes,
+invalid-selection preservation, default rollback byte checks and actual App UI
+library/apply actions. The baseline module is CLI/mount reference only: the
+original App receives no root grant and is not represented by the new App.
+The sole permitted App root grant is an exact, non-shared user-0 `.stabletest`
+UID, bounded to one hour and revoked on completion. A grant alone is not proof:
+App evidence requires actual verified library frames for 100/1000 synthetic
+fonts and a new matching switch task following a real UI apply click.
+Pending, unsupported or failed stages must remain blocked.
