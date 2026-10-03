@@ -61,19 +61,10 @@ def run_gate(adb, magisk, baseline, candidate, output):
         return shell(shlex.quote(magisk) + ' su -mm -c ' + shlex.quote(text), timeout, required)
     def boot():
         before = shell('cat /proc/sys/kernel/random/boot_id')
-        command(['reboot']); command(['wait-for-device'], timeout=180)
-        end = time.monotonic() + 240
-        while time.monotonic() < end:
-            if shell('getprop sys.boot_completed') == '1':
-                break
-            time.sleep(2)
-        else:
-            raise RuntimeError('Module reboot did not complete')
-        ensure_root([adb, '-s', 'emulator-5554'], report['steps'])
-        after = shell('cat /proc/sys/kernel/random/boot_id')
-        if before == after or shell('getenforce') != 'Enforcing':
-            raise RuntimeError('Boot identity/SELinux invariant failed')
-        return {'before': before, 'after': after}
+        from boot_evidence import wait_for_reboot
+        return wait_for_reboot(command,
+            lambda: ensure_root([adb, '-s', 'emulator-5554'], report['steps']),
+            before, output, report)
     def bridge(*args, prefix=""):
         text = root(prefix + 'sh ' + MODULE + '/common/app_bridge.sh ' + shlex.join(args), timeout=240)
         for line in reversed(text.splitlines()):

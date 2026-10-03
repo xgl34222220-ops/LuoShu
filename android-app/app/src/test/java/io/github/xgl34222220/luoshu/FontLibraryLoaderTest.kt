@@ -249,6 +249,46 @@ class FontLibraryLoaderTest {
     }
 
     @Test
+    fun scanAndCheckInOneRequestAvoidsAnotherRootInterpreter() = runBlocking {
+        val commands = mutableListOf<String>()
+        val source = RootFontLibrarySource { action, _ ->
+            commands += action
+            val proof = if (action == "refresh")
+                """, "verification":{"schema":"font-list-verification-v1","fingerprint":"font-list-v5:new","current":"A"}""" else ""
+            ShellResult(0, """{"status":"ok","data":{"fonts":[{"id":"B","valid":true}],"fingerprint":"font-list-v5:new","current":"A"$proof}}""", "")
+        }
+        val states = mutableListOf<Boolean>()
+        val loaded = loadFontLibrary(index(), true, source) { _, ready -> states += ready }
+        assertEquals(listOf("refresh"), commands)
+        assertEquals(listOf(false, true), states)
+        assertEquals("B", loaded.fonts.single().id)
+        assertEquals("A", loaded.currentFont)
+    }
+
+    @Test
+    fun mismatchedBatchedProofCannotAuthorizeOrClearKnownRows() = runBlocking {
+        for (proof in listOf(
+            """{"schema":"font-list-verification-v1","fingerprint":"font-list-v5:stale","current":"default"}""",
+            """{"schema":"font-list-verification-v1","fingerprint":"font-list-v5:new","current":"changed"}""",
+            """{"schema":"unknown","fingerprint":"font-list-v5:new","current":"default"}""",
+            "null",
+            "false",
+            "\"broken\"",
+        )) {
+            var calls = 0
+            val source = RootFontLibrarySource { _, _ ->
+                calls++
+                ShellResult(0, """{"status":"ok","data":{"fonts":[],"fingerprint":"font-list-v5:new","current":"default","verification":$proof}}""", "")
+            }
+            val states = mutableListOf<Pair<CachedFontIndex, Boolean>>()
+            assertTrue(runCatching { loadFontLibrary(index(), true, source) { rows, ready -> states += rows to ready } }.isFailure)
+            assertEquals(1, calls)
+            assertEquals("A", states.last().first.fonts.single().id)
+            assertTrue(states.none { it.second })
+        }
+    }
+
+    @Test
     fun rootSourceRejectsMalformedSuccessInsteadOfClearingTheIndex() = runBlocking {
         val source = RootFontLibrarySource { _, _ -> ShellResult(0, """{"status":"ok","data":{}}""", "") }
         assertTrue(runCatching { source.scan(false) }.isFailure)

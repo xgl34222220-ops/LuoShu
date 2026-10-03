@@ -226,6 +226,25 @@ def read_cache(path):
     return value
 
 
+def verify_inventory(value, fonts, config, captured):
+    """Bind the response to a second snapshot in this same finite request.
+
+    The App otherwise launches another ARM64 interpreter just to ask for this
+    fingerprint. A changed directory must fail before either cache is written.
+    Cached reads alone never carry current verification authority.
+    """
+    after = snapshot(fonts)
+    if after[2] != captured[2]:
+        raise ValueError('字体目录在扫描期间发生变化，列表尚未核实，请刷新重试')
+    value['data']['current'] = current_font(config)
+    value['data']['verification'] = {
+        'schema': 'font-list-verification-v1',
+        'fingerprint': after[2],
+        'current': value['data']['current'],
+    }
+    return value
+
+
 def ensure_storage(public_dir, config_dir, migrate=False):
     for path in (public_dir / 'fonts', public_dir / 'reports', public_dir / 'import', config_dir):
         path.mkdir(parents=True, exist_ok=True)
@@ -245,7 +264,11 @@ def execute(action, module_dir, public_dir):
     cached_path = config / 'native_font_index.json'
     key_path = config / 'native_font_index.key'
     if action == 'cached':
-        return read_cache(cached_path) or {'status': 'error', 'code': 'cache_miss', 'message': 'cache miss'}
+        value = read_cache(cached_path)
+        if value is not None:
+            # Persisted verification belongs to its old request, never this read.
+            value['data'].pop('verification', None)
+        return value or {'status': 'error', 'code': 'cache_miss', 'message': 'cache miss'}
     if action in ('preview', 'scan', 'refresh'):
         ensure_storage(public_dir, config, migrate=action != 'preview')
     captured = snapshot(fonts)
@@ -263,8 +286,9 @@ def execute(action, module_dir, public_dir):
         if saved_key == key:
             cached = read_cache(cached_path)
             if cached is not None and cached['data'].get('fingerprint') == captured[2]:
-                return cached
-    value = inventory(fonts, config, captured=captured)
+                return verify_inventory(cached, fonts, config, captured)
+    value = verify_inventory(inventory(fonts, config, captured=captured), fonts, config, captured)
+    key = 'native-v5-batch|' + value['data']['current'] + '|' + captured[2]
     atomic_write(cached_path, compact(value))
     atomic_write(key_path, key + '\n')
     return value

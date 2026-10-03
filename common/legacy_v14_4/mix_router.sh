@@ -327,6 +327,22 @@ complete_coloros_stage() {
     return 0
 }
 
+validate_mix_collections() (
+    # The frozen generic mapper aliases a single-face composite to a .ttc
+    # filename. AOSP references multiple collection indexes; publishing those
+    # bytes can stop the next boot. Reject before removing any previous -next.
+    find "$MIX_STAGE" -type f \( -iname '*.ttc' -o -iname '*.otc' \) -print -quit 2>/dev/null | grep -q . || return 0
+    luoshu_task_runtime || return 1
+    if [ "$_ltr_bundled" = 1 ]; then
+        export PYTHONHOME="$_ltr_root"
+        export PYTHONPATH="$_ltr_root/lib/python3.14:$_ltr_root/lib/python3.14/site-packages"
+        export LD_LIBRARY_PATH="$_ltr_root/lib:$_ltr_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+    exec "$_ltr_python" "$REALMOD/common/composite_collection_contract.py" \
+        --payload "$MIX_STAGE" --request "$(read_value "$MIX_STAGE_STATE" requestId)" \
+        --output "$REALMOD/config/composite-font-contract.json"
+)
+
 write_next_state() {
     _previous=$(read_value "$MIX_STAGE_STATE" previousFont)
     _previous_legacy=$(read_value "$MIX_STAGE_STATE" previousLegacy)
@@ -392,6 +408,7 @@ commit_mix_stage_if_needed() {
     stage_generation_matches || return 1
     complete_hyperos_stage || return 1
     complete_coloros_stage || return 1
+    validate_mix_collections >> "$LOG_FILE" 2>&1 || return 1
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
     if ! write_next_state; then

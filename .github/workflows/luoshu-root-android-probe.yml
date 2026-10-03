@@ -2,7 +2,7 @@ name: Root Android ARM64 qualification
 on:
   workflow_dispatch:
   push:
-    branches: [feat/stable-runtime-cleanup-20261002]
+    branches: [feat/stable-runtime-cleanup-20261002, fix/stable-composite-contract-20261003]
     paths:
       - .github/workflows/luoshu-root-android-probe.yml
       - tests/android-root-gate/**

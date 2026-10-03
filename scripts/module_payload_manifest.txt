@@ -7,6 +7,7 @@ common/background_task.sh
 common/retire_global_weight.sh
 common/task_scope.py
 common/font_inventory_batch.py
+common/composite_collection_contract.py
 common/font_inventory_request.sh
 common/font_request_scope.py
 common/coloros_global.sh

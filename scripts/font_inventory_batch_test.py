@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('batch', ROOT / 'common/font_inventory_batch.py')
@@ -166,6 +167,49 @@ class InventoryTest(unittest.TestCase):
         self.assertTrue(all(f['valid'] for f in value['data']['fonts']))
         self.assertEqual(1000, json.loads(batch.compact(value))['data']['stats']['count'])
         print(f'HOST batch inventory 1000 files: {elapsed:.4f}s (not Android latency)')
+
+    def test_fresh_and_reused_scan_bind_same_request_verification(self):
+        self.font('Alpha.ttf')
+        for action in ('refresh', 'scan'):
+            data = self.action(action)['data']
+            self.assertEqual({'schema': 'font-list-verification-v1',
+                              'fingerprint': data['fingerprint'], 'current': data['current']},
+                             data['verification'])
+        self.assertNotIn('verification', self.action('cached')['data'])
+
+    def test_mid_scan_change_preserves_previous_cache_and_key(self):
+        self.font('Alpha.ttf')
+        self.action('refresh')
+        cache = self.config / 'native_font_index.json'
+        key = self.config / 'native_font_index.key'
+        original = (cache.read_bytes(), key.read_bytes())
+        snapshot = batch.snapshot
+        calls = 0
+        def change_before_second(path):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.font('Beta.ttf')
+            return snapshot(path)
+        with patch.object(batch, 'snapshot', side_effect=change_before_second):
+            with self.assertRaisesRegex(ValueError, '扫描期间'):
+                self.action('refresh')
+        self.assertEqual(original, (cache.read_bytes(), key.read_bytes()))
+
+    def test_permission_loss_during_scan_cannot_publish_verified_cache(self):
+        self.font('Alpha.ttf')
+        snapshot = batch.snapshot
+        calls = 0
+        def lose_permission(path):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise PermissionError('permission lost')
+            return snapshot(path)
+        with patch.object(batch, 'snapshot', side_effect=lose_permission):
+            with self.assertRaises(PermissionError):
+                self.action('refresh')
+        self.assertFalse((self.config / 'native_font_index.json').exists())
 
 
 if __name__ == '__main__':

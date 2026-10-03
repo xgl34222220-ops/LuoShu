@@ -1,7 +1,7 @@
 name: Build Test Candidate
 on:
   push:
-    branches: [feat/stable-runtime-cleanup-20261002]
+    branches: [feat/stable-runtime-cleanup-20261002, fix/stable-composite-contract-20261003]
     paths:
       - common/**
       - android-app/**

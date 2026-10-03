@@ -55,6 +55,16 @@ _font_anchor() {
 _font_alias() {
     anchor="$1"
     dest="$2"
+    # A filename cannot turn a single SFNT into a collection. Refuse before
+    # the frozen engine commits its selection/configuration or payload.
+    case "$dest" in
+        *.[tT][tT][cC]|*.[oO][tT][cC])
+            if [ "$(head -c 4 "$anchor" 2>/dev/null)" != ttcf ]; then
+                printf '[MIX] 无法把单字体写入字体集合目标：%s\n' "$dest" >&2
+                return 1
+            fi
+            ;;
+    esac
     rm -f "$dest" 2>/dev/null || true
     ln "$anchor" "$dest" 2>/dev/null || cp -f "$anchor" "$dest" 2>/dev/null || return 1
     chmod 644 "$dest" 2>/dev/null || true
