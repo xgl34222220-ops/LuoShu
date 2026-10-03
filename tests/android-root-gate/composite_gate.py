@@ -27,10 +27,48 @@ def last_json(text):
     raise RuntimeError('Legacy composite returned no JSON: ' + text[-1000:])
 
 
+COLLECTION_TARGET = '/system/fonts/NotoSansCJK-Regular.ttc'
+
+
+def collection_blockers(report):
+    try:
+        build = report.get('collection_build', {})
+        finalized = report.get('collection_finalization', {})
+        state = report.get('next_state', {})
+        count = build.get('stockFaces')
+        faces = build.get('faces', [])
+        rows = [row for row in finalized.get('collections', [])
+                if row.get('path') == COLLECTION_TARGET.lstrip('/')]
+        output = report.get('collection_output_path', '')
+        if (build.get('schema') != 'composite-collection-build-v1' or build.get('result') != 'PASS' or
+                not isinstance(state.get('requestId'), str) or not state['requestId'] or
+                build.get('requestId') != state.get('requestId') or build.get('target') != COLLECTION_TARGET or
+                not re.fullmatch('[0-9a-f]{64}', build.get('sourceSha256', '')) or
+                build.get('sourceSha256') != state.get('compositeHash') or
+                not re.fullmatch('[0-9a-f]{64}', report.get('collection_stock_sha256', '')) or
+                build.get('stockSha256') != report.get('collection_stock_sha256') or
+                type(count) is not int or not 1 <= count <= 256 or len(faces) != count or
+                any(type(face.get('index')) is not int or face['index'] != index
+                    for index, face in enumerate(faces)) or
+                not any(face.get('mode') == 'compiled' for face in faces) or
+                not output.endswith('/.luoshu-payload-next' + COLLECTION_TARGET) or
+                not re.fullmatch('[0-9a-f]{64}', build.get('outputSha256', '')) or
+                report.get('next_payload_hashes', {}).get(output) != build.get('outputSha256') or
+                finalized.get('schema') != 'composite-collection-contract-v1' or
+                finalized.get('result') != 'PASS' or finalized.get('requestId') != state.get('requestId') or
+                len(rows) != 1 or rows[0].get('generatedContractVerified') is not True or
+                rows[0].get('faces') != count or rows[0].get('stockFaces') != count):
+            return ['generated collection request, stock/index or final payload proof incomplete']
+    except (TypeError, AttributeError, KeyError, ValueError):
+        return ['malformed generated collection evidence']
+    return []
+
+
 def composite_blockers(report):
     if not isinstance(report, dict):
         return ['legacy composite evidence absent']
     errors = []
+    errors.extend(collection_blockers(report))
     try:
         if report.get('result') != 'PASS' or report.get('entry') != 'common/font_mix_controller.sh start':
             errors.append('actual legacy composite entry did not pass')
@@ -179,6 +217,12 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
         text = root('find ' + module + '/.luoshu-payload-next -type f -exec sha256sum {} \\; | sort')
         return {line.split(None, 1)[1]: line.split()[0] for line in text.splitlines() if re.match(r'^[0-9a-f]{64}  ', line)}
     report['next_payload_hashes'] = next_hashes()
+    report['collection_output_path'] = module + '/.luoshu-payload-next' + COLLECTION_TARGET
+    report['collection_stock_sha256'] = stock.get(COLLECTION_TARGET, '')
+    report['collection_build'] = json.loads(root('cat ' + report['collection_output_path'] + '.luoshu-collection.json'))
+    report['collection_finalization'] = json.loads(root('cat ' + module + '/config/composite-font-contract.json'))
+    if collection_blockers(report):
+        raise RuntimeError('Generated collection proof does not match this Android composite')
     report['live_unchanged_before_reboot'] = font_hashes() == before
     root('test ! -e ' + module + '/.luoshu-mix-stage && test ! -e ' + module + '/config/mix-stage-next.conf')
     report['stage_cleared'] = True

@@ -30,18 +30,18 @@ jobs:
             https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip
           echo "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  $RUNNER_TEMP/LuoShu-v1.1.1.zip" | sha256sum -c -
           python3 -m unittest discover -s tests/android-root-gate -p 'test_*.py'
-      - name: Download exact exploratory candidate artifact
+      - name: Download exact static-collection candidate artifact
         uses: actions/download-artifact@v4
         with:
           name: LuoShu-Test-Candidate
-          run-id: 37080258821
+          run-id: 37119550651
           github-token: ${{ github.token }}
           path: candidate-artifact
-      - name: Verify exploratory candidate identity
+      - name: Verify static-collection candidate identity
         shell: bash
         run: |
-          echo '3d7e8830cf91a2590195d5c1539b63ab7692b5fab9273db85f653c118c7c9d18  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
-          echo 'Exploratory candidate commit: 9576301d20c03c7ee60b3b18410122d3374375da' | tee root-gate-output/candidate-source.txt
+          echo 'fc3f2b3fabda57909d9b453ceadb7e51e43f9431673031d9442ea5476c7be5a9  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
+          echo 'Static-collection candidate commit: 339046f19315208a352bd3e78b78164cbf6b63e9' | tee root-gate-output/candidate-source.txt
       - name: Fetch authorized official Magisk for this disposable AVD
         shell: bash
         run: |

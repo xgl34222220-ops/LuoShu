@@ -1,10 +1,11 @@
 # Root Android delivery gate
 
-`luoshu-root-android-probe.yml` is an environment qualification check, **not a
-release check**. PASS proves the unmodified baseline ARM64 ELF can execute its
-Python/FontTools/native extensions and launch children on that specific AVD,
-before and after a verified kernel reboot. It does not prove module installation,
-font activation, rollback, child cleanup, or persistent font mounts.
+`luoshu-root-android-probe.yml` now contains runtime qualification and separate
+baseline/candidate module, cleanup, composite and App checks on one disposable
+AOSP API35 x86_64/nativebridge AVD. Each component needs its own evidence; runtime
+qualification alone cannot prove font activation or a complete delivery result.
+The workflow pins the exact candidate build and module digest. A green scoped
+AVD result is not physical ARM64/OEM qualification or permission to release.
 
 The probe uses the SHA256-pinned official `refactor-v1.1.1` ZIP. It never replaces
 the runtime with host Python or an x86 build. Executable-format errors, missing
@@ -31,7 +32,7 @@ actual evidence. JNI ARM translation support is not evidence for standalone ELF.
 Any proposed x86 Android test runtime needs a separate scope decision and results
 must remain labeled x86; it cannot validate the original ARM64 delivery package.
 
-## Required delivery evidence (all pending until actually executed)
+## Required delivery evidence (recorded separately for each execution)
 
 For BOTH exact official baseline and exact candidate package hashes on a qualified
 Root Android target, run the following without editing frozen mount code:
@@ -60,8 +61,17 @@ Root Android target, run the following without editing frozen mount code:
    Any missing, skipped, unsupported or failed requirement blocks delivery.
 
 Do not give a downloadable candidate to the user as "tested" until all applicable
-requirements are evidenced. This probe deliberately reports `delivery_gate:
-NOT_RUN`, including when `qualification: PASS`.
+requirements are evidenced. The runtime-only `qualification.json` deliberately
+reports `delivery_gate: NOT_RUN`, including when `qualification: PASS`; the
+separate module delivery report records the full gate's actual result.
+
+The legacy CLI composite component also requires the generated CJK collection's
+sidecar and finalization report. They must match this request, source-composite
+digest, original system TTC digest, ordered indexes and exact next-payload bytes.
+Structural-only evidence cannot pass this component. Its activation still needs
+a completed boot with a changed kernel ID, matching mounts/state, then a second
+completed boot restoring the original font hashes. This does not exercise the
+App's composite UI or every OEM partition/variable-font configuration.
 
 ## Architecture references
 

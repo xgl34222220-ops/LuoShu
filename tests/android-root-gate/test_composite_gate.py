@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from composite_gate import composite_blockers, fields, last_json, run
+from composite_gate import COLLECTION_TARGET, collection_blockers, composite_blockers, fields, last_json, run
 from commit_lock_device import fd_observation
 
 
@@ -26,7 +26,17 @@ def valid_composite():
         engine_task=dict(task='mix-1', state='success'),
         background_finalize=dict(requestId='mix-request-123', state='success'),
         generation_manifest=generation, next_state=dict(generation, state='prepared', font='mix'),
-        next_payload_hashes={'/next/font.otf': 'e' * 64},
+        next_payload_hashes={'/next/font.otf': 'e' * 64,
+            '/module/.luoshu-payload-next' + COLLECTION_TARGET: 'd' * 64},
+        collection_output_path='/module/.luoshu-payload-next' + COLLECTION_TARGET,
+        collection_stock_sha256='f' * 64,
+        collection_build=dict(schema='composite-collection-build-v1', result='PASS',
+            requestId=generation['requestId'], target=COLLECTION_TARGET, sourceSha256='e' * 64,
+            stockSha256='f' * 64, outputSha256='d' * 64, stockFaces=2,
+            faces=[dict(index=0, mode='compiled'), dict(index=1, mode='retained-specialized')]),
+        collection_finalization=dict(schema='composite-collection-contract-v1', result='PASS',
+            requestId=generation['requestId'], collections=[dict(path=COLLECTION_TARGET.lstrip('/'),
+            faces=2, stockFaces=2, generatedContractVerified=True)]),
         background_monitor_committed=True, live_unchanged_before_reboot=True,
         concurrent_finalize=[dict(exit=0, response=dict(status='ok')) for _ in range(3)],
         concurrent_finalize_unchanged=True, stage_cleared=True, worker_sidecars_cleared=True, worker_sidecars=[], stage_cleared_after_replay=True,
@@ -50,6 +60,17 @@ class CompositeVerdictTests(unittest.TestCase):
         report['background_finalize']['state'] = 'failed'
         report['task']['data']['state'] = 'running'
         self.assertTrue(composite_blockers(report))
+
+    def test_stale_collection_or_structural_only_proof_cannot_pass(self):
+        for key in ('requestId', 'sourceSha256', 'stockSha256', 'outputSha256', 'target', 'stockFaces'):
+            report = valid_composite(); report['collection_build'][key] = 'stale'
+            self.assertTrue(collection_blockers(report), key)
+        for value in (False, None):
+            report = valid_composite()
+            report['collection_finalization']['collections'][0]['generatedContractVerified'] = value
+            self.assertTrue(collection_blockers(report))
+        report = valid_composite(); report['collection_build']['faces'][1]['index'] = 0
+        self.assertTrue(collection_blockers(report))
 
     def test_stale_task_request_digest_or_sources_block(self):
         for where, key in (('axes_task','task'), ('axes_task','childTask'),
@@ -174,7 +195,11 @@ class CompositeVerdictTests(unittest.TestCase):
                     if command == 'cat /module/.luoshu-payload-next/.luoshu-mix-generation.conf':
                         return conf(expected['generation_manifest'])
                     if command.startswith('find /module/.luoshu-payload-next '):
-                        return 'e' * 64 + '  /next/font.otf'
+                        return '\n'.join(digest + '  ' + path for path, digest in expected['next_payload_hashes'].items())
+                    if command == 'cat /module/.luoshu-payload-next' + COLLECTION_TARGET + '.luoshu-collection.json':
+                        return json.dumps(expected['collection_build'])
+                    if command == 'cat /module/config/composite-font-contract.json':
+                        return json.dumps(expected['collection_finalization'])
                     if command.startswith('test ! -e /module/.luoshu-mix-stage'):
                         if leftover_stage:
                             raise RuntimeError('background monitor left stage or state')
@@ -197,9 +222,9 @@ class CompositeVerdictTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as output, patch('composite_gate.time.sleep'):
                     def invoke():
                         run(report, '/module', root, lambda *a: None,
-                            lambda: expected['reboot'], lambda: {'font':'stock'},
+                            lambda: expected['reboot'], lambda: {COLLECTION_TARGET:'f' * 64},
                             lambda *a: ({}, expected['mounted']), lambda *a: expected['restore'],
-                            {'font':'stock'}, ['synthetic-a','synthetic-b'], output)
+                            {COLLECTION_TARGET:'f' * 64}, ['synthetic-a','synthetic-b'], output)
                     if leftover_stage:
                         with self.assertRaisesRegex(RuntimeError, 'left stage or state'):
                             invoke()

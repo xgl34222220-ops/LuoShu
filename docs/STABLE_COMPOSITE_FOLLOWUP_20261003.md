@@ -178,3 +178,27 @@ replace the separate HyperOS/ColorOS mappings. True variable collection
 compilation, OEM physical-device coverage, geometry and reboot persistence
 remain open. The next candidate requires its own CI/artifact and actual Android
 activation results; earlier build hashes do not qualify this compiler.
+
+[Static-collection candidate build 37119550651](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37119550651)
+at `339046f19315208a352bd3e78b78164cbf6b63e9` completed successfully at 19:38
+CST. Source and mandatory supplemental gates, readiness, Android JVM tests/lint,
+stable-test App identity, module packaging and packaged-file checks all passed.
+The raw log has no failing test suite or traceback. Its mandatory real Noto
+test compiled 5/10 faces, retained 5/10, loaded all 10 through FreeType, and took
+35.841 seconds with 254,768 KiB peak RSS on that runner. The original stock digest
+was `b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a`;
+the synthetic output was 75,106,452 bytes. These remain host-fixture measurements.
+An additional local curved quadratic-to-CFF fixture passed bounds/area tolerance
+and independent FreeType loads, without changing candidate code.
+
+The downloaded build's provenance, outer/module/APK hashes, six reviewed runtime
+files, bundled-vs-separate APK and all 17 frozen mounting hashes matched.
+Module SHA-256: `fc3f2b3fabda57909d9b453ceadb7e51e43f9431673031d9442ea5476c7be5a9`.
+APK SHA-256: `49ba2092d31598db3323fc84d5d44225c2bf21c14295693f417df4f78c5aef26`.
+
+The root workflow now pins this exact candidate build/digest instead of the old
+`9576301` reproduction package. Its composite component requires the generated
+collection proof, original stock digest and final payload bytes to match the
+actual request before reboot; structural-only evidence cannot pass. All 69 host
+reboot-harness regressions pass. The new actual Android activation result is
+pending at this commit and must be reported separately when the run finishes.
