@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an index-preserving static CJK collection inside a finite mix task.
+"""Build an index-preserving CJK collection inside a finite mix task.
 
 Each stock face remains the base: cmap/UVS, glyph IDs, layout tables, names,
 style and line metrics stay at their original indexes. Supported donor outlines
@@ -26,13 +26,16 @@ from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.qu2cuPen import Qu2CuPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib.tables.TupleVariation import TupleVariation
+from fontTools.varLib.builder import buildVarData, buildVarIdxMap
 
 from composite_collection_contract import collection_faces
 from composite_font import LATIN_CODEPOINTS, DIGIT_CODEPOINTS, _pick_face, _progress
 import font_inventory as stock_inventory
 
 SCHEMA = 'composite-collection-build-v1'
-PROTECTED = ('cmap', 'GSUB', 'GPOS', 'GDEF', 'name', 'hhea', 'OS/2', 'vhea', 'vmtx', 'VORG')
+PROTECTED = ('cmap', 'GSUB', 'GPOS', 'GDEF', 'name', 'hhea', 'OS/2', 'vhea', 'vmtx', 'VORG',
+             'fvar', 'avar', 'STAT', 'MVAR', 'BASE', 'cvar', 'VVAR')
 CJK_RANGES = ((0x2E80, 0x31EF), (0x3400, 0x9FFF), (0xF900, 0xFAFF),
               (0xFF00, 0xFFEF), (0x20000, 0x323AF))
 
@@ -82,6 +85,13 @@ def _protected(font):
     tables = {}
     for tag in PROTECTED:
         if tag not in font:
+            continue
+        if tag == 'vmtx' and 'glyf' in font:
+            # TrueType vertical origins are yMax + top side bearing. A new
+            # outline needs a different bearing to keep that same origin.
+            glyf = font['glyf']
+            tables[tag] = canonical({name: [advance, getattr(glyf[name], 'yMax', 0) + bearing]
+                                     for name, (advance, bearing) in font['vmtx'].metrics.items()})
             continue
         data = font.getTableData(tag)
         # Metric serialization may change its run-length compression count.
@@ -133,12 +143,54 @@ def guard_retained_components(font, mapping):
                 raise ValueError('原厂保留 CFF 组合字形依赖被替换槽，当前不能保持其完整形状与边界')
 
 
+def freeze_horizontal_variations(font, mapping):
+    """Detach only replaced slots from stock width/side-bearing variation data.
+
+    Keep the existing store and each retained glyph's exact indices. In
+    particular, an implicit advance mapping must be expanded before changing
+    selected slots; editing a shared delta row would corrupt uncovered glyphs.
+    """
+    if 'HVAR' not in font:
+        return
+    table = font['HVAR'].table
+    store = table.VarStore
+    if len(store.VarData) >= 65535:
+        raise ValueError('水平变化存储没有可用索引')
+    zero = len(store.VarData) << 16
+    store.VarData.append(buildVarData([], [[]], optimize=False))
+    store.VarDataCount = len(store.VarData)
+    order = font.getGlyphOrder()
+    for field in ('AdvWidthMap', 'LsbMap', 'RsbMap'):
+        old = getattr(table, field, None)
+        if old is None and field != 'AdvWidthMap':
+            continue
+        indices = [zero if name in mapping else (old.mapping[name] if old else index)
+                   for index, name in enumerate(order)]
+        setattr(table, field, buildVarIdxMap(indices, order))
+
+
+def retained_vertical_deltas(font, name):
+    if 'gvar' not in font or 'vmtx' not in font:
+        return []
+    if 'VVAR' in font and getattr(font['VVAR'].table, 'TsbMap', None) is not None:
+        raise ValueError('可变 TrueType 垂直侧距映射需要独立重编译，不能沿用旧轮廓数据')
+    coordinates, controls = font['glyf']._getCoordinatesAndControls(
+        name, font['hmtx'].metrics, font['vmtx'].metrics)
+    from copy import deepcopy
+    values = []
+    for original in font['gvar'].variations.get(name, []):
+        variation = deepcopy(original)
+        variation.calcInferredDeltas(coordinates, controls.endPts)
+        top, bottom = variation.coordinates[-2:]
+        if any(top) or any(bottom):
+            values.append((variation.axes, top, bottom))
+    return values
+
+
 def replace_face(font, donor, recordings):
     if specialized(font):
         return {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
-    if 'fvar' in font or 'CFF2' in font:
-        raise ValueError('本机 CJK 集合含可变目标面，当前集合编译器不能保留其完整轴契约')
-    kind = 'glyf' if 'glyf' in font else 'CFF ' if 'CFF ' in font else None
+    kind = 'glyf' if 'glyf' in font else 'CFF ' if 'CFF ' in font else 'CFF2' if 'CFF2' in font else None
     if kind is None:
         raise ValueError('本机 CJK 集合包含不支持的轮廓')
     cmap, source = font.getBestCmap() or {}, donor.getBestCmap() or {}
@@ -211,19 +263,44 @@ def replace_face(font, donor, recordings):
                 recording.replay(TransformPen(output, (scale, 0, 0, scale, 0, 0)))
                 converted[key] = pen.glyph()
             glyph = converted[key]
+            vertical = retained_vertical_deltas(font, target_name)
+            old_origin = None
+            if 'vmtx' in font:
+                old_advance, old_bearing = font['vmtx'][target_name]
+                old_origin = getattr(font['glyf'][target_name], 'yMax', 0) + old_bearing
             font['glyf'][target_name] = glyph
             glyph.recalcBounds(font['glyf'])
             if not hasattr(glyph, 'xMin'):
                 glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
+            if 'fvar' in font and bearing != glyph.xMin:
+                raise ValueError('可变 TrueType 的来源侧距必须等于轮廓 xMin')
+            if old_origin is not None:
+                new_bearing = old_origin - glyph.yMax
+                if not -32768 <= new_bearing <= 32767:
+                    raise ValueError('原厂垂直原点无法保持在 SFNT 度量范围内')
+                header = font['vhea']
+                height = glyph.yMax - glyph.yMin
+                if (new_bearing < header.minTopSideBearing or
+                        old_advance - new_bearing - height < header.minBottomSideBearing or
+                        new_bearing + height > header.yMaxExtent):
+                    raise ValueError('来源字形垂直度量超出本机原厂字体面边界')
+                font['vmtx'][target_name] = (old_advance, new_bearing)
+            if 'gvar' in font:
+                points = len(glyph.getCoordinates(font['glyf'])[0])
+                font['gvar'].variations[target_name] = [
+                    TupleVariation(axes, [(0, 0)] * (points + 2) + [top, bottom])
+                    for axes, top, bottom in vertical]
         else:
-            cff = font['CFF '].cff
+            if kind == 'CFF2' and 'vmtx' in font and 'VORG' not in font:
+                raise ValueError('CFF2 集合缺少独立垂直原点，不能沿用旧轮廓的垂直侧距')
+            cff = font[kind].cff
             top = cff.topDictIndex[0]
             _, selector = top.CharStrings.getItemAndSelector(target_name)
             private = top.FDArray[selector or 0].Private if hasattr(top, 'FDArray') else top.Private
             key = (source_name, selector, width)
             if key not in converted:
-                encoded_width = None if width == private.defaultWidthX else width - private.nominalWidthX
-                pen = T2CharStringPen(encoded_width, None)
+                encoded_width = None if kind == 'CFF2' or width == private.defaultWidthX else width - private.nominalWidthX
+                pen = T2CharStringPen(encoded_width, None, CFF2=kind == 'CFF2')
                 output = Qu2CuPen(pen, max_err=max(0.5, frame.unitsPerEm / 2000),
                                   all_cubic=True, reverse_direction='glyf' in donor)
                 recording.replay(TransformPen(output, (scale, 0, 0, scale, 0, 0)))
@@ -233,11 +310,14 @@ def replace_face(font, donor, recordings):
                 converted[key] = char
             top.CharStrings[target_name] = converted[key]
         font['hmtx'][target_name] = (width, bearing)
+    freeze_horizontal_variations(font, mapping)
     for tag in ('DSIG', 'LTSH', 'hdmx', 'VDMX'):
         if tag in font:
             del font[tag]
     return {'mode': 'compiled', 'replaced': counts, 'uncovered': uncovered,
-            'retainedSharedSlots': retained_shared, 'retainedUnencodedGlyphs': True}
+            'retainedSharedSlots': retained_shared, 'retainedUnencodedGlyphs': True,
+            'outline': kind, 'retainedVariationAxes': 'fvar' in font,
+            'replacementVariation': 'fixed-source-at-selected-weight'}
 
 
 def build(source, stock, output, workspace, request, target, progress=None):

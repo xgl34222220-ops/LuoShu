@@ -32,7 +32,7 @@ def vertices(commands):
     return {point for _, points in commands for point in points}
 
 
-def freetype_load(path, indexes):
+def freetype_load(path, indexes, coordinates=None):
     library = ctypes.util.find_library('freetype')
     if not library:
         raise RuntimeError('FreeType is required for the independent collection check')
@@ -45,6 +45,8 @@ def freetype_load(path, indexes):
     ft.FT_Load_Glyph.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int32]
     ft.FT_Done_Face.argtypes = [ctypes.c_void_p]
     ft.FT_Done_FreeType.argtypes = [ctypes.c_void_p]
+    ft.FT_Set_Var_Design_Coordinates.argtypes = [ctypes.c_void_p, ctypes.c_uint,
+                                              ctypes.POINTER(ctypes.c_long)]
     context = ctypes.c_void_p()
     if ft.FT_Init_FreeType(ctypes.byref(context)):
         raise RuntimeError('FreeType initialization failed')
@@ -55,11 +57,17 @@ def freetype_load(path, indexes):
             if error:
                 raise RuntimeError(f'FreeType rejected collection face {index}: {error}')
             try:
-                for cp in map(ord, '中永Az09'):
-                    glyph = ft.FT_Get_Char_Index(face, cp)
-                    error = ft.FT_Load_Glyph(face, glyph, 1) if glyph else -1
-                    if error:
-                        raise RuntimeError(f'FreeType rejected face {index}, U+{cp:04X}: {error}')
+                for location in coordinates or (None,):
+                    if location is not None:
+                        vector = (ctypes.c_long * len(location))(*(round(v * 65536) for v in location))
+                        error = ft.FT_Set_Var_Design_Coordinates(face, len(location), vector)
+                        if error:
+                            raise RuntimeError(f'FreeType rejected face {index} axes {location}: {error}')
+                    for cp in map(ord, '中永Az09'):
+                        glyph = ft.FT_Get_Char_Index(face, cp)
+                        error = ft.FT_Load_Glyph(face, glyph, 1) if glyph else -1
+                        if error:
+                            raise RuntimeError(f'FreeType rejected face {index}, U+{cp:04X}: {error}')
             finally:
                 ft.FT_Done_Face(face)
     finally:

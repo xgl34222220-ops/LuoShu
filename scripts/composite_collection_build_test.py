@@ -19,7 +19,9 @@ from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.ttLib import TTCollection, TTFont, newTable
-from fontTools.ttLib.tables._f_v_a_r import Axis
+from fontTools.ttLib.tables.TupleVariation import TupleVariation
+from fontTools.varLib.builder import buildVarRegionList, buildVarData, buildVarStore, buildVarIdxMap
+from fontTools.varLib.instancer import instantiateVariableFont
 
 
 CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789中国永Ω'
@@ -71,6 +73,47 @@ def outline(font, char=None, name=None):
     pen = DecomposingRecordingPen(glyphs)
     glyphs[name or font.getBestCmap()[ord(char)]].draw(pen)
     return pen.value
+
+
+def variable_fixture(path, cff2=False, implicit=False, vertical=False):
+    fixture(path, 0, cff=cff2)
+    with TTFont(path) as font:
+        fb = FontBuilder(font=font, isTTF=not cff2)
+        fb.setupFvar([('wght', 100, 400, 900, 'Weight')],
+                     [{'location': {'wght': 900}, 'stylename': 'Black'}])
+        avar = newTable('avar'); avar.segments = {'wght': {-1: -1, 0: 0, 0.5: 0.75, 1: 1}}
+        font['avar'] = avar
+        order = font.getGlyphOrder()
+        regions = [{'wght': (0, 1, 1)}]
+        if cff2:
+            del font['CFF ']
+            chars = {}
+            for name in order:
+                pen = T2CharStringPen(None, None, CFF2=True)
+                chars[name] = pen.getCharString()
+                chars[name].program = [20, 0, 'rmoveto', 580, 50, 1, 'blend', 0, 'rlineto',
+                                       0, 700, 'rlineto', -580, -50, 1, 'blend', 0, 'rlineto',
+                                       0, -700, 'rlineto']
+            fb.setupCFF2(chars, regions=regions)
+        else:
+            fb.setupGvar({name: [TupleVariation(regions[0], [(0, 0), (50, 0), (50, 0), (0, 0),
+                (0, 0), (100, 0), (0, 120) if vertical else (0, 0),
+                (0, 30) if vertical else (0, 0)])] for name in order})
+            font['head'].flags |= 2
+        hvar = newTable('HVAR')
+        from fontTools.ttLib.tables import otTables
+        hvar.table = table = otTables.HVAR(); table.Version = 0x10000
+        values = [[100 + index] for index in range(len(order))] if implicit else [[100]]
+        table.VarStore = buildVarStore(buildVarRegionList(regions, ['wght']), [buildVarData([0], values)])
+        table.AdvWidthMap = None if implicit else buildVarIdxMap([0] * len(order), order)
+        table.LsbMap = table.RsbMap = None
+        font['HVAR'] = hvar
+        if vertical:
+            fb.setupVerticalMetrics({name: (1000, 180) for name in order})
+            fb.setupVerticalHeader(ascent=1000, descent=0)
+            if cff2:
+                fb.setupVerticalOrigins({name: 880 for name in order}, defaultVerticalOrigin=880)
+        font.save(path)
 
 
 class CollectionBuildTest(unittest.TestCase):
@@ -183,19 +226,60 @@ class CollectionBuildTest(unittest.TestCase):
         with TTFont(self.stock, fontNumber=0) as original, TTFont(self.output, fontNumber=0) as result:
             self.assertEqual(outline(original, '永'), outline(result, '永'))
 
-    def test_variable_stock_rejected_without_destroying_old_output(self):
-        self.collection()
-        collection = TTCollection(self.stock)
-        font = collection.fonts[1]; variable = newTable('fvar'); axis = Axis()
-        axis.axisTag='wght'; axis.minValue=100; axis.defaultValue=400
-        axis.maxValue=900; axis.flags=0; axis.axisNameID=256
-        variable.axes=[axis]; variable.instances=[]; font['fvar']=variable
+    def check_variable(self, cff2=False, implicit=False, vertical=False):
+        variable = self.root / 'variable.font'
+        variable_fixture(variable, cff2=cff2, implicit=implicit, vertical=vertical)
+        if vertical and not cff2:
+            with TTFont(self.source) as source:
+                for glyph in source['glyf'].glyphs.values():
+                    glyph.expand(source['glyf'])
+                    glyph.coordinates[2] = (400, 680); glyph.coordinates[3] = (20, 680)
+                source.save(self.source)
+        collection = TTCollection(); collection.fonts = [TTFont(variable)]
         collection.save(self.stock); collection.close()
-        self.output.write_bytes(b'previous generation')
-        with self.assertRaisesRegex(ValueError, '可变目标面'):
-            self.run_build()
-        self.assertEqual(b'previous generation', self.output.read_bytes())
-        self.assertEqual([], list(self.workspace.iterdir()))
+        report = self.run_build()
+        self.assertTrue(report['faces'][0]['retainedVariationAxes'])
+        with TTFont(self.stock, fontNumber=0) as original, TTFont(self.output, fontNumber=0) as result:
+            self.assertEqual(builder.protected(original), builder.protected(result))
+            for weight in (100, 400, 650, 900):
+                old = instantiateVariableFont(original, {'wght': weight}, inplace=False)
+                new = instantiateVariableFont(result, {'wght': weight}, inplace=False)
+                with TTFont(self.source) as source:
+                    # Compare vertices: cubic outlines reverse donor winding.
+                    if cff2:
+                        points = lambda commands: {point for _, args in commands for point in args}
+                        self.assertEqual(points(outline(source, '中')), points(outline(new, '中')))
+                    else:
+                        self.assertEqual(outline(source, '中'), outline(new, '中'))
+                self.assertEqual(outline(old, 'Ω'), outline(new, 'Ω'))
+                self.assertEqual(outline(old, name=old.getGlyphOrder()[-1]),
+                                 outline(new, name=new.getGlyphOrder()[-1]))
+                covered = new.getBestCmap()[ord('中')]; kept = new.getBestCmap()[ord('Ω')]
+                self.assertEqual(800, new['hmtx'][covered][0])
+                self.assertEqual(old['hmtx'][kept], new['hmtx'][kept])
+                if vertical:
+                    self.assertEqual(old['vmtx'][covered][0], new['vmtx'][covered][0])
+                    if not cff2:
+                        self.assertEqual(old['glyf'][covered].yMax + old['vmtx'][covered][1],
+                                         new['glyf'][covered].yMax + new['vmtx'][covered][1])
+                old.close(); new.close()
+        from composite_collection_real_test import freetype_load
+        freetype_load(self.output, [0], coordinates=([100], [400], [650], [900]))
+
+    def test_variable_glyf_preserves_axes_and_uncovered_variations(self):
+        self.check_variable()
+
+    def test_variable_cff2_preserves_axes_and_uncovered_blends(self):
+        self.check_variable(cff2=True)
+
+    def test_variable_implicit_width_map_retains_uncovered_glyph_indices(self):
+        self.check_variable(implicit=True)
+
+    def test_variable_cff2_with_stock_vertical_origin(self):
+        self.check_variable(cff2=True, vertical=True)
+
+    def test_variable_glyf_keeps_vertical_phantoms_when_outline_height_changes(self):
+        self.check_variable(vertical=True)
 
     def test_ambiguous_stock_encoded_slot_is_rejected(self):
         self.collection()
