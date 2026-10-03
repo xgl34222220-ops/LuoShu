@@ -80,17 +80,18 @@ jobs:
           cat "$log"
 
       - name: Run supplemental candidate gates
-        continue-on-error: true
+        shell: bash
         run: |
-          sh -x scripts/background_task_test.sh
-          sh -x scripts/device_font_foreground_quick_test.sh
-          sh -x scripts/font_switch_task_test.sh
-          sh -x scripts/mount_fast_sync_test.sh
-          FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
-          test -s "$FONT"
-          python3 scripts/font_inventory_scan_test.py --font "$FONT"
-          grep -q '多字重 · ${weights.size} 档' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt
-          grep -q '静态字体现在始终按当前所选字重走快速单文件组合' common/mix_weight_mode.sh
+          set -euo pipefail
+          log="$RUNNER_TEMP/luoshu-supplemental-check.log"
+          if ! bash scripts/candidate_supplemental_check.sh >"$log" 2>&1; then
+            echo '补充候选门禁失败，输出最后 180 行：' >&2
+            tail -n 180 "$log" >&2
+            mkdir -p dist
+            cp -f "$log" dist/supplemental-check.log
+            exit 1
+          fi
+          cat "$log"
 
       - name: Enforce current pre-release readiness
         shell: bash

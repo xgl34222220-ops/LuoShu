@@ -93,3 +93,17 @@ the finalizer race suite passes its 8 runnable cases (9 procfs-dependent cases
 are unsupported by this executor). The 17 frozen mount hashes remain unchanged.
 The new runtime changes require their own complete CI/App build result; the
 earlier `be0e31e` build above is not qualification of these later changes.
+
+Review build `37113895850` at `9009be9` passed the source checks, Android JVM
+tests/lint and packaging, and its downloaded artifact matched the source and
+17 frozen mounting hashes. However, inspection of its raw log found a failing
+supplemental switch-worker test hidden by `continue-on-error: true`. Its overall
+green status is not a pass of all candidate gates. The outdated fixture omitted
+the immutable input gate and owned task workspace, so no generator was started.
+
+The fixture now supplies a valid selected-font source and task-owned workspace,
+runs the actual snapshot/validation/recheck path, and asserts that validation
+and the nested generator received the same private copy before testing TERM and
+descendant cleanup. Candidate supplemental gates now fail the workflow and save
+their failing log as an artifact. A new mandatory CI run must pass every
+supplemental check before this review's candidate can be described as passing.
