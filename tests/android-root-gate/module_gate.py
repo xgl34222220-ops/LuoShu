@@ -234,6 +234,15 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 if font_hashes() != original_fonts:
                     raise RuntimeError('Restoring default did not restore exact original system fonts')
                 cycle['restore_hashes_equal_stock'] = True
+                if label == 'candidate':
+                    # The existing App gate below remains an independent real UI
+                    # single-font test. Exercise the previously uncovered legacy
+                    # composite monitor/finalizer path before calling this green.
+                    from composite_gate import run as run_composite
+                    report['legacy_composite'] = {}
+                    run_composite(report['legacy_composite'], MODULE, root, command,
+                                  boot, font_hashes, assert_mounted, switch,
+                                  original_fonts, ids, output)
                 cycle['result'] = 'PASS'
                 if label == 'baseline':
                     from upgrade_evidence import prepare as prepare_upgrade

@@ -1,6 +1,7 @@
 """Synthetic schema tests only; these fixtures are never Android test reports."""
 import copy
 import unittest
+from test_composite_gate import valid_composite
 from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers
 
 BOOT = {'before': '11111111-1111-1111-1111-111111111111', 'after': '22222222-2222-2222-2222-222222222222'}
@@ -28,7 +29,7 @@ def scope(expected, request=False):
 
 
 def valid_delivery():
-    report = {'run_scope': 'FULL_GATE', 'cycles': [], 'magisk_task_scope': scope(OLD_CASES),
+    report = {'legacy_composite': valid_composite(), 'run_scope': 'FULL_GATE', 'cycles': [], 'magisk_task_scope': scope(OLD_CASES),
               'magisk_request_scope': scope(REQUEST_CASES, True),
               'app_root': 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY', 'library_timings': [],
               'candidate_apk_sha256': 'b'*64, 'fixture_inventory': [{'files':n,'unique_content_hashes':['c'*64,'d'*64]} for n in (100,1000)],

@@ -127,3 +127,48 @@ UID, bounded to one hour and revoked on completion. A grant alone is not proof:
 App evidence requires actual verified library frames for 100/1000 synthetic
 fonts and a new matching switch task following a real UI apply click.
 Pending, unsupported or failed stages must remain blocked.
+
+
+## Legacy composite commit regression gate
+
+The full candidate module cycle now additionally invokes the installed
+`common/font_mix_controller.sh start` with two original geometric fixtures and
+fixed 400-weight selections. `synthetic_fonts.py` gives each ASCII codepoint an
+independent glyph, so the unchanged v14.4 engine performs actual Latin/digit
+replacement instead of rejecting a one-glyph cmap fixture. Both baseline and
+candidate single-font cycles continue to use the same fixtures.
+
+`composite_gate.py` requires all of the following before delivery can pass:
+
+- A real `axes_task` bound to its nested `mix_task`, successful generation and a
+  matching request/digest manifest in `.luoshu-payload-next`.
+- Background monitor success with its exact child-task log message. The gate
+  only reads state during generation; it never calls a manual finalizer to rescue
+  a broken monitor. A success-state write is not enough: the exact child-task
+  committed marker must arrive within the task deadline. Public status must
+  subsequently report terminal success.
+- Unchanged currently visible font hashes before reboot, stage removal and
+  cleared worker sidecars before the first manual finalizer replay (plus a
+  delayed observation), all checked before reboot.
+- Three actual concurrent finalizer replays, all successful and byte/state
+  preserving. Separate Android lock ownership checks prove exclusion while the
+  caller still holds the critical section open.
+- A changed kernel boot ID, exact activated generation identity, actual mounted
+  composite payload provenance, then default restoration and exact stock bytes.
+
+`commit_lock_device.py` uses the shipped ARM64 runtime and Android `/system/bin/sh`
+inside the existing Enforcing disposable Magisk AVD. Each invocation uses a
+new UUID output path and must exit successfully; a previous PASS or a report
+left by a failed/crashed invocation cannot satisfy the gate. Failure output is
+retained only as diagnostics. Its unexported-fd control
+records `fstat` and `flock` errno 9 (`EBADF`). The candidate helper must instead
+retain the calling shell's lock after Python exits, produce errno 11 (`EAGAIN`)
+for real contention, release a blocked waiter only after caller release and
+preserve the persistent lock-file inode. Lock files are isolated test fixtures;
+no shell, runtime, frozen core, mount code or security policy is patched.
+
+`legacy_composite` is mandatory in the structured delivery verdict. These checks
+remain distinct from the existing actual-App single-font apply test. They are
+AOSP API35 x86_64/nativebridge evidence only, never ColorOS, physical-device,
+native-ARM64 or App-composite-UI validation. Host schema/fixture tests alone cannot
+satisfy this Android gate.

@@ -16,7 +16,7 @@ jobs:
   qualify:
     name: Original ARM64 ELF on Root Android API35
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 65
     env:
       LUOSHU_APP_DIAGNOSTIC_ONLY: "0"
     steps:
@@ -34,14 +34,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: LuoShu-Test-Candidate
-          run-id: 37071674418
+          run-id: 37080258821
           github-token: ${{ github.token }}
           path: candidate-artifact
       - name: Verify exploratory candidate identity
         shell: bash
         run: |
-          echo '69438800abe877a8f3acf72e136554feab55397e918660eab57574ae2afeea24  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
-          echo 'Exploratory candidate commit: 9d259fbf9a1f91282fc76dfe3ffc893b94c76105' | tee root-gate-output/candidate-source.txt
+          echo '3d7e8830cf91a2590195d5c1539b63ab7692b5fab9273db85f653c118c7c9d18  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
+          echo 'Exploratory candidate commit: 9576301d20c03c7ee60b3b18410122d3374375da' | tee root-gate-output/candidate-source.txt
       - name: Fetch authorized official Magisk for this disposable AVD
         shell: bash
         run: |

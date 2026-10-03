@@ -12,9 +12,13 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 
 def generate(path, index):
     builder = FontBuilder(1000, isTTF=True)
-    names = ['.notdef', 'space', 'shape']
+    # The frozen composite engine counts distinct replaced glyphs, not cmap
+    # aliases. Independent original ASCII outlines exercise real Latin/digit
+    # replacement (>=52 letters and >=10 digits) instead of failing at preflight.
+    ascii_glyphs = {c: f'ascii{c:04x}' for c in range(33, 127)}
+    names = ['.notdef', 'space', 'shape', *ascii_glyphs.values()]
     builder.setupGlyphOrder(names)
-    cmap = {c: 'shape' for c in range(33, 127)}
+    cmap = dict(ascii_glyphs)
     cmap.update({c: 'shape' for c in range(0x4E00, 0xA000)})
     cmap[32] = 'space'
     builder.setupCharacterMap(cmap)

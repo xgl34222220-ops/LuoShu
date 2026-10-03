@@ -130,6 +130,8 @@ def delivery_blockers(report):
             errors.append(f'{label}: injected commit/reboot proof missing')
         if label == 'candidate' and (cycle.get('prepare_failure_crashes') != '' or commit.get('crash_buffer') != ''):
             errors.append('candidate error path has missing/native-crash evidence')
+    from composite_gate import composite_blockers
+    errors.extend(composite_blockers(report.get('legacy_composite')))
     errors.extend(scope_blockers(report.get('magisk_task_scope'), OLD_CASES))
     errors.extend(scope_blockers(report.get('magisk_request_scope'), REQUEST_CASES, True))
     if report.get('app_root') != 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY':
