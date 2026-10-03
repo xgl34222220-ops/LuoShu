@@ -67,3 +67,29 @@ pinned mount files were independently compared with the source/baseline.
 Module SHA-256: `4192a81ec42afe05723b8412277deddf3bd525e9aab34fbf4e3d6b93895c5e4e`.
 APK SHA-256: `e4b1f34521858df530b3dae4c66ceccc0115b400023027b8e3992647ad93a3be`.
 These build/structure checks leave the delivery checks above outstanding.
+
+The subsequent 17:21 CST review found additional defects. The batch index had
+ignored the `is_variable` field written by the direct import's real fvar probe;
+an ordinary filename therefore hid variable-font controls. It also treated
+`supports_cjk=false` with CRLF as true. Single-file families now use that import
+metadata, CRLF/boolean values are normalized, and a shared multiweight config
+does not reclassify every file. The scanner revision participates in its
+fingerprint so an unchanged directory cannot reauthorize old cached semantics.
+
+Both module and App reject malformed, missing or duplicate cached font IDs.
+Module scans rebuild corrupt rows rather than returning the same corrupt cache
+forever. Live malformed scans retain the known display list without verification;
+the App cannot silently drop broken records into an apparently valid empty list.
+
+A structurally valid TTC can still have fewer faces than its target. Collection
+finalization now compares each exact partition target's existing face count.
+The generic system alias helper checks the count before the legacy engine can
+commit its selection/configuration, using bounded header reads rather than an
+additional Python process. Counts do not certify face order, glyph coverage,
+axes or metrics, and do not implement the outstanding collection compiler.
+
+Local checks for this review: 17 inventory tests and 11 collection tests pass;
+the finalizer race suite passes its 8 runnable cases (9 procfs-dependent cases
+are unsupported by this executor). The 17 frozen mount hashes remain unchanged.
+The new runtime changes require their own complete CI/App build result; the
+earlier `be0e31e` build above is not qualification of these later changes.

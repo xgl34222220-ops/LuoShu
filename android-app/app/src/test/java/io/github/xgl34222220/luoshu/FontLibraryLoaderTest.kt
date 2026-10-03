@@ -295,6 +295,40 @@ class FontLibraryLoaderTest {
     }
 
     @Test
+    fun malformedOrDuplicateRowsCannotClearKnownLibraryOrBecomeVerified() = runBlocking {
+        for (rows in listOf("[null]", "[1]", "[{}]", "[{\"id\":null}]", "[{\"id\":123}]",
+                            "[{\"id\":\"\"}]", "[{\"id\":\"A\"},{\"id\":\" A \"}]")) {
+            var calls = 0
+            val source = RootFontLibrarySource { _, _ ->
+                calls++
+                ShellResult(0, """{"status":"ok","data":{"fonts":$rows,"fingerprint":"font-list-v5:new"}}""", "")
+            }
+            val states = mutableListOf<Pair<CachedFontIndex, Boolean>>()
+            assertTrue(runCatching { loadFontLibrary(index(), true, source) { value, ready -> states += value to ready } }.isFailure)
+            assertEquals(1, calls)
+            assertEquals("A", states.last().first.fonts.single().id)
+            assertTrue(states.none { it.second })
+        }
+    }
+
+    @Test
+    fun malformedCachedRowsAreACacheMissAndCanRecoverWithFreshScan() = runBlocking {
+        val actions = mutableListOf<String>()
+        val source = RootFontLibrarySource { action, _ ->
+            actions += action
+            val rows = if (action == "cached") "[null]" else "[{\"id\":\"B\",\"valid\":true}]"
+            val proof = if (action == "scan")
+                """, "verification":{"schema":"font-list-verification-v1","fingerprint":"font-list-v5:new","current":"default"}""" else ""
+            ShellResult(0, """{"status":"ok","data":{"fonts":$rows,"fingerprint":"font-list-v5:new","current":"default"$proof}}""", "")
+        }
+        val verified = mutableListOf<Boolean>()
+        val result = loadFontLibrary(null, false, source) { _, ready -> verified += ready }
+        assertEquals(listOf("cached", "preview", "scan"), actions)
+        assertEquals(listOf(false, true), verified)
+        assertEquals("B", result.fonts.single().id)
+    }
+
+    @Test
     fun rootSourceDoesNotConvertPermissionDenialIntoCacheMiss() = runBlocking {
         val source = RootFontLibrarySource { _, _ -> ShellResult(1, "", "permission denied") }
         assertTrue(runCatching { source.cached() }.exceptionOrNull()?.message.orEmpty().contains("permission denied"))

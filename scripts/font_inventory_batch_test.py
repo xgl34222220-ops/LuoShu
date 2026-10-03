@@ -86,7 +86,59 @@ class InventoryTest(unittest.TestCase):
         self.assertNotEqual(first['fingerprint'], second['fingerprint'])
         self.assertEqual('Changed', second['fonts'][0]['name'])
         config.write_bytes(b'name=CRLF\r\nsupports_cjk=false\r\n')
-        self.assertTrue(self.action('scan')['data']['fonts'][0]['supportsCjk'])
+        third = self.action('scan')['data']['fonts'][0]
+        self.assertEqual('CRLF', third['name'])
+        self.assertFalse(third['supportsCjk'])
+
+    def test_imported_variable_probe_wins_over_single_file_name(self):
+        self.font('Plain.ttf')
+        (self.fonts / 'Plain.conf').write_bytes(b'is_variable=true\r\nsupports_cjk=false\r\n')
+        row = self.action('scan')['data']['fonts'][0]
+        self.assertTrue(row['variable'])
+        self.assertEqual(['variable'], row['weights'])
+        self.assertEqual({'variable': 'Plain.ttf'}, row['variants'])
+        self.assertEqual('variable', row['familyType'])
+        self.assertFalse(row['supportsCjk'])
+        self.font('Nervar-Bold.ttf')
+        (self.fonts / 'Nervar.conf').write_text('is_variable=false\n')
+        row = next(f for f in self.action('scan')['data']['fonts'] if f['id'] == 'Nervar')
+        self.assertFalse(row['variable'])
+        self.assertEqual(['bold'], row['weights'])
+
+    def test_shared_metadata_does_not_reclassify_every_multiweight_file(self):
+        self.font('Family-Regular.ttf'); self.font('Family-Bold.ttf')
+        (self.fonts / 'Family.conf').write_text('is_variable=true\n')
+        row = self.action('refresh')['data']['fonts'][0]
+        self.assertEqual(['regular', 'bold'], row['weights'])
+        self.assertFalse(row['variable'])
+        self.assertEqual('static-family', row['familyType'])
+
+    def test_scanner_revision_invalidates_persisted_semantic_cache(self):
+        self.font('Plain.ttf')
+        (self.fonts / 'Plain.conf').write_text('is_variable=true\n')
+        with patch.object(batch, 'SCANNER_REVISION', 1):
+            old = self.action('refresh')
+        old['data']['fonts'][0]['variable'] = False
+        (self.config / 'native_font_index.json').write_text(batch.compact(old))
+        self.assertFalse(self.action('cached')['data']['fonts'][0]['variable'])
+        current = self.action('fingerprint')['data']['fingerprint']
+        self.assertNotEqual(old['data']['fingerprint'], current)
+        new = self.action('scan')['data']
+        self.assertEqual(current, new['fingerprint'])
+        self.assertTrue(new['fonts'][0]['variable'])
+
+    def test_invalid_or_duplicate_cached_rows_are_rebuilt_without_a_retry_loop(self):
+        self.font('Alpha.ttf')
+        for rows in ([None], [1], [{}], [{'id': None}], [{'id': ''}],
+                     [{'id': 'A'}, {'id': ' A '}], [{'id': 123}]):
+            with self.subTest(rows=rows):
+                cached = self.action('refresh')
+                cached['data']['fonts'] = rows
+                (self.config / 'native_font_index.json').write_text(batch.compact(cached))
+                self.assertEqual('cache_miss', self.action('cached')['code'])
+                rebuilt = self.action('scan')['data']
+                self.assertEqual(['Alpha'], [f['id'] for f in rebuilt['fonts']])
+                self.assertEqual(rebuilt['fingerprint'], rebuilt['verification']['fingerprint'])
 
     def test_formats_size_errors_and_exclusions(self):
         for name, magic in [('A.ttf', b'\x00\x01\x00\x00'), ('B.otf', b'OTTO'), ('C.ttc', b'ttcf'),

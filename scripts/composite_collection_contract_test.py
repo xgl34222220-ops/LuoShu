@@ -31,15 +31,21 @@ class CollectionContractTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def collection(self):
-        path = self.fonts / 'NotoSansCJK-Regular.ttc'
+    def collection(self, count=2, path=None):
+        path = path or self.fonts / 'NotoSansCJK-Regular.ttc'
+        path.parent.mkdir(parents=True, exist_ok=True)
         collection = TTCollection()
-        collection.fonts = [TTFont(self.source), TTFont(self.source)]
+        collection.fonts = [TTFont(self.source) for _ in range(count)]
         try:
             collection.save(path)
         finally:
             collection.close()
         return path
+
+    def stock_collection(self, count=3, relative='system/fonts/NotoSansCJK-Regular.ttc'):
+        root = self.base / 'stock'
+        path = self.collection(count, root / relative)
+        return root, path
 
     def test_real_collection_is_inspected_without_rewriting_any_bytes(self):
         path = self.collection(); original = path.read_bytes()
@@ -56,6 +62,52 @@ class CollectionContractTests(unittest.TestCase):
         self.assertEqual('FAIL', result['result'])
         self.assertIn('单字体', result['errors'][0]['reason'])
         self.assertEqual(self.source.read_bytes(), path.read_bytes())
+
+    def test_real_but_incomplete_collection_is_rejected_against_actual_target(self):
+        path = self.collection(); stock_root, stock = self.stock_collection()
+        before = (path.read_bytes(), stock.read_bytes())
+        result = contract.validate(self.payload, 'request-new', stock_root)
+        self.assertEqual('FAIL', result['result'])
+        self.assertIn('生成 2，原目标 3', result['errors'][0]['reason'])
+        self.assertEqual(before, (path.read_bytes(), stock.read_bytes()))
+
+    def test_full_collection_count_is_accepted_without_claiming_face_semantics(self):
+        self.collection(3); stock_root, _ = self.stock_collection()
+        result = contract.validate(self.payload, 'request-new', stock_root)
+        self.assertEqual('PASS', result['result'])
+        self.assertEqual(3, result['collections'][0]['stockFaces'])
+        self.assertEqual(3, result['collections'][0]['faces'])
+
+    def test_each_collection_uses_its_exact_partition_target(self):
+        relative = 'product/fonts/Shared.ttc'
+        self.collection(2, self.payload / relative)
+        stock_root, _ = self.stock_collection(4, relative)
+        self.stock_collection(1, 'system/fonts/Shared.ttc')
+        result = contract.validate(self.payload, 'request-product', stock_root)
+        self.assertEqual('FAIL', result['result'])
+        self.assertEqual(relative, result['errors'][0]['path'])
+        self.assertIn('原目标 4', result['errors'][0]['reason'])
+
+    def test_incomplete_collection_alias_is_refused_before_replacing_destination(self):
+        source = self.collection(); stock_root, _ = self.stock_collection()
+        destination = self.base / 'stage/fonts/NotoSansCJK-Regular.ttc'
+        destination.parent.mkdir(parents=True); destination.write_bytes(b'previous alias')
+        result = subprocess.run(['sh', '-c', '. "$1"; _font_alias "$2" "$3"',
+            'test', str(ROOT / 'common/legacy_v14_4/rom_adapters.sh'), str(source), str(destination)],
+            env=dict(os.environ, LUOSHU_COLLECTION_STOCK_ROOT=str(stock_root)), capture_output=True, text=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn('原目标 3', result.stderr)
+        self.assertEqual(b'previous alias', destination.read_bytes())
+
+    def test_complete_collection_alias_still_succeeds(self):
+        source = self.collection(3); stock_root, _ = self.stock_collection()
+        destination = self.base / 'stage/fonts/NotoSansCJK-Regular.ttc'
+        destination.parent.mkdir(parents=True)
+        result = subprocess.run(['sh', '-c', '. "$1"; _font_alias "$2" "$3"',
+            'test', str(ROOT / 'common/legacy_v14_4/rom_adapters.sh'), str(source), str(destination)],
+            env=dict(os.environ, LUOSHU_COLLECTION_STOCK_ROOT=str(stock_root)), capture_output=True, text=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(source.read_bytes(), destination.read_bytes())
 
     def test_truncated_or_out_of_range_collection_is_rejected(self):
         path = self.collection(); original = path.read_bytes()

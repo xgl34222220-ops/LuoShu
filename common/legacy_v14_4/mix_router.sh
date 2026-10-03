@@ -341,6 +341,7 @@ validate_mix_collections() (
     fi
     exec "$_ltr_python" "$REALMOD/common/composite_collection_contract.py" \
         --payload "$_collection_payload" --request "$(read_value "$MIX_STAGE_STATE" requestId)" \
+        --stock-root "${LUOSHU_COLLECTION_STOCK_ROOT:-/}" \
         --output "$REALMOD/config/composite-font-contract.json"
 )
 

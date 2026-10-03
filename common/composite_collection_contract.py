@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Reject fake/truncated collections before the staged payload is published.
 
-This validates container structure only. It neither rewrites fonts nor certifies
+This validates structure and preserves the existing target's face count.
+It neither rewrites fonts nor certifies
 glyph coverage, metrics, variable axes, or an OEM's complete rendering contract.
 """
 import argparse
@@ -48,7 +49,7 @@ def collection_faces(path):
     return count
 
 
-def validate(payload, request):
+def validate(payload, request, stock_root=Path('/')):
     report = {'schema': 'composite-collection-contract-v1', 'requestId': request,
               'result': 'PASS', 'collections': [], 'errors': []}
     for path in sorted(payload.rglob('*')):
@@ -57,7 +58,11 @@ def validate(payload, request):
         relative = path.relative_to(payload).as_posix()
         try:
             count = collection_faces(path)
-            report['collections'].append({'path': relative, 'faces': count})
+            stock = stock_root / relative
+            stock_count = collection_faces(stock) if os.path.lexists(stock) else None
+            if stock_count is not None and count < stock_count:
+                raise ValueError(f'字体集合缺少本机字体面：生成 {count}，原目标 {stock_count}')
+            report['collections'].append({'path': relative, 'faces': count, 'stockFaces': stock_count})
         except (OSError, ValueError, struct.error) as error:
             report['errors'].append({'path': relative, 'reason': str(error)})
     if report['errors']:
@@ -70,10 +75,11 @@ def main():
     parser.add_argument('--payload', type=Path, required=True)
     parser.add_argument('--request', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--stock-root', type=Path, default=Path('/'))
     args = parser.parse_args()
     if not args.payload.is_dir():
         raise SystemExit('复合字体暂存负载不存在')
-    report = validate(args.payload, args.request)
+    report = validate(args.payload, args.request, args.stock_root)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix='.composite-contract.', dir=args.output.parent)
     try:

@@ -94,7 +94,13 @@ internal class RootFontLibrarySource(
             else -> return null
         }
         if (root.optJSONObject("data")?.optJSONArray("fonts") == null) return null
-        return parseIndex(root)
+        return try {
+            parseIndex(root)
+        } catch (_: JSONException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 
     private suspend fun parseCachedRoot(raw: String): JSONObject? = withContext(Dispatchers.Default) {
@@ -173,10 +179,13 @@ internal class RootFontLibrarySource(
 }
 
 internal fun parseFontItems(array: JSONArray): List<FontItem> = buildList {
+    val seen = HashSet<String>()
     for (index in 0 until array.length()) {
-        val item = array.optJSONObject(index) ?: continue
-        val id = item.optString("id").trim()
-        if (id.isBlank() || id == "default") continue
+        val item = requireNotNull(array.optJSONObject(index)) { "字体索引包含无效字体记录" }
+        val id = (item.opt("id") as? String)?.trim().orEmpty()
+        require(id.isNotBlank()) { "字体索引缺少有效字体 ID" }
+        if (id == "default") continue
+        require(seen.add(id)) { "字体索引包含重复字体 ID：$id" }
         val weightsArray = item.optJSONArray("weights") ?: JSONArray()
         val weights = buildList {
             for (weightIndex in 0 until weightsArray.length()) {

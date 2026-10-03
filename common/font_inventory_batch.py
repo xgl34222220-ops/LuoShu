@@ -31,6 +31,9 @@ MAGIC = {b'\x00\x01\x00\x00': 'TTF', b'true': 'TTF', b'\x00\x02\x00\x00': 'TTF',
          b'OTTO': 'OTF', b'ttcf': 'TTC', b'wOFF': 'WOFF', b'wOF2': 'WOFF2',
          b'PK\x03\x04': 'ZIP'}
 PROTOCOL = 'font-list-v5'
+# Include interpretation changes in the fingerprint too: the App may verify a
+# previously persisted index without asking the module to rebuild its cache.
+SCANNER_REVISION = 2
 MAX_CACHE_BYTES = 4 * 1024 * 1024
 MAX_CONFIG_BYTES = 64 * 1024
 
@@ -44,7 +47,7 @@ def family_of(name):
     return family.rstrip(' \t\r\n\v\f-_')
 
 
-def weight_of(name):
+def weight_of(name, *, allow_variable=True):
     lower = name.lower()
     groups = (
         ('variable', ('variable', 'var', '可变', 'vf')),
@@ -57,7 +60,8 @@ def weight_of(name):
         ('bold', ('bold', '-700.', '_700.', '粗体')),
         ('black', ('black', 'heavy', '-900.', '_900.', '特粗', '重体')),
     )
-    return next((weight for weight, patterns in groups if any(p in lower for p in patterns)), 'regular')
+    return next((weight for weight, patterns in groups
+                 if (allow_variable or weight != 'variable') and any(p in lower for p in patterns)), 'regular')
 
 
 def size_label(size):
@@ -118,7 +122,8 @@ def snapshot(font_dir):
         target = entry.stat(follow_symlinks=True)
         fingerprints.append(['config', name, identity(info), identity(target)])
         configs[family] = font_dir / name
-    encoded = json.dumps(fingerprints, ensure_ascii=True, separators=(',', ':')).encode()
+    encoded = json.dumps([PROTOCOL, SCANNER_REVISION, fingerprints],
+                         ensure_ascii=True, separators=(',', ':')).encode()
     digest = hashlib.sha256(encoded).hexdigest()
     total = sum(row['stat'].st_size for row in files)
     return families, configs, f'{PROTOCOL}:{digest}:{len(files)}:{total}', total
@@ -128,17 +133,23 @@ def config_values(path):
     if path is None:
         return {}
     values = {}
-    # Bound even an abnormal single line, while retaining first-key/CR semantics.
+    # Bound even an abnormal single line. Normalize CRLF while retaining the
+    # first occurrence of each key, without evaluating any config text.
     with path.open('rb') as stream:
         raw = stream.read(MAX_CONFIG_BYTES + 1)
     if len(raw) > MAX_CONFIG_BYTES:
         raise ValueError('字体配置超过 64 KiB 限制')
-    for line in raw.decode('utf-8', errors='replace').split('\n'):
+    for line in raw.decode('utf-8', errors='replace').splitlines():
         if '=' in line:
             key, value = line.split('=', 1)
-            if key in ('name', 'supports_cjk') and key not in values:
+            if key in ('name', 'supports_cjk', 'is_variable') and key not in values:
                 values[key] = value
     return values
+
+
+def boolean_config(values, key):
+    value = values.get(key, '').strip().lower()
+    return {'true': True, 'false': False}.get(value)
 
 
 def current_font(config_dir):
@@ -153,13 +164,20 @@ def inventory(font_dir, config_dir, *, preview=False, captured=None):
     families, configs, fingerprint, total = captured or snapshot(font_dir)
     fonts = []
     for family, records in families.items():
+        config = config_values(configs.get(family))
+        imported_variable = boolean_config(config, 'is_variable')
         variants = {}
         for row in records:
-            variants.setdefault(row['weight'], row['name'])
+            # Direct imports record a real fvar probe. Use it for a single-file
+            # family, including names with no VF hint or a coincidental "var".
+            # One shared family config cannot reclassify every multiweight file.
+            weight = row['weight']
+            if len(records) == 1 and imported_variable is not None:
+                weight = 'variable' if imported_variable else weight_of(row['name'], allow_variable=False)
+            variants.setdefault(weight, row['name'])
         weights = [weight for weight in WEIGHTS if weight in variants]
         representative = min(records, key=lambda row: PREFERRED.index(row['weight']))
         info = representative['stat']
-        config = config_values(configs.get(family))
         variable = 'variable' in weights
         if preview:
             form = Path(representative['name']).suffix[1:].upper()
@@ -175,7 +193,7 @@ def inventory(font_dir, config_dir, *, preview=False, captured=None):
             'familyType': 'variable' if variable else ('static-family' if len(weights) >= 2 else 'single'),
             'file': representative['name'], 'size': size_label(info.st_size), 'bytes': info.st_size,
             'format': form, 'valid': valid, 'warning': '', 'error': error, 'variable': variable,
-            'supportsCjk': config.get('supports_cjk') != 'false',
+            'supportsCjk': boolean_config(config, 'supports_cjk') is not False,
             'date': datetime.fromtimestamp(info.st_mtime).strftime('%Y-%m-%d'),
             'provisional': preview,
         })
@@ -223,6 +241,14 @@ def read_cache(path):
     data = value.get('data')
     if not isinstance(data, dict) or not isinstance(data.get('fonts'), list):
         return None
+    seen = set()
+    for row in data['fonts']:
+        if not isinstance(row, dict) or not isinstance(row.get('id'), str):
+            return None
+        identifier = row['id'].strip()
+        if not identifier or identifier in seen:
+            return None
+        seen.add(identifier)
     return value
 
 
