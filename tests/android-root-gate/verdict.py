@@ -4,6 +4,45 @@ import re
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 OLD_CASES = {'success': 0, 'failure': 7, 'timeout': 124, 'cancel': 143}
 REQUEST_CASES = {**OLD_CASES, 'cancel_int': 130, 'cancel_hup': 129, 'stdin_eof': 130, 'writer_death': 130}
+MIX_HANDOFF_CASES = {
+    'silent-start', 'conflicting-output', 'truncated-output', 'logged-task-lookalike',
+    'queued-task', 'completed-task', 'failed-task', 'stale-task-with-fresh-output',
+    'wrong-cjk', 'wrong-latin', 'wrong-digit', 'unknown-state', 'missing-state', 'missing-task',
+    'chinese-native-regex-regression', 'escaped-quote-and-path', 'pretty-json', 'ascii-unicode-escapes',
+    'task-field-injection', 'nested-message-lookalike', 'pretty-nested-message', 'truncated-json',
+    'wrong-message-type', 'last-valid-log-record', 'bounded-long-log-tail',
+    'progress-chinese-native-regression', 'progress-escaped-quote-and-path', 'progress-control-escape',
+    'progress-truncated-message', 'progress-invalid-string-tail', 'progress-unsupported-unicode-escape',
+    'progress-oversized-message',
+}
+
+
+def mix_handoff_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS'
+            or value.get('schema') != 'luoshu-mix-handoff-contract-v1'
+            or value.get('environment') != 'ANDROID' or value.get('selinux') != 'Enforcing'
+            or not re.fullmatch(r'[0-9a-f-]{36}', str(value.get('boot_id', '')))
+            or value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh'):
+        return ['actual Android composite handoff context missing or failed']
+    cases = value.get('cases', [])
+    if (value.get('case_count') != len(MIX_HANDOFF_CASES) or len(cases) != len(MIX_HANDOFF_CASES)
+            or {case.get('name') for case in cases} != MIX_HANDOFF_CASES
+            or any(case.get('result') != 'PASS' for case in cases)):
+        return ['actual Android composite handoff/UTF-8 case set incomplete or failed']
+    return []
+
+
+def axis_metadata_blockers(value):
+    if (not isinstance(value, dict) or value.get('status') != 'ok'
+            or value.get('variable') is not True or value.get('hasWeight') is not True):
+        return ['actual CFF2 collection axis metadata missing or failed']
+    weight = value.get('weight', {})
+    if (value.get('axes') != [weight] or weight.get('tag') != 'wght'
+            or (weight.get('min'), weight.get('default'), weight.get('max')) != (400, 400, 900)
+            or not isinstance(weight.get('name'), str) or not weight['name'].strip()
+            or weight.get('hidden') is not False):
+        return ['actual CFF2 collection axis name/range/flags unproven']
+    return []
 
 
 def reboot_ok(value):
@@ -134,6 +173,19 @@ def delivery_blockers(report):
     errors.extend(composite_blockers(report.get('legacy_composite')))
     errors.extend(scope_blockers(report.get('magisk_task_scope'), OLD_CASES))
     errors.extend(scope_blockers(report.get('magisk_request_scope'), REQUEST_CASES, True))
+    errors.extend(mix_handoff_blockers(report.get('magisk_mix_handoff')))
+    errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
+    axes_ui = report.get('app_axes', {})
+    observed = axes_ui.get('observed_labels', [])
+    if (axes_ui.get('result') != 'PASS' or axes_ui.get('package') != PACKAGE
+            or axes_ui.get('font_id') != 'LuoShuAxisGate' or not str(axes_ui.get('actual_app_pid', '')).isdigit()
+            or not re.fullmatch('[0-9a-f]{64}', axes_ui.get('source_sha256', ''))
+            or axes_ui.get('stock_hashes_unchanged') is not True or axes_ui.get('target_fatal') is not False
+            or axes_ui.get('anr') is not False or axes_ui.get('hidden_axis_visible') is not False
+            or axes_ui.get('cjk_card_scanned_to_next_slot') is not True
+            or not all(label in observed for label in ('字宽', '纹理细节', 'XTRA', '可变字体', '英文字形'))
+            or any(label in observed for label in ('HIDN', '内置参数'))):
+        errors.append('actual App font-declared axis UI/read-only evidence incomplete or failed')
     if report.get('app_root') != 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY':
         errors.append('actual App root not proven')
     timings = report.get('library_timings', [])

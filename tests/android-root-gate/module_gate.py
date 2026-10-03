@@ -318,6 +318,36 @@ def run_gate(adb, magisk, baseline, candidate, output):
             report['magisk_request_scope'] = json.loads(root('cat /data/local/tmp/luoshu-request-scope.json'))
             if report['magisk_request_scope'].get('result') != 'PASS':
                 raise RuntimeError('Installed synchronous request lease cleanup failed under Magisk')
+            # Run exactly the new host contract cases under original ARM64
+            # Python + Android mksh/toybox in this disposable Magisk context.
+            handoff_script = Path(__file__).resolve().parents[2] / 'scripts/mix_handoff_contract_test.py'
+            command(['push', str(handoff_script), '/data/local/tmp/luoshu-mix-handoff.py'])
+            handoff_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-mix-handoff.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-mix-handoff.json', timeout=240)
+            report['magisk_mix_handoff'] = json.loads(root('cat /data/local/tmp/luoshu-mix-handoff.json'))
+            handoff = report['magisk_mix_handoff']
+            handoff['boot_id'] = root('cat /proc/sys/kernel/random/boot_id').strip()
+            handoff['selinux'] = root('getenforce').strip()
+            if handoff['boot_id'] != handoff_boot or handoff['selinux'] != 'Enforcing':
+                raise RuntimeError('Android context changed during composite handoff verification')
+            if (handoff.get('result') != 'PASS' or handoff.get('environment') != 'ANDROID'
+                    or handoff.get('case_count') != 32 or len(handoff.get('cases', [])) != 32
+                    or any(case.get('result') != 'PASS' for case in handoff['cases'])):
+                raise RuntimeError('Installed composite handoff/UTF-8 message contract failed under Android')
+            report['axis_metadata'] = json.loads(root(
+                f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
+                f'{runtime}/bin/luoshu-python {MODULE}/common/font_axis_info.py {stock_collection}', timeout=60))
+            axis_metadata = report['axis_metadata']
+            weight_axis = axis_metadata.get('weight') or {}
+            if (axis_metadata.get('status') != 'ok' or not axis_metadata.get('variable')
+                    or not axis_metadata.get('hasWeight') or weight_axis.get('tag') != 'wght'
+                    or (weight_axis.get('min'), weight_axis.get('default'), weight_axis.get('max')) != (400, 400, 900)
+                    or not weight_axis.get('name') or weight_axis.get('hidden') is not False):
+                raise RuntimeError('Actual Android CFF2 collection axis/name metadata differs from stock contract')
         with zipfile.ZipFile(candidate) as archive:
             apk_bytes = archive.read('bundled/LuoShu-App.apk')
             expected_apk = hashlib.sha256(apk_bytes).hexdigest()
@@ -355,6 +385,32 @@ def run_gate(adb, magisk, baseline, candidate, output):
         report['root_policy'] = {'package': PACKAGE, 'uid': uid, 'expires': until,
                                 'note': 'Policy grant is not yet proof of actual App execution'}
         report['app_root'] = 'GRANTED_NOT_PROVEN'
+        if not diagnostic_only:
+            # Only our original disposable fixture enters the picker. Selecting
+            # it must display real names/hidden-axis semantics without applying.
+            axis_fixture = '/sdcard/LuoShu/fonts/LuoShuAxisGate.ttf'
+            runtime = MODULE + '/common/python'
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-synthetic-fonts.py '
+                 '--output /sdcard/LuoShu/fonts --axis-fixture', timeout=90)
+            try:
+                inventory = bridge('fonts', 'refresh')
+                fonts = inventory.get('data', {}).get('fonts', [])
+                selected = [font for font in fonts if font.get('id') == 'LuoShuAxisGate']
+                if len(selected) != 1 or selected[0].get('valid') is not True or selected[0].get('variable') is not True:
+                    raise RuntimeError('Original variable-axis fixture is not visible in actual root inventory')
+                from app_axis_gate import qualify as qualify_axes
+                report['app_axes'] = qualify_axes(adb, output / 'app-axes', selected[0]['name'],
+                                                  [font['name'] for font in fonts])
+                report['app_axes']['source_sha256'] = root('sha256sum ' + axis_fixture).split()[0]
+                report['app_axes']['font_id'] = selected[0]['id']
+                report['app_axes']['stock_hashes_unchanged'] = font_hashes() == original_fonts
+                if not report['app_axes']['stock_hashes_unchanged']:
+                    raise RuntimeError('Read-only App axis inspection changed live system font bytes')
+            finally:
+                root('rm -f ' + axis_fixture)
+                bridge('fonts', 'refresh')
         from app_library_gate import measure
         report['library_timings'] = []
         report['fixture_inventory'] = []

@@ -37,6 +37,8 @@
 第一批提交：[`ac886690`](https://github.com/xgl34222220-ops/LuoShu/commit/ac886690d1902693aa6d89471ef5b99053f04057)。
 首次 [CI 37157270444](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37157270444) 的嵌套集成测试已通过，但后续收尾性能门禁失败：它要求保留详细进度消息。本轮按日志恢复这个功能，并用有限字节读取替代旧正则；保留原门禁继续验收。
 
+修正提交 [`1f9ea679`](https://github.com/xgl34222220-ops/LuoShu/commit/1f9ea679a1e2512ba009aba6d27ab4accf2afacc) 的 [完整候选 CI 37157593288](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37157593288) 已成功：源码、补充门禁、实际 Android CFF2 回归、App lint/单测/构建和候选包校验均通过。
+
 ## 第二批：按需读取轴元数据，显示真实能力
 
 采用理由：Font Manager 的真实字体属性分类、FontTools 的按需读表和 OpenType 的轴名称/隐藏轴语义，适合补齐现有界面，不需要重做主题或挂载。
@@ -53,6 +55,21 @@
 同一 64 MiB 原创 SFNT（含大尾部区域）的 `tracemalloc` 测量：旧读取器分配峰值 `67,114,265` 字节，新读取器 `16,938` 字节，两者均正确读出 2 个轴。该数据是此读取路径的宿主 Python 分配峰值，不是 Android 整机 RSS、延迟或真机结果。
 
 仍沿用集合面 0 的轴描述策略；异构集合的按角色选面界面一致性不在本批宣称已解决。
+
+第二批提交 [`17783f22`](https://github.com/xgl34222220-ops/LuoShu/commit/17783f2229e8ecb946bbd280a7c6343292e296da) 的 [完整候选 CI 37157991533](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37157991533) 已成功，包含上述新增 App 单测。
+下载本轮 artifact `11286956067` 独立校验：外层 ZIP SHA-256 `c53aa732931955f8c0c81b104935e77756f7c895904542f1ddca5dd95a2397ad`；模块 `a56a54ea9618946f8a96cf9e3d91fea751f72f1aa9d318842e6865ad5b9b957c`；APK `a929619682dca646c1a2486ec42a0813de595e9be93c4f5571faa70c0a69a8e5`。
+已对 17 个冻结文件、6 个运行源码、模块内外 APK 字节、构建来源和校验文件逐一核对。
+
+## 本轮隔离 Android 验收的新增门禁
+
+Root workflow 只绑定上述已通过、已下载验真的候选包。新增门禁包括：
+
+- 同一套 32 个交接/UTF-8/进度用例，用原 ARM64 Python 和 Android shell/toybox 在 Magisk/SELinux Enforcing 环境重新运行。
+- 真实 Android CFF2 集合的轴名称、范围、默认值及隐藏标志读取。
+- 只用项目原创几何字体构造无字重轴的可变字体，实际在 App 中文基底选择器选择它；检查“可变字体”、字体声明的“纹理细节”/`XTRA`、隐藏轴未曝光，保存新 UI XML 与实际截图，并确认系统字体哈希不变。
+- 判定器拒绝 HOST_ONLY、缺失/重复用例、缺失名称、错误范围、隐藏轴曝光和不完整的 App 实际证据。
+
+本轮新增后，宿主 Root harness 的 85 个测试通过。这里只是脚本/判定器回归；实际 Android 成败须等本轮运行完成，尚未预填成功。
 
 ## 不可越过的边界
 

@@ -2,7 +2,7 @@
 import copy
 import unittest
 from test_composite_gate import valid_composite
-from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers
+from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES
 
 BOOT = {'before': '11111111-1111-1111-1111-111111111111', 'after': '22222222-2222-2222-2222-222222222222'}
 
@@ -53,6 +53,18 @@ def valid_delivery():
                           'reboot':copy.deepcopy(BOOT),'restore_reboot':copy.deepcopy(BOOT),
                           'restore_hashes_equal_stock':True,'mounted':{'font':'synthetic','mount_proofs':{'/system/fonts/a.ttf':{}}},'restore':{'data':{'state':'success'}}}
     identity = {'task': 'new-task', 'boot': BOOT['before'], 'token': 'a'*32}
+    report['magisk_mix_handoff'] = {
+        'schema': 'luoshu-mix-handoff-contract-v1', 'result': 'PASS', 'environment': 'ANDROID',
+        'selinux': 'Enforcing', 'boot_id': BOOT['before'], 'module': '/data/adb/modules/LuoShu',
+        'shell': '/system/bin/sh', 'case_count': len(MIX_HANDOFF_CASES),
+        'cases': [{'name': name, 'result': 'PASS'} for name in sorted(MIX_HANDOFF_CASES)],
+    }
+    weight = {'tag': 'wght', 'name': 'Weight', 'min': 400, 'default': 400, 'max': 900, 'hidden': False}
+    report['axis_metadata'] = {'status': 'ok', 'variable': True, 'hasWeight': True, 'weight': weight, 'axes': [weight]}
+    report['app_axes'] = {'result': 'PASS', 'package': PACKAGE, 'font_id': 'LuoShuAxisGate',
+        'actual_app_pid': '123', 'source_sha256': 'e'*64, 'stock_hashes_unchanged': True,
+        'target_fatal': False, 'anr': False, 'hidden_axis_visible': False, 'cjk_card_scanned_to_next_slot': True,
+        'observed_labels': ['字宽', '纹理细节', 'XTRA', '可变字体', '英文字形']}
     source = {'snapshot_digest': 'b'*64, 'source_fingerprint': 'font-selection-v1:' + 'c'*64}
     report['app_apply']['input_events'] = [dict(identity, event='snapshot', **source),
         dict(identity, event='full_validation', valid=True, code=0),
@@ -74,6 +86,35 @@ class VerdictTests(unittest.TestCase):
 
     def test_complete_schema(self):
         self.assertEqual(delivery_blockers(valid_delivery()), [])
+
+    def test_host_missing_duplicate_or_failed_handoff_cases_cannot_pass_android(self):
+        for mutation in ('host', 'missing', 'duplicate', 'failed'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['magisk_mix_handoff']
+                if mutation == 'host': value['environment'] = 'HOST_ONLY'
+                elif mutation == 'missing': value['cases'].pop()
+                elif mutation == 'duplicate': value['cases'][0] = value['cases'][1].copy()
+                else: value['cases'][0]['result'] = 'FAIL'
+                self.assertTrue(delivery_blockers(r))
+
+    def test_handoff_context_must_remain_the_exact_enforcing_module(self):
+        for key, value in (('boot_id', ''), ('selinux', 'Permissive'), ('module', '/data/adb/modules/LuoShu-copy')):
+            r = valid_delivery(); r['magisk_mix_handoff'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_actual_collection_axis_name_flags_and_bounds_are_required(self):
+        for key, value in (('name', ''), ('hidden', True), ('default', 450), ('tag', 'wdth')):
+            r = valid_delivery(); r['axis_metadata']['weight'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_axis_ui_pass_requires_visible_names_complete_card_and_no_mount_changes(self):
+        for mutation in ('label', 'hidden', 'stock', 'card'):
+            r = valid_delivery(); value = r['app_axes']
+            if mutation == 'label': value['observed_labels'].remove('纹理细节')
+            elif mutation == 'hidden': value['observed_labels'].append('HIDN')
+            elif mutation == 'stock': value['stock_hashes_unchanged'] = False
+            else: value['cjk_card_scanned_to_next_slot'] = False
+            self.assertTrue(delivery_blockers(r))
     def test_diagnostic_fake_pass_blocked(self):
         r=valid_delivery();r.update(run_scope='APP_DIAGNOSTIC_ONLY',delivery_gate='PASS')
         self.assertTrue(delivery_blockers(r))
