@@ -5,6 +5,19 @@ committed a composite, passed its actual Android lock checks, then timed out at
 the composite reboot. It did not capture logcat from that failed reboot, so the
 timeout alone cannot establish a specific native crash or an OEM-device cause.
 
+The new [reproduction run 37110684874](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37110684874)
+finished at 17:04 CST, still using the immutable old candidate `9576301`.
+Ten lifecycle reboots passed with changed kernel IDs and Enforcing SELinux.
+The composite reboot (11) changed its kernel ID but never completed. All four
+failure diagnostics were saved without diagnostic errors. Its system log records
+`FontManagerService_create` failing with invalid font data at
+`/system/fonts/NotoSansCJK-Regular.ttc`; the stack goes through
+`Font$Builder.nBuild`, `SystemFonts.buildSystemFallback` and
+`FontManagerService.serializeFontMap`. This directly confirms rejection of that
+payload during the failed AOSP boot and supports the diagnosed container defect.
+It is not a native ARM64/OEM-device qualification or a successful new-candidate
+composite test.
+
 Source inspection confirms a separate structural defect: the legacy generic
 mapper hardlinks the single SFNT composite under `NotoSansCJK-Regular.ttc`.
 Multiple collection indexes cannot be satisfied by renaming a single face.
@@ -13,6 +26,8 @@ Previously generated collection stages are also validated before a finalizer
 can replace an existing next-boot payload. Reports bind failures to the request
 and path. The guard does not generate stock-compatible collection faces and
 must not be described as completing generic CJK, HyperOS or ColorOS coverage.
+Interrupted directory-rename recovery applies the same guard before it can
+publish the next-boot state file.
 
 The 17 pinned mounting/commit files remain unchanged. Fonts.xml is not modified.
 No hook, resident watcher, runtime replacement or automatic release is added.
@@ -43,3 +58,12 @@ local source suite cannot qualify this environment: the packaged ARM64 runtime
 is absent, and executor process IDs do not match the mounted procfs. Existing
 process-lifecycle tests therefore cannot run meaningfully here. CI must run the
 complete source suite and Android JVM tests/build before any test-package claim.
+
+[Candidate build 37110918225](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37110918225)
+passed the full source suite, Android JVM tests, lint and APK/module packaging for
+runtime code commit `be0e31e0a6ca39c01b38323627b9b0fa8d50185c`. The downloaded
+artifact's provenance, ZIP/APK checksums, four changed runtime files and all 17
+pinned mount files were independently compared with the source/baseline.
+Module SHA-256: `4192a81ec42afe05723b8412277deddf3bd525e9aab34fbf4e3d6b93895c5e4e`.
+APK SHA-256: `e4b1f34521858df530b3dae4c66ceccc0115b400023027b8e3992647ad93a3be`.
+These build/structure checks leave the delivery checks above outstanding.
