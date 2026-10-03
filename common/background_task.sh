@@ -92,6 +92,12 @@ luoshu_task_helper() (
         export PYTHONPATH="$_ltr_root/lib/python3.14:$_ltr_root/lib/python3.14/site-packages"
         export LD_LIBRARY_PATH="$_ltr_root/lib:$_ltr_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
+    # Android mksh marks exec-created fd 9 shell-private (close-on-exec).
+    # Export the existing open-file description at the final Python boundary,
+    # not merely at this function call. Other actions need no descriptor 9.
+    if [ "${1:-}" = lock-fd ] && [ "${2:-}" = 9 ]; then
+        exec "$_ltr_python" "$_ltr_helper" "$@" 9>&9
+    fi
     exec "$_ltr_python" "$_ltr_helper" "$@"
 )
 

@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FinalizeLockTest(unittest.TestCase):
+    shell = 'sh'
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='luoshu-finalize-lock-')
         self.addCleanup(self.temp.cleanup)
@@ -34,7 +36,7 @@ class FinalizeLockTest(unittest.TestCase):
         self.lockfile = self.module / 'config/mix-finalize.flock'
 
     def script(self, body):
-        return ['sh', '-c', '. "$1"; ' + body, 'sh', str(self.functions)]
+        return [self.shell, '-c', '. "$1"; ' + body, 'sh', str(self.functions)]
 
     def call(self, body='finalize_lock_acquire || exit 4; finalize_lock_release'):
         return subprocess.run(self.script(body), env=self.env, capture_output=True,
@@ -42,8 +44,8 @@ class FinalizeLockTest(unittest.TestCase):
 
     def holder(self):
         process = subprocess.Popen(self.script(
-            'finalize_lock_acquire || exit 4; echo ready; exec /bin/sleep 30'),
-            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            'finalize_lock_acquire || exit 4; echo ready; read -r released; finalize_lock_release'),
+            env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         def cleanup():
             if process.poll() is None:
                 process.kill()
@@ -105,8 +107,44 @@ class FinalizeLockTest(unittest.TestCase):
             'exec 9>>"$REALMOD/config/mix-finalize.flock"; '
             'luoshu_task_helper lock-fd 9 0.1; rc=$?; exec 9>&-; exit "$rc"')
         self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('lock-fd timeout fd=9 errno=11 (EAGAIN)', result.stderr)
         self.assertTrue(self.lockfile.exists())
         self.assertIsNone(holder.poll())
+
+
+    def test_closed_descriptor_reports_ebadf_without_waiting(self):
+        result = subprocess.run(['python3', str(self.module / 'common/task_scope.py'),
+                                 'lock-fd', '9', '20'], env=self.env,
+                                capture_output=True, text=True, timeout=2)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn('lock-fd failed fd=9 errno=9 (EBADF)', result.stderr)
+
+    def test_other_helper_actions_do_not_require_descriptor_nine(self):
+        (self.module / 'output.log').write_text('{"message":"helper without fd9"}\n')
+        result = self.call(
+            '. "$REALMOD/common/background_task.sh"; exec 9>&-; '
+            'luoshu_task_helper error-message "$REALMOD/output.log"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'helper without fd9')
+
+
+MKSH = os.environ.get('LUOSHU_TEST_MKSH') or shutil.which('mksh')
+
+
+@unittest.skipUnless(MKSH, 'mksh is required in candidate CI; optional on a minimal host')
+class MkshFinalizeLockTest(FinalizeLockTest):
+    """Android mksh makes exec-created fds private unless explicitly exported."""
+    shell = MKSH
+
+    def test_original_unexported_exec_boundary_is_ebadf(self):
+        # Control reproduces the pre-fix shell boundary without requiring a
+        # competing owner or depending on this test suite's implementation.
+        result = subprocess.run([self.shell, '-c',
+            'exec 9>>"$REALMOD/config/control.flock"; '
+            'python3 -c "import os; os.fstat(9)"'], env=self.env,
+            capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('[Errno 9] Bad file descriptor', result.stderr)
 
 
 if __name__ == '__main__':

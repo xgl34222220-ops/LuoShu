@@ -606,11 +606,17 @@ def lock_fd(args):
         try:
             fcntl.flock(args.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             return 0
-        except BlockingIOError:
+        except BlockingIOError as exc:
             if time.monotonic() >= deadline:
+                print(f'[task-scope] lock-fd timeout fd={args.fd} '
+                      f'errno={exc.errno} ({errno.errorcode.get(exc.errno, "UNKNOWN")}) '
+                      f'wait={args.timeout}s', file=sys.stderr)
                 return 1
             time.sleep(.05)
-        except OSError:
+        except OSError as exc:
+            print(f'[task-scope] lock-fd failed fd={args.fd} '
+                  f'errno={exc.errno} ({errno.errorcode.get(exc.errno, "UNKNOWN")})',
+                  file=sys.stderr)
             return 1
 
 
