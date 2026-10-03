@@ -19,10 +19,10 @@ from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.ttLib import TTFont
 
 
-def outline(font, cp):
-    glyphs = font.getGlyphSet()
+def outline(font, cp, location=None, name=None):
+    glyphs = font.getGlyphSet(location=location)
     pen = DecomposingRecordingPen(glyphs)
-    glyphs[font.getBestCmap()[cp]].draw(pen)
+    glyphs[name or font.getBestCmap()[cp]].draw(pen)
     return pen.value
 
 
@@ -77,6 +77,8 @@ def freetype_load(path, indexes, coordinates=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--stock', type=Path, required=True)
+    parser.add_argument('--expected-compiled', type=int, default=5)
+    parser.add_argument('--expected-retained', type=int, default=5)
     args = parser.parse_args()
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix='luoshu-real-collection-') as directory:
@@ -102,16 +104,43 @@ def main():
                         assert vertices(outline(donor, cp)) == vertices(outline(result, cp)), \
                             f'face {index}: donor shape changed'
                         name = result.getBestCmap()[cp]
-                        char = result['CFF '].cff.topDictIndex[0].CharStrings[name]
-                        char.draw(DecomposingRecordingPen(None))
-                        assert char.width == result['hmtx'][name][0], f'face {index}: CFF width disagrees'
+                        if 'CFF ' in result:
+                            char = result['CFF '].cff.topDictIndex[0].CharStrings[name]
+                            char.draw(DecomposingRecordingPen(None))
+                            assert char.width == result['hmtx'][name][0], f'face {index}: CFF width disagrees'
                     else:
                         assert outline(original, cp) == outline(result, cp), f'face {index}: retained shape changed'
+                if 'fvar' in original:
+                    axes = original['fvar'].axes
+                    defaults = {axis.axisTag: axis.defaultValue for axis in axes}
+                    locations = [defaults]
+                    for axis in axes:
+                        for value in (axis.minValue, (axis.defaultValue + axis.maxValue) / 2, axis.maxValue):
+                            locations.append(dict(defaults, **{axis.axisTag: value}))
+                    encoded = set(original.getBestCmap().values())
+                    retained_name = next(name for name in original.getGlyphOrder()
+                                         if name not in encoded and name != '.notdef')
+                    for location in locations:
+                        for cp in map(ord, '中永Az09'):
+                            if entry['mode'] == 'compiled':
+                                assert vertices(outline(result, cp, location)) == vertices(outline(donor, cp)), \
+                                    f'face {index}, {location}: stock variation changed donor'
+                                glyphs = result.getGlyphSet(location=location)
+                                assert glyphs[result.getBestCmap()[cp]].width == 800, \
+                                    f'face {index}, {location}: stock width delta leaked into donor'
+                        for cp in map(ord, 'Ωあ'):
+                            assert outline(original, cp, location) == outline(result, cp, location), \
+                                f'face {index}, {location}: uncovered glyph variation changed'
+                        assert outline(original, None, location, retained_name) == outline(result, None, location, retained_name), \
+                            f'face {index}, {location}: unencoded variation changed'
+                    freetype_load(output, [index], coordinates=[
+                        [location[axis.axisTag] for axis in axes] for location in locations])
             if entry['mode'] == 'compiled':
                 compiled += 1
             else:
                 retained += 1
-        assert compiled and retained, 'The Noto fixture must include proportional and specialized faces'
+        assert compiled == args.expected_compiled and retained == args.expected_retained, \
+            f'Expected {args.expected_compiled}/{args.expected_retained} compiled/retained faces; got {compiled}/{retained}'
         freetype_load(output, range(report['stockFaces']))
         print(json.dumps({'result': 'PASS', 'stockFaces': report['stockFaces'],
                           'compiledFaces': compiled, 'retainedFaces': retained,

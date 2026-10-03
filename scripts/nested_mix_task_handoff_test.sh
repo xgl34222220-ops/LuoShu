@@ -7,6 +7,22 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 . "$ROOT/common/mix_task_handoff.sh"
 
+# Reproduce the Chinese progress string from the Android sed native crash.
+# Numeric progress must remain usable for compact and pretty writer variants,
+# while truncated/non-numeric/out-of-range values cannot reach shell arithmetic.
+for value in 0 36 95 100; do
+    printf '{"stage":"collection","message":"正在编译本机 CJK 集合面 1/5","percent":%s,"time":1791038898}\n' "$value" > "$TMP/progress.json"
+    test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = "$value"
+done
+printf '{"message":"正在生成完整复合字体", "percent" : 95 }\n' > "$TMP/progress.json"
+test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = 95
+for raw in '"95"' '-1' '101' '95oops' 'true'; do
+    printf '{"message":"完整复合字体正在后台生成","percent":%s}\n' "$raw" > "$TMP/progress.json"
+    test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = 0
+done
+printf '{"message":"完整复合字体正在后台生成","percent":95' > "$TMP/progress.json"
+test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = 0
+
 RESPONSE="$TMP/response.json"
 TASK="$TMP/mix_task.conf"
 

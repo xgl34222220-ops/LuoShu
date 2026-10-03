@@ -341,7 +341,7 @@ worker() {
             _base_message=$(read_value "$BASE_TASK_FILE" message)
             _base_percent=0
             if [ -s "$PROGRESS_FILE" ]; then
-                _base_percent=$(sed -n 's/^.*"percent":\([0-9][0-9]*\).*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
+                _base_percent=$(luoshu_mix_progress_percent "$PROGRESS_FILE")
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
             _mapped=$((36 + (_base_percent * 64 / 100)))
