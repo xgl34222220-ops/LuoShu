@@ -27,17 +27,14 @@ luoshu_mix_task_value() {
     sed -n "s/^${_key}=//p" "$_file" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
-luoshu_mix_task_from_response() {
-    _response="$1"
-    [ -s "$_response" ] || return 1
-    sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response" 2>/dev/null | tail -n1
-}
-
-luoshu_mix_task_message_from_response() {
-    _response="$1"
-    [ -s "$_response" ] || return 1
-    sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_response" 2>/dev/null | tail -n1
-}
+luoshu_mix_task_message_from_response() (
+    # Startup/instance failures are infrequent. Reuse the shipped bounded JSON
+    # reader so escaped text survives without Android libc regex calls or task
+    # field injection. Never start another Python process for progress polling.
+    [ -s "$1" ] || return 1
+    type luoshu_task_helper >/dev/null 2>&1 || return 1
+    luoshu_task_helper error-message "$1"
+)
 
 luoshu_mix_task_matches_request() {
     _task_file="$1"
@@ -67,13 +64,9 @@ luoshu_resolve_nested_mix_task() {
     _latin="$5"
     _digit="$6"
 
-    # “无启动输出”正是需要回退到持久化任务文件的正常场景；不得让 set -e 提前终止。
-    _child=$(luoshu_mix_task_from_response "$_response" 2>/dev/null || true)
-    if [ -n "$_child" ]; then
-        printf '%s\n' "$_child"
-        return 0
-    fi
-
+    # The engine persists admission before printing its response. Stdout may
+    # contain a stale/nested task or disappear entirely on Android. Only the
+    # new persisted task with all three requested inputs can own this handoff.
     _candidate=$(luoshu_mix_task_value "$_task_file" task)
     if luoshu_mix_task_matches_request "$_task_file" "$_candidate" "$_previous" "$_cjk" "$_latin" "$_digit"; then
         printf '%s\n' "$_candidate"

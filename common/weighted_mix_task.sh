@@ -183,7 +183,8 @@ run_instance() {
     ) >"$_report" 2>"$_error"
     _code=$?
     if [ "$_code" -ne 0 ] || [ ! -s "$_destination" ]; then
-        _message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_error" "$_report" 2>/dev/null | tail -n1)
+        _message=$(luoshu_mix_task_message_from_response "$_report" 2>/dev/null || true)
+        [ -n "$_message" ] || _message=$(luoshu_mix_task_message_from_response "$_error" 2>/dev/null || true)
         [ -n "$_message" ] || _message=$(tail -n1 "$_error" 2>/dev/null | tr -d '\r')
         [ -n "$_message" ] || _message="字体实例化失败（代码 $_code）"
         echo "错误：$_message" >&2
@@ -281,13 +282,13 @@ worker() {
         _child=$(luoshu_resolve_nested_mix_task "$_response_file" "$BASE_TASK_FILE" "$_previous_child" \
             LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
     else
-        _child=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+        _child=''
     fi
     if [ -z "$_child" ]; then
         if type luoshu_mix_task_message_from_response >/dev/null 2>&1; then
             _message=$(luoshu_mix_task_message_from_response "$_response_file" 2>/dev/null)
         else
-            _message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+            _message=''
         fi
         [ -n "$_message" ] || _message='完整复合字体任务未登记，启动输出为空'
         update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
@@ -308,15 +309,12 @@ worker() {
         if [ "$_base_task" = "$_child" ]; then
             _base_message=$(read_value "$BASE_TASK_FILE" message)
             _base_percent=0
-            _progress_message=''
             if [ -s "$PROGRESS_FILE" ]; then
                 _base_percent=$(luoshu_mix_progress_percent "$PROGRESS_FILE")
-                _progress_message=$(LC_ALL=C sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
             _mapped=$((36 + (_base_percent * 64 / 100)))
             [ "$_mapped" -le 99 ] || _mapped=99
-            [ -z "$_progress_message" ] || _base_message="$_progress_message"
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             if [ "$_base_state" = running ] && [ "$_loops" -ge 3 ]; then
                 if ! luoshu_task_pid_alive "$CONFIG_DIR/mix_worker.pid" "$_child"; then

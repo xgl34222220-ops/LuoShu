@@ -6,6 +6,8 @@ TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-mix-handoff)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 . "$ROOT/common/mix_task_handoff.sh"
+MODDIR="$ROOT"
+. "$ROOT/common/background_task.sh"
 
 # Reproduce the Chinese progress string from the Android sed native crash.
 # Numeric progress must remain usable for compact and pretty writer variants,
@@ -34,7 +36,10 @@ cjk=LuoShuMixCJK
 latin=LuoShuMixLatin
 digit=LuoShuMixDigit
 EOF_TASK
-test "$(luoshu_resolve_nested_mix_task "$RESPONSE" "$TASK" stale LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit)" = from-output
+if luoshu_resolve_nested_mix_task "$RESPONSE" "$TASK" stale LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit >/dev/null 2>&1; then
+    echo 'startup output bypassed persisted task identity' >&2
+    exit 1
+fi
 
 : >"$RESPONSE"
 cat >"$TASK" <<'EOF_TASK'
@@ -73,6 +78,7 @@ if [ -s "$FONT" ]; then
     cp "$ROOT/common/util_functions.sh" "$MODULE/common/util_functions.sh"
     cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
     cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
+    cp "$ROOT/common/task_scope.py" "$MODULE/common/task_scope.py"
     cp "$ROOT/common/mix_task_handoff.sh" "$MODULE/common/mix_task_handoff.sh"
 
     cat >"$MODULE/common/font_role_check.sh" <<'EOF_ROLE'
@@ -133,6 +139,15 @@ EOF_ENGINE
     fi
     test "$(sed -n 's/^childTask=//p' "$MODULE/config/axes_task.conf")" = base-no-output
     ! grep -q '无法启动完整复合字体引擎' "$MODULE/config/axes_task.conf"
+
+    # success is visible before the finite supervisor reaps its owned scope.
+    # Wait for that cleanup before admitting another task on the same pidfile.
+    COUNT=0
+    while [ -s "$MODULE/config/axes_worker.pid.identity" ] && [ "$COUNT" -lt 20 ]; do
+        sleep 1
+        COUNT=$((COUNT + 1))
+    done
+    test ! -s "$MODULE/config/axes_worker.pid.identity"
 
     # The committed payload is authoritative even when the inner controller's
     # final task-file write is delayed. This is the real-device false-timeout
