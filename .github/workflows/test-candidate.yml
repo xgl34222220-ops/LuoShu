@@ -52,7 +52,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv mksh fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv mksh fonts-noto-cjk fonts-dejavu-core libfreetype6 >/dev/null
 
       - uses: actions/cache@v4
         with:
@@ -162,6 +162,9 @@ jobs:
             common/font_archive_export.sh \
             common/font_inventory.py \
             common/font_inventory_scan.py \
+            common/composite_collection_build.py \
+            common/composite_collection_build.sh \
+            common/composite_collection_contract.py \
             common/font_switch_task.sh \
             common/legacy_v14_4/payload_clone.sh \
             common/mix_weight_mode.sh \
@@ -197,7 +200,9 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" \
+            "$tmp/common/composite_collection_build.py" "$tmp/common/composite_collection_contract.py"
+          sh -n "$tmp/common/composite_collection_build.sh"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"

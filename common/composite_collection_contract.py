@@ -6,6 +6,7 @@ It neither rewrites fonts nor certifies
 glyph coverage, metrics, variable axes, or an OEM's complete rendering contract.
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,38 @@ import tempfile
 
 SFNT = (b'\x00\x01\x00\x00', b'OTTO', b'true')
 MAX_FACES = 256
+
+
+def verify_build_report(path, relative, request, count):
+    sidecar = path.with_name(path.name + '.luoshu-collection.json')
+    if not sidecar.exists():
+        return False  # Older stages have structural evidence only.
+    with sidecar.open('rb') as stream:
+        raw = stream.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise ValueError('集合生成证明过大')
+    def unique(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError('集合生成证明包含重复字段')
+            result[key] = value
+        return result
+    proof = json.loads(raw, object_pairs_hook=unique)
+    if (not isinstance(proof, dict) or proof.get('schema') != 'composite-collection-build-v1'
+            or proof.get('result') != 'PASS' or proof.get('requestId') != request
+            or proof.get('target') != '/' + relative or proof.get('stockFaces') != count
+            or not isinstance(proof.get('faces'), list) or len(proof['faces']) != count
+            or any(not isinstance(face, dict) or face.get('index') != index
+                   for index, face in enumerate(proof['faces']))):
+        raise ValueError('集合生成证明与本次请求、路径或字体面索引不符')
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    if proof.get('outputSha256') != digest.hexdigest():
+        raise ValueError('集合字节与生成证明不符')
+    return True
 
 
 def collection_faces(path):
@@ -62,7 +95,9 @@ def validate(payload, request, stock_root=Path('/')):
             stock_count = collection_faces(stock) if os.path.lexists(stock) else None
             if stock_count is not None and count < stock_count:
                 raise ValueError(f'字体集合缺少本机字体面：生成 {count}，原目标 {stock_count}')
-            report['collections'].append({'path': relative, 'faces': count, 'stockFaces': stock_count})
+            built = verify_build_report(path, relative, request, count)
+            report['collections'].append({'path': relative, 'faces': count, 'stockFaces': stock_count,
+                                          'generatedContractVerified': built})
         except (OSError, ValueError, struct.error) as error:
             report['errors'].append({'path': relative, 'reason': str(error)})
     if report['errors']:

@@ -338,6 +338,7 @@ python3 "$ROOT/scripts/font_coverage_fields_test.py"
 python3 "$ROOT/scripts/font_switch_input_test.py"
 python3 "$ROOT/scripts/font_inventory_batch_test.py"
 python3 "$ROOT/scripts/composite_collection_contract_test.py"
+python3 "$ROOT/scripts/composite_collection_build_test.py"
 python3 "$ROOT/scripts/font_request_scope_test.py"
 
 sh "$ROOT/scripts/system_health_test.sh"

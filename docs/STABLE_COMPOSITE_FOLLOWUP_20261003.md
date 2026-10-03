@@ -130,3 +130,51 @@ Module SHA-256: `f5c4038275a8f90035c8aaaee97a8c0fc64190ad6bebdd4b9591e21b1ea20de
 APK SHA-256: `b01670eda2d542c19f56a39b1ec8ec1abd4e764a2c7df41181a7f423d12eaa3a`.
 These are host/build and artifact checks. The collection compiler and OEM-device
 delivery checks listed above remain outstanding; no release is published.
+
+## Static collection compiler continuation (18:30 CST request)
+
+The generic composite mapper now invokes a finite, caller-owned compiler for
+its system TTC alias. The frozen `font_mix_engine.sh` and all 17 pinned mount
+files remain untouched. The compiler obtains the exact target's stock view
+through the existing lower/mirror resolver; an active module without a stock
+view fails rather than compiling against its own mounted payload.
+
+Each original face stays at its original index. Supported static TrueType/CFF
+faces receive the selected composite's encoded CJK, Latin and digit outlines in
+their existing glyph-ID slots. Cmap/UVS, glyph order, GSUB/GPOS/GDEF, names,
+OS/2, line metrics, vertical metrics/origins and the stock coordinate frame are
+checked before and after serialization and collection assembly. Header metric
+compression counters may change when hmtx is re-encoded; the other header fields
+stay bound. Lazy tables are loaded consistently before contract hashing.
+CFF glyph widths use each stock private dictionary's default/nominal widths.
+
+Monospace, serif, italic and symbol/emoji/icon faces retain stock content. Missing
+donor characters, unencoded layout alternatives, and glyph slots shared with
+uncovered/out-of-role characters also retain stock content. Thus preserving
+stock shaping is not a claim that every shaped alternative uses the donor.
+Regular variable target faces/CFF2, incompatible shared aliases and donor
+geometry/advances outside the stock frame fail before publication.
+
+Input identity/digests are rechecked before atomic output replacement. The
+generated sidecar binds request, exact partition path, ordered face contracts and
+output bytes; finalization rejects a mismatched present proof. Older stages
+without that proof still have structural evidence only. There is no system XML
+edit, hook, detached compiler, permanent worker or live source-file rewrite.
+
+Local verification passed 17 generator regressions, 11 collection/rollback
+regressions and the unchanged 17-file boundary. The real upstream Noto CJK
+collection passed all 10 indexes: 5 proportional faces compiled, 5 monospace
+faces retained. Independent FreeType loads and CFF/hmtx width agreement passed
+for CJK, Latin and digits at every index. This host check took about 50 seconds
+with a roughly 242 MiB peak RSS and produced a roughly 72 MiB collection; these
+numbers describe this synthetic-donor fixture, not phone latency or memory.
+The font fixture is not bundled in the module. This real-font check is now a
+mandatory supplemental candidate gate, with a missing fixture/consumer or a
+failed load blocking packaging.
+
+The automatic integration currently covers the legacy generic system TTC alias.
+It does not add automatic discovery/compilation for every OEM partition or
+replace the separate HyperOS/ColorOS mappings. True variable collection
+compilation, OEM physical-device coverage, geometry and reboot persistence
+remain open. The next candidate requires its own CI/artifact and actual Android
+activation results; earlier build hashes do not qualify this compiler.

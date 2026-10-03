@@ -69,6 +69,11 @@ _font_alias() {
     # the frozen engine commits its selection/configuration or payload.
     case "$dest" in
         *.[tT][tT][cC]|*.[oO][tT][cC])
+            _fac_builder="${LUOSHU_REAL_MODDIR:-${MODDIR:-}}/common/composite_collection_build.sh"
+            if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ -f "$_fac_builder" ]; then
+                sh "$_fac_builder" "$anchor" "/system/fonts/${dest##*/}" "$dest"
+                return $?
+            fi
             if [ "$(head -c 4 "$anchor" 2>/dev/null)" != ttcf ]; then
                 printf '[MIX] 无法把单字体写入字体集合目标：%s\n' "$dest" >&2
                 return 1
