@@ -25,9 +25,13 @@ from fontTools.ttLib.tables._f_v_a_r import Axis
 CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789中国永Ω'
 
 
-def fixture(path, index, cff=False, mono=False):
+def fixture(path, index, cff=False, mono=False, seac=False):
     points = {ord(c): f'f{index}u{ord(c):04x}' for c in CHARS}
+    if seac:
+        points[ord('A')] = 'A'; points[ord('Ω')] = 'Aacute'
     order = ['.notdef', *sorted(points.values(), reverse=bool(index % 2)), 'retainedAlt']
+    if seac:
+        order.append('acute')
     font = FontBuilder(1000, isTTF=not cff)
     font.setupGlyphOrder(order); font.setupCharacterMap(points)
     glyphs = {}
@@ -36,6 +40,9 @@ def fixture(path, index, cff=False, mono=False):
         pen.moveTo((20, 0)); pen.lineTo((600, 0))
         pen.lineTo((400 if index % 2 else 600, 700)); pen.lineTo((20, 700)); pen.closePath()
         glyphs[name] = pen.getCharString() if cff else pen.glyph()
+    if seac:
+        from fontTools.misc.psCharStrings import T2CharString
+        glyphs['Aacute'] = T2CharString(program=[800, 0, 0, 65, 194, 'endchar'])
     if cff:
         font.setupCFF(f'StockFace{index}', {'FullName': f'Stock Face {index}'}, glyphs, {})
     else:
@@ -227,6 +234,38 @@ class CollectionBuildTest(unittest.TestCase):
             for letter in 'AΩ中':
                 self.assertEqual(outline(original, letter), outline(result, letter))
             self.assertNotEqual(outline(original, '国'), outline(result, '国'))
+
+    def test_uncovered_true_type_component_dependency_cannot_publish(self):
+        self.collection()
+        collection = TTCollection(self.stock)
+        font = collection.fonts[0]
+        base = font.getBestCmap()[ord('A')]
+        pen = TTGlyphPen({base: font['glyf'][base]})
+        pen.addComponent(base, (1, 0, 0, 1, 0, 0))
+        font['glyf'][font.getBestCmap()[ord('Ω')]] = pen.glyph()
+        collection.save(self.stock); collection.close()
+        self.output.write_bytes(b'previous generation')
+        with self.assertRaisesRegex(ValueError, '保留组合字形依赖'):
+            self.run_build()
+        self.assertEqual(b'previous generation', self.output.read_bytes())
+
+    def test_fully_replaced_true_type_components_remain_supported(self):
+        self.collection()
+        collection = TTCollection(self.stock)
+        font = collection.fonts[0]
+        base = font.getBestCmap()[ord('A')]
+        pen = TTGlyphPen({base: font['glyf'][base]})
+        pen.addComponent(base, (1, 0, 0, 1, 0, 0))
+        font['glyf'][font.getBestCmap()[ord('B')]] = pen.glyph()
+        collection.save(self.stock); collection.close()
+        self.assertEqual('PASS', self.run_build()['result'])
+
+    def test_uncovered_cff_seac_dependency_cannot_publish(self):
+        self.collection((dict(index=0, cff=True, seac=True),))
+        self.output.write_bytes(b'previous generation')
+        with self.assertRaisesRegex(ValueError, '保留 CFF 组合字形依赖'):
+            self.run_build()
+        self.assertEqual(b'previous generation', self.output.read_bytes())
 
     def test_donor_outside_stock_frame_is_rejected_without_touching_output(self):
         self.collection()

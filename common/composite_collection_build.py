@@ -19,7 +19,7 @@ import shutil
 import tempfile
 
 from fontTools.pens.boundsPen import BoundsPen
-from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.cu2quPen import Cu2QuPen
@@ -108,6 +108,31 @@ def draw_record(glyphs, name):
     return pen
 
 
+def guard_retained_components(font, mapping):
+    if 'glyf' in font:
+        glyf = font['glyf']
+        for name in font.getGlyphOrder():
+            if name in mapping:
+                continue  # Its complete outline will be replaced.
+            raw = getattr(glyf.glyphs[name], 'data', None)
+            if raw is not None and (len(raw) < 2 or int.from_bytes(raw[:2], 'big', signed=True) >= 0):
+                continue
+            glyph = glyf[name]
+            if glyph.isComposite() and any(component.glyphName in mapping for component in glyph.components):
+                raise ValueError('原厂保留组合字形依赖被替换槽，当前不能保持其完整形状与边界')
+    elif 'CFF ' in font and not hasattr(font['CFF '].cff.topDictIndex[0], 'ROS'):
+        # Non-CID CFF can have seac components addressed by standard names.
+        glyphs = font.getGlyphSet()
+        for name in font.getGlyphOrder():
+            if name in mapping:
+                continue
+            pen = RecordingPen()
+            glyphs[name].draw(pen)
+            if any(operation == 'addComponent' and arguments[0] in mapping
+                   for operation, arguments in pen.value):
+                raise ValueError('原厂保留 CFF 组合字形依赖被替换槽，当前不能保持其完整形状与边界')
+
+
 def replace_face(font, donor, recordings):
     if specialized(font):
         return {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
@@ -151,6 +176,7 @@ def replace_face(font, donor, recordings):
         return {'mode': 'retained-no-cjk-match', 'replaced': counts, 'uncovered': uncovered}
     if '.notdef' in mapping:
         raise ValueError('原厂编码映射指向缺字槽，不能覆盖 .notdef')
+    guard_retained_components(font, mapping)
     scale = font['head'].unitsPerEm / donor['head'].unitsPerEm
     frame = font['head']
     converted = {}

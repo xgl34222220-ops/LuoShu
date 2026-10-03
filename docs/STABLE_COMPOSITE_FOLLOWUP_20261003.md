@@ -202,3 +202,14 @@ collection proof, original stock digest and final payload bytes to match the
 actual request before reboot; structural-only evidence cannot pass. All 69 host
 reboot-harness regressions pass. The new actual Android activation result is
 pending at this commit and must be reported separately when the run finishes.
+
+The subsequent retained-glyph review reproduced another boundary issue: an
+uncovered TrueType composite could reference a replaced encoded slot and change
+shape even though its own record was retained. Such dependencies can also make
+retained point-matching/geometry assumptions invalid. Compilation now rejects
+retained TrueType and non-CID CFF/seac component dependencies before changing
+outlines or output. Fully replaced composite slots remain supported; specialized
+faces stay untouched. Three meaningful regressions bring the generator suite to
+20 passing tests. The already-running Android gate remains bound to its exact
+`339046f` Noto-CID candidate; this later guard needs its own CI/package evidence
+and must not be substituted into that immutable run's provenance.
