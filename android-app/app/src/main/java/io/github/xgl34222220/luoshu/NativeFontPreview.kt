@@ -34,23 +34,6 @@ private const val PREVIEW_CACHE_MAX_BYTES = 384L * 1024L * 1024L
 private const val PREVIEW_MEMORY_MAX_ENTRIES = 24
 private const val PREVIEW_EXPORT_CONCURRENCY = 2
 
-internal data class VariableAxisInfo(
-    val tag: String,
-    val min: Float,
-    val default: Float,
-    val max: Float,
-)
-
-internal data class WeightAxisInfo(
-    val loading: Boolean = true,
-    val hasWeight: Boolean = false,
-    val min: Int = 100,
-    val default: Int = 400,
-    val max: Int = 900,
-    val axes: List<VariableAxisInfo> = emptyList(),
-    val error: String = "",
-)
-
 private data class PreviewTypefaceState(
     val typeface: Typeface? = null,
     val file: File? = null,
@@ -160,51 +143,7 @@ private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
     val jsonLine = result.stdout.lineSequence()
         .firstOrNull { it.trimStart().startsWith("{") }
         ?: error("未收到字体轴数据")
-    val root = JSONObject(jsonLine.trim())
-    if (root.optString("status") != "ok") {
-        error(root.optString("message", "字体轴读取失败"))
-    }
-    val rawAxes = root.optJSONArray("axes")
-    val axes = buildList {
-        if (rawAxes != null) {
-            for (index in 0 until rawAxes.length()) {
-                val axis = rawAxes.optJSONObject(index) ?: continue
-                val tag = axis.optString("tag").trim()
-                val minimum = axis.optDouble("min", Double.NaN).toFloat()
-                val maximum = axis.optDouble("max", Double.NaN).toFloat()
-                val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
-                if (
-                    tag.length == 4 &&
-                    minimum.isFinite() &&
-                    maximum.isFinite() &&
-                    defaultValue.isFinite() &&
-                    maximum >= minimum
-                ) {
-                    add(
-                        VariableAxisInfo(
-                            tag = tag,
-                            min = minimum,
-                            default = defaultValue.coerceIn(minimum, maximum),
-                            max = maximum,
-                        ),
-                    )
-                }
-            }
-        }
-    }
-    val weight = axes.firstOrNull { it.tag == "wght" }
-    if (weight == null) {
-        WeightAxisInfo(loading = false, hasWeight = false, axes = axes)
-    } else {
-        WeightAxisInfo(
-            loading = false,
-            hasWeight = true,
-            min = weight.min.roundToInt(),
-            default = weight.default.roundToInt(),
-            max = weight.max.roundToInt(),
-            axes = axes,
-        )
-    }
+    parseWeightAxisInfo(JSONObject(jsonLine.trim()))
 } catch (cancelled: CancellationException) {
     throw cancelled
 } catch (error: Throwable) {
