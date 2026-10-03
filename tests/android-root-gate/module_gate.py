@@ -23,6 +23,40 @@ MODULE = '/data/adb/modules/LuoShu'
 FONT_PARTITIONS = 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'.split()
 
 
+def payload_mount_proof(path, canonical, stock_paths, live_digest, payload_hashes, mount_records):
+    """Bind stock aliases to their real target without relaxing bytes/provenance."""
+    if not canonical or stock_paths.get(path) != canonical:
+        raise RuntimeError('Original system font alias changed: ' + path)
+    slots = [p for p, target in stock_paths.items()
+             if target == canonical and p in payload_hashes]
+    if canonical in payload_hashes and canonical not in slots:
+        slots.append(canonical)
+    if not slots or any(payload_hashes[p] != live_digest for p in slots):
+        raise RuntimeError('Live target differs from committed canonical payload: ' + path)
+    # Prefer the canonical slot, then the requested partition spelling. Any
+    # other original alias must have identical bytes, rather than concealing a
+    # conflicting per-alias payload which the actual system link cannot load.
+    slot = canonical if canonical in slots else path if path in slots else sorted(slots)[0]
+    expected_source = MODULE.removeprefix('/data') + '/.luoshu-payload' + slot
+    matching = []
+    for row in mount_records:
+        if len(row) <= 5:
+            continue
+        destination = row[4].rstrip('/')
+        if canonical == destination:
+            source = row[3]
+        elif canonical.startswith(destination + '/'):
+            source = row[3].rstrip('/') + canonical[len(destination):]
+        else:
+            continue
+        if source in (expected_source, '/data' + expected_source):
+            matching.append(row)
+    if not matching:
+        raise RuntimeError('Changed font lacks exact canonical module-payload mount provenance: ' + path)
+    return {'canonical': canonical, 'stock_canonical': stock_paths[path],
+            'payload_path': slot, 'payload_sha256': live_digest, 'mount_records': matching}
+
+
 def resolve_authorized_uid(packages):
     rows = re.findall(r'package:(\S+) uid:(\d+)', packages)
     uids = {int(uid) for package, uid in rows if package == PACKAGE}
@@ -118,26 +152,31 @@ def run_gate(adb, magisk, baseline, candidate, output):
         payload = root('find -L ' + payload_prefix + r' -type f \( -iname "*.ttf" -o -iname "*.otf" -o -iname "*.ttc" \) -exec sha256sum {} \;')
         payload_hashes = {line.split(None, 1)[1].removeprefix(payload_prefix): line.split()[0]
                           for line in payload.splitlines() if re.match(r'^[0-9a-f]{64}  ', line)}
-        for path in changed:
-            if payload_hashes.get(path) != live[path]:
-                raise RuntimeError('Live target differs from committed payload: ' + path)
         mounts = root('cat /proc/1/mountinfo')
         mount_records = [line.split() for line in mounts.splitlines() if ' - ' in line]
         proofs = {}
         for path in changed:
             canonical = root('readlink -f ' + shlex.quote(path))
-            matching = [row for row in mount_records if len(row) > 5 and
-                        (row[4] == canonical or canonical.startswith(row[4].rstrip('/') + '/')) and
-                        '/adb/modules/LuoShu/.luoshu-payload/' in row[3]]
-            if not matching:
-                raise RuntimeError('Changed font lacks exact module-payload mount provenance: ' + path)
-            proofs[path] = {'canonical': canonical, 'mount_records': matching}
+            proofs[path] = payload_mount_proof(path, canonical, original_paths,
+                                              live[path], payload_hashes, mount_records)
         return live, {'font': active, 'changed': changed, 'payload_hashes': payload_hashes, 'mount_proofs': proofs, 'mountinfo': mounts}
     try:
         if shell('getprop ro.kernel.qemu') != '1' or shell('getenforce') != 'Enforcing':
             raise RuntimeError('Only authorized Enforcing disposable AVD is supported')
         report['font_directories'] = root('for d in ' + ' '.join('/' + part + '/fonts' for part in FONT_PARTITIONS) + '; do if [ -d "$d" ]; then echo PRESENT:$d; else echo ABSENT:$d; fi; done')
         original_fonts = font_hashes()
+        paths_text = root('for p in ' + shlex.join(sorted(original_fonts)) +
+                          '; do c=$(readlink -f "$p") || exit 1; '
+                          'printf "%s\\t%s\\n" "$p" "$c"; done')
+        original_paths = {}
+        for line in paths_text.splitlines():
+            path, separator, canonical = line.partition('\t')
+            if not separator or not canonical.startswith('/') or path in original_paths:
+                raise RuntimeError('Incomplete or duplicated original font path identity')
+            original_paths[path] = canonical
+        if set(original_paths) != set(original_fonts):
+            raise RuntimeError('Original font alias identity set differs from stock hashes')
+        report['stock_font_canonical_paths'] = original_paths
         # Keep the actual untouched AOSP collection for reproducible compiler
         # diagnostics. Never pull a mounted candidate or modify the stock font.
         stock_collection = '/system/fonts/NotoSansCJK-Regular.ttc'

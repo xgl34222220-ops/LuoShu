@@ -305,3 +305,55 @@ APK SHA-256: `0cbfde8bb044f15be56ab05323bbc42586b79ca85dc4f030c8861c41effd24ab`.
 The Root workflow now pins this exact run, source and module digest. Its next
 full gate must demonstrate generation, completed activation boot, stock restore,
 App checks and cleanup; this CI pass alone does not close Android activation.
+
+## Continued remote verification and stock-alias correction
+
+A fresh remote check found the original branch at
+`a2b24d7db1df1e6ebe0048a28b24aba54a52964c`, PR #264 still open as a draft,
+and no in-progress build or Root run. The worktree was restored from that same
+branch after automated workspace maintenance. No replacement implementation or
+new branch was created.
+
+The freshly downloaded evidence for
+[Root run 37132842902](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37132842902)
+was checked against artifact digest
+`f6736991111ec1211ae1b8d0f23a05a62c95d16b960d4e3efc5d1f88665918af`.
+All five original CFF2 faces compiled with their original variation axes. The
+background engine/finalizer completed, three concurrent finalizers retained the
+same generation, worker sidecars cleared, and the composite reboot completed
+with a new kernel identity and Enforcing SELinux. Eleven recorded module boots
+passed. The current composite task had a complete crash-free generation log.
+
+The run nevertheless FAILED at the post-boot assertion:
+`Live target differs from committed payload: /system/fonts/DroidSans-Bold.ttf`.
+Earlier actual mount evidence proves this original AOSP alias resolves to
+`/system/fonts/Roboto-Regular.ttf`. The generic composite publishes that
+canonical slot; demanding another payload file named after the alias falsely
+rejects these identical live/canonical bytes.
+
+The gate now records every original font's canonical path before installation,
+requires that alias identity to survive, compares the changed font with the
+committed canonical slot, and requires the exact file or parent-directory mount
+to map to that module payload path. Missing bytes, changed original aliases,
+conflicting alias payloads, wrong sources and lookalike destinations still fail.
+This is an assertion correction; the candidate runtime and all 17 frozen
+mounting files remain unchanged. The actual restore/App checks still must run
+in a new full gate, and the preceding partial run cannot satisfy them.
+
+This continuation reran 77 host harness regressions, including seven new alias
+cases, and the 17-file immutable boundary. All passed. Twelve previously
+captured A/B mount proofs also passed a diagnostic replay of the corrected
+predicate; this replay is not a new Android delivery qualification. The candidate
+artifact was downloaded again, with provenance, ZIP/APK digests, eleven runtime
+files, all 17 frozen files and the bundled APK identity independently verified.
+It remains the exact runtime commit `d3002e8`, CI run `37131915487`, module
+digest `0c8edb56379eb06ac94214167be835a87159a34edfd8111beb1e02428242eb98`.
+
+Native evidence is kept scoped: the progress-reader SIGSEGVs from diagnostic
+run `37129497468` identify toybox/bionic regex execution, and the candidate's
+current composite log contains none. The later run's one remaining tombstone
+belongs to the immutable baseline's injected commit-failure task
+`1791041277-7064`, before candidate installation; both candidate error-path
+crash buffers are empty. The reference baseline is not patched to erase this
+observation. OEM phones, native ARM64 execution and physical-device font
+coverage/geometry/performance remain unverified.
