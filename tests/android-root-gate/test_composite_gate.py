@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from composite_gate import COLLECTION_TARGET, collection_blockers, composite_blockers, fields, last_json, run
+from composite_gate import COLLECTION_TARGET, collection_blockers, composite_blockers, fields, last_json, run, runtime_log_evidence
 from commit_lock_device import fd_observation
 
 
@@ -24,6 +24,7 @@ def valid_composite():
         task=dict(status='ok', data=dict(sources, task='axes-1', state='success')),
         axes_task=dict(sources, task='axes-1', childTask='mix-1', state='success'),
         engine_task=dict(task='mix-1', state='success'),
+        generation_runtime=dict(result='PASS', task='mix-1', crashLines=[], logSha256='a' * 64),
         background_finalize=dict(requestId='mix-request-123', state='success'),
         generation_manifest=generation, next_state=dict(generation, state='prepared', font='mix'),
         next_payload_hashes={'/next/font.otf': 'e' * 64,
@@ -60,6 +61,18 @@ class CompositeVerdictTests(unittest.TestCase):
         report['background_finalize']['state'] = 'failed'
         report['task']['data']['state'] = 'running'
         self.assertTrue(composite_blockers(report))
+
+    def test_successful_engine_does_not_hide_native_crashes_in_this_task(self):
+        log = '[time] mix start: cjk=a latin=b digit=b task=mix-1\nSegmentation fault \n'
+        evidence = runtime_log_evidence(log, 'mix-1')
+        self.assertEqual('FAIL', evidence['result'])
+        report = valid_composite(); report['generation_runtime'] = evidence
+        self.assertTrue(composite_blockers(report))
+        with self.subTest('missing complete task log'):
+            self.assertEqual('FAIL', runtime_log_evidence('commit succeeded', 'mix-1')['result'])
+        log = ('[time] mix start: cjk=a task=prior\nSegmentation fault \n'
+               '[time] mix start: cjk=a task=mix-1\nactual generation completed\n')
+        self.assertEqual('PASS', runtime_log_evidence(log, 'mix-1')['result'])
 
     def test_stale_collection_or_structural_only_proof_cannot_pass(self):
         for key in ('requestId', 'sourceSha256', 'stockSha256', 'outputSha256', 'target', 'stockFaces'):
@@ -187,6 +200,7 @@ class CompositeVerdictTests(unittest.TestCase):
                     if command.startswith('tail -n 240 '):
                         marker_reads += 1
                         return ('monitor finishing' if marker_reads == 1 else
+                                '[time] mix start: cjk=a latin=b digit=b task=mix-1\n'
                                 'legacy-v14 composite task committed for next boot: mix-1')
                     if 'font_mix_controller.sh status' in command:
                         return json.dumps(expected['task'])

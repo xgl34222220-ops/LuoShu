@@ -4,6 +4,7 @@
 No replacement engine or synthetic success state is installed. The entry, frozen
 engine, monitor, finalizer and next-boot mount path all come from the candidate.
 """
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -28,6 +29,19 @@ def last_json(text):
 
 
 COLLECTION_TARGET = '/system/fonts/NotoSansCJK-Regular.ttc'
+
+
+def runtime_log_evidence(log, task):
+    lines = log.splitlines()
+    starts = [index for index, line in enumerate(lines)
+              if ' mix start:' in line and line.rpartition('task=')[2].strip() == task]
+    if not starts:
+        return {'result': 'FAIL', 'task': task, 'reason': 'Current engine start marker absent'}
+    current = lines[starts[-1]:]
+    crashes = [line for line in current if re.search(
+        r'(?:^|\]\s*)(?:Segmentation fault\b|Fatal signal [0-9]+\b|Aborted\b)', line.strip())]
+    return {'result': 'FAIL' if crashes else 'PASS', 'task': task, 'crashLines': crashes,
+            'logSha256': hashlib.sha256('\n'.join(current).encode()).hexdigest()}
 
 
 def collection_blockers(report):
@@ -90,6 +104,10 @@ def composite_blockers(report):
         task = report.get('task', {}).get('data', {})
         axes = report.get('axes_task', {})
         child = report.get('engine_task', {})
+        runtime = report.get('generation_runtime', {})
+        if (runtime.get('result') != 'PASS' or runtime.get('task') != child.get('task') or
+                runtime.get('crashLines') != [] or not re.fullmatch('[0-9a-f]{64}', runtime.get('logSha256', ''))):
+            errors.append('current composite native-crash-free log unproven')
         final = report.get('background_finalize', {})
         manifest = report.get('generation_manifest', {})
         state = report.get('next_state', {})
@@ -205,8 +223,14 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
             log = root('tail -n 240 ' + module + '/logs/fontswitch.log')
             marker = 'legacy-v14 composite task committed for next boot: ' + child.get('task', 'NO_TASK')
             if marker in log:
-                report['background_monitor_committed'] = True
+                report['generation_runtime'] = runtime_log_evidence(log, child['task'])
+                if report['generation_runtime'].get('reason'):
+                    log = root('cat ' + module + '/logs/fontswitch.log')
+                    report['generation_runtime'] = runtime_log_evidence(log, child['task'])
                 (Path(output) / 'legacy-composite.log').write_text(log)
+                if report['generation_runtime']['result'] != 'PASS':
+                    raise RuntimeError('Current composite native crash or complete log unproven')
+                report['background_monitor_committed'] = True
                 break
         time.sleep(1)
     else:

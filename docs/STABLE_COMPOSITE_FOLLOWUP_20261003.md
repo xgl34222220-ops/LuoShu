@@ -249,3 +249,59 @@ caller or cause. They remain an open runtime/AVD diagnostic item. Actual App
 root/library timing, App apply and final cleanup acceptance were not reached.
 Do not describe the full Android gate, latest guard package, or OEM phones as
 qualified. The draft and immutable reproduction pin remain, with no release.
+
+## Variable collection and Android progress fix (23:00 CST continuation)
+
+Diagnostic [Root run 37129497468](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37129497468)
+used the preceding static-only candidate. Its ten baseline/candidate lifecycle
+boots passed and restored stock fonts, then the composite correctly failed on
+the stock variable collection. The exact untouched Android 15 stock TTC was
+preserved: 32,355,424 bytes, SHA-256
+`3e7e5afaac2c6d872592d76abedac03a51c6f0fc42d11e311ff2816a6c368afe`.
+It contains five ordered JP/KR/SC/TC/HK CFF2 faces with `wght=400..900`.
+
+The compiler now handles variable glyf/CFF2 collections while retaining the
+original indexes, variation metadata, untouched glyph variation, and the stock
+layout/metric contract. Replaced slots use the selected donor's fixed outlines
+and advances at every target-axis position; this does not create a new varying
+donor family. Original HVAR rows are retained, with only replacement slots
+mapped to added zero rows. For glyf, original vertical phantom-point deltas and
+origins remain bound and new unhinted glyphs receive adequate maxp capacity.
+CFF2 keeps original FD/private dictionaries and variation stores while inserting
+valid widthless CFF2 charstrings. A CFF2 target without VORG and a glyf target
+with independent VVAR top-side-bearing maps still fail before publication.
+
+The same Android diagnostic captured four native SIGSEGVs in system toybox
+`sed`'s greedy UTF-8 progress regex (`mstep`, `mwalk`, `regexec`), rather than
+in the font compiler or bundled Python. Both mix pollers now use a finite
+ASCII numeric-token reader; the remaining progress-message regex uses the C
+locale. The Root composite gate also rejects a current task's native-crash
+log even if its engine reports success. No frozen mount file changes.
+
+Local checks passed all 27 compiler regressions and all 70 Root-harness tests.
+The exact stock five-face CFF2 fixture compiled and independently loaded with
+FreeType at default, minimum, midpoint and maximum axis positions. Its fixture
+output was 102,657,856 bytes, taking 32.698 seconds and a 298,860 KiB peak RSS
+on this host. The ten-face static upstream fixture also passed: five faces
+compiled and five retained. These synthetic-donor host figures are not Android
+or phone performance measurements.
+
+The candidate workflow now requires the exact Android 15 CFF2 fixture, fetched
+from immutable AOSP commit `1763da7de494446263d6e6b7b9e9328eac8ecdd8`
+and checked against the captured stock digest before testing. A missing font,
+failed variation comparison or failed FreeType load blocks candidate packaging.
+The new runtime source is `d3002e830f10977a263701864fd1c2ee19f0e8d7`.
+Its own complete candidate CI, artifact verification and Root activation/restore
+results are required; earlier static-only package results do not qualify it.
+
+[Candidate CI 37131915487](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37131915487)
+completed successfully at 23:17 CST: source checks, mandatory supplemental gates,
+27 compiler regressions, both real static/variable font checks, readiness checks,
+Android JVM tests/lint and App/module packaging passed. Independent download
+verification matched the source's nine reviewed runtime files, all 17 immutable
+mount-file digests, APK/module checksums, source provenance and bundled APK.
+Module SHA-256: `0c8edb56379eb06ac94214167be835a87159a34edfd8111beb1e02428242eb98`.
+APK SHA-256: `0cbfde8bb044f15be56ab05323bbc42586b79ca85dc4f030c8861c41effd24ab`.
+The Root workflow now pins this exact run, source and module digest. Its next
+full gate must demonstrate generation, completed activation boot, stock restore,
+App checks and cleanup; this CI pass alone does not close Android activation.
