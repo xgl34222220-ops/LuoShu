@@ -66,6 +66,7 @@ def valid_delivery():
         'imported_sha256': 'e'*64, 'import_result': {'status': 'ok', 'data': {'kind': 'font',
             'id': 'LuoShuAxisGate', 'supportsCjk': True, 'duplicate': False}},
         'target_fatal': False, 'anr': False, 'hidden_axis_visible': False, 'cjk_card_scanned_to_next_slot': True,
+        'next_slot_detail_bounds': '[0,150][200,190]',
         'observed_labels': ['字宽', '纹理细节', 'XTRA', '可变字体', '英文字形']}
     source = {'snapshot_digest': 'b'*64, 'source_fingerprint': 'font-selection-v1:' + 'c'*64}
     report['app_apply']['input_events'] = [dict(identity, event='snapshot', **source),
@@ -130,6 +131,11 @@ class VerdictTests(unittest.TestCase):
                     elif mutation == 'id': data['id'] = 'other-font'
                     else: data['supportsCjk'] = False
                 self.assertTrue(delivery_blockers(r))
+
+    def test_card_scan_requires_actual_detail_heading_coordinates(self):
+        for invalid in ('', 'summary-only', '[0,0][0,0]extra'):
+            r = valid_delivery(); r['app_axes']['next_slot_detail_bounds'] = invalid
+            self.assertTrue(delivery_blockers(r))
     def test_diagnostic_fake_pass_blocked(self):
         r=valid_delivery();r.update(run_scope='APP_DIAGNOSTIC_ONLY',delivery_gate='PASS')
         self.assertTrue(delivery_blockers(r))

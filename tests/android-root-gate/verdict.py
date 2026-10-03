@@ -189,6 +189,7 @@ def delivery_blockers(report):
             or axes_ui.get('stock_hashes_unchanged') is not True or axes_ui.get('target_fatal') is not False
             or axes_ui.get('anr') is not False or axes_ui.get('hidden_axis_visible') is not False
             or axes_ui.get('cjk_card_scanned_to_next_slot') is not True
+            or not re.fullmatch(r'\[\d+,\d+\]\[\d+,\d+\]', axes_ui.get('next_slot_detail_bounds', ''))
             or not all(label in observed for label in ('字宽', '纹理细节', 'XTRA', '可变字体', '英文字形'))
             or any(label in observed for label in ('HIDN', '内置参数'))):
         errors.append('actual App font-declared axis UI/read-only evidence incomplete or failed')

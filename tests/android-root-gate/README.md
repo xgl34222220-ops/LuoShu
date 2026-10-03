@@ -84,6 +84,11 @@ live App PID, absent target fatal/ANR and unchanged system-font hashes are all
 required. Cleanup removes only this new fixture, its importer-generated config
 and its owned intake files. Selecting a font is UI evidence; it does not prove
 App composite generation, native ARM64 phone rendering or OEM behavior.
+The composition summary repeats slot titles: selectors must bind the actual
+detailed CJK heading/explanation and ignore clickable summary ancestors. Only
+the following detailed card can terminate the full-card scan. The recorded
+`fixtures/axis-navigation-37160499707.xml` is a selector regression fixture;
+replaying it is not a new Android run or evidence of successful axis display.
 
 The legacy CLI composite component also requires the generated CJK collection's
 sidecar and finalization report. They must match this request, source-composite
