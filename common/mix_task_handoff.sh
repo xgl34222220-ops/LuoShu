@@ -21,6 +21,40 @@ luoshu_mix_progress_percent() {
     ' "$1" 2>/dev/null
 }
 
+luoshu_mix_progress_message() {
+    # Our atomic progress writer emits literal UTF-8. Decode its quoted string
+    # in a bounded byte loop, not a greedy regex or another Python invocation.
+    # Unsupported escapes/malformed records fall back to the persisted message.
+    LC_ALL=C awk '
+        {
+            key="\"message\""; p=index($0,key); if (!p) next
+            s=substr($0,p+length(key)); sub(/^[ \t\r]*/,"",s)
+            if (substr(s,1,1)!=":") exit
+            s=substr(s,2); sub(/^[ \t\r]*/,"",s)
+            if (substr(s,1,1)!="\"") exit
+            for (i=2; i<=length(s) && i<=4098; i++) {
+                c=substr(s,i,1)
+                if (c=="\"") {
+                    rest=substr(s,i+1); sub(/^[ \t\r]*/,"",rest)
+                    if (substr(rest,1,1)!="," && substr(rest,1,1)!="}") exit
+                    found=1; exit
+                }
+                if (c=="\\") {
+                    c=substr(s,++i,1)
+                    if (c=="\"" || c=="\\" || c=="/") value=value c
+                    else if (c!="" && index("bfnrt",c)) value=value " "
+                    else exit
+                } else {
+                    if (c ~ /[[:cntrl:]]/) exit
+                    value=value c
+                }
+            }
+            exit
+        }
+        END { if (found) print value; else exit 1 }
+    ' "$1" 2>/dev/null
+}
+
 luoshu_mix_task_value() {
     _file="$1"
     _key="$2"

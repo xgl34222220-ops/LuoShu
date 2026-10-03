@@ -309,12 +309,15 @@ worker() {
         if [ "$_base_task" = "$_child" ]; then
             _base_message=$(read_value "$BASE_TASK_FILE" message)
             _base_percent=0
+            _progress_message=''
             if [ -s "$PROGRESS_FILE" ]; then
                 _base_percent=$(luoshu_mix_progress_percent "$PROGRESS_FILE")
+                _progress_message=$(luoshu_mix_progress_message "$PROGRESS_FILE")
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
             _mapped=$((36 + (_base_percent * 64 / 100)))
             [ "$_mapped" -le 99 ] || _mapped=99
+            [ -z "$_progress_message" ] || _base_message="$_progress_message"
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             if [ "$_base_state" = running ] && [ "$_loops" -ge 3 ]; then
                 if ! luoshu_task_pid_alive "$CONFIG_DIR/mix_worker.pid" "$_child"; then

@@ -71,6 +71,23 @@ def run_cases(module, shell):
             if result.stdout.strip() != expected or result.returncode != (0 if expected else 1):
                 raise RuntimeError(f'{name}: unexpected message {result.returncode}: {result.stdout!r} {result.stderr!r}')
             results.append({'name': name, 'result': 'PASS'})
+        progress_messages = [
+            ('progress-chinese-native-regression', '{"stage":"collection","message":"正在编译本机 CJK 集合面 1/5","percent":95}', '正在编译本机 CJK 集合面 1/5'),
+            ('progress-escaped-quote-and-path', json.dumps({'message': '字体 "示例" 路径 C:\\Fonts'}, ensure_ascii=False), '字体 "示例" 路径 C:\\Fonts'),
+            ('progress-control-escape', json.dumps({'message': '失败\nstate=success'}, ensure_ascii=False), '失败 state=success'),
+            ('progress-truncated-message', '{"message":"未完成', ''),
+            ('progress-invalid-string-tail', '{"message":"未完成"oops}', ''),
+            ('progress-unsupported-unicode-escape', '{"message":"\\u4e2d"}', ''),
+            ('progress-oversized-message', json.dumps({'message': 'x' * 5000}), ''),
+        ]
+        # Even a broken helper must not start Python in the progress loop.
+        for name, output, expected in progress_messages:
+            response.write_text(output)
+            result = call('luoshu_task_helper() { echo unexpected-python >&2; return 99; }; '
+                          'luoshu_mix_progress_message "$1"', response)
+            if result.stdout.strip() != expected or result.returncode != (0 if expected else 1) or result.stderr:
+                raise RuntimeError(f'{name}: unexpected progress {result.returncode}: {result.stdout!r} {result.stderr!r}')
+            results.append({'name': name, 'result': 'PASS'})
     return {'schema': 'luoshu-mix-handoff-contract-v1', 'result': 'PASS',
             'environment': 'ANDROID' if Path('/system/bin/sh').exists() else 'HOST_ONLY',
             'module': str(module), 'shell': shell, 'cases': results, 'case_count': len(results),
