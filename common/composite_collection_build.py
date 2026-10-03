@@ -272,6 +272,12 @@ def replace_face(font, donor, recordings):
             glyph.recalcBounds(font['glyf'])
             if not hasattr(glyph, 'xMin'):
                 glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
+            # recalcBBoxes=False keeps the stock frame but also disables maxp
+            # recomputation. Retain stock interpreter limits while reserving
+            # enough point/contour capacity for the newly imported outlines.
+            maxp = font['maxp']
+            maxp.maxPoints = max(maxp.maxPoints, len(glyph.getCoordinates(font['glyf'])[0]))
+            maxp.maxContours = max(maxp.maxContours, glyph.numberOfContours)
             if 'fvar' in font and bearing != glyph.xMin:
                 raise ValueError('可变 TrueType 的来源侧距必须等于轮廓 xMin')
             if old_origin is not None:

@@ -281,6 +281,53 @@ class CollectionBuildTest(unittest.TestCase):
     def test_variable_glyf_keeps_vertical_phantoms_when_outline_height_changes(self):
         self.check_variable(vertical=True)
 
+    def test_replaced_width_and_side_bearings_do_not_edit_shared_stock_deltas(self):
+        variable = self.root / 'variable.font'; variable_fixture(variable)
+        with TTFont(variable) as font:
+            table = font['HVAR'].table
+            order = font.getGlyphOrder()
+            table.LsbMap = buildVarIdxMap([0] * len(order), order)
+            table.RsbMap = buildVarIdxMap([0] * len(order), order)
+            font.save(variable)
+        collection = TTCollection(); collection.fonts = [TTFont(variable)]
+        collection.save(self.stock); collection.close()
+        self.run_build()
+        from fontTools.varLib.varStore import VarStoreInstancer
+        with TTFont(self.output, fontNumber=0) as result:
+            table = result['HVAR'].table
+            interpolate = VarStoreInstancer(table.VarStore, result['fvar'].axes, {'wght': 1})
+            for field in ('AdvWidthMap', 'LsbMap', 'RsbMap'):
+                mapping = getattr(table, field).mapping
+                self.assertEqual(0, interpolate[mapping[result.getBestCmap()[ord('中')]]])
+                self.assertEqual(100, interpolate[mapping[result.getBestCmap()[ord('Ω')]]])
+
+    def test_cff2_without_vertical_origin_is_rejected_without_replacing_prior_output(self):
+        variable = self.root / 'variable.font'; variable_fixture(variable, cff2=True, vertical=True)
+        with TTFont(variable) as font:
+            del font['VORG']; font.save(variable)
+        collection = TTCollection(); collection.fonts = [TTFont(variable)]
+        collection.save(self.stock); collection.close()
+        self.output.write_bytes(b'previous generation')
+        with self.assertRaisesRegex(ValueError, '独立垂直原点'):
+            self.run_build()
+        self.assertEqual(b'previous generation', self.output.read_bytes())
+
+    def test_new_glyf_outlines_reserve_enough_points_and_contours_in_maxp(self):
+        self.collection()
+        with TTFont(self.source) as font:
+            name = font.getBestCmap()[ord('中')]
+            pen = TTGlyphPen(None)
+            for left, right in ((20, 250), (300, 550)):
+                pen.moveTo((left, 0)); pen.lineTo((right, 0)); pen.lineTo((right, 700))
+                pen.lineTo((left, 700)); pen.closePath()
+            font['glyf'][name] = pen.glyph(); font.save(self.source)
+        self.run_build()
+        with TTFont(self.output, fontNumber=0) as result:
+            self.assertGreaterEqual(result['maxp'].maxPoints, 8)
+            self.assertGreaterEqual(result['maxp'].maxContours, 2)
+        from composite_collection_real_test import freetype_load
+        freetype_load(self.output, [0, 1])
+
     def test_ambiguous_stock_encoded_slot_is_rejected(self):
         self.collection()
         with TTFont(self.source) as font:
