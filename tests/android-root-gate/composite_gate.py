@@ -196,6 +196,7 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
             raise RuntimeError('Legacy composite parent task identity changed')
         if any(value.get('state') in ('failed', 'error', 'cancelled') for value in (axes, child, final)):
             report['failure_log'] = root('tail -n 180 ' + module + '/logs/fontswitch.log', required=False)
+            (Path(output) / 'legacy-composite-failure.log').write_text(report['failure_log'])
             raise RuntimeError('Legacy composite generation/background finalizer failed')
         if all(value.get('state') == 'success' for value in (axes, child, final)):
             # success is written before the monitor's final mode/log writes.

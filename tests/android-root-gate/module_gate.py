@@ -138,6 +138,16 @@ def run_gate(adb, magisk, baseline, candidate, output):
             raise RuntimeError('Only authorized Enforcing disposable AVD is supported')
         report['font_directories'] = root('for d in ' + ' '.join('/' + part + '/fonts' for part in FONT_PARTITIONS) + '; do if [ -d "$d" ]; then echo PRESENT:$d; else echo ABSENT:$d; fi; done')
         original_fonts = font_hashes()
+        # Keep the actual untouched AOSP collection for reproducible compiler
+        # diagnostics. Never pull a mounted candidate or modify the stock font.
+        stock_collection = '/system/fonts/NotoSansCJK-Regular.ttc'
+        stock_copy = output / 'stock-NotoSansCJK-Regular.ttc'
+        command(['pull', stock_collection, str(stock_copy)])
+        copied_hash = hashlib.sha256(stock_copy.read_bytes()).hexdigest()
+        if copied_hash != original_fonts.get(stock_collection):
+            raise RuntimeError('Diagnostic collection is not the original system font')
+        report['stock_collection_source'] = {'path': stock_collection, 'sha256': copied_hash,
+                                             'bytes': stock_copy.stat().st_size}
         archives = [('candidate', candidate)] if diagnostic_only else [('baseline', baseline), ('candidate', candidate)]
         for label, archive in archives:
             cycle = {'label': label, 'result': 'FAIL', 'zip_sha256': hashlib.sha256(Path(archive).read_bytes()).hexdigest()}
@@ -441,6 +451,20 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 report['app_apply']['diagnostic_manager_trace'] = {'scope': 'DIAGNOSTIC direct manager ONLY', 'error': str(trace_error), 'command_evidence': report['steps'][-1]}
             report['app_apply']['post_diagnostic_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'after-cli-diagnostic')
     finally:
+        # Native crashes in finite composite children can be hidden by their
+        # shell callers. Capture the active rooted guest before teardown, also
+        # when generation fails before a reboot is attempted.
+        for filename, query in (
+                ('module-final-crash-log.txt', 'logcat -b crash -d -t 2000'),
+                ('module-final-system-log.txt', 'logcat -b all -d -t 4000'),
+                ('module-final-dmesg.txt', 'dmesg | tail -n 1200'),
+                ('module-final-tombstones.txt', 'for f in /data/tombstones/tombstone_*; do '
+                 'case "$f" in *.pb) continue;; esac; [ -f "$f" ] || continue; '
+                 'echo "GATE_TOMBSTONE:$f"; head -c 262144 "$f"; done')):
+            try:
+                (output / filename).write_text(root(query, timeout=45, required=False) + '\n')
+            except Exception as error:
+                report.setdefault('native_diagnostic_errors', {})[filename] = str(error)
         if granted_uid is not None:
             try:
                 shell('am force-stop ' + PACKAGE)
