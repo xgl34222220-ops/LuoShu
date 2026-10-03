@@ -107,3 +107,9 @@ and the nested generator received the same private copy before testing TERM and
 descendant cleanup. Candidate supplemental gates now fail the workflow and save
 their failing log as an artifact. A new mandatory CI run must pass every
 supplemental check before this review's candidate can be described as passing.
+
+Mandatory run `37115015590` at `a6a6d33` passed the corrected process test and
+switch timeout/cancellation checks. It correctly blocked packaging when the
+inventory scanner test could not import FontTools in its own host process:
+the fixture only updated PYTHONPATH for subprocesses. The test now also adds
+the prepared bundled pure-Python package directory to its own import path.
