@@ -357,3 +357,72 @@ belongs to the immutable baseline's injected commit-failure task
 crash buffers are empty. The reference baseline is not patched to erase this
 observation. OEM phones, native ARM64 execution and physical-device font
 coverage/geometry/performance remain unverified.
+
+## Complete qualification result — run 37152531513
+
+[The full Root run](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37152531513)
+completed successfully on 2026-10-03 at 21:10 UTC (14:10 America/Los_Angeles).
+Its harness commit is `85af499fb850ba4974b43a9fc55ea242cb3c0a7e`; the
+runtime remains the independently verified candidate `d3002e8` from build
+`37131915487`. The complete downloaded artifact is 22,156,863 bytes with SHA-256
+`06931b7789d34117102d4df363cf4c1ed9aea91c56380cddf9f9bcf1a931fad6`.
+It was verified again against the current source's fail-closed predicates.
+All blockers are empty. [Structured evidence](ROOT_ANDROID_QUALIFICATION_37152531513.json)
+records current-run proofs and all twelve measured UI samples.
+
+| Current-run check | Result |
+| --- | --- |
+| Root harness regressions in CI and local continuation | 77 passed |
+| Immutable v1.1.1 mounting/commit boundary | All 17 files unchanged |
+| Actual stock five-face CFF2 compilation, indexes and axes | PASS |
+| Current composite engine/monitor, commit lock and three finalizer replays | PASS |
+| Baseline/candidate lifecycle, composite and actual-App boots | 14 completed kernel reboots, Enforcing |
+| Original aliases, actual bytes and exact mount source | 19 proofs independently recomputed; two original aliases preserved |
+| Composite activation and restoration to original system-font hashes | PASS |
+| Actual App Root access, 100/1000 synthetic libraries, three cold/warm repetitions each | PASS, twelve verified target-count frames, no target fatal/ANR |
+| Actual App selected-font input validation, apply, completed boot and stock restore | PASS |
+| Installed Magisk task/request ownership and descendant cleanup | 4 task cases and 8 request cases passed |
+| Final transient task space and temporary App policy | Empty workspace; policy revoked |
+| Emulator ownership/cleanup and KVM security metadata | Both emulators reaped; metadata unchanged |
+
+The generated variable collection has SHA-256
+`b8c9cba7c6c48a27f5d5f7a16234dde55910cf35824ee5247411748d73ba6da9`.
+It is the actual mounted payload verified after the completed composite boot,
+rather than a renamed single-face font or host-only compiler result. Replaced
+glyphs retain the selected fixed donor weight; untouched glyph variation and
+original variation-axis metadata remain bound as described above.
+
+The first verified target-count library frame, measured from the actual library
+open, took 433–520 ms for the 100-file cold-launch samples and 342–401 ms on
+reopen; the 1000-file samples took 456–1091 ms and 341–374 ms respectively.
+The app_start sample also includes scripted navigation before opening the
+library; its whole elapsed time is not a direct phone cold-start metric.
+These are synthetic libraries containing two unique TTF contents in the
+x86_64/nativebridge AVD. They do not establish a physical-phone latency or
+1000-distinct-real-font result.
+
+Fresh inspection of diagnostic run `37129497468` resolves the earlier
+unlabelled progress fault reports. The complete capture contains four progress
+faults, plus separate baseline error-message faults; the earlier reported
+three lines are not the final event count.
+
+| Progress fault PID | UTC timestamp | Actual process/backtrace |
+| --- | --- | --- |
+| 6204 | 2026-10-03 14:48:25 | toybox sed on composite_progress.json; bionic mstep → mwalk → regexec |
+| 6378 | 2026-10-03 14:48:27 | Same reader and native regex stack |
+| 6504 | 2026-10-03 14:48:29 | Same reader and native regex stack |
+| 6716 | 2026-10-03 14:48:34 | Additional capture of the same reader and stack |
+
+The current candidate's generation log is crash-free, both candidate error-path
+crash buffers are empty, and independent native-command classification found
+no unexpected candidate/module/App crash. Two current-run tombstones belong
+to the original baseline's invalid-switch/commit-failure tasks
+`1791060592-4432` and `1791060601-7070`; they are recorded as baseline
+observations, not removed or described as candidate faults.
+
+The AOSP disposable Root gate is now closed successfully. Physical OnePlus 15 /
+Redmi K80 Ultra coverage on ColorOS/HyperOS, pixel geometry, real phone/native
+ARM64 startup latency and backup-restore API remain unverified. The unsupported
+CFF2-without-VORG and independent-VVAR-top-bearing cases still fail closed.
+No hook, new mounting strategy, device mutation, expanded permission, merge
+to main, formal release or deployment is part of this continuation.

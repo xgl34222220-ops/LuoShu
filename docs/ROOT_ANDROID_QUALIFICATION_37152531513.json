@@ -1,0 +1,429 @@
+{
+  "result": "PASS",
+  "blockers": [],
+  "artifact_sha256": "06931b7789d34117102d4df363cf4c1ed9aea91c56380cddf9f9bcf1a931fad6",
+  "runtime_source": "d3002e830f10977a263701864fd1c2ee19f0e8d7",
+  "module_sha256": "0c8edb56379eb06ac94214167be835a87159a34edfd8111beb1e02428242eb98",
+  "apk_sha256": "0cbfde8bb044f15be56ab05323bbc42586b79ca85dc4f030c8861c41effd24ab",
+  "verified_module_reboots": 14,
+  "collection_faces": 5,
+  "collection_output_sha256": "b8c9cba7c6c48a27f5d5f7a16234dde55910cf35824ee5247411748d73ba6da9",
+  "generation_runtime": {
+    "result": "PASS",
+    "task": "mix-1791061153-5609",
+    "crashLines": [],
+    "logSha256": "707217a349fb8892a252b9261a347f5b1d34a45215e09019d2cb13e0efc5c6d9"
+  },
+  "canonical_mount_proofs": 19,
+  "alias_count": 2,
+  "composite_result": "PASS",
+  "app_apply_result": "PASS",
+  "library_timings": [
+    {
+      "result": "PASS",
+      "inventory_count": 100,
+      "samples": [
+        {
+          "pid": "4690",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 116432,
+          "first_inventory_frame_elapsed_ms": 13941,
+          "library_open_to_inventory_first_ms": 520,
+          "first_frame_ms": 116432,
+          "first_frame_elapsed_ms": 13941,
+          "library_open_to_verified_ms": 1478,
+          "library_open_to_first_ms": 520,
+          "kind": "app_start",
+          "count": 100,
+          "verified": true,
+          "start_ms": 102491,
+          "frame_ms": 117390,
+          "elapsed_ms": 14899,
+          "repetition": 0,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "4690",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 126767,
+          "first_inventory_frame_elapsed_ms": 371,
+          "library_open_to_inventory_first_ms": 371,
+          "first_frame_ms": 126767,
+          "first_frame_elapsed_ms": 371,
+          "library_open_to_verified_ms": 4154,
+          "library_open_to_first_ms": 371,
+          "kind": "library_open",
+          "count": 100,
+          "verified": true,
+          "start_ms": 126396,
+          "frame_ms": 130550,
+          "elapsed_ms": 4154,
+          "repetition": 0
+        },
+        {
+          "pid": "6363",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 141495,
+          "first_inventory_frame_elapsed_ms": 7891,
+          "library_open_to_inventory_first_ms": 462,
+          "first_frame_ms": 141495,
+          "first_frame_elapsed_ms": 7891,
+          "library_open_to_verified_ms": 786,
+          "library_open_to_first_ms": 462,
+          "kind": "app_start",
+          "count": 100,
+          "verified": true,
+          "start_ms": 133604,
+          "frame_ms": 141819,
+          "elapsed_ms": 8215,
+          "repetition": 1,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "6363",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 153561,
+          "first_inventory_frame_elapsed_ms": 401,
+          "library_open_to_inventory_first_ms": 401,
+          "first_frame_ms": 153561,
+          "first_frame_elapsed_ms": 401,
+          "library_open_to_verified_ms": 3447,
+          "library_open_to_first_ms": 401,
+          "kind": "library_open",
+          "count": 100,
+          "verified": true,
+          "start_ms": 153160,
+          "frame_ms": 156607,
+          "elapsed_ms": 3447,
+          "repetition": 1
+        },
+        {
+          "pid": "7071",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 170420,
+          "first_inventory_frame_elapsed_ms": 10527,
+          "library_open_to_inventory_first_ms": 433,
+          "first_frame_ms": 170420,
+          "first_frame_elapsed_ms": 10527,
+          "library_open_to_verified_ms": 2878,
+          "library_open_to_first_ms": 433,
+          "kind": "app_start",
+          "count": 100,
+          "verified": true,
+          "start_ms": 159893,
+          "frame_ms": 172865,
+          "elapsed_ms": 12972,
+          "repetition": 2,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "7071",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 182018,
+          "first_inventory_frame_elapsed_ms": 342,
+          "library_open_to_inventory_first_ms": 342,
+          "first_frame_ms": 182018,
+          "first_frame_elapsed_ms": 342,
+          "library_open_to_verified_ms": 3493,
+          "library_open_to_first_ms": 342,
+          "kind": "library_open",
+          "count": 100,
+          "verified": true,
+          "start_ms": 181676,
+          "frame_ms": 185169,
+          "elapsed_ms": 3493,
+          "repetition": 2
+        }
+      ],
+      "app_start": {
+        "median_ms": 12972,
+        "p95_ms": 14899,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      },
+      "library_open": {
+        "median_ms": 3493,
+        "p95_ms": 4154,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      }
+    },
+    {
+      "result": "PASS",
+      "inventory_count": 1000,
+      "samples": [
+        {
+          "pid": "7798",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 201227,
+          "first_inventory_frame_elapsed_ms": 11887,
+          "library_open_to_inventory_first_ms": 1091,
+          "first_frame_ms": 200511,
+          "first_frame_elapsed_ms": 11171,
+          "library_open_to_verified_ms": 1091,
+          "library_open_to_first_ms": 375,
+          "kind": "app_start",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 189340,
+          "frame_ms": 201227,
+          "elapsed_ms": 11887,
+          "repetition": 0,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "7798",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 211182,
+          "first_inventory_frame_elapsed_ms": 355,
+          "library_open_to_inventory_first_ms": 355,
+          "first_frame_ms": 211182,
+          "first_frame_elapsed_ms": 355,
+          "library_open_to_verified_ms": 4058,
+          "library_open_to_first_ms": 355,
+          "kind": "library_open",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 210827,
+          "frame_ms": 214885,
+          "elapsed_ms": 4058,
+          "repetition": 0
+        },
+        {
+          "pid": "12803",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 229252,
+          "first_inventory_frame_elapsed_ms": 11437,
+          "library_open_to_inventory_first_ms": 456,
+          "first_frame_ms": 229252,
+          "first_frame_elapsed_ms": 11437,
+          "library_open_to_verified_ms": 2020,
+          "library_open_to_first_ms": 456,
+          "kind": "app_start",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 217815,
+          "frame_ms": 230816,
+          "elapsed_ms": 13001,
+          "repetition": 1,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "12803",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 240094,
+          "first_inventory_frame_elapsed_ms": 374,
+          "library_open_to_inventory_first_ms": 374,
+          "first_frame_ms": 240094,
+          "first_frame_elapsed_ms": 374,
+          "library_open_to_verified_ms": 4123,
+          "library_open_to_first_ms": 374,
+          "kind": "library_open",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 239720,
+          "frame_ms": 243843,
+          "elapsed_ms": 4123,
+          "repetition": 1
+        },
+        {
+          "pid": "13517",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": true,
+          "first_inventory_frame_ms": 255981,
+          "first_inventory_frame_elapsed_ms": 9572,
+          "library_open_to_inventory_first_ms": 746,
+          "first_frame_ms": 255981,
+          "first_frame_elapsed_ms": 9572,
+          "library_open_to_verified_ms": 746,
+          "library_open_to_first_ms": 746,
+          "kind": "app_start",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 246409,
+          "frame_ms": 255981,
+          "elapsed_ms": 9572,
+          "repetition": 2,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "13517",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 268389,
+          "first_inventory_frame_elapsed_ms": 341,
+          "library_open_to_inventory_first_ms": 341,
+          "first_frame_ms": 268389,
+          "first_frame_elapsed_ms": 341,
+          "library_open_to_verified_ms": 3492,
+          "library_open_to_first_ms": 341,
+          "kind": "library_open",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 268048,
+          "frame_ms": 271540,
+          "elapsed_ms": 3492,
+          "repetition": 2
+        }
+      ],
+      "app_start": {
+        "median_ms": 11887,
+        "p95_ms": 13001,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      },
+      "library_open": {
+        "median_ms": 4058,
+        "p95_ms": 4123,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      }
+    }
+  ],
+  "final_workspace": {
+    "result": "PASS",
+    "entries": [],
+    "delayed_recheck_seconds": 1
+  },
+  "root_policy_revoked": true,
+  "runner_result": "PASS",
+  "baseline_native_commands": [
+    "sed -n s/.*\"message\":\"\\([^\"]*\\)\".*/\\1/p /data/adb/modules/LuoShu/config/switch_task.conf.output.1791060592-4432",
+    "sed -n s/.*\"message\":\"\\([^\"]*\\)\".*/\\1/p /data/adb/modules/LuoShu/config/switch_task.conf.output.1791060601-7070"
+  ],
+  "unexpected_native_commands": [],
+  "scope_limits": [
+    "AOSP API35 x86_64 with original ARM64 runtime via nativebridge; no native ARM64 or OEM-ROM claim",
+    "100/1000 independent filenames contain two original synthetic TTF contents",
+    "Baseline App performance and backup restore API not tested or counted as PASS"
+  ],
+  "schema": "luoshu-root-qualification-evidence-v1",
+  "root_run": 37152531513,
+  "root_harness_commit": "85af499fb850ba4974b43a9fc55ea242cb3c0a7e",
+  "candidate_build_run": 37131915487,
+  "root_artifact_id": 11284369523,
+  "local_harness_tests": 77,
+  "frozen_mount_files": 17,
+  "official_baseline_commit": "be39f598bfb921526851c5c4a2e92905dacf4ea7",
+  "library_summary": [
+    {
+      "synthetic_filenames": 100,
+      "unique_ttf_contents": 2,
+      "result": "PASS",
+      "verified_samples": 6,
+      "app_start": {
+        "meaning": "library-open to first verified target-count frame; app_start includes scripted navigation before open",
+        "milliseconds": [
+          520,
+          462,
+          433
+        ],
+        "median_ms": 462,
+        "range_ms": [
+          433,
+          520
+        ],
+        "script_start_to_verified_inventory_ms": [
+          13941,
+          7891,
+          10527
+        ]
+      },
+      "library_open": {
+        "meaning": "library-open to first verified target-count frame; app_start includes scripted navigation before open",
+        "milliseconds": [
+          371,
+          401,
+          342
+        ],
+        "median_ms": 371,
+        "range_ms": [
+          342,
+          401
+        ],
+        "script_start_to_verified_inventory_ms": [
+          371,
+          401,
+          342
+        ]
+      }
+    },
+    {
+      "synthetic_filenames": 1000,
+      "unique_ttf_contents": 2,
+      "result": "PASS",
+      "verified_samples": 6,
+      "app_start": {
+        "meaning": "library-open to first verified target-count frame; app_start includes scripted navigation before open",
+        "milliseconds": [
+          1091,
+          456,
+          746
+        ],
+        "median_ms": 746,
+        "range_ms": [
+          456,
+          1091
+        ],
+        "script_start_to_verified_inventory_ms": [
+          11887,
+          11437,
+          9572
+        ]
+      },
+      "library_open": {
+        "meaning": "library-open to first verified target-count frame; app_start includes scripted navigation before open",
+        "milliseconds": [
+          355,
+          374,
+          341
+        ],
+        "median_ms": 355,
+        "range_ms": [
+          341,
+          374
+        ],
+        "script_start_to_verified_inventory_ms": [
+          355,
+          374,
+          341
+        ]
+      }
+    }
+  ],
+  "root_artifact_created_utc": "2026-10-03T21:10:48Z"
+}
