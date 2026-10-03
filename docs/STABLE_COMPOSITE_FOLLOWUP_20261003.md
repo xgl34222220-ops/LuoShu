@@ -213,3 +213,39 @@ faces stay untouched. Three meaningful regressions bring the generator suite to
 20 passing tests. The already-running Android gate remains bound to its exact
 `339046f` Noto-CID candidate; this later guard needs its own CI/package evidence
 and must not be substituted into that immutable run's provenance.
+
+[Guard candidate build 37121394598](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37121394598)
+at `fe1e7f4d21d7875b1859e2efc22d3336409e78c2` passed all mandatory source,
+supplemental, readiness, App JVM/lint and packaging checks at 20:11 CST. Its raw
+log has no traceback or failing test suite. All 20 generator regressions passed;
+the independent Noto/FreeType check again passed all 10 indexes. Its CID output
+digest remained exactly `3733d095f16899cffcfd7bd45238bea0094d98f0abab86307b7f1fa9ff979a14`,
+confirming that this dependency guard leaves the tested Noto-CID output unchanged.
+The downloaded artifact's provenance, six reviewed runtime files, module/APK
+digests, embedded APK and all 17 frozen mounting hashes matched again.
+Module SHA-256: `3beca660d158e7bc1b63bc8466085584789427548f96f8321c0bba9c8ad02c42`.
+APK SHA-256: `640345af640252436fef1c5ea2246ed980414197e493ef72a397648f962e9242`.
+
+[Actual Android run 37120493760](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37120493760)
+finished with an overall failure / `delivery_gate: BLOCKED` at 20:04 CST.
+It used the exact earlier `339046f` module, not the later guard package. All ten
+baseline/candidate installation, A/B switch, injected-failure and stock-restore
+reboots completed with changed kernel IDs; the candidate's final restore returned
+the original stock hashes. Android fd/lock transport checks also passed.
+
+The actual CLI composite started and then failed in preparation with
+`本机 CJK 集合含可变目标面，当前集合编译器不能保留其完整轴契约`.
+This is the explicit fvar/CFF2 target rejection, before the engine's composite
+config/next-payload commit. The harness did not attempt the composite reboot;
+there was no 11th boot in this run. Axis/table details were not captured, so the
+exact variable outline kind must not be inferred from this combined guard.
+It does not establish successful Android activation of the static compiler,
+completion of the variable compiler, or a fix for every device's boot behavior.
+
+The composite log additionally contains three un-attributed `Segmentation fault`
+lines before that explicit rejection. The saved system log contains no matching
+native crash record or process identity; this evidence cannot identify their
+caller or cause. They remain an open runtime/AVD diagnostic item. Actual App
+root/library timing, App apply and final cleanup acceptance were not reached.
+Do not describe the full Android gate, latest guard package, or OEM phones as
+qualified. The draft and immutable reproduction pin remain, with no release.
