@@ -113,3 +113,20 @@ switch timeout/cancellation checks. It correctly blocked packaging when the
 inventory scanner test could not import FontTools in its own host process:
 the fixture only updated PYTHONPATH for subprocesses. The test now also adds
 the prepared bundled pure-Python package directory to its own import path.
+
+[Mandatory candidate build 37115397750](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37115397750)
+at `d64b3aa7bf2cb50b933bb0664ca0c081821a59a9` completed successfully at 18:20
+CST. Source checks, mandatory supplemental gates, readiness checks, Android JVM
+tests/lint and APK/module packaging all passed; the raw job log contains no
+suppressed failing check. All four real process tests, switch timeout/cancellation,
+quick mapping, hardlink sync and the scanner fixture passed. CI still lacks
+permission for the existing Google-provider mount-namespace experiment, which
+reports its host limitation; this is not a physical-device mount qualification.
+
+The downloaded artifact's provenance, outer ZIP digest, APK/module checksums,
+four changed runtime files, bundled APK identity and all 17 pinned mount hashes
+were independently verified against this source and the immutable baseline.
+Module SHA-256: `f5c4038275a8f90035c8aaaee97a8c0fc64190ad6bebdd4b9591e21b1ea20def`.
+APK SHA-256: `b01670eda2d542c19f56a39b1ec8ec1abd4e764a2c7df41181a7f423d12eaa3a`.
+These are host/build and artifact checks. The collection compiler and OEM-device
+delivery checks listed above remain outstanding; no release is published.
