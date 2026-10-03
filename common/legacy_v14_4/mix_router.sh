@@ -331,7 +331,8 @@ validate_mix_collections() (
     # The frozen generic mapper aliases a single-face composite to a .ttc
     # filename. AOSP references multiple collection indexes; publishing those
     # bytes can stop the next boot. Reject before removing any previous -next.
-    find "$MIX_STAGE" -type f \( -iname '*.ttc' -o -iname '*.otc' \) -print -quit 2>/dev/null | grep -q . || return 0
+    _collection_payload="${1:-$MIX_STAGE}"
+    find "$_collection_payload" -type f \( -iname '*.ttc' -o -iname '*.otc' \) -print -quit 2>/dev/null | grep -q . || return 0
     luoshu_task_runtime || return 1
     if [ "$_ltr_bundled" = 1 ]; then
         export PYTHONHOME="$_ltr_root"
@@ -339,7 +340,7 @@ validate_mix_collections() (
         export LD_LIBRARY_PATH="$_ltr_root/lib:$_ltr_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     fi
     exec "$_ltr_python" "$REALMOD/common/composite_collection_contract.py" \
-        --payload "$MIX_STAGE" --request "$(read_value "$MIX_STAGE_STATE" requestId)" \
+        --payload "$_collection_payload" --request "$(read_value "$MIX_STAGE_STATE" requestId)" \
         --output "$REALMOD/config/composite-font-contract.json"
 )
 
@@ -399,6 +400,7 @@ commit_mix_stage_if_needed() {
     # but before its small state file was committed. MIX_STAGE_STATE is retained
     # until both pieces are durable, so the next status poll can finish the commit.
     if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+        validate_mix_collections "$NEXT_PAYLOAD" >> "$LOG_FILE" 2>&1 || return 1
         write_next_state || return 1
         rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
         return 0

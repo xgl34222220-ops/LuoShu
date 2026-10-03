@@ -100,6 +100,29 @@ class CollectionContractTests(unittest.TestCase):
         self.assertEqual('new', report['requestId'])
         self.assertEqual('FAIL', report['result'])
 
+    def test_interrupted_rename_cannot_publish_invalid_recovered_collection(self):
+        module = self.base
+        config = module / 'config'
+        config.mkdir(); (module / 'logs').mkdir(); (module / 'common').mkdir()
+        shutil.copyfile(ROOT / 'common/composite_collection_contract.py', module / 'common/composite_collection_contract.py')
+        (config / 'active_font.conf').write_text('PreviousFont\n')
+        state = config / 'mix-stage-next.conf'
+        state.write_text('requestId=recover\npreviousFont=PreviousFont\n')
+        next_fonts = module / '.luoshu-payload-next/system/fonts'
+        next_fonts.mkdir(parents=True)
+        os.link(self.source, next_fonts / 'NotoSansCJK-Regular.ttc')
+        original = state.read_bytes()
+        result = subprocess.run(['sh', str(ROOT / 'common/legacy_v14_4/mix_router.sh'), 'finalize'],
+            env=dict(os.environ, MODDIR=str(module), LUOSHU_TASK_HELPER=str(ROOT / 'common/task_scope.py')),
+            capture_output=True, text=True)
+        self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertFalse((config / 'font-payload-next.conf').exists())
+        self.assertEqual(original, state.read_bytes())
+        self.assertEqual('PreviousFont\n', (config / 'active_font.conf').read_text())
+        report = json.loads((config / 'composite-font-contract.json').read_text())
+        self.assertEqual('recover', report['requestId'])
+        self.assertEqual('FAIL', report['result'])
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
