@@ -65,6 +65,26 @@ requirements are evidenced. The runtime-only `qualification.json` deliberately
 reports `delivery_gate: NOT_RUN`, including when `qualification: PASS`; the
 separate module delivery report records the full gate's actual result.
 
+The candidate additionally runs the 32 composite-handoff/UTF-8 message cases
+from `scripts/mix_handoff_contract_test.py` using its installed original ARM64
+Python and Android shell in the Enforcing Magisk guest. Host results, duplicate
+or missing cases, wrong module/shell or changed boot identity cannot pass.
+The installed axis helper must read the pinned actual CFF2 collection's axis
+name, 400/400/900 weight range and non-hidden flag.
+
+`app_axis_gate.py` inspects an original generated variable TTF with `wdth`,
+named custom `XTRA` and hidden `HIDN`, without applying it. The fixture enters
+through the existing native importer's trusted `.stabletest` cache intake;
+the importer must accept it as new CJK-capable font and preserve its SHA256.
+No font-index cache or variable-font configuration is fabricated by the gate.
+The real App must show the variable-font capability and the custom axis name,
+retain the established Chinese label for width, and omit the hidden axis from
+ordinary controls. Actual UI XML through the next font slot, a real screenshot,
+live App PID, absent target fatal/ANR and unchanged system-font hashes are all
+required. Cleanup removes only this new fixture, its importer-generated config
+and its owned intake files. Selecting a font is UI evidence; it does not prove
+App composite generation, native ARM64 phone rendering or OEM behavior.
+
 The legacy CLI composite component also requires the generated CJK collection's
 sidecar and finalization report. They must match this request, source-composite
 digest, original system TTC digest, ordered indexes and exact next-payload bytes.

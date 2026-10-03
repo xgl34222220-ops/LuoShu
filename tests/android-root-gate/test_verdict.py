@@ -63,6 +63,8 @@ def valid_delivery():
     report['axis_metadata'] = {'status': 'ok', 'variable': True, 'hasWeight': True, 'weight': weight, 'axes': [weight]}
     report['app_axes'] = {'result': 'PASS', 'package': PACKAGE, 'font_id': 'LuoShuAxisGate',
         'actual_app_pid': '123', 'source_sha256': 'e'*64, 'stock_hashes_unchanged': True,
+        'imported_sha256': 'e'*64, 'import_result': {'status': 'ok', 'data': {'kind': 'font',
+            'id': 'LuoShuAxisGate', 'supportsCjk': True, 'duplicate': False}},
         'target_fatal': False, 'anr': False, 'hidden_axis_visible': False, 'cjk_card_scanned_to_next_slot': True,
         'observed_labels': ['字宽', '纹理细节', 'XTRA', '可变字体', '英文字形']}
     source = {'snapshot_digest': 'b'*64, 'source_fingerprint': 'font-selection-v1:' + 'c'*64}
@@ -115,6 +117,19 @@ class VerdictTests(unittest.TestCase):
             elif mutation == 'stock': value['stock_hashes_unchanged'] = False
             else: value['cjk_card_scanned_to_next_slot'] = False
             self.assertTrue(delivery_blockers(r))
+
+    def test_axis_ui_requires_a_real_new_import_with_exact_source_bytes(self):
+        for mutation in ('missing', 'duplicate', 'id', 'hash', 'unsupported'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['app_axes']
+                if mutation == 'missing': value.pop('import_result')
+                elif mutation == 'hash': value['imported_sha256'] = 'f'*64
+                else:
+                    data = value['import_result']['data']
+                    if mutation == 'duplicate': data['duplicate'] = True
+                    elif mutation == 'id': data['id'] = 'other-font'
+                    else: data['supportsCjk'] = False
+                self.assertTrue(delivery_blockers(r))
     def test_diagnostic_fake_pass_blocked(self):
         r=valid_delivery();r.update(run_scope='APP_DIAGNOSTIC_ONLY',delivery_gate='PASS')
         self.assertTrue(delivery_blockers(r))

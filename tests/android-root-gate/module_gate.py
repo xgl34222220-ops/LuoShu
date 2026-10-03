@@ -389,12 +389,28 @@ def run_gate(adb, magisk, baseline, candidate, output):
             # Only our original disposable fixture enters the picker. Selecting
             # it must display real names/hidden-axis semantics without applying.
             axis_fixture = '/sdcard/LuoShu/fonts/LuoShuAxisGate.ttf'
+            axis_config = '/sdcard/LuoShu/fonts/LuoShuAxisGate.conf'
+            intake = f'/data/user/0/{PACKAGE}/cache/native_import/luoshu-axis-gate'
             runtime = MODULE + '/common/python'
-            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
-                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
-                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-synthetic-fonts.py '
-                 '--output /sdcard/LuoShu/fonts --axis-fixture', timeout=90)
+            # Use the same trusted intake and importer as the native picker.
+            # Raw public-directory copies intentionally have no fvar metadata;
+            # do not fabricate an inventory cache or is_variable configuration.
+            root(f'test ! -e {axis_fixture} && test ! -e {axis_config} && '
+                 f'mkdir -p {intake.rsplit("/", 1)[0]} && mkdir {intake}')
             try:
+                root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                     f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
+                     f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-synthetic-fonts.py '
+                     f'--output {intake} --axis-fixture', timeout=90)
+                source_sha256 = root(f'sha256sum {intake}/LuoShuAxisGate.ttf').split()[0]
+                imported = bridge('import_file', intake + '/LuoShuAxisGate.ttf', 'LuoShuAxisGate.ttf')
+                imported_data = imported.get('data', {})
+                if (imported.get('status') != 'ok' or imported_data.get('kind') != 'font'
+                        or imported_data.get('id') != 'LuoShuAxisGate'
+                        or imported_data.get('supportsCjk') is not True or imported_data.get('duplicate') is not False):
+                    raise RuntimeError('Original axis fixture did not pass the actual native import path: ' + json.dumps(imported))
+                if root('sha256sum ' + axis_fixture).split()[0] != source_sha256:
+                    raise RuntimeError('Native import changed original axis fixture bytes')
                 inventory = bridge('fonts', 'refresh')
                 fonts = inventory.get('data', {}).get('fonts', [])
                 selected = [font for font in fonts if font.get('id') == 'LuoShuAxisGate']
@@ -403,13 +419,15 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 from app_axis_gate import qualify as qualify_axes
                 report['app_axes'] = qualify_axes(adb, output / 'app-axes', selected[0]['name'],
                                                   [font['name'] for font in fonts])
-                report['app_axes']['source_sha256'] = root('sha256sum ' + axis_fixture).split()[0]
+                report['app_axes']['source_sha256'] = source_sha256
+                report['app_axes']['import_result'] = imported
+                report['app_axes']['imported_sha256'] = root('sha256sum ' + axis_fixture).split()[0]
                 report['app_axes']['font_id'] = selected[0]['id']
                 report['app_axes']['stock_hashes_unchanged'] = font_hashes() == original_fonts
                 if not report['app_axes']['stock_hashes_unchanged']:
                     raise RuntimeError('Read-only App axis inspection changed live system font bytes')
             finally:
-                root('rm -f ' + axis_fixture)
+                root(f'rm -f {axis_fixture} {axis_config} {intake}/LuoShuAxisGate.ttf {intake}/LICENSE.txt && rmdir {intake}')
                 bridge('fonts', 'refresh')
         from app_library_gate import measure
         report['library_timings'] = []

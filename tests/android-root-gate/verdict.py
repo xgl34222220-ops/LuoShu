@@ -177,9 +177,15 @@ def delivery_blockers(report):
     errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
     axes_ui = report.get('app_axes', {})
     observed = axes_ui.get('observed_labels', [])
+    imported = axes_ui.get('import_result', {})
+    imported_data = imported.get('data', {})
     if (axes_ui.get('result') != 'PASS' or axes_ui.get('package') != PACKAGE
             or axes_ui.get('font_id') != 'LuoShuAxisGate' or not str(axes_ui.get('actual_app_pid', '')).isdigit()
             or not re.fullmatch('[0-9a-f]{64}', axes_ui.get('source_sha256', ''))
+            or axes_ui.get('imported_sha256') != axes_ui.get('source_sha256')
+            or imported.get('status') != 'ok' or imported_data.get('kind') != 'font'
+            or imported_data.get('id') != 'LuoShuAxisGate' or imported_data.get('supportsCjk') is not True
+            or imported_data.get('duplicate') is not False
             or axes_ui.get('stock_hashes_unchanged') is not True or axes_ui.get('target_fatal') is not False
             or axes_ui.get('anr') is not False or axes_ui.get('hidden_axis_visible') is not False
             or axes_ui.get('cjk_card_scanned_to_next_slot') is not True

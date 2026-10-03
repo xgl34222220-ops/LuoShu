@@ -1,0 +1,230 @@
+{
+  "result": "BLOCKED",
+  "run_id": 37159156172,
+  "run_url": "https://github.com/xgl34222220-ops/LuoShu/actions/runs/37159156172",
+  "harness_source": "90841e7f7b74d3e80b51f347bb45a6fc69f5429b",
+  "runtime_source": "17783f2229e8ecb946bbd280a7c6343292e296da",
+  "module_sha256": "a56a54ea9618946f8a96cf9e3d91fea751f72f1aa9d318842e6865ad5b9b957c",
+  "artifact_id": 11287526886,
+  "artifact_sha256": "3d359de852c6e87b3eb9af3dae23077cf00f81fdb9c25d73c9e932e2cd102138",
+  "error": "Original variable-axis fixture is not visible in actual root inventory",
+  "blockers": [
+    "execution recorded an error",
+    "actual synthetic file inventory/hashes incomplete",
+    "actual App font-declared axis UI/read-only evidence incomplete or failed",
+    "actual App root not proven",
+    "100/1000 real libraries not both measured",
+    "actual App apply task not proven",
+    "App task/boot/selected font identity binding missing",
+    "ordered snapshot/full validation/core entry evidence missing",
+    "App-applied font exact restoration evidence missing",
+    "actual App apply/reboot/restore mount proof missing",
+    "App-applied font restore did not succeed",
+    "fresh final App crash/ANR observation absent or failed"
+  ],
+  "cycles": [
+    {
+      "label": "baseline",
+      "result": "PASS",
+      "zip_sha256": "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a",
+      "restore_hashes_equal_stock": true
+    },
+    {
+      "label": "candidate",
+      "result": "PASS",
+      "zip_sha256": "a56a54ea9618946f8a96cf9e3d91fea751f72f1aa9d318842e6865ad5b9b957c",
+      "restore_hashes_equal_stock": true
+    }
+  ],
+  "composite_result": "PASS",
+  "generation_runtime": {
+    "result": "PASS",
+    "task": "mix-1791068132-5674",
+    "crashLines": [],
+    "logSha256": "98a50848a2d5efae94b8fa14b4106889140a72630207a44f8b059fa1ffff4fec"
+  },
+  "completed_module_reboots": 12,
+  "actual_android_mix_handoff": {
+    "schema": "luoshu-mix-handoff-contract-v1",
+    "result": "PASS",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "cases": [
+      {
+        "name": "silent-start",
+        "result": "PASS"
+      },
+      {
+        "name": "conflicting-output",
+        "result": "PASS"
+      },
+      {
+        "name": "truncated-output",
+        "result": "PASS"
+      },
+      {
+        "name": "logged-task-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "queued-task",
+        "result": "PASS"
+      },
+      {
+        "name": "completed-task",
+        "result": "PASS"
+      },
+      {
+        "name": "failed-task",
+        "result": "PASS"
+      },
+      {
+        "name": "stale-task-with-fresh-output",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-cjk",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-latin",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-digit",
+        "result": "PASS"
+      },
+      {
+        "name": "unknown-state",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-state",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-task",
+        "result": "PASS"
+      },
+      {
+        "name": "chinese-native-regex-regression",
+        "result": "PASS"
+      },
+      {
+        "name": "escaped-quote-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-json",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-unicode-escapes",
+        "result": "PASS"
+      },
+      {
+        "name": "task-field-injection",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-message-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-nested-message",
+        "result": "PASS"
+      },
+      {
+        "name": "truncated-json",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-message-type",
+        "result": "PASS"
+      },
+      {
+        "name": "last-valid-log-record",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-long-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-chinese-native-regression",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-escaped-quote-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-control-escape",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-truncated-message",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-invalid-string-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-unsupported-unicode-escape",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-oversized-message",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 32,
+    "elapsed_seconds": 7.246,
+    "boot_id": "39c2b49a-a731-44fb-a541-96693d6a7c2b",
+    "selinux": "Enforcing"
+  },
+  "axis_metadata": {
+    "status": "ok",
+    "variable": true,
+    "hasWeight": true,
+    "weight": {
+      "tag": "wght",
+      "name": "Weight",
+      "min": 400.0,
+      "default": 400.0,
+      "max": 900.0,
+      "hidden": false
+    },
+    "axes": [
+      {
+        "tag": "wght",
+        "name": "Weight",
+        "min": 400.0,
+        "default": 400.0,
+        "max": 900.0,
+        "hidden": false
+      }
+    ]
+  },
+  "fixture_observed": {
+    "id": "LuoShuAxisGate",
+    "valid": true,
+    "variable": false,
+    "reason": "Raw public-directory copy bypassed native_import metadata."
+  },
+  "app_axis_ui": "NOT_RUN",
+  "library_timings": "NOT_RUN",
+  "actual_app_apply_restore": "NOT_RUN",
+  "root_policy_revoked": true,
+  "final_workspace": {
+    "result": "PASS",
+    "entries": [],
+    "delayed_recheck_seconds": 1
+  },
+  "launcher_reaped": true,
+  "kvm_metadata_unchanged": true,
+  "correction": "Generate only original geometric source in existing trusted .stabletest intake and invoke actual import_file bridge; require new CJK import and identical SHA256. No fabricated inventory/config or weakened gate.",
+  "scope": "Disposable AOSP API35 x86_64/nativebridge runs original ARM64 Python. Not physical ARM64/OEM validation. Overall gate remains blocked."
+}
