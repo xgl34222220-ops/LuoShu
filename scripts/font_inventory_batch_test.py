@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -298,6 +299,74 @@ class InventoryTest(unittest.TestCase):
             with self.assertRaises(PermissionError):
                 self.action('refresh')
         self.assertFalse((self.config / 'native_font_index.json').exists())
+
+    def test_phase_counts_separate_rebuild_and_reuse_without_changing_authority(self):
+        self.font('Alpha.ttf')
+        fresh_trace = batch.InventoryTrace()
+        fresh = batch.execute('refresh', self.module, self.public, trace=fresh_trace)
+        self.assertFalse(fresh_trace.cache_hit)
+        self.assertEqual((1, 1, 1, 2), tuple(fresh_trace.calls[p] for p in ('snapshot', 'build', 'verify', 'write')))
+        reuse_trace = batch.InventoryTrace()
+        reused = batch.execute('scan', self.module, self.public, trace=reuse_trace)
+        self.assertEqual(fresh, reused)
+        self.assertTrue(reuse_trace.cache_hit)
+        self.assertEqual((1, 0, 1, 0), tuple(reuse_trace.calls[p] for p in ('snapshot', 'build', 'verify', 'write')))
+        self.assertEqual(reused['data']['fingerprint'], reused['data']['verification']['fingerprint'])
+        self.assertIn('snapshot_count=2 build_count=0 write_count=0', reuse_trace.fields())
+
+    def test_failed_live_verification_finishes_its_span_without_writing_cache(self):
+        self.font('Alpha.ttf')
+        original = self.action('refresh')
+        old_cache = (self.config / 'native_font_index.json').read_bytes()
+        snapshots = iter([batch.snapshot(self.fonts), PermissionError('private filename')])
+        def snapshot(_path):
+            result = next(snapshots)
+            if isinstance(result, Exception):
+                raise result
+            return result
+        trace = batch.InventoryTrace()
+        with patch.object(batch, 'snapshot', side_effect=snapshot):
+            with self.assertRaises(PermissionError):
+                batch.execute('scan', self.module, self.public, trace=trace)
+        self.assertEqual(1, trace.calls['verify'])
+        self.assertGreaterEqual(trace.durations['verify'], 0)
+        self.assertEqual(0, trace.calls['write'])
+        self.assertNotIn('private', trace.fields())
+        self.assertEqual(old_cache, (self.config / 'native_font_index.json').read_bytes())
+        self.assertEqual(original, self.action('scan'))
+
+    def test_cli_subphase_spans_and_counters_are_numeric_and_exclude_private_paths(self):
+        self.font('私人字体.ttf')
+        for action, expected, exit_code in [('refresh', (0, 2, 1, 2), 0),
+                                            ('scan', (1, 2, 0, 0), 0),
+                                            ('fingerprint', (0, 1, 0, 0), 0)]:
+            result = subprocess.run([sys.executable, str(ROOT / 'common/font_inventory_batch.py'), action,
+                                     '--module', str(self.module), '--public', str(self.public)],
+                                    capture_output=True, text=True, check=False, timeout=10)
+            self.assertEqual(exit_code, result.returncode, result.stderr)
+            self.assertEqual('ok', json.loads(result.stdout)['status'])
+            detail, total = result.stderr.splitlines()
+            prefix = f'[font-inventory-detail] stage={action} '
+            self.assertTrue(detail.startswith(prefix))
+            fields = dict(field.split('=') for field in detail[len(prefix):].split())
+            self.assertEqual(set(batch.InventoryTrace.PHASES) | {'cache_hit', 'snapshot_count', 'build_count', 'write_count', 'code'},
+                             {k.removesuffix('_ms') for k in fields})
+            durations = [float(fields[p + '_ms']) for p in batch.InventoryTrace.PHASES]
+            self.assertTrue(all(0 <= d <= 180000 for d in durations))
+            self.assertEqual(expected, tuple(int(fields[k]) for k in ('cache_hit', 'snapshot_count', 'build_count', 'write_count')))
+            elapsed = float(re.search(r'elapsed_ms=([0-9.]+)', total).group(1))
+            self.assertLessEqual(sum(durations), elapsed + 1)
+            self.assertNotIn('私人', result.stderr)
+            self.assertNotIn(str(self.base), result.stderr)
+
+    def test_cli_failed_snapshot_retains_failure_and_emits_no_successful_work_counts(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'common/font_inventory_batch.py'), 'fingerprint',
+                                 '--module', str(self.module), '--public', str(self.base / 'missing-private-dir')],
+                                capture_output=True, text=True, check=False, timeout=10)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual('inventory_unavailable', json.loads(result.stdout)['code'])
+        self.assertIn('cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=1', result.stderr)
+        self.assertNotIn('private', result.stderr)
 
 
 if __name__ == '__main__':

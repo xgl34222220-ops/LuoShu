@@ -215,3 +215,15 @@ artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37
 下载 artifact `11295201887` 后 [独立包核验](TEST_CANDIDATE_VERIFICATION_37180012702.json) PASS：外层 ZIP `5b448894e42c1628c3fe69035fe6088d6bd7e9e69433c59458773de79ce2a0ed`，模块 `99180db7357c0035b6baa60fec2ef6a667106adb89e05aabaf2b3329a4514882`，APK `1eb859a22d3b428c46b0e590972e8a6c7fe21f3a9c35dcab074b77f9fa9cc6a7`。10 个运行文件、来源/内外 APK、17 个冻结文件及旧冻结引擎逐项一致。
 
 新 Root workflow 只绑定这个已验真的包，新增实际安装模块下的 14 个扫描错误函数用例，要求原 ARM64 Python、Android shell、同一内核启动 ID、Enforcing 及正确 helper 哈希。判定器拒绝错环境、缺失/重复/失败用例；独立 verifier 进一步核对真实命令 stdout 与 Git helper 字节。新宿主 harness 113 个于 0.638 秒 PASS，仅证明脚本与判定逻辑；完整 Android 结果仍待本次新运行。第八批固定候选的 PASS 保留为该批证据，不替代第九批验收。
+
+验收提交 [`b108bf8d`](https://github.com/xgl34222220-ops/LuoShu/commit/b108bf8d5f95b5136564dfb7e56b23fbd04daf50) 已启动 [第九批完整 Root 37181343923](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37181343923)，身份、前置和一次性 AVD 准备通过，原 ARM64 Android 长步骤正在执行；不取消或重复启动，下面的新改动不会进入这个固定包。
+
+## 第十批：有限库存请求的内部阶段与实际工作计数
+
+具体差距：第八批恢复后的最终冷扫描函数及 stdout 耗时 19096.482 ms，但日志不能区别目录读取、索引命中、字体核查、二次验证、持久化或输出。参考 [AOSP Android 15 Trace 源码](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/core/java/android/os/Trace.java)（源码头 [Apache-2.0 许可证](https://www.apache.org/licenses/LICENSE-2.0) 已核对）及 [Android 官方自定义阶段文档](https://developer.android.com/topic/performance/tracing/custom-events)，采用命名边界、成对完成的阶段原则。这里独立实现单进程 monotonic/finally 计时，没有复制源码、接入系统 trace、修改 profileable 或引入权限。
+
+原有限 worker 只增加七个固定阶段：storage、首目录 snapshot、cache 读取、build（配置/头/行构造）、verify（二次快照及当前证明）、write（序列化、fsync 和重命名）、output（序列化和 stdout flush）。记录缓存命中与尝试快照/重建/写入次数，异常仍完成本段计时并保留失败码；次数不代表操作成功，也不能取得就绪权。stdout JSON、排序/指纹身份、两次快照、原子写入、所有预算和进程回收未变，计时不含 Python 导入/参数解析，也不含少量阶段间调度/当前配置键生成。
+
+App 隔离诊断版仅导出固定数值字段，单行不超过 2048 字符，每请求最多三组，拒绝私有尾部、错阶段、过界耗时/次数、非数值和坏退出码；正式版本仍不开 App 诊断日志。新增两项 JVM 回归尚待新 CI。
+
+本轮库存回归 23 个于 0.617 秒 PASS，新增四项覆盖新建/复用且证明相同、失败后二次验证计时完整且旧缓存保留、实际 CLI 数值/路径隐私/阶段总和、失败快照不得伪造成工作成功。17 个冻结文件重新匹配。[当前宿主 1000 文件阶段证据](INVENTORY_SUBPHASE_HOST_20261004.json) 标记 HOST_ONLY 和人工头部夹具；refresh 的两次快照/一次重建/两次写入，与 scan 的两次快照/零重建/零写入分开记录，不能称为 Android 提速或真实字体内容覆盖。新候选 CI 与带阶段证据的 Android 复测仍需实际运行。

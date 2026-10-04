@@ -4,6 +4,32 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class InventoryTimingTest {
+    private val detail = "[font-inventory-detail] stage=scan storage_ms=1.0 snapshot_ms=2.0 cache_ms=3.0 build_ms=0.0 verify_ms=4.0 write_ms=0.0 output_ms=5.0 cache_hit=1 snapshot_count=2 build_count=0 write_count=0 code=0"
+
+    @Test
+    fun subphasesExportOnlyFixedSpansAndCountsTogetherWithExistingTotals() {
+        val fields = inventoryTimingFields("scan", "$detail\n[font-inventory] stage=scan elapsed_ms=16 count=1000 code=0\n" +
+            "[font-request] {\"event\":\"finished\",\"reason\":\"success\",\"code\":0,\"cleaned\":true,\"elapsed_ms\":6321.25,\"token\":\"private-token\"}")
+        assertEquals(3, fields.size)
+        assertEquals(detail.removePrefix("[font-inventory-detail] stage=scan ").let { "phase=inventory_detail $it" }, fields[0])
+        assertEquals("phase=inventory duration_ms=16.0 count=1000 code=0", fields[1])
+        assertEquals("phase=scope duration_ms=6321.25 code=0 cleaned=true reason=success", fields[2])
+        assertFalse(fields.any { "private" in it })
+    }
+
+    @Test
+    fun subphaseMalformedOrUnboundedValuesCannotReachLocalAppLogs() {
+        for (line in listOf(detail + " /private/path", detail.replace("stage=scan", "stage=refresh"),
+            detail.replace("snapshot_ms=2.0", "snapshot_ms=NaN"),
+            detail.replace("snapshot_ms=2.0", "snapshot_ms=180001.0"),
+            detail.replace("snapshot_count=2", "snapshot_count=3"),
+            detail.replace("write_count=0", "write_count=999999999999999999999"),
+            detail.replace("build_count=0", "build_count=true"),
+            detail.replace("cache_hit=1", "cache_hit=2"), detail.replace("code=0", "code=256"))) {
+            assertTrue(line, inventoryTimingFields("scan", line).isEmpty())
+        }
+    }
+
     @Test
     fun workerAndOwnedScopeTimingsNeverExportIdentitiesOrArbitraryText() {
         val stderr = """

@@ -1,0 +1,78 @@
+{
+  "result": "PASS",
+  "environment": "HOST_ONLY",
+  "source_file_sha256": "5665d079e972e940f8a20a1cf8c9ae19ec449e868bb7645b4937181f84b2fbe7",
+  "fixture": "1000 independent names with synthetic 8192-byte headers, not real font-content coverage",
+  "samples": [
+    {
+      "action": "refresh",
+      "code": 0,
+      "fields": {
+        "stage": "refresh",
+        "storage_ms": 0.833,
+        "snapshot_ms": 18.714,
+        "cache_ms": 0.0,
+        "build_ms": 23.27,
+        "verify_ms": 16.472,
+        "write_ms": 3.214,
+        "output_ms": 2.402,
+        "cache_hit": 0,
+        "snapshot_count": 2,
+        "build_count": 1,
+        "write_count": 2,
+        "code": 0
+      },
+      "total_ms": 65.181,
+      "count": 1000,
+      "current_verification_matches": true
+    },
+    {
+      "action": "scan",
+      "code": 0,
+      "fields": {
+        "stage": "scan",
+        "storage_ms": 0.076,
+        "snapshot_ms": 17.255,
+        "cache_ms": 2.832,
+        "build_ms": 0.0,
+        "verify_ms": 15.637,
+        "write_ms": 0.0,
+        "output_ms": 2.185,
+        "cache_hit": 1,
+        "snapshot_count": 2,
+        "build_count": 0,
+        "write_count": 0,
+        "code": 0
+      },
+      "total_ms": 38.25,
+      "count": 1000,
+      "current_verification_matches": true
+    },
+    {
+      "action": "fingerprint",
+      "code": 0,
+      "fields": {
+        "stage": "fingerprint",
+        "storage_ms": 0.0,
+        "snapshot_ms": 17.437,
+        "cache_ms": 0.0,
+        "build_ms": 0.0,
+        "verify_ms": 0.0,
+        "write_ms": 0.0,
+        "output_ms": 0.058,
+        "cache_hit": 0,
+        "snapshot_count": 1,
+        "build_count": 0,
+        "write_count": 0,
+        "code": 0
+      },
+      "total_ms": 17.807,
+      "count": 1000
+    }
+  ],
+  "limits": [
+    "Not Android latency or causal performance improvement",
+    "Counters describe attempted function calls; code and live verification still determine authority",
+    "build includes config/header/row construction; verify includes second snapshot/current proof; write includes serialization/fsync/rename; output includes serialization/stdout flush"
+  ]
+}

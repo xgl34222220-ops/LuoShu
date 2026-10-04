@@ -38,6 +38,35 @@ MAX_CACHE_BYTES = 4 * 1024 * 1024
 MAX_CONFIG_BYTES = 64 * 1024
 
 
+class InventoryTrace:
+    """Fixed numeric spans only; these diagnostics never authorize inventory use."""
+    PHASES = ('storage', 'snapshot', 'cache', 'build', 'verify', 'write', 'output')
+
+    def __init__(self):
+        self.durations = dict.fromkeys(self.PHASES, 0.0)
+        self.calls = dict.fromkeys(self.PHASES, 0)
+        self.cache_hit = False
+
+    def measure(self, phase, function, *args, **kwargs):
+        started = time.monotonic()
+        self.calls[phase] += 1
+        try:
+            return function(*args, **kwargs)
+        finally:
+            self.durations[phase] += (time.monotonic() - started) * 1000
+
+    def fields(self):
+        values = [f'{phase}_ms={round(self.durations[phase], 3)}' for phase in self.PHASES]
+        values.extend((f'cache_hit={int(self.cache_hit)}',
+                       f'snapshot_count={self.calls["snapshot"] + self.calls["verify"]}',
+                       f'build_count={self.calls["build"]}', f'write_count={self.calls["write"]}'))
+        return ' '.join(values)
+
+
+def measured(trace, phase, function, *args, **kwargs):
+    return function(*args, **kwargs) if trace is None else trace.measure(phase, function, *args, **kwargs)
+
+
 def family_of(name):
     family = name.rsplit('.', 1)[0]
     # Preserve the shell's ordered single pass; Foo-Black-Italic != Foo-Italic-Black.
@@ -284,39 +313,44 @@ def ensure_storage(public_dir, config_dir, migrate=False):
                     shutil.copyfile(entry.path, target)
 
 
-def execute(action, module_dir, public_dir):
+def execute(action, module_dir, public_dir, *, trace=None):
     config = module_dir / 'config'
     fonts = public_dir / 'fonts'
     cached_path = config / 'native_font_index.json'
     key_path = config / 'native_font_index.key'
     if action == 'cached':
-        value = read_cache(cached_path)
+        value = measured(trace, 'cache', read_cache, cached_path)
         if value is not None:
+            if trace is not None:
+                trace.cache_hit = True
             # Persisted verification belongs to its old request, never this read.
             value['data'].pop('verification', None)
         return value or {'status': 'error', 'code': 'cache_miss', 'message': 'cache miss'}
     if action in ('preview', 'scan', 'refresh'):
-        ensure_storage(public_dir, config, migrate=action != 'preview')
-    captured = snapshot(fonts)
+        measured(trace, 'storage', ensure_storage, public_dir, config, migrate=action != 'preview')
+    captured = measured(trace, 'snapshot', snapshot, fonts)
     if action == 'fingerprint':
         return {'status': 'ok', 'data': {'fingerprint': captured[2], 'current': current_font(config),
                                       'count': sum(map(len, captured[0].values())), 'bytes': captured[3]}}
     if action == 'preview':
-        return inventory(fonts, config, preview=True, captured=captured)
+        return measured(trace, 'build', inventory, fonts, config, preview=True, captured=captured)
     key = 'native-v5-batch|' + current_font(config) + '|' + captured[2]
     if action == 'scan':
         try:
-            saved_key = key_path.read_text().strip()
+            saved_key = measured(trace, 'cache', key_path.read_text).strip()
         except FileNotFoundError:
             saved_key = ''
         if saved_key == key:
-            cached = read_cache(cached_path)
+            cached = measured(trace, 'cache', read_cache, cached_path)
             if cached is not None and cached['data'].get('fingerprint') == captured[2]:
-                return verify_inventory(cached, fonts, config, captured)
-    value = verify_inventory(inventory(fonts, config, captured=captured), fonts, config, captured)
+                if trace is not None:
+                    trace.cache_hit = True
+                return measured(trace, 'verify', verify_inventory, cached, fonts, config, captured)
+    value = measured(trace, 'build', inventory, fonts, config, captured=captured)
+    value = measured(trace, 'verify', verify_inventory, value, fonts, config, captured)
     key = 'native-v5-batch|' + value['data']['current'] + '|' + captured[2]
-    atomic_write(cached_path, compact(value))
-    atomic_write(key_path, key + '\n')
+    measured(trace, 'write', lambda: atomic_write(cached_path, compact(value)))
+    measured(trace, 'write', atomic_write, key_path, key + '\n')
     return value
 
 
@@ -327,16 +361,18 @@ def main():
     parser.add_argument('--public', default=os.environ.get('LUOSHU_PUBLIC_DIR', '/sdcard/LuoShu'))
     args = parser.parse_args()
     started = time.monotonic()
+    trace = InventoryTrace()
     try:
-        result = execute(args.action, Path(args.module), Path(args.public))
+        result = execute(args.action, Path(args.module), Path(args.public), trace=trace)
         code = 0
     except (OSError, ValueError) as exc:
         result = {'status': 'error', 'code': 'inventory_unavailable', 'message': '字体目录或索引暂不可读：' + str(exc)}
         code = 1
-    print(compact(result), end='', flush=True)
+    trace.measure('output', lambda: print(compact(result), end='', flush=True))
     elapsed = round((time.monotonic() - started) * 1000, 3)
     data = result.get('data', {})
     count = data.get('stats', {}).get('count', data.get('count', 0))
+    print(f'[font-inventory-detail] stage={args.action} {trace.fields()} code={code}', file=sys.stderr, flush=True)
     print(f'[font-inventory] stage={args.action} elapsed_ms={elapsed} count={count} code={code}', file=sys.stderr, flush=True)
     return code
 
