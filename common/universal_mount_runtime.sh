@@ -39,7 +39,7 @@ _ufmr_python() {
 }
 
 _ufmr_validate_payload() {
-    _ufmr_deployer="$MODDIR/common/universal_font_deployment.py"
+    _ufmr_deployer="$MODDIR/common/luoshu_payload.py"
     _ufmr_manifest="$PAYLOAD/.luoshu-runtime/deployment/deployment.json"
     [ -f "$_ufmr_deployer" ] && [ -s "$_ufmr_manifest" ] || return 1
     _ufmr_python "$_ufmr_deployer" \

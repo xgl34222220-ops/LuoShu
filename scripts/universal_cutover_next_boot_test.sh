@@ -8,7 +8,7 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 cat > "$TMP/fake-python" <<'SH'
 #!/bin/sh
 case "$1" in
-  */universal_font_deployment.py)
+  */luoshu_payload.py)
     [ "${FAKE_VALIDATE:-ok}" = ok ] || exit 1
     exit 0
     ;;
@@ -28,7 +28,7 @@ chmod +x "$TMP/fake-python"
 MOD="$TMP/universal"
 mkdir -p "$MOD/common" "$MOD/config" "$MOD/.luoshu-payload/old" \
          "$MOD/.luoshu-payload-next/.luoshu-runtime/deployment"
-printf '# fake\n' > "$MOD/common/universal_font_deployment.py"
+printf '# fake\n' > "$MOD/common/luoshu_payload.py"
 printf 'old\n' > "$MOD/.luoshu-payload/old/file"
 printf '{}\n' > "$MOD/.luoshu-payload-next/.luoshu-runtime/deployment/deployment.json"
 printf 'OldFont\n' > "$MOD/config/active_font.conf"
@@ -141,7 +141,7 @@ grep -q '^targetMode=legacy$' "$MOD3/config/font-payload-activated.conf"
 MOD4="$TMP/rejected"
 mkdir -p "$MOD4/common" "$MOD4/config" "$MOD4/.luoshu-payload/old" \
          "$MOD4/.luoshu-payload-next/.luoshu-runtime/deployment"
-printf '# fake\n' > "$MOD4/common/universal_font_deployment.py"
+printf '# fake\n' > "$MOD4/common/luoshu_payload.py"
 printf 'still-live\n' > "$MOD4/.luoshu-payload/old/file"
 printf '{}\n' > "$MOD4/.luoshu-payload-next/.luoshu-runtime/deployment/deployment.json"
 printf 'NewConfigured\n' > "$MOD4/config/active_font.conf"

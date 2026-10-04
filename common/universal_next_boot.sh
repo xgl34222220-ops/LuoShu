@@ -113,7 +113,7 @@ universal_font_next_boot_activate() {
         return 1
     }
 
-    _ufnb_deployer="$_ufnb_mod/common/universal_font_deployment.py"
+    _ufnb_deployer="$_ufnb_mod/common/luoshu_payload.py"
     [ -f "$_ufnb_deployer" ] || {
         _ufnb_log "universal deployer missing; keeping previous payload"
         _ufnb_discard_invalid_next "$_ufnb_state" "$_ufnb_next" deployer-missing "$_ufnb_previous_font"

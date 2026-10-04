@@ -9,12 +9,8 @@ MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 MODULE_DIR="$MODDIR"
 CONFIG_DIR="${CONFIG_DIR:-$MODDIR/config}"
 PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
-DEPLOYMENT="$MODDIR/common/universal_font_deployment.sh"
-PLAN_BRIDGE="$MODDIR/common/universal_font_plan.sh"
-ROUTE_BRIDGE="$MODDIR/common/minimal_xml_router.sh"
-COMPILER_BRIDGE="$MODDIR/common/universal_font_compiler.sh"
-GATE="$MODDIR/common/universal_font_cutover_gate.py"
-DEPLOYER="$MODDIR/common/universal_font_deployment.py"
+ENGINE_BRIDGE="$MODDIR/common/luoshu_engine.sh"
+DEPLOYER="$MODDIR/common/luoshu_payload.py"
 ACTIVATED_CONF="$CONFIG_DIR/universal-font-activated.conf"
 VERIFY_CONF="$CONFIG_DIR/universal-font-runtime-verification.conf"
 ROLLBACK_STATE="$CONFIG_DIR/universal-font-rollback.conf"
@@ -101,23 +97,8 @@ _uc_cleanup_universal_next() {
 
 _uc_precondition() {
     [ -s "$CONFIG_DIR/device_font_topology.json" ] || return 1
-    [ -s "$CONFIG_DIR/device_font_roles.json" ] || return 1
-    [ -f "$DEPLOYMENT" ] || return 1
-    [ -f "$GATE" ] || return 1
-    [ -f "$PLAN_BRIDGE" ] || return 1
-    [ -f "$ROUTE_BRIDGE" ] || return 1
-    [ -f "$COMPILER_BRIDGE" ] || return 1
+    [ -f "$ENGINE_BRIDGE" ] || return 1
     return 0
-}
-
-_uc_paths() {
-    _ucx_font="$1"
-    UC_PLAN=$(MODDIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" sh "$PLAN_BRIDGE" path "$_ucx_font") || return 1
-    UC_ROUTE=$(MODDIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" sh "$ROUTE_BRIDGE" path "$_ucx_font") || return 1
-    UC_ARTIFACTS=$(MODDIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" sh "$COMPILER_BRIDGE" manifest "$_ucx_font") || return 1
-    UC_DEPLOYMENT=$(MODDIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" sh "$DEPLOYMENT" manifest "$_ucx_font") || return 1
-    UC_PAYLOAD=$(MODDIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" sh "$DEPLOYMENT" payload "$_ucx_font") || return 1
-    [ -s "$UC_PLAN" ] && [ -s "$UC_ROUTE" ] && [ -s "$UC_ARTIFACTS" ] && [ -s "$UC_DEPLOYMENT" ] && [ -d "$UC_PAYLOAD" ]
 }
 
 # Non-core slots the engine left stock in this switch, for the task message.
@@ -125,12 +106,12 @@ KEPT_STOCK_FILE="$CONFIG_DIR/universal-kept-stock.conf"
 
 _uc_record_kept_stock() {
     rm -f "$KEPT_STOCK_FILE" 2>/dev/null || true
-    _uck_list=$(_uc_python - "$UC_PLAN" <<'PY' 2>/dev/null
+    _uck_report=$(MODDIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" sh "$ENGINE_BRIDGE" report "$1")
+    _uck_list=$(_uc_python - "$_uck_report" <<'PY' 2>/dev/null
 import json, sys
 from pathlib import Path
-plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-names = sorted(Path(path).name for path, item in (plan.get("targets") or {}).items()
-               if isinstance(item, dict) and item.get("action") == "keep-stock")
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+names = sorted(Path(item["path"]).name for item in report.get("keptStock") or [])
 if names:
     print(f"{len(names)}|{'、'.join(names[:5])}{' 等' if len(names) > 5 else ''}")
 PY
@@ -144,7 +125,7 @@ PY
     } > "$KEPT_STOCK_FILE" 2>/dev/null || true
 }
 
-# Runs Universal prepare -> readiness gate -> stage-next for one family key.
+# Runs the v3 engine (generate payload) -> stage-next for one family key.
 # Returns 0 after staging (stage JSON on stdout). On failure nothing has been
 # staged; UC_FAIL holds a reason code and UC_FAIL_DETAIL a short diagnostic.
 _uc_universal() {
@@ -158,57 +139,36 @@ _uc_universal() {
 
     _uc_write_state preparing "$_uc_font" universal preparing
     rm -f "$KEPT_STOCK_FILE" 2>/dev/null || true
-    _uc_progress 8 "通用引擎正在分析设备字体拓扑"
+    _uc_progress 8 "字体引擎正在分析设备字体"
     _uc_budget=$(_uc_budget_seconds)
     _uc_started=$(date +%s 2>/dev/null || echo 0)
-    _uc_log "universal prepare start font=$_uc_font budget=${_uc_budget}s"
-    # The compiler stops before starting a unit past this deadline.
+    _uc_log "engine prepare start font=$_uc_font budget=${_uc_budget}s"
+    # The engine stops before starting new work past this deadline.
     _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
-        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
-        LUOSHU_UNIVERSAL_DEADLINE=$((_uc_started + _uc_budget)) \
-        sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
+        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" LUOSHU_SWITCH_PROGRESS_FILE="$PROGRESS_FILE" \
+        LUOSHU_ENGINE_DEADLINE=$((_uc_started + _uc_budget)) \
+        sh "$ENGINE_BRIDGE" prepare "$_uc_font" 2>&1)
     _uc_prepare_rc=$?
-    _uc_log "universal prepare finished font=$_uc_font rc=$_uc_prepare_rc elapsed=$(( $(date +%s 2>/dev/null || echo 0) - _uc_started ))s"
-    if [ "$_uc_prepare_rc" -ne 0 ]; then
-        _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
+    _uc_log "engine prepare finished font=$_uc_font rc=$_uc_prepare_rc elapsed=$(( $(date +%s 2>/dev/null || echo 0) - _uc_started ))s result=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
+    if [ "$_uc_prepare_rc" -ne 0 ] || ! printf '%s' "$_uc_prepare_output" | grep -q '"status":"ok"'; then
         UC_FAIL=universal-prepare-failed
         UC_FAIL_DETAIL=$(printf '%s\n' "$_uc_prepare_output" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tail -n1)
         return 1
     fi
 
-    _uc_progress 72 "正在检查正式接管安全条件"
-    if ! _uc_paths "$_uc_font"; then
-        UC_FAIL=universal-artifacts-missing
-        return 1
-    fi
-
-    _uc_gate_output=$(_uc_python "$GATE" \
-        --font-plan "$UC_PLAN" \
-        --route-plan "$UC_ROUTE" \
-        --artifact-manifest "$UC_ARTIFACTS" \
-        --deployment "$UC_DEPLOYMENT" \
-        --payload-root "$UC_PAYLOAD" 2>&1)
-    _uc_gate_rc=$?
-    _uc_log "gate font=$_uc_font rc=$_uc_gate_rc result=$_uc_gate_output"
-    if [ "$_uc_gate_rc" -ne 0 ] || ! printf '%s' "$_uc_gate_output" | grep -q '"eligible":true'; then
-        UC_FAIL=universal-readiness-gate-rejected
-        UC_FAIL_DETAIL=$(printf '%s' "$_uc_gate_output" | sed -n 's/.*"reasons":\["\([^"]*\)".*/\1/p' | head -n1)
-        return 1
-    fi
-
-    _uc_progress 88 "通用引擎验证通过，正在准备下一次启动"
+    _uc_progress 88 "字体已生成，正在准备下一次启动"
     _uc_stage_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
-        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" sh "$DEPLOYMENT" stage-prepared "$_uc_font" 2>&1)
+        sh "$ENGINE_BRIDGE" stage "$_uc_font" 2>&1)
     _uc_stage_rc=$?
     if [ "$_uc_stage_rc" -ne 0 ] || ! printf '%s' "$_uc_stage_output" | grep -q '"status":"ok"'; then
-        _uc_log "universal stage failed font=$_uc_font rc=$_uc_stage_rc output=$_uc_stage_output"
+        _uc_log "engine stage failed font=$_uc_font rc=$_uc_stage_rc output=$_uc_stage_output"
         UC_FAIL=universal-stage-failed
         return 1
     fi
 
     _uc_write_state staged "$_uc_font" universal ready-next-boot
     _uc_record_kept_stock "$_uc_font"
-    _uc_progress 96 "通用字体负载已准备，完整重启后自动验收"
+    _uc_progress 96 "字体负载已准备，完整重启后生效"
     printf '%s\n' "$_uc_stage_output"
     return 0
 }

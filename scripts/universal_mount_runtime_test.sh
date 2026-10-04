@@ -9,7 +9,7 @@ mkdir -p "$MOD/common" "$MOD/config" "$MOD/.luoshu-payload/.luoshu-runtime/deplo
 cp "$ROOT/common/universal_mount_runtime.sh" "$MOD/common/"
 printf 'system-font-content\n' > "$MOD/.luoshu-payload/system/fonts/Fake.ttf"
 printf '{}\n' > "$MOD/.luoshu-payload/.luoshu-runtime/deployment/deployment.json"
-cat > "$MOD/common/universal_font_deployment.py" <<'PY'
+cat > "$MOD/common/luoshu_payload.py" <<'PY'
 #!/usr/bin/env python3
 import sys
 # Mount runtime only needs a zero/non-zero integrity verdict here; the real

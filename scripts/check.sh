@@ -35,6 +35,10 @@ python3 -m py_compile \
   "$ROOT/common/minimal_xml_router.py" \
   "$ROOT/common/universal_font_compiler.py" \
   "$ROOT/common/universal_font_deployment.py" \
+  "$ROOT/common/luoshu_engine.py" \
+  "$ROOT/common/luoshu_merge.py" \
+  "$ROOT/common/luoshu_payload.py" \
+  "$ROOT/common/luoshu_verify.py" \
   "$ROOT/common/font_inventory.py"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
@@ -43,6 +47,7 @@ for file in \
   README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_source_profile.py common/font_source_profile.sh common/font_web_convert.py common/universal_font_plan.py common/universal_font_plan.sh common/minimal_xml_router.py common/minimal_xml_router.sh common/universal_font_compiler.py common/universal_font_compiler.sh common/universal_font_deployment.py common/universal_font_deployment.sh common/universal_next_boot.sh common/universal_mount_runtime.sh common/font_inventory.py \
+  common/luoshu_engine.py common/luoshu_engine.sh common/luoshu_merge.py common/luoshu_payload.py common/luoshu_verify.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -290,6 +295,8 @@ sh "$ROOT/scripts/universal_composite_bridge_test.sh"
 python3 "$ROOT/scripts/luoshu_diagnostics_test.py"
 python3 "$ROOT/scripts/universal_keep_stock_test.py"
 python3 "$ROOT/scripts/luoshu_engine_test.py"
+python3 "$ROOT/scripts/luoshu_engine_bridge_test.py"
+python3 "$ROOT/scripts/luoshu_verify_test.py"
 sh "$ROOT/scripts/universal_font_compiler_bridge_test.sh"
 python3 "$ROOT/scripts/universal_font_deployment_test.py"
 sh "$ROOT/scripts/universal_font_deployment_bridge_test.sh"

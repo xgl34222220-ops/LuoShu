@@ -70,6 +70,7 @@ Path(a.manifest).write_text(json.dumps(m),encoding="utf-8")
 print('{"status":"ok","deploymentId":"sha256:test-deployment"}')
 PY
 chmod 0755 "$MOD/common/universal_font_deployment.py"
+cp "$MOD/common/universal_font_deployment.py" "$MOD/common/luoshu_payload.py"
 printf '{}\n' > "$MOD/config/universal-font-plans/test.json"
 printf '{}\n' > "$MOD/config/minimal-xml-route-plans/test.json"
 printf '{}\n' > "$MOD/config/universal-font-artifact-manifests/test.json"

@@ -18,7 +18,7 @@ from fontTools.ttLib import TTCollection, TTFont
 import luoshu_engine as engine
 import universal_composite_test as composite
 import universal_font_compiler_test as fixture
-import universal_font_deployment as payload_format
+import luoshu_payload as payload_format
 
 ROBOTO = "/system/fonts/Roboto-Regular.ttf"
 CJK = "/system/fonts/NotoSansCJK-Regular.ttf"

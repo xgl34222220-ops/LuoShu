@@ -96,7 +96,10 @@ common/luoshu_cli.sh
 common/luoshu_composite.sh
 common/luoshu_diagnostics.py
 common/luoshu_engine.py
+common/luoshu_engine.sh
 common/luoshu_merge.py
+common/luoshu_payload.py
+common/luoshu_verify.py
 common/luoshu_diagnostics.sh
 common/mix_task_handoff.sh
 common/mix_weight_mode.sh

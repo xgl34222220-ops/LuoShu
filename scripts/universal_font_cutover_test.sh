@@ -5,41 +5,24 @@ ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
-mkdir -p "$MOD/common/legacy_v14_4" "$MOD/config" "$MOD/logs" "$MOD/.luoshu-retired"
+mkdir -p "$MOD/common" "$MOD/config" "$MOD/logs" "$MOD/.luoshu-retired"
 printf '{}\n' > "$MOD/config/device_font_topology.json"
-printf '{}\n' > "$MOD/config/device_font_roles.json"
 printf 'OldFont\n' > "$MOD/config/active_font.conf"
 
-cat > "$MOD/common/universal_font_plan.sh" <<'SH'
-#!/bin/sh
-[ "$1" = path ] || exit 1
-printf '%s\n' "$MODDIR/config/plan.json"
-SH
-cat > "$MOD/common/minimal_xml_router.sh" <<'SH'
-#!/bin/sh
-[ "$1" = path ] || exit 1
-printf '%s\n' "$MODDIR/config/route.json"
-SH
-cat > "$MOD/common/universal_font_compiler.sh" <<'SH'
-#!/bin/sh
-case "$1" in manifest|path) printf '%s\n' "$MODDIR/config/artifacts.json" ;; *) exit 1 ;; esac
-SH
-cat > "$MOD/common/universal_font_deployment.sh" <<'SH'
+cat > "$MOD/common/luoshu_engine.sh" <<'SH'
 #!/bin/sh
 case "$1" in
   prepare)
-    printf '%s %s\n' "${LUOSHU_UNIVERSAL_DEADLINE:-}" "$(date +%s)" > "$MODDIR/config/prepare-deadline"
+    printf '%s %s\n' "${LUOSHU_ENGINE_DEADLINE:-}" "$(date +%s)" > "$MODDIR/config/prepare-deadline"
     [ "${FAKE_PREPARE:-ok}" = ok ] || { echo '{"status":"error","message":"fake prepare failed"}'; exit 1; }
-    mkdir -p "$MODDIR/config/prepared-payload"
-    printf '{}\n' > "$MODDIR/config/plan.json"
-    printf '{}\n' > "$MODDIR/config/route.json"
-    printf '{}\n' > "$MODDIR/config/artifacts.json"
-    printf '{}\n' > "$MODDIR/config/deployment.json"
+    mkdir -p "$MODDIR/config/build/payload"
+    printf '%s\n' "$2" > "$MODDIR/config/build/family"
+    printf '{"keptStock":[{"path":"/system/fonts/Odd.ttf","reason":"x"}]}\n' > "$MODDIR/config/build/report.json"
     printf '{"status":"ok"}\n'
     ;;
-  manifest|path) printf '%s\n' "$MODDIR/config/deployment.json" ;;
-  payload) printf '%s\n' "$MODDIR/config/prepared-payload" ;;
-  stage-prepared)
+  report) printf '%s\n' "$MODDIR/config/build/report.json" ;;
+  stage)
+    [ "$(cat "$MODDIR/config/build/family")" = "$2" ] || exit 1
     previous=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null || printf 'default')
     [ -n "$previous" ] || previous=default
     mkdir -p "$MODDIR/.luoshu-payload-next"
@@ -53,105 +36,73 @@ case "$1" in
       printf 'previousLegacy=false\n'
     } > "$MODDIR/config/universal-font-next.conf"
     printf '%s\n' "$2" > "$MODDIR/config/active_font.conf"
-    printf '{"status":"ok","state":"staged-next-boot","pipeline":"universal","fallback":false,"deploymentId":"fake-new"}\n'
+    printf '{"status":"ok","state":"staged-next-boot","pipeline":"luoshu-engine-v3","deploymentId":"fake-new"}\n'
     ;;
   *) exit 2 ;;
 esac
 SH
-cat > "$MOD/common/legacy_v14_4/font_switch_safe.sh" <<'SH'
-#!/bin/sh
-previous=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null || printf 'default')
-[ -n "$previous" ] || previous=default
-printf '%s\n' "${3:-unknown}" >> "$MODDIR/config/legacy-called"
-mkdir -p "$MODDIR/.luoshu-payload-next"
-{
-  printf 'state=prepared\n'
-  printf 'font=%s\n' "${3:-default}"
-  printf 'previousFont=%s\n' "$previous"
-  printf 'previousLegacy=false\n'
-} > "$MODDIR/config/font-payload-next.conf"
-printf '%s\n' "${3:-default}" > "$MODDIR/config/active_font.conf"
-printf '{"status":"ok","state":"prepared","fallback":true}\n'
-SH
-cat > "$MOD/common/universal_font_cutover_gate.py" <<'PY'
-# fake gate marker
-PY
-cat > "$MOD/common/universal_font_deployment.py" <<'PY'
+cat > "$MOD/common/luoshu_payload.py" <<'PY'
 # fake deployer marker
 PY
 cat > "$TMP/fake-python" <<'SH'
 #!/bin/sh
 case "$1" in
-  */universal_font_cutover_gate.py)
-    if [ "${FAKE_GATE:-pass}" = pass ]; then
-      printf '{"schema":"universal-font-cutover-gate-v1","eligible":true,"decision":"universal"}\n'
-      exit 0
-    fi
-    printf '{"schema":"universal-font-cutover-gate-v1","eligible":false,"decision":"legacy-fallback","reasons":["fake-reject"]}\n'
-    exit 2
-    ;;
-  */universal_font_deployment.py)
+  */luoshu_payload.py)
     exit 0
     ;;
   -)
+    if [ -n "${2:-}" ] && grep -q keptStock "$2" 2>/dev/null; then
+      printf '1|Odd.ttf\n'
+      exit 0
+    fi
     printf 'previous-universal-id\nprevious-universal-digest\n'
     exit 0
     ;;
   *) exit 1 ;;
 esac
 SH
-chmod +x "$MOD/common/"*.sh "$MOD/common/legacy_v14_4/font_switch_safe.sh" "$TMP/fake-python"
-printf '{}\n' > "$MOD/config/plan.json"
-printf '{}\n' > "$MOD/config/route.json"
-printf '{}\n' > "$MOD/config/artifacts.json"
-printf '{}\n' > "$MOD/config/deployment.json"
-mkdir -p "$MOD/config/prepared-payload"
+chmod +x "$MOD/common/"*.sh "$TMP/fake-python"
 
 OUT="$(
-  MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_GATE=pass \
+  MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" \
     sh "$ROOT/common/universal_font_cutover.sh" switch DemoFont
 )"
-printf '%s' "$OUT" | grep -q '"pipeline":"universal"'
-[ ! -f "$MOD/config/legacy-called" ]
+printf '%s' "$OUT" | grep -q '"pipeline":"luoshu-engine-v3"'
 grep -q '^state=staged$' "$MOD/config/universal-font-cutover.conf"
 grep -q '^font=DemoFont$' "$MOD/config/universal-font-next.conf"
+# Slots the engine left stock are recorded for the task message.
+grep -q '^font=DemoFont$' "$MOD/config/universal-kept-stock.conf"
+grep -q '^files=Odd.ttf$' "$MOD/config/universal-kept-stock.conf"
 
-# Universal stops starting work 30 s before the switch timeout so it can report
-# a clear failure; there is no legacy fallback to leave time for.
+# The engine stops starting work 30 s before the switch timeout so it can report
+# a clear failure.
 read -r deadline now < "$MOD/config/prepare-deadline"
 [ $((deadline - now)) -ge 325 ] && [ $((deadline - now)) -le 330 ]
-grep -q 'universal prepare start font=DemoFont budget=330s' "$MOD/logs/fontswitch.log"
+grep -q 'engine prepare start font=DemoFont budget=330s' "$MOD/logs/fontswitch.log"
 cp -a "$MOD/config" "$TMP/config-after-first-switch"
-MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_GATE=pass \
+MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" \
   LUOSHU_SWITCH_TIMEOUT_SECONDS=100 sh "$ROOT/common/universal_font_cutover.sh" switch DemoFont >/dev/null
 read -r deadline now < "$MOD/config/prepare-deadline"
 [ $((deadline - now)) -ge 65 ] && [ $((deadline - now)) -le 70 ]
-MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_GATE=pass \
+MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" \
   LUOSHU_UNIVERSAL_BUDGET_SECONDS=bogus sh "$ROOT/common/universal_font_cutover.sh" switch DemoFont >/dev/null
 read -r deadline now < "$MOD/config/prepare-deadline"
 [ $((deadline - now)) -ge 325 ] && [ $((deadline - now)) -le 330 ]
 rm -rf "$MOD/config"
 mv "$TMP/config-after-first-switch" "$MOD/config"
 
-# A rejected Universal switch reports the gate reason and changes nothing: no
-# legacy engine, the queued DemoFont request and the active selection stay.
+# A failed switch reports the engine message and changes nothing: the queued
+# DemoFont request and the active selection stay.
 cp "$MOD/config/universal-font-next.conf" "$TMP/next-before.conf"
-OUT="$(MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_GATE=reject \
-  sh "$ROOT/common/universal_font_cutover.sh" switch RejectedFont || true)"
-printf '%s' "$OUT" | grep -q '"status":"error"'
-printf '%s' "$OUT" | grep -q '"reason":"universal-readiness-gate-rejected"'
-printf '%s' "$OUT" | grep -q 'fake-reject'
-[ ! -f "$MOD/config/legacy-called" ]
-grep -q '^state=failed$' "$MOD/config/universal-font-cutover.conf"
-cmp -s "$TMP/next-before.conf" "$MOD/config/universal-font-next.conf"
-grep -q '^DemoFont$' "$MOD/config/active_font.conf"
-[ -d "$MOD/.luoshu-payload-next" ]
-
 OUT="$(MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_PREPARE=fail \
   sh "$ROOT/common/universal_font_cutover.sh" switch PrepareFail || true)"
 printf '%s' "$OUT" | grep -q '"reason":"universal-prepare-failed"'
 printf '%s' "$OUT" | grep -q 'fake prepare failed'
-[ ! -f "$MOD/config/legacy-called" ]
+grep -q '^state=failed$' "$MOD/config/universal-font-cutover.conf"
+cmp -s "$TMP/next-before.conf" "$MOD/config/universal-font-next.conf"
+grep -q '^DemoFont$' "$MOD/config/active_font.conf"
+[ -d "$MOD/.luoshu-payload-next" ]
+[ ! -f "$MOD/config/universal-kept-stock.conf" ]
 
 # Composite temporary families and the old composite runtime are refused.
 MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" \
@@ -163,7 +114,6 @@ LUOSHU_REAL_MODDIR="$MOD" MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fa
 # records the font running in this boot (OldFont), not the queued DemoFont.
 MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" \
   sh "$ROOT/common/universal_font_cutover.sh" switch default | grep -q '"pipeline":"universal-default"'
-[ ! -f "$MOD/config/legacy-called" ]
 [ -d "$MOD/.luoshu-payload-next" ] && [ -z "$(ls -A "$MOD/.luoshu-payload-next")" ]
 grep -q '^font=default$' "$MOD/config/font-payload-next.conf"
 grep -q '^targetMode=default$' "$MOD/config/font-payload-next.conf"
@@ -173,7 +123,7 @@ grep -q '^default$' "$MOD/config/active_font.conf"
 grep -q '^font=default$' "$MOD/config/text_reboot_required.conf"
 
 rm -rf "$MOD/.luoshu-payload-next"
-rm -f "$MOD/config/font-payload-next.conf" "$MOD/config/universal-font-next.conf" "$MOD/config/legacy-called"
+rm -f "$MOD/config/font-payload-next.conf" "$MOD/config/universal-font-next.conf"
 mkdir -p "$MOD/.luoshu-retired/universal-boot-legacy/system/fonts"
 printf 'old payload\n' > "$MOD/.luoshu-retired/universal-boot-legacy/system/fonts/Old.ttf"
 cat > "$MOD/config/universal-font-runtime-verification.conf" <<'EOF'

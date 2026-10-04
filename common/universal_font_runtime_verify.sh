@@ -7,6 +7,7 @@ MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 MODULE_DIR="$MODDIR"
 CONFIG_DIR="${CONFIG_DIR:-$MODDIR/config}"
 VERIFIER="$MODDIR/common/universal_font_runtime_verify.py"
+ENGINE_VERIFIER="$MODDIR/common/luoshu_verify.py"
 PLAN_BRIDGE="$MODDIR/common/universal_font_plan.sh"
 COMPILER_BRIDGE="$MODDIR/common/universal_font_compiler.sh"
 RUNTIME_CONF="$CONFIG_DIR/universal-font-runtime.conf"
@@ -176,6 +177,26 @@ _uvr_run() {
     _uvr_deployment=$(_uvr_deployment)
     _uvr_mountinfo=$(_uvr_mountinfo)
 
+    # Engine v3 payloads carry no FontPlan/artifact contracts: verify the
+    # deployment itself (runtime + mount identity, every file visible and intact).
+    if [ -s "$_uvr_deployment" ] && grep -q '"luoshu-engine"' "$_uvr_deployment" 2>/dev/null; then
+        [ -s "$RUNTIME_CONF" ] || { _uvr_terminal_failure runtime-state-missing "$_uvr_font" "$_uvr_boot"; rm -f "$PID_FILE"; return 1; }
+        _uvr_collect_font_dump || true
+        set -- "$ENGINE_VERIFIER" \
+            --deployment "$_uvr_deployment" \
+            --runtime-conf "$RUNTIME_CONF" \
+            --mount-state "$MOUNT_STATE" \
+            --font-dump "$FONT_DUMP" \
+            --active-font "$_uvr_font" \
+            --boot-id "$_uvr_boot" \
+            --output-json "$OUTPUT_JSON" \
+            --output-conf "$OUTPUT_CONF"
+        [ -n "${LUOSHU_VERIFY_VISIBLE_ROOT:-}" ] && set -- "$@" --visible-root "$LUOSHU_VERIFY_VISIBLE_ROOT"
+        _uvr_python "$@"
+        _uvr_finish "$_uvr_font" "$_uvr_boot" $?
+        return $?
+    fi
+
     [ -s "$_uvr_plan" ] || { _uvr_terminal_failure fontplan-missing "$_uvr_font" "$_uvr_boot"; rm -f "$PID_FILE"; return 1; }
     [ -s "$_uvr_artifacts" ] || { _uvr_terminal_failure artifact-manifest-missing "$_uvr_font" "$_uvr_boot"; rm -f "$PID_FILE"; return 1; }
     [ -s "$_uvr_deployment" ] || { _uvr_terminal_failure deployment-missing "$_uvr_font" "$_uvr_boot"; rm -f "$PID_FILE"; return 1; }
@@ -210,7 +231,11 @@ _uvr_run() {
             --output-json "$OUTPUT_JSON" \
             --output-conf "$OUTPUT_CONF"
     fi
-    _uvr_rc=$?
+    _uvr_finish "$_uvr_font" "$_uvr_boot" $?
+}
+
+_uvr_finish() {
+    _uvr_font="$1"; _uvr_boot="$2"; _uvr_rc="$3"
     _uvr_grade=$(_uvr_value "$OUTPUT_CONF" grade)
     _uvr_reason=$(_uvr_value "$OUTPUT_CONF" reason)
     _uvr_log "result=${_uvr_grade:-FAIL} reason=${_uvr_reason:-unknown} font=$_uvr_font rc=$_uvr_rc"

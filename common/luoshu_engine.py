@@ -32,7 +32,7 @@ from fontTools.ttLib import TTCollection, TTFont
 
 import font_role_shadow
 import luoshu_merge
-import universal_font_deployment as payload_format
+import luoshu_payload as payload_format
 
 ENGINE_REVISION = 1
 REPORT_SCHEMA = "luoshu-engine-report-v1"
@@ -849,10 +849,52 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     os.replace(temp, path)
 
 
+def parse_axes(value: str) -> dict[str, float]:
+    """The App's ``tag=value`` list (``,`` or ``;`` separated)."""
+    result: dict[str, float] = {}
+    for item in re.split(r"[;,]", value or ""):
+        tag, sep, raw = item.strip().partition("=")
+        if not sep:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9]{4}", tag.strip()):
+            raise EngineError(f"组合轴设置无效：{item.strip()}")
+        try:
+            result[tag.strip()] = float(raw)
+        except ValueError as error:
+            raise EngineError(f"组合轴数值无效：{item.strip()}") from error
+    return result
+
+
+def _spec_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    if args.role_font:
+        roles: dict[str, dict[str, Any]] = {role: {"files": []} for role in COMPOSITE_ROLES}
+        for item in args.role_font:
+            role, sep, path = item.partition(":")
+            if not sep or role not in roles:
+                raise EngineError(f"组合字体参数无效：{item}")
+            roles[role]["files"].append(path)
+        for item in args.role_mode:
+            role, _sep, mode = item.partition("=")
+            if role in roles:
+                roles[role]["mode"] = mode
+        for item in args.role_axes:
+            role, _sep, axes = item.partition("=")
+            if role in roles:
+                roles[role]["axes"] = parse_axes(axes)
+        return {"mode": "composite", "roles": roles}
+    if not args.font:
+        raise EngineError("没有指定源字体文件")
+    return {"mode": "single", "files": list(args.font)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--topology", required=True, type=Path)
-    parser.add_argument("--spec", required=True, type=Path, help="source fonts: {mode, files | roles}")
+    parser.add_argument("--spec", type=Path, help="source fonts: {mode, files | roles}")
+    parser.add_argument("--font", action="append", default=[], help="single family: a source font file")
+    parser.add_argument("--role-font", action="append", default=[], help="composite: ROLE:PATH")
+    parser.add_argument("--role-mode", action="append", default=[], help="composite: ROLE=auto|fixed")
+    parser.add_argument("--role-axes", action="append", default=[], help="composite: ROLE=tag=value,...")
     parser.add_argument("--xml-root", type=Path, help="stock XML snapshots: <root>/<partition>/<file>")
     parser.add_argument("--xml-map", type=Path)
     parser.add_argument("--stock-map", type=Path)
@@ -874,9 +916,10 @@ def main() -> int:
                                  encoding="utf-8")
 
     try:
+        spec = _load_json(args.spec) if args.spec else _spec_from_args(args)
         args.payload_root.parent.mkdir(parents=True, exist_ok=True)
         manifest, report = build(
-            _load_json(args.topology), _load_json(args.spec), args.payload_root, args.cache_dir,
+            _load_json(args.topology), spec, args.payload_root, args.cache_dir,
             xml_root=args.xml_root, xml_map=_path_map(args.xml_map), stock_paths=_path_map(args.stock_map),
             deadline=deadline, progress=progress,
         )
