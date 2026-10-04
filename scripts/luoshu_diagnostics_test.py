@@ -2,7 +2,6 @@
 """Engine diagnostic bundle: device-side export and host-side replay round trip."""
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import subprocess
@@ -15,8 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import dataclasses
+
 import font_role_shadow
-import font_source_profile
+import luoshu_engine
 import universal_composite_test as composite
 import universal_font_compiler_test as fixture
 
@@ -28,7 +29,6 @@ def main() -> int:
         moddir = temp / "module"
         config = moddir / "config"
         (config / "font-config-source" / "system").mkdir(parents=True)
-        (config / "source-font-profiles").mkdir()
         (moddir / "logs").mkdir()
         (moddir / "module.prop").write_text("id=LuoShu\nversion=test\nversionCode=1\n", encoding="utf-8")
         (moddir / "logs" / "fontswitch.log").write_text("universal prepare start font=mix\n", encoding="utf-8")
@@ -52,27 +52,25 @@ def main() -> int:
         composite.make_cjk_font(cjk, family="User CJK", variable=True, pentagon=True)
         fixture.make_font(latin, family="User Latin", variable=True, triangle=True)
         fixture.make_font(digit, family="User Digit", advance=560)
-        profile = font_source_profile.build(
-            [], {"cjk": [cjk], "latin": [latin], "digit": [digit]},
-            {"cjk": "auto", "latin": "auto", "digit": "fixed"},
-            {"cjk": "", "latin": "", "digit": "wght=500"},
-        )
-        key = hashlib.sha256(b"mix").hexdigest()[:24]
-        (config / "source-font-profiles" / f"{key}.json").write_text(json.dumps(profile), encoding="utf-8")
+        # The last switch on the device: its report records the source fonts.
+        spec = {"mode": "composite", "roles": {
+            "cjk": {"files": [str(cjk)], "mode": "auto"},
+            "latin": {"files": [str(latin)], "mode": "auto"},
+            "digit": {"files": [str(digit)], "mode": "fixed", "axes": {"wght": 500}},
+        }}
+        build_dir = config / "luoshu-engine-build"
+        _manifest, device_report = luoshu_engine.build(
+            topology, spec, build_dir / "payload", temp / "device-cache", xml_root=config / "font-config-source")
+        (build_dir / "report.json").write_text(json.dumps(device_report), encoding="utf-8")
 
-        # Hollowing keeps everything the engine profiles: tables, metrics, cmap, axes.
+        # Hollowing keeps everything the engine inspects: style, axes, coverage.
         import luoshu_diagnostics
         hollow = temp / "hollow.ttf"
         luoshu_diagnostics._hollow(cjk, hollow, luoshu_diagnostics._keep_codepoints())
 
-        def profiled(path: Path) -> dict:
-            info = font_source_profile._inspect_file(path)
-            for key in ("fileUid", "sha256", "sourcePath", "fileName", "bytes"):
-                info.pop(key, None)
-            for face in info["faces"]:
-                for key in ("uid", "fileUid", "sourcePath", "sha256", "fileName"):
-                    face.pop(key, None)
-            return info
+        def profiled(path: Path) -> list[dict]:
+            return [{key: value for key, value in dataclasses.asdict(face).items()
+                     if key not in {"path", "identity"}} for face in luoshu_engine._inspect(path)]
 
         assert profiled(hollow) == profiled(cjk)
         assert hollow.stat().st_size < cjk.stat().st_size
@@ -130,7 +128,7 @@ def main() -> int:
         )
         assert replay.returncode == 0, replay.stdout + replay.stderr
         assert "RESULT: PASS" in replay.stdout, replay.stdout
-        assert "blocked=0" in replay.stdout, replay.stdout
+        assert f"replaced: {len(device_report['replaced'])}" in replay.stdout, replay.stdout
 
     print("luoshu_diagnostics_test: PASS")
     return 0

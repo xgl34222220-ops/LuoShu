@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
-"""Replay a device engine diagnostic bundle on the host (HOST_ONLY).
+"""Replay a device diagnostic bundle with the current engine (HOST_ONLY).
 
-Takes the zip written by common/luoshu_diagnostics.py and runs the current
-Universal Font Engine over the device's real inputs:
+Takes the zip written by common/luoshu_diagnostics.py (App logs page, or
+'洛书 诊断') and runs engine v3 over the device's real inputs: its font
+topology, stock XML snapshots, stock collection files and the user's source
+fonts of the last switch. Prints what would be replaced, what keeps the stock
+font and why, which XML files change, and how long it takes on this machine.
 
-  roles (re-classified from the device topology) -> source profile (rebuilt
-  from the bundled source fonts) -> FontPlan -> XML route -> compile ->
-  deployment -> cutover gate
-
-and prints which slots fail and why. Nothing touches the host system.
-
-  python3 tools/replay_diagnostics.py LuoShu-engine-XXX.zip [--profile NAME] [--work DIR]
+  python3 tools/replay_diagnostics.py LuoShu-engine-XXX.zip [--work DIR]
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -27,187 +21,76 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-COMMON = ROOT / "common"
-sys.path.insert(0, str(COMMON))
+sys.path.insert(0, str(ROOT / "common"))
 
-import font_source_profile  # noqa: E402
+import luoshu_engine  # noqa: E402
+import luoshu_payload  # noqa: E402
 
 
 def _load(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _family_key(family: str) -> str:
-    return hashlib.sha256(family.encode("utf-8")).hexdigest()[:24]
-
-
-def _run(stage: str, args: list[str], env: dict[str, str]) -> tuple[int, dict[str, Any] | None, str, float]:
-    started = time.monotonic()
-    done = subprocess.run(
-        [sys.executable, *args], check=False, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-    )
-    elapsed = time.monotonic() - started
-    parsed = None
-    for line in reversed(done.stdout.strip().splitlines()):
-        try:
-            parsed = json.loads(line)
-            break
-        except ValueError:
-            continue
-    text = (done.stdout + done.stderr).strip()
-    print(f"[{stage}] rc={done.returncode} {elapsed:.1f}s", flush=True)
-    if done.returncode != 0:
-        print("  " + text[-1500:].replace("\n", "\n  "))
-    return done.returncode, parsed, text, elapsed
-
-
-def _axes_text(axes: dict[str, Any]) -> str:
-    return ",".join(f"{tag}={value}" for tag, value in sorted((axes or {}).items()))
-
-
-def _pick_profile(config: Path, wanted: str | None) -> Path:
-    profiles = sorted((config / "source-font-profiles").glob("*.json"))
-    if not profiles:
-        raise SystemExit("诊断包里没有源字体 Profile：请先在手机上切换一次字体再导出")
-    if wanted:
-        for path in profiles:
-            if wanted in {path.stem, path.name, _family_key(wanted)}:
-                return path
-        raise SystemExit(f"找不到 Profile：{wanted}")
-    return max(profiles, key=lambda path: int(_load(path).get("generatedAt") or 0))
-
-
-def _rebuild_profile(device_profile: Path, sources: dict[str, Any], bundle_root: Path, output: Path) -> None:
-    data = _load(device_profile)
-    remap: dict[str, Path] = {}
-    for item in data.get("files") or []:
-        original = str(item.get("sourcePath") or "")
-        entry = sources.get(original)
+def _remap_spec(spec: dict[str, Any], sources: dict[str, Any], bundle_root: Path) -> dict[str, Any]:
+    def remap(path: str) -> str:
+        entry = sources.get(path)
         if entry is None:
-            raise SystemExit(f"诊断包缺少源字体：{original}")
-        remap[original] = bundle_root / entry["file"]
-    composite = data.get("composite")
-    if isinstance(composite, dict):
-        role_fonts: dict[str, list[Path]] = {}
-        for item in data.get("files") or []:
-            roles = sorted({role for face in item.get("faces") or [] for role in face.get("assignedRoles") or []})
-            for role in roles:
-                role_fonts.setdefault(role, []).append(remap[item["sourcePath"]])
-        specs = composite.get("roles") or {}
-        profile = font_source_profile.build(
-            [], role_fonts,
-            {role: str(spec.get("mode") or "auto") for role, spec in specs.items()},
-            {role: _axes_text(spec.get("axes") or {}) for role, spec in specs.items()},
-        )
-    else:
-        profile = font_source_profile.build(list(remap.values()))
-    output.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+            raise SystemExit(f"诊断包缺少源字体：{path}")
+        return str(bundle_root / entry["file"])
+
+    if spec.get("mode") == "composite":
+        roles = {}
+        for role, item in (spec.get("roles") or {}).items():
+            roles[role] = dict(item, files=[remap(path) for path in item.get("files") or []])
+        return {"mode": "composite", "roles": roles}
+    return {"mode": "single", "files": [remap(path) for path in spec.get("files") or []]}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("bundle", type=Path)
-    parser.add_argument("--profile", help="profile file stem or family name; default: newest")
     parser.add_argument("--work", type=Path)
     args = parser.parse_args()
 
     work = args.work or Path(tempfile.mkdtemp(prefix="luoshu-replay-"))
     bundle_root = work / "bundle"
-    out = work / "replay"
-    out.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.bundle) as bundle:
         bundle.extractall(bundle_root)
     index = _load(bundle_root / "index.json")
     config = bundle_root / "config"
     print(f"device: {json.dumps(index.get('device'), ensure_ascii=False)}")
     print(f"module: {index.get('module')} active={index.get('activeFont')!r} mode={index.get('mode', 'full')}")
-    print(f"stock files: {len(index.get('stock') or {})} skipped: {len(index.get('stockSkipped') or [])}")
 
-    env = dict(os.environ)
-    env["PYTHONPATH"] = str(COMMON) + os.pathsep + env.get("PYTHONPATH", "")
-    # Never let the compiler fall back to host paths or an expired deadline.
-    env["LUOSHU_SELF_MOUNT_STATE_ROOT"] = str(work / "no-self-mount")
-    env.pop("LUOSHU_UNIVERSAL_DEADLINE", None)
+    report_path = config / "luoshu-engine-build" / "report.json"
+    if not report_path.is_file():
+        raise SystemExit("诊断包里没有字体引擎记录：请先在手机上切换一次字体再导出")
+    device_report = _load(report_path)
+    spec = _remap_spec(device_report.get("sources") or {}, index.get("sources") or {}, bundle_root)
+    stock_paths = {logical: bundle_root / entry["file"] for logical, entry in (index.get("stock") or {}).items()}
+    print(f"device result: replaced={len(device_report.get('replaced') or [])} "
+          f"kept={len(device_report.get('keptStock') or [])} seconds={device_report.get('seconds')}")
 
-    topology = config / "device_font_topology.json"
-    roles = out / "device_font_roles.json"
-    shadow = out / "device_font_shadow_plan.json"
-    rc, _, _, _ = _run("roles", [str(COMMON / "font_role_shadow.py"), "--topology", str(topology),
-                                 "--roles-output", str(roles), "--plan-output", str(shadow)], env)
-    if rc:
+    started = time.monotonic()
+    try:
+        manifest, report = luoshu_engine.build(
+            _load(config / "device_font_topology.json"), spec, work / "payload", work / "cache",
+            xml_root=config / "font-config-source", stock_paths=stock_paths,
+        )
+    except (luoshu_engine.EngineError, luoshu_payload.DeploymentError) as error:
+        print(f"RESULT: FAIL {error}")
         return 1
-
-    device_profile = _pick_profile(config, args.profile)
-    print(f"profile: {device_profile.name}")
-    profile = out / "source_profile.json"
-    _rebuild_profile(device_profile, index.get("sources") or {}, bundle_root, profile)
-
-    plan = out / "font_plan.json"
-    route = out / "route_plan.json"
-    artifacts = out / "artifacts.json"
-    exclusions = out / "exclusions.json"
-    stock_map = out / "stock_map.json"
-    stock_map.write_text(json.dumps({
-        logical: str(bundle_root / entry["file"]) for logical, entry in (index.get("stock") or {}).items()
-    }, ensure_ascii=False), encoding="utf-8")
-    compile_time = 0.0
-    # Same loop as universal_font_compiler.sh: blocked non-core slots keep stock.
-    for attempt in range(1, 5):
-        plan_args = [str(COMMON / "universal_font_plan.py"), "--topology", str(topology),
-                     "--roles", str(roles), "--source-profile", str(profile), "--output", str(plan)]
-        if exclusions.is_file():
-            plan_args += ["--exclusions", str(exclusions)]
-        rc, _, _, _ = _run(f"plan#{attempt}", plan_args, env)
-        if rc:
-            return 1
-        rc, _, _, _ = _run("route", [str(COMMON / "minimal_xml_router.py"), "--font-plan", str(plan),
-                                     "--snapshot-root", str(config / "font-config-source"),
-                                     "--output", str(route)], env)
-        if rc:
-            return 1
-        rc, _, _, elapsed = _run("compile", [
-            str(COMMON / "universal_font_compiler.py"), "--font-plan", str(plan), "--route-plan", str(route),
-            "--stock-map", str(stock_map), "--output-dir", str(out / "artifacts"), "--manifest", str(artifacts),
-            "--exclusions-out", str(exclusions),
-        ], env)
-        compile_time += elapsed
-        if artifacts.is_file():
-            manifest = _load(artifacts)
-            blocked = [item for item in manifest.get("artifacts") or [] if item.get("status") == "blocked"]
-            modes: dict[str, int] = {}
-            for item in manifest.get("artifacts") or []:
-                modes[str(item.get("mode"))] = modes.get(str(item.get("mode")), 0) + 1
-            print(f"artifacts: {len(manifest.get('artifacts') or [])} modes={modes} blocked={len(blocked)}")
-            for item in blocked:
-                print(f"  BLOCKED {item.get('targetPath')} role={item.get('role')} reason={item.get('reason')}")
-        if rc != 3:
-            break
-    kept = {path: item.get("keptStockReason") for path, item in (_load(plan).get("targets") or {}).items()
-            if item.get("action") == "keep-stock"}
-    print(f"kept stock: {len(kept)}")
-    for path, reason in sorted(kept.items()):
-        print(f"  KEPT {path} reason={reason}")
-    if rc:
-        return 1
-
-    deployment = out / "deployment.json"
-    payload = out / "payload"
-    rc, _, _, _ = _run("deploy", [
-        str(COMMON / "universal_font_deployment.py"), "--font-plan", str(plan), "--route-plan", str(route),
-        "--artifact-manifest", str(artifacts), "--payload-root", str(payload), "--manifest", str(deployment),
-    ], env)
-    if rc:
-        return 1
-
-    rc, gate, text, _ = _run("gate", [
-        str(COMMON / "universal_font_cutover_gate.py"), "--font-plan", str(plan), "--route-plan", str(route),
-        "--artifact-manifest", str(artifacts), "--deployment", str(deployment), "--payload-root", str(payload),
-    ], env)
-    print("  " + text[-2000:].replace("\n", "\n  "))
-    eligible = rc == 0 and '"eligible":true' in text.replace(" ", "")
-    print(f"RESULT: {'PASS' if eligible else 'FAIL'} (compile {compile_time:.0f}s on host) work={work}")
-    return 0 if eligible else 1
+    print(f"replaced: {len(report['replaced'])}")
+    for item in report["replaced"]:
+        print(f"  {item['path']} role={item['role']} variable={item['variable']} faces={item['faces']}")
+    print(f"kept stock: {len(report['keptStock'])}")
+    for item in report["keptStock"]:
+        print(f"  KEPT {item['path']} reason={item['reason']}")
+    for item in report["xml"]:
+        print(f"  XML {item['sourceXml']} nodes={item['nodes']}")
+    size = sum(item["bytes"] for item in manifest["files"]) / 1e6
+    print(f"RESULT: PASS files={manifest['summary']['fileCount']} payload={size:.0f}MB "
+          f"stats={report['stats']} host={time.monotonic() - started:.1f}s work={work}")
+    return 0
 
 
 if __name__ == "__main__":

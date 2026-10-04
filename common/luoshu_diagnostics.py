@@ -37,6 +37,7 @@ RECENT_PROFILES = 3
 SKIPPED_ROLES = {"emoji", "symbol-icon"}
 CONFIG_DIRS = (
     "font-config-source",
+    "luoshu-engine-build",
     "source-font-profiles",
     "universal-font-plans",
     "minimal-xml-route-plans",
@@ -116,6 +117,8 @@ def _wanted_slots(config: Path) -> list[tuple[str, str, str]]:
     roles = _load(config / "device_font_roles.json").get("slots") or {}
     shadow = _load(config / "device_font_shadow_plan.json").get("slots") or {}
     targeted: set[str] = set()
+    report = _load(config / "luoshu-engine-build" / "report.json")
+    targeted.update(str(item.get("path")) for item in report.get("replaced") or [] if item.get("path"))
     for plan_path in sorted((config / "universal-font-plans").glob("*.json")):
         targets = _load(plan_path).get("targets")
         if isinstance(targets, dict):
@@ -136,20 +139,14 @@ def _wanted_slots(config: Path) -> list[tuple[str, str, str]]:
 
 
 def _recent_sources(config: Path) -> list[dict[str, Any]]:
-    profiles = []
-    for path in (config / "source-font-profiles").glob("*.json"):
-        data = _load(path)
-        if data.get("files"):
-            profiles.append((int(data.get("generatedAt") or 0), path.name, data))
-    profiles.sort(reverse=True)
+    """Source fonts of the last engine build (its report records the spec)."""
+    spec = _load(config / "luoshu-engine-build" / "report.json").get("sources") or {}
+    paths = list(spec.get("files") or [])
+    for role in (spec.get("roles") or {}).values():
+        paths.extend((role or {}).get("files") or [])
     result: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for _, name, data in profiles[:RECENT_PROFILES]:
-        for item in data.get("files") or []:
-            source = str(item.get("sourcePath") or "")
-            if source and source not in seen:
-                seen.add(source)
-                result.append({"profile": name, "sourcePath": source, "bytes": int(item.get("bytes") or 0)})
+    for source in dict.fromkeys(str(path) for path in paths):
+        result.append({"profile": "luoshu-engine-build", "sourcePath": source})
     return result
 
 
@@ -296,6 +293,8 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
         for name in CONFIG_DIRS:
             root = config / name
             for path in sorted(root.rglob("*")) if root.is_dir() else []:
+                if name == "luoshu-engine-build" and path.suffix != ".json":
+                    continue  # the built payload fonts are reproducible
                 if path.is_file() and path.stat().st_size <= CONFIG_FILE_LIMIT:
                     bundle.write(path, f"config/{name}/{path.relative_to(root)}")
         deployment = moddir / ".luoshu-runtime" / "deployment" / "deployment.json"

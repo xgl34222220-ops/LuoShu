@@ -655,6 +655,7 @@ def build(
         wanted = {(int(ref.get("weight") or 400), _italic_style(ref.get("style"))) for ref in target.refs}
         xml_weights[target.path] = wanted
 
+    payload_root.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=f".{payload_root.name}.", dir=str(payload_root.parent)))
     files: dict[str, dict[str, Any]] = {}
     node_actions: dict[str, dict[tuple[int, bool], NodeAction]] = {}
@@ -738,6 +739,7 @@ def build(
         "schema": REPORT_SCHEMA,
         "engineRevision": ENGINE_REVISION,
         "mode": sources.mode,
+        "sources": spec,
         "deploymentId": manifest["deploymentId"],
         "replaced": replaced,
         "keptStock": [{"path": path, "reason": reason} for path, reason in sorted(kept.items())],
