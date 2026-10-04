@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # HyperOS routes Chrome/WebView through a framework-owned theme symlink.
 # Keep that router intact; replace only its exact active theme file in consumer
-# namespaces. Invoked by the existing provider watcher, with no extra daemon.
+# namespaces. Invoked by the bounded boot task, with no resident daemon.
 set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
@@ -29,6 +29,22 @@ _htf_active() {
         *) return 1 ;;
     esac
     [ ! -L "$HTF_TARGET" ] && [ -s "$HTF_TARGET" ]
+}
+
+_htf_readiness() {
+    if [ ! -L "$HTF_ALIAS" ]; then
+        # On HyperOS the framework can create the alias itself after boot.
+        if [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
+            printf 'pending\n'
+        else
+            printf 'not-applicable\n'
+        fi
+        return 0
+    fi
+    _htf_active || { printf 'pending\n'; return 0; }
+    _htf_ready_stamp=$(_htf_stamp "$HTF_TARGET")
+    [ -n "$_htf_ready_stamp" ] || { printf 'pending\n'; return 0; }
+    printf 'ready|%s|%s\n' "$HTF_TARGET" "$_htf_ready_stamp"
 }
 
 _htf_source() {
@@ -267,6 +283,7 @@ _htf_restore() { _gfp_locked _htf_restore_internal; }
 
 if [ "${0##*/}" = hyperos_theme_font_bridge.sh ]; then
     case "${1:-apply}" in
+        readiness) _htf_readiness ;;
         fingerprint) _htf_fingerprint ;;
         apply) _htf_apply ;;
         restore) _htf_restore ;;

@@ -403,7 +403,42 @@ def inventory_target(data: dict, logical: str) -> bool:
                 (coverage['hanCount'] >= 512 or
                  (coverage['latinCount'] >= 52 and coverage['unicodeCount'] >= 96))))
     return role and (coverage['hasLatin'] or coverage['hasHan']
-                     or (coverage.get('hasDigits', False) and is_clock_slot(path.name, slot)))
+                     or coverage.get('hasDigits', False))
+
+
+def check_core_coverage(path: Path, slot: dict, logical: str, memo: dict) -> dict:
+    """Do not accept a full stock Latin/digit slot with missing selected glyphs.
+
+    Legacy partial stock counts cannot prove the individual original characters;
+    enforce the entire core alphabet only when all 52/10 were actually recorded.
+    """
+    coverage = slot.get('metrics', {}).get('coverage')
+    if not valid_coverage(coverage):
+        return {'textCoverage': 'unverified-no-stock-character-facts'}
+    st = path.stat()
+    identity = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    if identity not in memo:
+        face = _pick_face(path)
+        kwargs = {'fontNumber': face} if face >= 0 else {}
+        with TTFont(path, lazy=True, recalcBBoxes=False, **kwargs) as font:
+            # Retain only the 62 core code points, not a CJK cmap per alias.
+            memo[identity] = frozenset(cp for cp in preferred_unicode_codepoints(font)
+                                       if 48 <= cp <= 57 or 65 <= cp <= 90 or 97 <= cp <= 122)
+    points = memo[identity]
+    required = set()
+    if coverage['latinCount'] == 52:
+        required.update(range(65, 91)); required.update(range(97, 123))
+    if coverage.get('digitCount') == 10:
+        required.update(range(48, 58))
+    missing = sorted(required - points)
+    if missing:
+        raise ValueError('英数覆盖不完整：' + logical + ' 缺少 ' +
+                         ' '.join(f'U+{cp:04X}' for cp in missing))
+    return {'textCoverage': 'checked-core-characters',
+            'latinCount': sum(65 <= cp <= 90 or 97 <= cp <= 122 for cp in points),
+            'digitCount': sum(48 <= cp <= 57 for cp in points),
+            'coreLatinChecked': coverage['latinCount'] == 52,
+            'coreDigitsChecked': coverage.get('digitCount') == 10}
 
 
 def build(module: Path, stage: Path, names: list[str]) -> dict:
@@ -414,8 +449,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     preserved_aliases = []
     excluded_aliases = protected_aliases(stage, data)
     trusted = {logical for logical in data.get('slots', {}) if inventory_target(data, logical)}
-    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted)
-                                                if not safe_physical_font_name(Path(logical).name))]))
+    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted))]))
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
@@ -458,6 +492,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     compact_sources = {}
     weight_sources = {}
     output_reports = {}
+    coverage_memo = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
     prepared = []
@@ -475,6 +510,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 weight_sources[weight_key] = slot_weight.prepare(
                     source, outputs / f'weight-{len(weight_sources)}.font', weight, keep_variable)
             source, weight_report = weight_sources[weight_key]
+            check_core_coverage(source, slot_for(data, logical), logical, coverage_memo)
             stat = source.stat()
             routing, stock_punctuation, routing_reason = _cjk_routing(data, logical, cjk_fallback)
             if contract[-1] != 'stock':
@@ -497,6 +533,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                                     align_bitmap_bottom=align_bottom)
                 output_reports[key]['removedCjkMappings'] += compact_removed
                 cache[key] = output
+            core_report = check_core_coverage(cache[key], slot_for(data, logical), logical, coverage_memo)
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
             slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
@@ -508,12 +545,13 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'useTypoMetrics': contract[9],
                                 'cjkRoutingSource': 'stock-fallback' if routing else 'source',
                                 'cjkRoutingReason': routing_reason,
-                                **output_reports[key], **weight_report,
+                                **output_reports[key], **weight_report, **core_report,
                                 'targetDiscovery': 'inventory' if logical in trusted else 'physical-policy'})
         for output, dest in prepared:
             link_copy(output, dest)
         record_preserved(stage, ['/' + alias.relative_to(stage).as_posix()
-                                 for alias in excluded_aliases])
+                                 for alias in excluded_aliases],
+                         replaced=['/' + dest.relative_to(stage).as_posix() for _, dest in prepared])
         for alias in preserved_aliases + excluded_aliases:
             # Initial generic mapping creates the alias as a regular font. Its
             # absence exposes the ROM lower symlink in OverlayFS and leaves it
