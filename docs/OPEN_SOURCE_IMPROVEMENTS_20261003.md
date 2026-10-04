@@ -305,3 +305,11 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 修正提交 [`a70b19c8`](https://github.com/xgl34222220-ops/LuoShu/commit/a70b19c89a0c8daf21d724d10201915fda7eafc8) 的 [本轮候选 CI 37189036319](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37189036319) 已完整 PASS。[原始新 CI 节选](evidence/candidate-inventory-output-37189036319.txt) 包含 5 个真实外部 printf 模式的传输用例、当前库存 23 个（0.431 秒）、正常 Linux 真实进程 20 个（24.011 秒）、有限请求 5 个（9.361 秒）及构建时原 harness 128 个（0.334 秒）通过；打包前重复要求也通过。App lint/JVM/构建和原厂 CFF2 夹具门禁通过，不编造未读取的 JVM 总数。
 
 下载 artifact `11298680369` 后 [独立包核验](TEST_CANDIDATE_VERIFICATION_37189036319.json) PASS：外层 ZIP `114797201b8e51c6fd6f9fcbc108b7ddbfb69ebe3df0d0a5c3950e08b58cca25`、模块 `f8e357c0b4ad0f47c2ed1f078e5e89f522d934fed2d858fc5689001ba41f86d3`、APK `72fd36d03d7c548356e20bb0bc358e7c25ab5257d9397b1928062313c6793356`。11 个运行源码、内外 APK、来源、17 冻结文件和旧引擎一致。完整 Root workflow 只绑定这份审阅修正包；不跳过任一新旧必过门禁，第十三轮仍按其旧 pin 跟进。
+
+## 第十六批：执行通道离线时继续只读核验已保存的 Android 制品
+
+本地执行服务实际返回 `409 environment_offline: Environment is not connected`；原分支改动已经推送，不让这个连接故障阻断已授权的 CI 跟进。新增独立、可重跑的制品审阅 workflow，只读取固定 artifact 与审阅源码，不创建 AVD、不运行安装代码、不授予权限。它要求原始 ZIP 的外层 SHA、API 元数据的 run/source/digest、内层包来源、精确固定 harness 和既有全部 verifier 门禁。审阅 job 通过只代表成功核验，保留的 Android FAIL 仍为 FAIL，重放不产生新的 Android 测试结果。
+
+参考 [GitHub 官方 artifact REST 下载与元数据文档](https://docs.github.com/en/rest/actions/artifacts)、现有 [upload-artifact v4 源码](https://github.com/actions/upload-artifact/blob/ea165f8d65b6e75b540449e92b4886f43607fa02/src/upload/upload-artifact.ts) 与 [MIT 许可证](https://github.com/actions/upload-artifact/blob/ea165f8d65b6e75b540449e92b4886f43607fa02/LICENSE)。采用理由是保留原始制品摘要和不可变来源，而不重新打包后伪造外层一致。独立实现读取与校验脚本，复用已有 Actions 工具，只使用原有 contents/actions read 范围；没有复制上游实现，不设置 overwrite 或调用删除接口。
+
+第十三轮 37187408273 于 08:52 UTC 主步骤结束 FAIL，原始 artifact 11298721414/外层 `241e3ce91cec34d332f0ba022ae186e85b365efbb3019a7b8ba928f77e369a7e` 已保存。新只读 workflow 固定该轮与其候选 57aa02ed/harness 6afbb02a，失败原因及独立 proof 待此次审阅取得；不能沿用第十二轮解释。新修正包的完整 Android 37189814352 已接续进入实际运行，继续跟进，不修改其 pin 或门禁。
