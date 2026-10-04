@@ -3,7 +3,26 @@
 继续 `fix/stable-composite-contract-20261003` / [PR #264](https://github.com/xgl34222220-ops/LuoShu/pull/264)。
 本记录只引用本轮新运行的结果；上一轮 Root 验收不替本轮改动背书。
 
-## 核实状态
+## 最新已独立核验的结果（2026-10-04）
+
+[第十六轮完整 Android 37198566413](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37198566413) **PASS**，实际运行源码固定为 d12168a88a06193b238821c87d0f4bf844a74b96、harness 为 d694f58d072a4ce3c7bb4a0f4fe3b55241ff5404。原始 artifact 11302008315 的外层 SHA-256 为 a1be84f605b2b8df2474da8cb2870fd35faf8341fe09376f89fc9edb8f248b33。[只读独立审阅 37201135955](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37201135955) 重新下载此原始 ZIP，与 API 来源、原固定 harness、候选字节及全部必过判定一致；它不产生第二份 Android 执行结果。[本轮完整 proof](ROOT_ANDROID_VERIFICATION_37198566413.json) 保留原始核验内容。
+
+| 本轮实际检查 | 当前结果和证据范围 |
+| --- | --- |
+| 挂载、重启、默认恢复 | 16 个不同内核重启，7 组挂载视图、23 条规范挂载证明，2 个别名；App 单字体、CLI 组合及实际 App 组合后的重启/默认恢复通过。不是旧 14 次/6 组契约的重放。 |
+| 可变 CFF2 集合 | CLI 与实际 App 都在 AOSP 原厂 5 面 CFF2 集合上真实编译、检查系统契约与保留变化轴；未覆盖字符、名称/布局/垂直信息等继续保护，源替换轮廓固定在所选字重。 |
+| App 实际组合 | 三槽实际选择 0000/0001/0002，真实“生成并应用”创建新父/子任务；同一 PID 4682 的成功 XML/原始截图显示“组合字体已生成 / 完整复合字体已准备，完整重启后生效 / 100%”，随后内核重启挂载和默认恢复通过。 |
+| 并发与回收 | 原 Android fd 锁/等待/并发幂等 finalize 通过；未重启前 live 字节未变、sidecar 清理完成。最后工作区 entries=[]，临时 Root 政策已撤销，runner 清理 PASS。 |
+| 当前原 shell 函数门禁 | 32 个交接、18 个来源、15 个组合错误、14 个原厂扫描错误、5 个库存 stdout 传输用例重新通过，分别绑定当前启动和原始命令 stdout；不冒充完整库或 UI 测试。 |
+| 轴和性能观察 | 本轮实际轴帧 7 个，当前轴读取 2568 ms/code 0。100/1000 各 6 个冷/暖观察及恢复后 2 个，共 14 个性能观察的实际请求七阶段日志独立核对；另有 2 个轴准备观察，不能合并成 16 个性能样本。 |
+| 原生崩溃 | 本轮候选 unexpected_native_commands=[]，两段组合运行时 crashLines=[]。官方基线中的两个已知 sed 崩溃命令仍保留，不能写成整个原始 artifact 零崩溃。 |
+| 包与冻结边界 | 当前模块 95b07019…/APK f37c7e4e…，12 个运行源码及内外 APK/来源一致，17 个 1.1.1 冻结文件、冻结旧组合引擎逐字节一致。没有 hook、XML 改写、新常驻引擎或敏感权限扩张。 |
+
+[实际 App 组合完成记录](APP_COMPOSITE_COMPLETION_37198566413.json)、[成功截图](evidence/root-composite-completed-37198566413.png)、[本轮轴截图](evidence/root-axis-ui-37198566413.png) 和 [原始组合运行日志](evidence/root-composite-runtime-37198566413.txt) 已保存。截图是实际 Miuix 测试 APK 与合成夹具，不是设计图或真实字形几何证明。原来的各轮 FAIL 及其缺失项原样保留，下文“尚待/运行中”描述均属于其记录时点。
+
+仍未验证：原生 ARM64/OEM 真机、Material 实际运行界面、真实字形像素几何、备份恢复 API、1000 种不同字体内容、官方基线 App 性能；旧 25 秒轴超时/焦点 ANR 的永久根因及目标 ANR 栈收集器的实际命中分支。本轮轴读取首次成功，没有实际复现“失败后其他调用方成功”的 Android 通知分支；新增针对性 JVM 用例通过不能替这个设备分支。初次无 Root 检查只覆盖 App 启动，不证明 Root 或大库可用性。
+
+## 开始时核实状态（历史）
 
 开始时本地与远端均为 `1a329a1c0cb3cb8aaa70de6972fd10a39a1bf964`，工作区干净，PR 开放且为 Draft，没有运行中的构建或 Android 任务。
 最近一次历史 Root 验收为 [37152531513](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37152531513)，已成功；本轮候选包和新增用例需要重新验收。
@@ -354,3 +373,10 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 
 
 [新候选只读审阅 37198329194](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37198329194) 已完成。[独立候选 proof](TEST_CANDIDATE_VERIFICATION_37197455936.json) PASS：模块 `95b07019ffb7ee401aaab4b92362cec1e52116f1749713bc676e38656efef2c9`、APK `f37c7e4e8ad4868b2c9aa0c4e8165cb7c9ee9af7ac3e7de5e02ea5023b48cea8`，12 个运行源码、内外 APK/来源、17 冻结文件及旧引擎一致。[本次快照 HOST 证明](MIX_SNAPSHOT_CONTRACT_HOST_20261004.json)/[原始 CI 节选](evidence/candidate-mix-snapshot-37197455936.txt) 保留新 8 用例 0.163 秒及打包前 0.148 秒、固定旧源码真实混读控制。完整 Root pin 只更新此审阅候选；16 次重启/7 组挂载、实际 App 成功完成帧/截图及后续恢复、14 个当前性能采样和另外 2 个轴准备要求全部保留。本批新 Android 结果须由接续任务取得，之前失败不改为 PASS。
+
+
+第十八批完整新验收已完成：[37198566413](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37198566413) PASS，[37201135955](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37201135955) 只读独立核验 PASS。本文开头列出的 16 次重启/7 组视图/23 条挂载、实际 App 成功与恢复、14 个当前性能观察/另 2 个轴准备、最终空闲回收和 17 文件边界均来自这一份新原始制品，没有旧 PASS 回填。
+
+[本轮实际提交耗时证据](MIX_ADMISSION_ANDROID_37198566413.json) 从原始日志取得同 PID 4682 的 admission **36304 ms / code 0 / stdout 56 B**，31 个 status 请求全部 code 0，耗时 1514–2537 ms。真实 stage_start/ready 为 uptime 103.97/104.18，runtime_start/ready 为 104.18/104.43，child_start/reply 为 104.47/138.30；此轮主要等待在子任务回执段，不能把早先“暂存准备可能较慢”的推断当成实测结论。这次 36.304 秒确实超过旧前台 20 秒，且在新 75 秒内成功，不说明每台设备的永久耗时，也不倒推上一轮不存在的精确日志。15 秒状态和 720 秒生成门禁保持原值，没有 CLI 发起替代 App 点击、自动重试或放宽验收。
+
+当前性能观察只作真实范围证明，不作跨轮提速或同类竞品比较：恢复后的 1000 文件冷启动到核查完成 37869 ms、暖库打开到核查完成 4408 ms；冷启动包含导航/权限与环境调度成本。每组仅 3 次冷/暖和最终各 1 次，文件来自两种自有合成内容，没有官方基线 App 对照。针对阶段数据继续优化时必须另跑新候选/Android，本轮证据只能背书 d12168a8 的运行字节。保持 PR Draft，不合并、正式发布/部署或操作用户设备。

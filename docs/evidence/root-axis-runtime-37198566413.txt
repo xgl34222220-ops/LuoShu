@@ -1,0 +1,21 @@
+--------- beginning of system
+10-04 11:45:07.341  1153  2183 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+--------- beginning of main
+10-04 11:45:08.220  7939  7939 I LuoShuStartup: event=font_index_visible elapsed_ms=190680 count=3 verified=false
+10-04 11:45:11.855  1153  1174 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:45:14.838  1153  1377 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:45:15.254  7939  7939 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=12.936 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.793 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:45:15.254  7939  7939 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=15.494 count=3 code=0
+10-04 11:45:15.254  7939  7939 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=4069.502 code=0 cleaned=true reason=success
+10-04 11:45:15.254  7939  7939 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=197713 duration_ms=7033 code=0
+10-04 11:45:15.254  7939  7939 I LuoShuStartup: event=font_index_verified elapsed_ms=197713 count=3 verified=true
+10-04 11:45:17.847  1153  1580 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:45:20.341  1153  2183 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:45:21.258  7939  7939 I LuoShuAxis: event=axis_request duration_ms=2568 code=0 stdout_bytes=328
+10-04 11:45:21.259  7939  7939 I LuoShuAxis: axis_stage=source_start uptime=203.03
+10-04 11:45:21.259  7939  7939 I LuoShuAxis: axis_stage=source_ready uptime=203.05
+10-04 11:45:21.259  7939  7939 I LuoShuAxis: axis_stage=metadata_start uptime=203.06
+10-04 11:45:21.259  7939  7939 I LuoShuAxis: axis_stage=metadata_end uptime=203.70
+10-04 11:45:22.857  1153  1377 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:45:25.495  1153  3051 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:45:28.269  1153  3022 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found

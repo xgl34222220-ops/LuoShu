@@ -1,0 +1,176 @@
+--------- beginning of system
+10-04 11:51:54.744  1227  1332 I ActivityManager: Start proc 4682:io.github.xgl34222220.luoshu.stabletest/u0a209 for next-top-activity {io.github.xgl34222220.luoshu.stabletest/io.github.xgl34222220.luoshu.MainActivity}
+--------- beginning of main
+10-04 11:51:55.261  4682  4682 I LuoShuStartup: event=app_start elapsed_ms=50723
+10-04 11:51:56.090  1227  1322 I ActivityManager: updateOomAdj start time is before than pendingPid added, don't delete it
+10-04 11:51:57.805  1227  1374 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:51:59.501  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=54964 count=1000 verified=false
+10-04 11:51:59.502  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=54964 count=1000 verified=false
+10-04 11:51:59.977  1227  2324 I ActivityManager: Process com.android.imsserviceentitlement (pid 3654) has died: cch+99 CEM 
+10-04 11:52:00.290  1227  1332 W ActivityManager: Slow operation: 114ms so far, now at startProcess: returned from zygote!
+10-04 11:52:00.301  1227  1332 W ActivityManager: Slow operation: 125ms so far, now at startProcess: done updating battery stats
+10-04 11:52:00.301  1227  1332 W ActivityManager: Slow operation: 125ms so far, now at startProcess: building log message
+10-04 11:52:00.301  1227  1332 I ActivityManager: Start proc 4798:com.topjohnwu.magisk/u0a210 for content provider {com.topjohnwu.magisk/com.topjohnwu.magisk.core.Provider}
+10-04 11:52:00.301  1227  1332 W ActivityManager: Slow operation: 125ms so far, now at startProcess: starting to update pids map
+10-04 11:52:00.301  1227  1332 W ActivityManager: Slow operation: 125ms so far, now at startProcess: done updating pids map
+10-04 11:52:05.873  1227  2349 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:06.564  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=490.156 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=1.015 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:52:06.564  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=501.31 count=1000 code=0
+10-04 11:52:06.564  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=3649.644 code=0 cleaned=true reason=success
+10-04 11:52:06.564  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=62027 duration_ms=7061 code=0
+10-04 11:52:11.768  1227  1792 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:12.363  4682  4682 I LuoShuStartup: event=font_request_phase stage=scan phase=inventory_detail storage_ms=55.028 snapshot_ms=310.931 cache_ms=56.298 build_ms=0.0 verify_ms=209.76 write_ms=0.0 output_ms=166.415 cache_hit=1 snapshot_count=2 build_count=0 write_count=0 code=0
+10-04 11:52:12.363  4682  4682 I LuoShuStartup: event=font_request_phase stage=scan phase=inventory duration_ms=802.739 count=1000 code=0
+10-04 11:52:12.363  4682  4682 I LuoShuStartup: event=font_request_phase stage=scan phase=scope duration_ms=3546.986 code=0 cleaned=true reason=success
+10-04 11:52:12.363  4682  4682 I LuoShuStartup: event=font_request stage=scan elapsed_ms=67826 duration_ms=5670 code=0
+10-04 11:52:13.424  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=68887 count=1000 verified=true
+10-04 11:52:15.235  1227  1374 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:17.559  1227  2318 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:19.517  1227  2349 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:22.729  1227  4419 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:24.894  1227  2349 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:26.865  1227  2274 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:30.124  1227  4419 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:32.363  1227  2274 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:34.323  1227  1792 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:37.183  1227  4419 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:37.262  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=92725 count=1000 verified=false
+10-04 11:52:39.034  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=260.741 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.616 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:52:39.034  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=265.207 count=1000 code=0
+10-04 11:52:39.034  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=1184.342 code=0 cleaned=true reason=success
+10-04 11:52:39.034  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=94497 duration_ms=1770 code=0
+10-04 11:52:39.034  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=94497 count=1000 verified=true
+10-04 11:52:40.188  1227  1792 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:43.020  1227  1374 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:52:45.847  1227  2349 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 11:53:07.281  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=122744 count=1000 verified=false
+10-04 11:53:08.904  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=108.457 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.777 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:53:08.905  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=113.778 count=1000 code=0
+10-04 11:53:08.905  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=902.559 code=0 cleaned=true reason=success
+10-04 11:53:08.905  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=124368 duration_ms=1623 code=0
+10-04 11:53:08.905  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=124368 count=1000 verified=true
+10-04 11:53:22.996  4682  4682 I LuoShuStartup: event=mix_request stage=admission duration_ms=36304 code=0 stdout_bytes=56
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=entry uptime=103.96
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=stage_start uptime=103.97
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=stage_ready uptime=104.18
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=runtime_start uptime=104.18
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=runtime_ready uptime=104.43
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=child_start uptime=104.47
+10-04 11:53:22.997  4682  4682 I LuoShuStartup: mix_stage=child_reply uptime=138.30
+10-04 11:53:25.668  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1670 code=0 stdout_bytes=406
+10-04 11:53:25.668  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=140.97
+10-04 11:53:25.669  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=140.97
+10-04 11:53:28.401  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1730 code=0 stdout_bytes=406
+10-04 11:53:28.401  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=143.72
+10-04 11:53:28.401  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=143.72
+10-04 11:53:30.974  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1571 code=0 stdout_bytes=407
+10-04 11:53:30.974  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=146.30
+10-04 11:53:30.974  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=146.30
+10-04 11:53:33.645  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1671 code=0 stdout_bytes=407
+10-04 11:53:33.645  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=148.94
+10-04 11:53:33.646  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=148.94
+10-04 11:53:36.223  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1576 code=0 stdout_bytes=407
+10-04 11:53:36.223  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=151.55
+10-04 11:53:36.224  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=151.55
+10-04 11:53:37.285  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=152748 count=1000 verified=false
+10-04 11:53:39.479  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=162.281 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.775 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:53:39.479  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=167.694 count=1000 code=0
+10-04 11:53:39.479  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=1183.588 code=0 cleaned=true reason=success
+10-04 11:53:39.479  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=154942 duration_ms=2194 code=0
+10-04 11:53:39.480  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=154942 count=1000 verified=true
+10-04 11:53:39.718  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=2493 code=0 stdout_bytes=407
+10-04 11:53:39.718  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=155.04
+10-04 11:53:39.718  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=155.04
+10-04 11:53:42.804  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=2084 code=0 stdout_bytes=419
+10-04 11:53:42.805  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=158.10
+10-04 11:53:42.805  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=158.10
+10-04 11:53:45.531  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1723 code=0 stdout_bytes=419
+10-04 11:53:45.531  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=160.87
+10-04 11:53:45.531  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=160.88
+10-04 11:53:48.255  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1723 code=0 stdout_bytes=419
+10-04 11:53:48.255  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=163.55
+10-04 11:53:48.255  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=163.55
+10-04 11:53:50.881  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1624 code=0 stdout_bytes=419
+10-04 11:53:50.881  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=166.15
+10-04 11:53:50.882  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=166.16
+10-04 11:53:53.707  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1822 code=0 stdout_bytes=419
+10-04 11:53:53.707  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=169.01
+10-04 11:53:53.708  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=169.02
+10-04 11:53:57.375  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1665 code=0 stdout_bytes=419
+10-04 11:53:57.375  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=172.66
+10-04 11:53:57.375  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=172.66
+10-04 11:54:00.995  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1618 code=0 stdout_bytes=419
+10-04 11:54:00.995  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=176.30
+10-04 11:54:00.995  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=176.31
+10-04 11:54:04.715  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1717 code=0 stdout_bytes=419
+10-04 11:54:04.715  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=180.01
+10-04 11:54:04.715  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=180.01
+10-04 11:54:07.286  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=182749 count=1000 verified=false
+10-04 11:54:08.863  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=2142 code=0 stdout_bytes=419
+10-04 11:54:08.863  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=184.10
+10-04 11:54:08.863  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=184.11
+10-04 11:54:09.574  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=112.167 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.548 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:54:09.574  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=116.007 count=1000 code=0
+10-04 11:54:09.574  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=1090.648 code=0 cleaned=true reason=success
+10-04 11:54:09.574  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=185037 duration_ms=2288 code=0
+10-04 11:54:09.575  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=185037 count=1000 verified=true
+10-04 11:54:12.593  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1728 code=0 stdout_bytes=419
+10-04 11:54:12.593  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=187.90
+10-04 11:54:12.594  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=187.91
+10-04 11:54:16.363  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1768 code=0 stdout_bytes=419
+10-04 11:54:16.363  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=191.68
+10-04 11:54:16.363  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=191.69
+10-04 11:54:19.984  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1618 code=0 stdout_bytes=419
+10-04 11:54:19.984  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=195.27
+10-04 11:54:19.984  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=195.28
+10-04 11:54:23.671  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1682 code=0 stdout_bytes=419
+10-04 11:54:23.671  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=198.97
+10-04 11:54:23.671  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=198.98
+10-04 11:54:27.441  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1768 code=0 stdout_bytes=419
+10-04 11:54:27.442  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=202.77
+10-04 11:54:27.442  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=202.77
+10-04 11:54:30.959  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1514 code=0 stdout_bytes=419
+10-04 11:54:30.959  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=206.30
+10-04 11:54:30.959  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=206.30
+10-04 11:54:34.634  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1673 code=0 stdout_bytes=419
+10-04 11:54:34.634  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=209.97
+10-04 11:54:34.634  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=209.97
+10-04 11:54:37.287  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=212750 count=1000 verified=false
+10-04 11:54:39.174  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=2537 code=0 stdout_bytes=419
+10-04 11:54:39.174  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=214.40
+10-04 11:54:39.177  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=214.41
+10-04 11:54:39.520  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=168.463 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.828 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:54:39.520  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=173.662 count=1000 code=0
+10-04 11:54:39.520  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=1132.708 code=0 cleaned=true reason=success
+10-04 11:54:39.520  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=214983 duration_ms=2232 code=0
+10-04 11:54:39.520  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=214983 count=1000 verified=true
+10-04 11:54:42.950  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1770 code=0 stdout_bytes=419
+10-04 11:54:42.950  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=218.21
+10-04 11:54:42.950  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=218.22
+10-04 11:54:46.569  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1618 code=0 stdout_bytes=419
+10-04 11:54:46.569  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=221.88
+10-04 11:54:46.570  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=221.88
+10-04 11:54:50.396  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1823 code=0 stdout_bytes=419
+10-04 11:54:50.396  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=225.72
+10-04 11:54:50.396  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=225.73
+10-04 11:54:54.119  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1722 code=0 stdout_bytes=419
+10-04 11:54:54.119  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=229.43
+10-04 11:54:54.119  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=229.43
+10-04 11:54:57.788  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1666 code=0 stdout_bytes=419
+10-04 11:54:57.788  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=233.09
+10-04 11:54:57.788  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=233.09
+10-04 11:55:01.568  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1779 code=0 stdout_bytes=419
+10-04 11:55:01.569  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=236.87
+10-04 11:55:01.569  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=236.87
+10-04 11:55:05.461  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=1889 code=0 stdout_bytes=431
+10-04 11:55:05.461  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=240.69
+10-04 11:55:05.461  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=240.74
+10-04 11:55:07.289  4682  4682 I LuoShuStartup: event=font_index_visible elapsed_ms=242752 count=1000 verified=false
+10-04 11:55:09.780  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=121.874 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.782 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 11:55:09.780  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=126.84 count=1000 code=0
+10-04 11:55:09.780  4682  4682 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=1341.734 code=0 cleaned=true reason=success
+10-04 11:55:09.780  4682  4682 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=245243 duration_ms=2491 code=0
+10-04 11:55:09.780  4682  4682 I LuoShuStartup: event=font_index_verified elapsed_ms=245243 count=1000 verified=true
+10-04 11:55:09.932  4682  4682 I LuoShuStartup: event=mix_request stage=status duration_ms=2470 code=0 stdout_bytes=462
+10-04 11:55:09.933  4682  4682 I LuoShuStartup: mix_stage=status_snapshot uptime=245.22
+10-04 11:55:09.933  4682  4682 I LuoShuStartup: mix_stage=status_reply uptime=245.23
