@@ -65,9 +65,12 @@ def main() -> int:
         report = json.loads((config / "universal-font-runtime-verification.json").read_text(encoding="utf-8"))
         assert report["engine"] == "luoshu-engine-v3"
 
-        # A dump without the replaced files is only a warning (ROM formats differ).
+        # A dump without the replaced files is only a note (ROM formats differ;
+        # HyperOS 3 lists no system file names): still PASS.
         dump.write_text("nothing useful\n", encoding="utf-8")
-        assert run()["grade"] == "WARN"
+        assert run()["grade"] == "PASS"
+        report = json.loads((config / "universal-font-runtime-verification.json").read_text(encoding="utf-8"))
+        assert report["notes"] == ["font-manager-no-replaced-file-reference"], report
 
         # The system sees a different file than the deployment: FAIL (-> rollback).
         (visible / "system/fonts/Roboto-Regular.ttf").write_bytes(b"stock")

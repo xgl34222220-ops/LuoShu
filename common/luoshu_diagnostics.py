@@ -111,14 +111,20 @@ def _resolve_stock(logical: str, lower_root: Path, live_ok: bool) -> tuple[str, 
     return None
 
 
-def _wanted_slots(config: Path) -> list[tuple[str, str, str]]:
-    """Returns (logical path, role, action) of every slot worth replaying."""
+def _wanted_slots(config: Path, full: bool = False) -> list[tuple[str, str, str]]:
+    """Returns (logical path, role, action) of every slot worth replaying.
+
+    Engine v3 takes line metrics from the topology, so a lite bundle only needs
+    the stock files the last build replaced (collection face counts); hollowing
+    every text font took too long on phones with large OEM font sets."""
+    report = _load(config / "luoshu-engine-build" / "report.json")
+    replaced = [item for item in report.get("replaced") or [] if item.get("path")]
+    if replaced and not full:
+        return [(str(item["path"]), str(item.get("role") or ""), "replace") for item in replaced]
     topology = _load(config / "device_font_topology.json")
     roles = _load(config / "device_font_roles.json").get("slots") or {}
     shadow = _load(config / "device_font_shadow_plan.json").get("slots") or {}
-    targeted: set[str] = set()
-    report = _load(config / "luoshu-engine-build" / "report.json")
-    targeted.update(str(item.get("path")) for item in report.get("replaced") or [] if item.get("path"))
+    targeted: set[str] = {str(item["path"]) for item in replaced}
     for plan_path in sorted((config / "universal-font-plans").glob("*.json")):
         targets = _load(plan_path).get("targets")
         if isinstance(targets, dict):
@@ -300,11 +306,15 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
         deployment = moddir / ".luoshu-runtime" / "deployment" / "deployment.json"
         if deployment.is_file():
             bundle.write(deployment, "runtime/deployment.json")
+        # FontManager dump captured by the last boot verification.
+        dump = Path(os.environ.get("LUOSHU_VERIFY_STATE_ROOT", "/data/adb/luoshu/runtime-verify")) / "font-manager.txt"
+        if dump.is_file():
+            _write_tail(bundle, dump, "runtime/font-manager.txt")
         for path in sorted((moddir / "logs").glob("*.log")) if (moddir / "logs").is_dir() else []:
             _write_tail(bundle, path, f"logs/{path.name}")
 
         stock_total = 0
-        for logical, role, action in _wanted_slots(config):
+        for logical, role, action in _wanted_slots(config, full):
             found = _resolve_stock(logical, lower_root, live_ok)
             if found is None:
                 index["stockSkipped"].append({"path": logical, "reason": "no-stock-snapshot"})
@@ -370,8 +380,17 @@ def main() -> int:
     args = parser.parse_args()
     try:
         result = export(args.moddir, args.output, args.lower_root, args.full)
-    except (OSError, zipfile.BadZipFile, ValueError) as error:
-        print(json.dumps({"status": "error", "message": f"诊断包生成失败：{error}"}, ensure_ascii=False))
+    except Exception as error:  # report every failure to the App, never a bare exit
+        import traceback
+        try:
+            log = args.moddir / "logs" / "diagnostics.log"
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write(time.strftime("[%Y-%m-%d %H:%M:%S] ") + traceback.format_exc() + "\n")
+        except OSError:
+            pass
+        message = f"诊断包生成失败：{type(error).__name__}: {error}"[:300]
+        print(json.dumps({"status": "error", "message": message}, ensure_ascii=False))
         return 1
     print(json.dumps({"status": "ok", "data": result}, ensure_ascii=False, separators=(",", ":")))
     return 0

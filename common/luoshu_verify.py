@@ -4,8 +4,8 @@
 Runs once after boot_completed. FAIL (the caller then stages a rollback) when the
 payload this boot was supposed to mount is not what the system sees: runtime or
 mount state disagree with the deployment, or a payload file is missing or
-different at its system path. A FontManager dump that never mentions a replaced
-file is only a warning: its format differs between ROMs.
+different at its system path. Whether a FontManager dump mentions the replaced
+files is recorded as a note only: its format differs between ROMs.
 
 Output keeps the Phase 8 result format, so App status and rollback are unchanged.
 """
@@ -100,8 +100,11 @@ def verify(
             font_files += 1
             if Path(logical).name.lower() in dump:
                 hits += 1
+    notes: list[str] = []
     if dump.strip() and font_files and not hits:
-        warnings.append("font-manager-no-replaced-file-reference")
+        # FontManager dumps differ between ROMs (HyperOS 3 lists no system file
+        # names); the visible, hash-checked files are the evidence that counts.
+        notes.append("font-manager-no-replaced-file-reference")
 
     grade = "FAIL" if failures else "WARN" if warnings else "PASS"
     return {
@@ -129,6 +132,7 @@ def verify(
         },
         "failures": failures,
         "warnings": warnings,
+        "notes": notes,
         "files": files,
     }
 
