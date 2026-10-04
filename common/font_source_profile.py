@@ -534,12 +534,67 @@ def _group_families(files: list[dict[str, Any]]) -> dict[str, Any]:
     return dict(sorted(groups.items()))
 
 
-def _profile_id(files: list[dict[str, Any]]) -> str:
+COMPOSITE_ROLES = ("cjk", "latin", "digit")
+COMPOSITE_MODES = {"auto", "fixed"}
+
+
+def _profile_id(files: list[dict[str, Any]], composite: dict[str, Any] | None = None) -> str:
     material = "|".join(sorted(str(file_info["sha256"]) for file_info in files))
-    return hashlib.sha256(material.encode("ascii")).hexdigest()
+    if composite is not None:
+        # The same files under a different role assignment, mode or axis choice
+        # must never share a FontPlan or compiled artifacts.
+        material += "|composite:" + json.dumps(composite, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
-def build(paths: list[Path]) -> dict[str, Any]:
+def parse_axes(value: str) -> dict[str, float]:
+    """Parse the App's ``tag=value`` list (``,`` or ``;`` separated)."""
+    result: dict[str, float] = {}
+    for item in re.split(r"[;,]", value or ""):
+        if not item.strip():
+            continue
+        tag, sep, raw = item.partition("=")
+        tag = tag.strip()
+        if not sep or not re.fullmatch(r"[A-Za-z0-9]{4}", tag):
+            raise ProfileError(f"组合轴设置无效：{item.strip()}")
+        number = _float(raw.strip())
+        if number is None:
+            raise ProfileError(f"组合轴数值无效：{item.strip()}")
+        result[tag] = number
+    return result
+
+
+def composite_spec(
+    role_fonts: dict[str, list[Path]],
+    modes: dict[str, str],
+    axes: dict[str, str],
+) -> dict[str, Any]:
+    roles: dict[str, Any] = {}
+    for role in COMPOSITE_ROLES:
+        if not role_fonts.get(role):
+            raise ProfileError(f"组合缺少{ {'cjk': '中文', 'latin': '英文', 'digit': '数字'}[role] }字体")
+        mode = str(modes.get(role) or "auto")
+        if mode not in COMPOSITE_MODES:
+            raise ProfileError(f"组合模式无效：{role}={mode}")
+        roles[role] = {"mode": mode, "axes": parse_axes(axes.get(role, ""))}
+    return {"roles": roles}
+
+
+def build(
+    paths: list[Path],
+    role_fonts: dict[str, list[Path]] | None = None,
+    modes: dict[str, str] | None = None,
+    axes: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    composite: dict[str, Any] | None = None
+    role_by_path: dict[str, set[str]] = {}
+    if role_fonts is not None:
+        composite = composite_spec(role_fonts, modes or {}, axes or {})
+        paths = list(paths)
+        for role, role_paths in role_fonts.items():
+            for path in role_paths:
+                role_by_path.setdefault(str(path.resolve()), set()).add(role)
+                paths.append(path)
     unique: list[Path] = []
     seen: set[str] = set()
     for path in paths:
@@ -553,6 +608,18 @@ def build(paths: list[Path]) -> dict[str, Any]:
         raise ProfileError("没有指定字体文件")
 
     files = [_inspect_file(path) for path in unique]
+    if composite is not None:
+        for path, file_info in zip(unique, files):
+            assigned = sorted(role_by_path.get(str(path), set()))
+            for face in file_info["faces"]:
+                face["assignedRoles"] = assigned
+        composite["roles"] = {
+            role: dict(spec, faceUids=sorted(
+                face["uid"] for file_info in files for face in file_info["faces"]
+                if role in face.get("assignedRoles", [])
+            ))
+            for role, spec in composite["roles"].items()
+        }
     faces = [face for file_info in files for face in file_info["faces"]]
     families = _group_families(files)
     axis_tags = sorted({
@@ -572,7 +639,7 @@ def build(paths: list[Path]) -> dict[str, Any]:
         "profileRevision": PROFILE_REVISION,
         "state": "ready",
         "generatedAt": int(time.time()),
-        "profileId": f"sha256:{_profile_id(files)}",
+        "profileId": f"sha256:{_profile_id(files, composite)}",
         "summary": {
             "fileCount": len(files),
             "faceCount": len(faces),
@@ -586,6 +653,8 @@ def build(paths: list[Path]) -> dict[str, Any]:
         "families": families,
         "files": files,
     }
+    if composite is not None:
+        profile["composite"] = composite
     validate(profile)
     return profile
 
@@ -617,6 +686,16 @@ def validate(profile: dict[str, Any]) -> None:
                 raise ProfileError("源字体 Profile 缺少覆盖信息")
             if not isinstance(face.get("capabilities"), dict):
                 raise ProfileError("源字体 Profile 缺少能力信息")
+    composite = profile.get("composite")
+    if composite is not None:
+        roles = composite.get("roles") if isinstance(composite, dict) else None
+        if not isinstance(roles, dict) or set(roles) != set(COMPOSITE_ROLES):
+            raise ProfileError("组合 Profile 角色分工无效")
+        for role, spec in roles.items():
+            if not isinstance(spec, dict) or spec.get("mode") not in COMPOSITE_MODES:
+                raise ProfileError(f"组合 Profile 角色模式无效：{role}")
+            if not spec.get("faceUids"):
+                raise ProfileError(f"组合 Profile 角色没有字体面：{role}")
 
 
 def _atomic_write(path: Path, value: dict[str, Any]) -> None:
@@ -646,6 +725,10 @@ def _summary(profile: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--font", action="append", default=[], type=Path)
+    parser.add_argument("--role-font", action="append", default=[],
+                        help="composite: ROLE:PATH, ROLE in cjk/latin/digit")
+    parser.add_argument("--role-mode", action="append", default=[], help="composite: ROLE=auto|fixed")
+    parser.add_argument("--role-axes", action="append", default=[], help="composite: ROLE=tag=value,...")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--validate", type=Path)
     args = parser.parse_args()
@@ -656,6 +739,18 @@ def main() -> int:
             if not isinstance(profile, dict):
                 raise ProfileError("源字体 Profile 根节点无效")
             validate(profile)
+        elif args.role_font:
+            role_fonts: dict[str, list[Path]] = {}
+            for item in args.role_font:
+                role, sep, raw = item.partition(":")
+                if not sep or role not in COMPOSITE_ROLES:
+                    raise ProfileError(f"组合字体参数无效：{item}")
+                role_fonts.setdefault(role, []).append(Path(raw))
+            modes = dict(item.split("=", 1) for item in args.role_mode if "=" in item)
+            axes = dict(item.split("=", 1) for item in args.role_axes if "=" in item)
+            profile = build(args.font, role_fonts, modes, axes)
+            if args.output is not None:
+                _atomic_write(args.output, profile)
         else:
             profile = build(args.font)
             if args.output is not None:
