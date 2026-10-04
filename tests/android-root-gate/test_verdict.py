@@ -1,8 +1,9 @@
 """Synthetic schema tests only; these fixtures are never Android test reports."""
 import copy
+import json
 import unittest
 from test_composite_gate import valid_composite
-from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES, COMPOSITE_ERROR_CASES, STOCK_ERROR_CASES
+from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES, COMPOSITE_ERROR_CASES, STOCK_ERROR_CASES, INVENTORY_OUTPUT_CASES, inventory_output_evidence_blockers
 
 BOOT = {'before': '11111111-1111-1111-1111-111111111111', 'after': '22222222-2222-2222-2222-222222222222'}
 
@@ -85,6 +86,14 @@ def valid_delivery():
         'selinux':'Enforcing','boot_id':BOOT['before'],'module':'/data/adb/modules/LuoShu','shell':'/system/bin/sh',
         'case_count':len(STOCK_ERROR_CASES),'cases':[{'name':name,'result':'PASS'} for name in sorted(STOCK_ERROR_CASES)],
     }
+    report['magisk_inventory_output'] = {
+        'schema':'luoshu-inventory-output-contract-v1','result':'PASS','environment':'ANDROID',
+        'tested_scope':'CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS','router_sha256':'a'*64,
+        'selinux':'Enforcing','boot_id':BOOT['before'],'module':'/data/adb/modules/LuoShu','shell':'/system/bin/sh',
+        'case_count':len(INVENTORY_OUTPUT_CASES),
+        'cases':[dict(name=name,result='PASS',input_bytes=values[0],output_bytes=values[1],code=values[2])
+                 for name,values in INVENTORY_OUTPUT_CASES.items()],
+    }
     weight = {'tag': 'wght', 'name': 'Weight', 'min': 400, 'default': 400, 'max': 900, 'hidden': False}
     report['axis_metadata'] = {'status': 'ok', 'variable': True, 'hasWeight': True, 'weight': weight, 'axes': [weight]}
     report['app_axes'] = {'result': 'PASS', 'package': PACKAGE, 'font_id': 'LuoShuAxisGate',
@@ -104,6 +113,50 @@ def valid_delivery():
 
 
 class VerdictTests(unittest.TestCase):
+    def test_inventory_output_rejects_missing_duplicate_or_changed_bytes_and_codes(self):
+        for mutation in ('absent','missing','duplicate','failed','malformed','short-output','exit-code','boolean'):
+            r=valid_delivery(); value=r['magisk_inventory_output']
+            if mutation=='absent': del r['magisk_inventory_output']
+            elif mutation=='missing': value['cases'].pop()
+            elif mutation=='duplicate': value['cases'][0]=value['cases'][1].copy()
+            elif mutation=='failed': value['cases'][0]['result']='FAIL'
+            elif mutation=='malformed': value['cases'][0]=None
+            elif mutation=='short-output': value['cases'][1]['output_bytes']=0
+            elif mutation=='exit-code': value['cases'][2]['code']=0
+            else: value['cases'][0]['code']=False
+            self.assertTrue(delivery_blockers(r),mutation)
+
+    def test_inventory_output_requires_exact_android_scope_and_enforcing_source(self):
+        for key,value in [('environment','HOST_ONLY'),('router_sha256',''),('boot_id','invalid'),
+                          ('selinux','Permissive'),('module','/tmp/fixture'),('shell','sh'),
+                          ('tested_scope','FULL_INVENTORY_OR_MOUNTS')]:
+            r=valid_delivery(); r['magisk_inventory_output'][key]=value
+            self.assertTrue(delivery_blockers(r),key)
+
+    def test_inventory_output_evidence_binds_raw_stdout_command_source_and_boot(self):
+        value=valid_delivery()['magisk_inventory_output']
+        raw={k:v for k,v in value.items() if k not in ('boot_id','selinux','module','shell')}
+        command={'argv':['shell','su','-mm','-c',
+            '/runtime/bin/luoshu-python /data/local/tmp/luoshu-inventory-output-contract.py '
+            '--module /data/adb/modules/LuoShu --shell /system/bin/sh '
+            '--output /data/local/tmp/luoshu-inventory-output-contract.json'],
+            'exit':0,'stdout':json.dumps(raw)}
+        self.assertEqual(inventory_output_evidence_blockers(value,[command],'a'*64,BOOT['before']),[])
+        for mutation in ('missing','duplicate','failed','wrong-shell','empty','malformed','changed','source','boot'):
+            steps=[copy.deepcopy(command)]; source='a'*64; boot=BOOT['before']
+            if mutation=='missing': steps=[]
+            elif mutation=='duplicate': steps.append(copy.deepcopy(command))
+            elif mutation=='failed': steps[0]['exit']=7
+            elif mutation=='wrong-shell': steps[0]['argv'][-1]=steps[0]['argv'][-1].replace('--shell /system/bin/sh','--shell sh')
+            elif mutation=='empty': steps[0]['stdout']=''
+            elif mutation=='malformed': steps[0]['stdout']='{'
+            elif mutation=='changed':
+                changed=copy.deepcopy(raw); changed['cases'][1]['output_bytes']=0
+                steps[0]['stdout']=json.dumps(changed)
+            elif mutation=='source': source='b'*64
+            else: boot=BOOT['after']
+            self.assertTrue(inventory_output_evidence_blockers(value,steps,source,boot),mutation)
+
     def test_stock_error_requires_complete_unique_actual_android_function_cases(self):
         for mutation in ('host','missing','duplicate','failed','malformed'):
             r=valid_delivery(); value=r['magisk_stock_error']

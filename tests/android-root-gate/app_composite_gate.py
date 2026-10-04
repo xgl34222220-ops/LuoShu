@@ -32,6 +32,8 @@ def selected_slot(tree, title, name):
 
 
 def app_composite_blockers(report):
+    if not isinstance(report, dict):
+        return ['actual App composite evidence absent']
     errors = composite_blockers(report, ENTRY)
     try:
         ui = report.get('ui', {})

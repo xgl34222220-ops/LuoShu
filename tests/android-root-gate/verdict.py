@@ -1,5 +1,6 @@
 """Fail-closed structured verdicts. A printed PASS or green job is not evidence."""
 import re
+import json
 from inventory_timings import verified_timing
 
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
@@ -73,6 +74,64 @@ def stock_error_blockers(value):
             {case.get('name') for case in cases} != STOCK_ERROR_CASES or any(case.get('result') != 'PASS' for case in cases)):
         return ['current stock error function cases incomplete or failed']
     return []
+
+
+INVENTORY_OUTPUT_CASES = {
+    # Exact synthetic transport fixture sizes, not limits on real inventories.
+    'small-list': (389, 389, 0),
+    'thousand-row-list': (332948, 332948, 0),
+    'large-backend-error': (307262, 307262, 7),
+    'unavailable-scanner-direct-output': (332948, 332948, 0),
+    'empty-backend-failure': (0, 1, 7),
+}
+
+
+def inventory_output_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS' or
+            value.get('schema') != 'luoshu-inventory-output-contract-v1' or
+            value.get('environment') != 'ANDROID' or
+            value.get('tested_scope') != 'CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS' or
+            value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh' or
+            value.get('selinux') != 'Enforcing' or
+            not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', str(value.get('boot_id', ''))) or
+            not re.fullmatch('[0-9a-f]{64}', str(value.get('router_sha256', '')))):
+        return ['current inventory output router not proven on original Root Android runtime']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(INVENTORY_OUTPUT_CASES) or
+            len(cases) != len(INVENTORY_OUTPUT_CASES) or any(not isinstance(case, dict) for case in cases) or
+            {case.get('name') for case in cases} != set(INVENTORY_OUTPUT_CASES)):
+        return ['current inventory output router case set incomplete or duplicated']
+    for case in cases:
+        fields = ('input_bytes', 'output_bytes', 'code')
+        if (case.get('result') != 'PASS' or any(type(case.get(field)) is not int for field in fields) or
+                tuple(case[field] for field in fields) != INVENTORY_OUTPUT_CASES[case['name']]):
+            return ['current inventory output bytes or backend exit code incomplete or failed']
+    return []
+
+
+def inventory_output_evidence_blockers(value, steps, router_sha, boot):
+    errors = inventory_output_blockers(value)
+    if errors:
+        return errors
+    commands = [step for step in steps if isinstance(step, dict) and
+                any('luoshu-inventory-output-contract.py --module ' in str(arg) for arg in step.get('argv', []))]
+    expected = ('luoshu-inventory-output-contract.py --module /data/adb/modules/LuoShu '
+                '--shell /system/bin/sh --output /data/local/tmp/luoshu-inventory-output-contract.json')
+    if (len(commands) != 1 or commands[0].get('exit') != 0 or
+            not any(expected in str(arg) for arg in commands[0].get('argv', []))):
+        errors.append('actual installed inventory output command missing, duplicated or failed')
+    else:
+        try:
+            actual = json.loads(commands[0].get('stdout', ''))
+        except (ValueError, TypeError):
+            actual = None
+        if {k:v for k,v in value.items() if k not in ('boot_id', 'selinux', 'module', 'shell')} != actual:
+            errors.append('inventory output report differs from actual ARM64 command stdout')
+    if value['router_sha256'] != router_sha:
+        errors.append('inventory output router differs from reviewed runtime source')
+    if value['boot_id'] != boot:
+        errors.append('inventory output and stock-error boot context changed')
+    return errors
 
 
 def preview_source_blockers(value):
@@ -253,6 +312,7 @@ def delivery_blockers(report):
     errors.extend(preview_source_blockers(report.get('magisk_preview_source')))
     errors.extend(composite_error_blockers(report.get('magisk_composite_error')))
     errors.extend(stock_error_blockers(report.get('magisk_stock_error')))
+    errors.extend(inventory_output_blockers(report.get('magisk_inventory_output')))
     errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
     axes_ui = report.get('app_axes', {})
     from app_axis_gate import library_preflight_ok

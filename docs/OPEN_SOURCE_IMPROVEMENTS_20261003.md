@@ -293,3 +293,15 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 参考第十一批已核对的 [Linux exec 参数定义](https://github.com/torvalds/linux/blob/v6.6/include/uapi/linux/binfmts.h)、[COPYING / GPL-2.0 WITH Linux-syscall-note](https://github.com/torvalds/linux/blob/v6.6/COPYING) 和 [execve 项目手册](https://man7.org/linux/man-pages/man2/execve.2.html)，同样采用 stdin 数据通道，独立实现并不复制上游代码。仅把既有 nativeAvailable 的固定替换器改为 here-document stdin，保留后端内容、该布尔转换和返回码；没有改库存格式/双快照/扫描次数/预算、监督器、界面或核心委托。
 
 [改前真实外部 printf 宿主复现](INVENTORY_OUTPUT_BEFORE_HOST_20261004.json) 绑定 `57aa02ed`，实际 1000 行用例复现空 stdout/E2BIG。[改后 5 个函数传输用例](INVENTORY_OUTPUT_CONTRACT_HOST_20261004.json) PASS：332948 字节、1000 行含中文/引号/shell-looking 字面数据的列表完整，307262 字节后端错误仍退出 7，组件不可用时仍直接委托，空后端失败保留其既有状态。明确仅测试原 list 路由，不能冒充完整扫描/挂载。新 CI 会用同样真实外部 printf 模式重跑。当前库存 23 个于 0.686 秒 PASS，原扫描错误 14 个、扫描锁/等待复用、17 冻结文件重新通过；实际 Android 的 5 个传输用例和完整 App 组合须用新候选另跑，不取消仍在运行的第十三轮。
+
+## 第十五批：把大库存传输修正纳入真实 Android 必过门禁
+
+参考上批已核对的 [Linux execve 参数定义与许可证](https://github.com/torvalds/linux/blob/v6.6/include/uapi/linux/binfmts.h)，以及 [AndroidX UI Automator 的实际节点与条件判定](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java)/[Apache-2.0](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt)，采用理由是这次失败发生在真实 shell 数据通道，宿主结果不能代表 Android；独立编写门禁，不复制上游实现。
+
+原安装模块的 list 路由在原 ARM64 Python 与 `/system/bin/sh` 上重跑 5 个函数传输夹具。报告要求同一 Enforcing 启动、安装路由 SHA、完整唯一用例、固定夹具字节数与后端退出码。独立 verifier 进一步核对原始命令 stdout、精确模块/shell 参数和审阅源码 SHA；报告打印 PASS、空输出、旧来源或重复制品都不能通过。该检查仍只覆盖兼容路由；完整库存、16 个实际模块重启、7 组挂载视图、App 组合 UI 和 14 个当前性能观察继续分别强制要求。缺失 App 组合证据现在准确标记 App 缺失，避免把已经通过的 CLI 组合混为失败。
+
+[本次宿主负例证明](INVENTORY_OUTPUT_GUARDS_HOST_20261004.json) 与 [原始输出](evidence/inventory-output-harness-host-20261004.txt) 为 HOST_SYNTHETIC_HARNESS_TESTS：新增 3 个方法后总 131 个，0.657 秒 PASS，17 冻结文件再次匹配。固定 `93b4075d` 的第八轮历史 artifact 用当前 verifier 重放仍 PASS，新增输出门禁字段为空，仅证明固定历史契约兼容，不取得本批 Android 覆盖。新 Android 与完整 App 组合尚待新候选执行。
+
+修正提交 [`a70b19c8`](https://github.com/xgl34222220-ops/LuoShu/commit/a70b19c89a0c8daf21d724d10201915fda7eafc8) 的 [本轮候选 CI 37189036319](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37189036319) 已完整 PASS。[原始新 CI 节选](evidence/candidate-inventory-output-37189036319.txt) 包含 5 个真实外部 printf 模式的传输用例、当前库存 23 个（0.431 秒）、正常 Linux 真实进程 20 个（24.011 秒）、有限请求 5 个（9.361 秒）及构建时原 harness 128 个（0.334 秒）通过；打包前重复要求也通过。App lint/JVM/构建和原厂 CFF2 夹具门禁通过，不编造未读取的 JVM 总数。
+
+下载 artifact `11298680369` 后 [独立包核验](TEST_CANDIDATE_VERIFICATION_37189036319.json) PASS：外层 ZIP `114797201b8e51c6fd6f9fcbc108b7ddbfb69ebe3df0d0a5c3950e08b58cca25`、模块 `f8e357c0b4ad0f47c2ed1f078e5e89f522d934fed2d858fc5689001ba41f86d3`、APK `72fd36d03d7c548356e20bb0bc358e7c25ab5257d9397b1928062313c6793356`。11 个运行源码、内外 APK、来源、17 冻结文件和旧引擎一致。完整 Root workflow 只绑定这份审阅修正包；不跳过任一新旧必过门禁，第十三轮仍按其旧 pin 跟进。

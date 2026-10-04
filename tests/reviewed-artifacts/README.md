@@ -56,6 +56,14 @@ in the same App process before entering the axis picker. Their preserved timing
 JSON and raw cold/warm request logs must agree. These two fixture-setup samples
 are separate from the fourteen 100/1000/final performance samples.
 
+Inventory-output harness versions require all five actual Android list-router
+transport cases, including the 1000-row response and large failing backend.
+Exact byte counts and exit codes must agree with the selected fixture contract.
+The report must match the original ARM64 command stdout, exact installed-module
+and shell arguments, current Enforcing boot and reviewed `font_manager.sh`
+hash. This isolated router check does not substitute for full inventory or App
+combination acceptance. Historical pinned harnesses acquire no new coverage.
+
 Exit 0 means this artifact passed these checks. Exit 1 with a FAIL JSON means
 preserved evidence blocks acceptance. Invalid inputs or a mismatched digest
 abort before writing a success report. Artifact replay is not a new Android run.

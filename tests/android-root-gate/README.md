@@ -238,3 +238,23 @@ remain distinct from the existing actual-App single-font apply test. They are
 AOSP API35 x86_64/nativebridge evidence only, never ColorOS, physical-device,
 native-ARM64 or App-composite-UI validation. Host schema/fixture tests alone cannot
 satisfy this Android gate.
+
+The additional `app_composite` gate selects all three slots through the actual
+App, clicks `生成并应用`, binds a new persisted task to those choices and proves
+the visible completed state in the same App process. It shares the existing
+generation/monitor/finalizer/reboot/mount/default-restoration checks; CLI start
+cannot substitute for App admission. Full current delivery requires both paths,
+16 actual module boot transitions and seven mounted views. Axis selection first
+requires two verified live cold/warm library observations in the same process;
+these are separate from the 14 current performance observations.
+
+Before App stages, `magisk_inventory_output` runs five list-router transport
+fixtures using the installed original ARM64 runtime and `/system/bin/sh`.
+The 1000-row and backend-error fixtures exceed 300 KiB and include Chinese,
+quotes and literal shell-looking text. Exact byte counts and backend exit codes
+must pass. This tests the extracted installed compatibility router with a
+synthetic backend, not complete inventory scanning or mount acceptance. Its
+installed router hash, Enforcing boot, actual command arguments and raw stdout
+are independently bound to the reviewed candidate source. Host PASS, empty
+stdout, changed counts/codes, duplicate commands or stale source cannot satisfy
+the current gate. Historical artifacts retain their pinned harness requirements.

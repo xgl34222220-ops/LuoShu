@@ -16,10 +16,12 @@ from app_anr import target_anr
 gate_root = Path(harness[0]) if harness else repo / 'tests/android-root-gate'
 sys.path.insert(0, str(gate_root))
 from verdict import delivery_blockers, qualification_blockers, preflight_blockers
+import verdict as selected_verdict
 from module_gate import payload_mount_proof
 from app_axis_gate import detail_headings
 import app_axis_gate as axis_gate
 requires_axis_preflight = hasattr(axis_gate, 'library_preflight_ok')
+requires_inventory_output = hasattr(selected_verdict, 'inventory_output_evidence_blockers')
 requires_app_composite = (gate_root / 'app_composite_gate.py').is_file()
 if requires_app_composite:
     from app_composite_gate import verify_ui_artifact
@@ -116,6 +118,12 @@ with zipfile.ZipFile(path) as z:
             errors.append('stock-error helper differs from reviewed runtime source')
         if stock_error.get('boot_id') != preview.get('boot_id'):
             errors.append('stock-error and preview boot context changed')
+    inventory_output = m.get('magisk_inventory_output')
+    if requires_inventory_output:
+        router_bytes = subprocess.check_output(['git', 'show', source + ':common/font_manager.sh'], cwd=repo)
+        errors.extend(selected_verdict.inventory_output_evidence_blockers(
+            inventory_output, m.get('steps', []), sha256(router_bytes).hexdigest(),
+            (stock_error or {}).get('boot_id')))
     for name in ('emulator-cleanup.json', 'magisk-emulator-cleanup.json'):
         if report(name).get('emulator_reaped') is not True:
             errors.append(name + ': owned emulator not reaped')
@@ -213,6 +221,7 @@ with zipfile.ZipFile(path) as z:
             unexpected_native_commands=unexpected_native, failed_stock_error_steps=failed_stock_steps,
             actual_android_mix_handoff=m.get('magisk_mix_handoff'), actual_android_preview_source=preview,
             actual_android_composite_error=engine_error, actual_android_stock_error=stock_error,
+            actual_android_inventory_output=inventory_output if requires_inventory_output else None,
             initial_unrooted_stock_app=runner.get('stock_app_ui', {}).get('result'),
             initial_unrooted_stock_app_detail=runner.get('stock_app_ui'), runner_result=runner.get('result'),
             kvm_metadata_unchanged=runner.get('kvm_before') == runner.get('kvm_after'),
@@ -314,6 +323,7 @@ with zipfile.ZipFile(path) as z:
         actual_android_preview_source=preview,
         actual_android_composite_error=engine_error,
         actual_android_stock_error=stock_error,
+        actual_android_inventory_output=inventory_output if requires_inventory_output else None,
         preview_selection_command_seconds=preview_steps[0].get('elapsed_seconds') if preview_steps else None,
         actual_cff2_axis_metadata=m.get('axis_metadata'), actual_app_axes=axes,
         app_axis_screenshot_sha256=sha256(screenshot).hexdigest(),

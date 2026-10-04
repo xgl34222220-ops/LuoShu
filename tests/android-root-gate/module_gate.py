@@ -389,6 +389,25 @@ def run_gate(adb, magisk, baseline, candidate, output):
             stock_errors = stock_error_blockers(stock_error)
             if stock_errors:
                 raise RuntimeError('; '.join(stock_errors))
+            output_script = Path(__file__).resolve().parents[2] / 'scripts/inventory_output_contract_test.py'
+            command(['push', str(output_script), '/data/local/tmp/luoshu-inventory-output-contract.py'])
+            output_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-inventory-output-contract.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-inventory-output-contract.json', timeout=240)
+            report['magisk_inventory_output'] = json.loads(root('cat /data/local/tmp/luoshu-inventory-output-contract.json'))
+            output_transport = report['magisk_inventory_output']
+            output_transport.update(module=MODULE, shell='/system/bin/sh',
+                          boot_id=root('cat /proc/sys/kernel/random/boot_id').strip(), selinux=root('getenforce').strip())
+            installed_router = root(f'sha256sum {MODULE}/common/font_manager.sh').split()[0]
+            if (output_transport['boot_id'] != output_boot or output_boot != stock_error_boot or
+                    output_transport['router_sha256'] != installed_router):
+                raise RuntimeError('Android inventory-output boot or installed router identity changed')
+            from verdict import inventory_output_blockers
+            output_errors = inventory_output_blockers(output_transport)
+            if output_errors:
+                raise RuntimeError('; '.join(output_errors))
             report['axis_metadata'] = json.loads(root(
                 f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
