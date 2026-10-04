@@ -309,7 +309,7 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
                     continue  # the built payload fonts are reproducible
                 if path.is_file() and path.stat().st_size <= CONFIG_FILE_LIMIT:
                     bundle.write(path, f"config/{name}/{path.relative_to(root)}")
-        deployment = moddir / ".luoshu-runtime" / "deployment" / "deployment.json"
+        deployment = moddir / ".luoshu-payload" / ".luoshu-runtime" / "deployment" / "deployment.json"
         if deployment.is_file():
             bundle.write(deployment, "runtime/deployment.json")
         # FontManager dump captured by the last boot verification.

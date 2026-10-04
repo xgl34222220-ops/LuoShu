@@ -19,6 +19,21 @@ from hyperos_metrics_batch import contract_for_slot, write_metrics
 def patch(source: Path, target: Path, output: Path) -> dict:
     if output.resolve() in {source.resolve(), target.resolve()}:
         raise ValueError('refusing to replace source or theme font')
+    with source.open('rb') as stream:
+        collection = stream.read(4) == b'ttcf'
+    if collection:
+        # Engine v3 writes extra weights as collection faces; face 0 is the
+        # file's own (regular) face.
+        output.parent.mkdir(parents=True, exist_ok=True)
+        fd, name = tempfile.mkstemp(prefix='.theme-face-', suffix='.ttf', dir=output.parent)
+        os.close(fd)
+        single = Path(name)
+        try:
+            with TTFont(source, fontNumber=0, recalcBBoxes=False, recalcTimestamp=False) as font:
+                font.save(single)
+            return patch(single, target, output)
+        finally:
+            single.unlink(missing_ok=True)
     for path in (source, target):
         with path.open('rb') as stream:
             if stream.read(4) not in (b'\x00\x01\x00\x00', b'OTTO', b'true'):

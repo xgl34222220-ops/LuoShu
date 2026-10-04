@@ -21,6 +21,18 @@ if [ -s "$UNIVERSAL_MODE" ]; then
     # Phase 4/6/7 artifacts and never starts a resident target-discovery loop.
     [ -f "$UNIVERSAL_VERIFY" ] && MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
         sh "$UNIVERSAL_VERIFY" schedule >/dev/null 2>&1 || true
+    # Engine v3 payloads keep stock file names, so the provider and HyperOS
+    # theme bridges (which read .luoshu-payload/system/fonts) apply as before.
+    # Without them HyperOS apps keep the stock theme font (Latin/digit stub)
+    # in front of the replaced system font. The pre-v3 universal pipeline
+    # wrote no such payload and must stay excluded.
+    if grep -q '"luoshu-engine"' "$MODDIR/.luoshu-payload/.luoshu-runtime/deployment/deployment.json" 2>/dev/null && \
+        [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
+        (
+            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+                sh "$MODDIR/common/google_font_provider_service.sh" boot
+        ) </dev/null >/dev/null 2>&1 &
+    fi
     exit 0
 fi
 
