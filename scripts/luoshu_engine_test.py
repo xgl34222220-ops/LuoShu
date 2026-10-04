@@ -47,10 +47,12 @@ def xml_nodes(payload: Path, original: Path | None = None) -> list[tuple[str, st
         assert original is not None, "fonts.xml was expected to change"
         rendered = original
     nodes = []
+    indexes = xml_nodes.indexes = []
     for family in ET.parse(rendered).getroot().iter("family"):
         for font in family.iter("font"):
             axes = {axis.get("tag"): axis.get("stylevalue") for axis in font.iter("axis")}
             nodes.append(((font.text or "").strip(), font.get("weight"), axes))
+            indexes.append(font.get("index"))
     return nodes
 
 
@@ -111,16 +113,18 @@ def test_static_family(temp: Path) -> None:
                                     {"mode": "single", "files": [str(regular), str(bold)]}, xml_map)
     assert not any(item["variable"] for item in report["replaced"])
     nodes = xml_nodes(payload)
-    roboto = [node for node in nodes if "Roboto" in node[0]]
-    assert ("Roboto-Regular.ttf", "400", {}) in roboto, roboto
-    assert ("LuoShu-Roboto-Regular-700.ttf", "700", {}) in roboto, roboto
-    variant = payload / "system/fonts/LuoShu-Roboto-Regular-700.ttf"
-    with TTFont(str(variant)) as font:
-        assert font["OS/2"].usWeightClass == 700 and glyph_points(font, "一") == 5
-        assert font["hhea"].ascent == TTFont(str(stocks[ROBOTO]))["hhea"].ascent
-    with TTFont(str(payload / ROBOTO.lstrip("/"))) as font:
-        assert font["OS/2"].usWeightClass == 400 and glyph_points(font, "一") == 4
-    assert any(item["kind"] == "xml-font" for item in manifest["files"])
+    # No new file names (a per-file bind cannot add them): the bold weight
+    # becomes face 1 of the same file and its XML node selects it by index.
+    roboto = [(node, index) for node, index in zip(nodes, xml_nodes.indexes) if "Roboto" in node[0]]
+    assert (("Roboto-Regular.ttf", "400", {}), None) in roboto, roboto
+    assert (("Roboto-Regular.ttf", "700", {}), "1") in roboto, roboto
+    collection = TTCollection(str(payload / ROBOTO.lstrip("/")))
+    assert len(collection.fonts) == 2
+    regular_face, bold_face = collection.fonts
+    assert regular_face["OS/2"].usWeightClass == 400 and glyph_points(regular_face, "一") == 4
+    assert bold_face["OS/2"].usWeightClass == 700 and glyph_points(bold_face, "一") == 5
+    assert bold_face["hhea"].ascent == TTFont(str(stocks[ROBOTO]))["hhea"].ascent
+    assert {item["kind"] for item in manifest["files"]} <= {"physical-font", "xml"}
 
 
 def _bounds(font: TTFont, char: str, weight: float | None = None):
@@ -193,14 +197,26 @@ def test_composite_static(temp: Path) -> None:
     _manifest, report, payload = run(temp, "mix-static", topology, spec, xml_map)
     assert not any(item["variable"] for item in report["replaced"])
     for logical in (ROBOTO, MISANS):
-        with TTFont(str(payload / logical.lstrip("/"))) as font:
+        with TTFont(str(payload / logical.lstrip("/")), fontNumber=0) as font:
             assert "fvar" not in font
             assert glyph_points(font, "\u4e00") == 5 and glyph_points(font, "A") == 4
             assert glyph_points(font, "0") == 3
             assert font["hhea"].ascent == TTFont(str(stocks[logical]))["hhea"].ascent
     nodes = xml_nodes(payload)
     assert all(not axes for _name, _weight, axes in nodes), nodes
-    assert ("LuoShu-MiSansVF-700.ttf", "700", {}) in nodes
+    misans = [index for node, index in zip(nodes, xml_nodes.indexes) if node[0] == "MiSansVF.ttf"]
+    assert misans == [None, "1"], misans
+
+    # Every role fixed (as on the HyperOS device that hit this): all weights are
+    # the same font, so no extra faces, no index changes, plain single fonts.
+    for item in spec["roles"].values():
+        item.update(mode="fixed", axes={"wght": 400})
+    _manifest, report, payload = run(temp, "mix-fixed", topology, spec, xml_map)
+    assert all(item["faces"] == 1 for item in report["replaced"]), report["replaced"]
+    with TTFont(str(payload / ROBOTO.lstrip("/"))) as font:
+        assert glyph_points(font, "A") == 4
+    nodes = xml_nodes(payload)
+    assert all(index is None for index in xml_nodes.indexes), nodes
 
 
 def test_latin_only(temp: Path) -> None:

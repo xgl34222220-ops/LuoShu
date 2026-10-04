@@ -34,7 +34,7 @@ import font_role_shadow
 import luoshu_merge
 import luoshu_payload as payload_format
 
-ENGINE_REVISION = 1
+ENGINE_REVISION = 2
 REPORT_SCHEMA = "luoshu-engine-report-v1"
 REPLACE_ROLES = {"ui-sans", "cjk", "latin", "clock", "numeric"}
 COMPOSITE_ROLES = ("cjk", "latin", "digit")
@@ -42,7 +42,6 @@ HAN_RANGE = range(0x4E00, 0xA000)
 LATIN_LETTERS = frozenset(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGITS = frozenset(map(ord, "0123456789"))
 MIN_HAN = 3000
-SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 USE_TYPO_METRICS = 1 << 7
 
 
@@ -495,14 +494,19 @@ class Builder:
         self.stats["instancesBuilt"] += 1
         return path, key
 
-    def output(self, kind: str, weight: int, italic: bool, line: dict[str, int], faces: int) -> Path:
-        base, key = self._base_path(kind, weight, italic)
-        index = 0
-        if kind == "variable" and self.sources.mode == "single":
-            face = self.sources.variable_face(italic)
-            index = face.index if face else 0
-        out_key = _canonical({"base": key, "line": line, "faces": faces, "rev": ENGINE_REVISION})
-        suffix = ".ttc" if faces > 1 else ".ttf"
+    def output(self, specs: list[tuple[str, int, bool]], line: dict[str, int]) -> Path:
+        """One output file: a face per spec ((kind, weight, italic)), all with
+        the stock line metrics. More than one face makes a collection."""
+        bases = []
+        for kind, weight, italic in specs:
+            base, key = self._base_path(kind, weight, italic)
+            index = 0
+            if kind == "variable" and self.sources.mode == "single":
+                face = self.sources.variable_face(italic)
+                index = face.index if face else 0
+            bases.append((base, key, index))
+        out_key = _canonical({"bases": [key for _, key, _ in bases], "line": line, "rev": ENGINE_REVISION})
+        suffix = ".ttc" if len(bases) > 1 else ".ttf"
         path = self.cache / f"out-{out_key[:32]}{suffix}"
         self.used.add(path)
         if path.is_file():
@@ -512,12 +516,12 @@ class Builder:
         temp = path.with_suffix(".part")
         fonts = []
         try:
-            for _ in range(faces):
+            for base, _key, index in bases:
                 font = TTFont(str(base), fontNumber=index, lazy=True, recalcBBoxes=False, recalcTimestamp=False)
                 font.flavor = None
                 apply_line_metrics(font, line)
                 fonts.append(font)
-            if faces > 1:
+            if len(fonts) > 1:
                 collection = TTCollection()
                 collection.fonts = fonts
                 collection.save(str(temp), shareTables=True)
@@ -558,7 +562,8 @@ def _parse_xml(path: Path) -> ET.ElementTree:
 
 @dataclass
 class NodeAction:
-    filename: str | None
+    # Face of the replaced file this node renders; None keeps the node's index.
+    index: int | None
     axes: dict[str, float]
     variable: bool
 
@@ -585,8 +590,9 @@ def _rewrite_xml(
         action: NodeAction | None = action_for(logical, weight, italic)
         if action is None:
             continue
-        if action.filename:
-            element.text = (element.text or "").replace(declared, action.filename, 1)
+        if action.index is not None:
+            if action.index or element.get("index") is not None:
+                element.set("index", str(action.index))
         for child in list(element):
             if isinstance(child.tag, str) and child.tag == "axis":
                 tail = child.tail
@@ -608,11 +614,6 @@ def _rewrite_xml(
 
 
 # ---------------------------------------------------------------- build
-
-
-def _variant_name(target_path: str, weight: int, italic: bool) -> str:
-    stem = SAFE_NAME.sub("_", Path(target_path).stem)[:60]
-    return f"LuoShu-{stem}-{weight}{'i' if italic else ''}.ttf"
 
 
 def _place(source: Path, destination: Path) -> None:
@@ -669,37 +670,46 @@ def build(
             upright_variable = sources.variable_face(False)
             variable = sources.is_variable()
             actions: dict[tuple[int, bool], NodeAction] = {}
+            # Only existing files can be replaced: a per-file bind mount cannot
+            # add new names to a ROM directory. Extra weights become extra
+            # faces of the same file and XML nodes select them by index.
             if variable:
                 own_italic = target.italic and italic_variable is not None and italic_variable is not upright_variable
-                main = builder.output("variable", target.weight, own_italic, line, target.face_count)
-                for weight, italic in xml_weights[target.path]:
+                specs = [("variable", target.weight, own_italic)] * target.face_count
+                italic_index: int | None = None
+                for weight, italic in sorted(xml_weights[target.path]):
                     axes = {"wght": float(weight)}
                     face = italic_variable if italic else upright_variable
                     if italic and face is not None and "ital" in face.axis_tags():
                         axes["ital"] = 1.0
-                    filename = None
+                    index = None
                     if italic and face is not None and face is not upright_variable and not own_italic:
-                        filename = _variant_name(target.path, 0, True)
-                        extra = builder.output("variable", weight, True, line, 1)
-                        _record(files, stage, target, filename, extra)
-                    actions[(weight, italic)] = NodeAction(filename, axes, True)
+                        if italic_index is None:
+                            specs.append(("variable", target.weight, True))
+                            italic_index = len(specs) - 1
+                        index = italic_index
+                    actions[(weight, italic)] = NodeAction(index, axes, True)
             else:
-                main = builder.output("static", target.weight, target.italic, line, target.face_count)
-                for weight, italic in xml_weights[target.path]:
-                    if (weight, italic) == (target.weight, target.italic):
+                main_key = sources.instance_key(target.weight, target.italic)
+                specs = [("static", target.weight, target.italic)] * target.face_count
+                extra_index: dict[str, int] = {}
+                for weight, italic in sorted(xml_weights[target.path]):
+                    key = sources.instance_key(weight, italic)
+                    if key == main_key:
                         actions[(weight, italic)] = NodeAction(None, {}, False)
                         continue
-                    filename = _variant_name(target.path, weight, italic)
-                    extra = builder.output("static", weight, italic, line, 1)
-                    _record(files, stage, target, filename, extra)
-                    actions[(weight, italic)] = NodeAction(filename, {}, False)
+                    if key not in extra_index:
+                        specs.append(("static", weight, italic))
+                        extra_index[key] = len(specs) - 1
+                    actions[(weight, italic)] = NodeAction(extra_index[key], {}, False)
+            main = builder.output(specs, line)
             logical = payload_format._safe_logical(target.path)
             rel = payload_format._payload_relative(logical)
             _place(main, stage / rel)
             files[target.path] = _file_record(target.path, str(rel), stage / rel, "physical-font")
             node_actions[target.path] = actions
             replaced.append({"path": target.path, "role": target.role,
-                             "variable": variable, "faces": target.face_count})
+                             "variable": variable, "faces": len(specs)})
 
         def action_for(logical: str, weight: int, italic: bool) -> NodeAction | None:
             per_target = node_actions.get(logical)
@@ -760,15 +770,6 @@ def _file_record(logical: str, rel: str, path: Path, kind: str, source_xml: str 
         "artifactId": "",
         "sourceXml": source_xml,
     }
-
-
-def _record(files: dict[str, dict[str, Any]], stage: Path, target: Target, filename: str, source: Path) -> None:
-    logical = str(Path(target.path).parent / filename)
-    if logical in files:
-        return
-    rel = payload_format._payload_relative(payload_format._safe_logical(logical))
-    _place(source, stage / rel)
-    files[logical] = _file_record(logical, str(rel), stage / rel, "xml-font")
 
 
 def _write_manifest(stage: Path, records: dict[str, dict[str, Any]], sources: Sources,
