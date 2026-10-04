@@ -133,6 +133,14 @@ def main(pin_path, output_path):
                            app_axis_stage=stage, owned_stage_reports=stage_reports,
                            raw_composite_runtime_log=z.read('app-composite/runtime.log').decode('utf-8', errors='replace')
                            if 'app-composite/runtime.log' in z.namelist() else None,
+                           composite_frame_states=[dict(path=name, sha256=sha256(z.read(name)).hexdigest(),
+                               archived_time=z.getinfo(name).date_time,
+                               labels=[node.get('text') for node in ET.fromstring(z.read(name)).iter('node')
+                                       if node.get('package') == 'io.github.xgl34222220.luoshu.stabletest' and node.get('text')])
+                               for name in sorted(n for n in z.namelist() if re.fullmatch(r'app-composite/frame-\d+\.xml', n))],
+                           composite_module_steps=[{key: step.get(key) for key in ('argv', 'exit', 'elapsed_seconds', 'stdout', 'stderr')}
+                               for step in module.get('steps', []) if any(token in ' '.join(map(str, step.get('argv', [])))
+                               for token in (' mix_status ', '/config/axes_task.conf', '/config/mix_task.conf'))],
                            composite_xml_frames=[dict(path=name, sha256=sha256(z.read(name)).hexdigest(),
                                nodes=[{key: node.get(key, '') for key in
                                        ('text', 'content-desc', 'bounds', 'class', 'resource-id', 'clickable', 'scrollable')}
