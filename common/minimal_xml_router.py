@@ -416,6 +416,7 @@ def _artifact_contract(font_plan: dict[str, Any], target: dict[str, Any], node: 
         "requirements": target.get("requirements"),
         "source": target.get("source"),
         "targetContract": target.get("targetContract"),
+        **({"compositeSources": target["compositeSources"]} if target.get("compositeSources") else {}),
         "xmlContract": {
             "weight": node.get("weight"),
             "style": node.get("style"),
@@ -477,6 +478,18 @@ def _variable_group_key(target: dict[str, Any], node: dict[str, Any]) -> tuple[A
     source = target.get("source") if isinstance(target.get("source"), dict) else {}
     if source.get("variable") is not True or "CFF" in str(source.get("format") or "").upper():
         return None
+    composite_sources = target.get("compositeSources")
+    if isinstance(composite_sources, dict) and composite_sources:
+        # One shared variable artifact is the whole source font, so it is only
+        # valid when every glyph class comes from the same face, following the
+        # node weight (auto), never a user-fixed instance.
+        identities = {
+            (str(ref.get("uid") or ""), str(ref.get("compositeMode") or "auto"),
+             json.dumps(ref.get("compositeAxes") or {}, sort_keys=True))
+            for ref in composite_sources.values() if isinstance(ref, dict)
+        }
+        if len(identities) != 1 or next(iter(identities))[1] != "auto":
+            return None
     ranges = _source_axis_ranges(target)
     axes = node.get("axes") if isinstance(node.get("axes"), list) else []
     if not axes:
@@ -530,6 +543,7 @@ def _variable_group_contract(
         "requirements": target.get("requirements"),
         "source": target.get("source"),
         "targetContract": target.get("targetContract"),
+        **({"compositeSources": target["compositeSources"]} if target.get("compositeSources") else {}),
         "variableGroup": {
             "index": first.get("index"),
             "postScriptName": first.get("postScriptName"),

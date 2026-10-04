@@ -528,11 +528,108 @@ def _compile_requirements(
     return compiler, requirements, risks
 
 
+COMPOSITE_ROLES = ("cjk", "latin", "digit")
+
+
+def _composite_needs(role: str, slot: dict[str, Any]) -> list[str]:
+    """Composite roles whose glyphs a stock slot of ``role`` actually shows."""
+    if role == "cjk":
+        return ["cjk"]
+    if role in SPECIALIZED_ROLES:
+        return ["digit"]
+    needs = ["latin", "digit"]
+    if role == "ui-sans" and _target_requires_cjk(role, slot):
+        needs.insert(0, "cjk")
+    return needs
+
+
+def _composite_face_ok(face: dict[str, Any], composite_role: str) -> tuple[bool, str]:
+    caps = _face_capabilities(face)
+    if caps.get("colorFont") is True:
+        return False, "color-font"
+    if composite_role == "cjk":
+        coverage = face.get("coverage") if isinstance(face.get("coverage"), dict) else {}
+        probes = coverage.get("probes") if isinstance(coverage.get("probes"), dict) else {}
+        cjk_ratio = _float((probes.get("cjk") or {}).get("ratio"), 0.0) or 0.0
+        minimum = _int(coverage.get("minimumCoreHan"), 6000) or 6000
+        if (_int(coverage.get("coreHan"), 0) or 0) < minimum or cjk_ratio < 0.95:
+            return False, "composite-cjk-coverage-missing"
+        return True, "composite-cjk-capable"
+    if composite_role == "latin":
+        return (True, "composite-latin-capable") if caps.get("latinUi") is True else (False, "composite-latin-coverage-missing")
+    return (True, "composite-digit-capable") if caps.get("numeric") is True else (False, "composite-digit-coverage-missing")
+
+
+def _select_composite_face(
+    faces: list[dict[str, Any]],
+    composite_role: str,
+    spec: dict[str, Any],
+    slot: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """Pick a face only among those the user assigned to ``composite_role``."""
+    axes = spec.get("axes") if isinstance(spec.get("axes"), dict) else {}
+    fixed = spec.get("mode") == "fixed"
+    target_weight = _target_weight(slot)
+    if fixed and _float(axes.get("wght")) is not None:
+        target_weight = int(round(float(axes["wght"])))
+    target_italic = _target_italic(slot)
+    ranked = []
+    rejected: dict[str, int] = {}
+    for face in faces:
+        if composite_role not in (face.get("assignedRoles") or []):
+            continue
+        ok, reason = _composite_face_ok(face, composite_role)
+        if not ok:
+            rejected[reason] = rejected.get(reason, 0) + 1
+            continue
+        italic_penalty = 0.0 if (_face_style(face).get("italic") is True) == target_italic else 10000.0
+        distance, mode = _weight_distance(face, target_weight)
+        ranked.append(((italic_penalty, distance, str(face.get("uid") or ""), _int(face.get("faceIndex"), 0) or 0),
+                       face, mode, reason))
+    selection: dict[str, Any] = {
+        "compositeRole": composite_role,
+        "mode": "fixed" if fixed else "auto",
+        "targetWeight": target_weight,
+        "targetItalic": target_italic,
+    }
+    if not ranked:
+        selection["rejected"] = dict(sorted(rejected.items()))
+        return None, selection
+    ranked.sort(key=lambda item: item[0])
+    _score, face, weight_mode, reason = ranked[0]
+    selection.update(
+        candidateCount=len(ranked),
+        weightMode=weight_mode,
+        weightDistance=round(float(_score[1]), 4),
+        italicMatch=_score[0] == 0.0,
+        roleReasons=[reason],
+    )
+    return face, selection
+
+
+
+def _composite_identity(ref: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        str(ref.get("uid") or ""),
+        str(ref.get("compositeMode") or "auto"),
+        json.dumps(ref.get("compositeAxes") or {}, sort_keys=True),
+    )
+
+
+def _composite_source_ref(face: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
+    ref = _source_ref(face)
+    ref["compositeMode"] = "fixed" if spec.get("mode") == "fixed" else "auto"
+    axes = spec.get("axes") if isinstance(spec.get("axes"), dict) else {}
+    ref["compositeAxes"] = {str(k): float(v) for k, v in sorted(axes.items())}
+    return ref
+
+
 def _plan_slot(
     path: str,
     slot: dict[str, Any],
     role_info: dict[str, Any],
     faces: list[dict[str, Any]],
+    composite: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     role = str(role_info.get("role") or "unknown-protected")
     confidence = _int(role_info.get("confidence"), 0) or 0
@@ -587,7 +684,36 @@ def _plan_slot(
         )
         return base
 
-    face, selection = _select_face(faces, role, slot)
+    composite_sources: dict[str, Any] | None = None
+    if composite is not None:
+        # The user's assignment decides every glyph class; capability-based
+        # auto selection across all imported faces must not apply here.
+        roles_spec = composite.get("roles") if isinstance(composite.get("roles"), dict) else {}
+        needs = _composite_needs(role, slot)
+        composite_sources = {}
+        selections: dict[str, Any] = {}
+        face = None
+        selection: dict[str, Any] = {}
+        for composite_role in needs:
+            spec = roles_spec.get(composite_role) if isinstance(roles_spec.get(composite_role), dict) else {}
+            picked, picked_selection = _select_composite_face(faces, composite_role, spec, slot)
+            selections[composite_role] = picked_selection
+            if picked is None:
+                face = None
+                selection = dict(picked_selection, compositeNeeds=needs)
+                break
+            composite_sources[composite_role] = _composite_source_ref(picked, spec)
+            if face is None:
+                # Primary source: CJK when the slot shows Han, otherwise Latin
+                # (or the digit source for clock/numeric slots).
+                face, selection = picked, dict(picked_selection)
+        else:
+            selection["compositeNeeds"] = needs
+            selection["compositeSelections"] = selections
+        if face is None:
+            composite_sources = None
+    else:
+        face, selection = _select_face(faces, role, slot)
     base["selection"] = selection
     if face is None:
         base.update(
@@ -600,6 +726,13 @@ def _plan_slot(
 
     compiler, requirements, risks = _compile_requirements(role, slot, face, selection)
     base["source"] = _source_ref(face)
+    if composite_sources is not None:
+        primary_role = next(iter(composite_sources))
+        base["source"] = dict(composite_sources[primary_role])
+        base["compositeSources"] = composite_sources
+        if len({_composite_identity(ref) for ref in composite_sources.values()}) > 1:
+            requirements = sorted(set(requirements) | {"composite-multi-source"})
+            compiler = "compatibility" if compiler == "direct" else compiler
     base["compiler"] = compiler
     base["requirements"] = requirements
     base["risks"] = risks
@@ -700,6 +833,7 @@ def build_plan(
     slots = _topology_slots(topology)
     role_slots = _role_slots(roles)
     faces = _source_faces(profile)
+    composite = profile.get("composite") if isinstance(profile.get("composite"), dict) else None
 
     targets: dict[str, dict[str, Any]] = {}
     missing_role_slots: list[str] = []
@@ -712,7 +846,7 @@ def build_plan(
                 "confidence": 0,
                 "action": "review",
             }
-        targets[path] = _plan_slot(path, slots[path], role_info, faces)
+        targets[path] = _plan_slot(path, slots[path], role_info, faces, composite)
 
     action_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
@@ -764,6 +898,7 @@ def build_plan(
             "faceCount": profile.get("summary", {}).get("faceCount"),
             "familyCount": profile.get("summary", {}).get("familyCount"),
             "capabilities": dict(profile.get("summary", {}).get("capabilities") or {}),
+            **({"composite": True} if composite is not None else {}),
         },
         "constraints": constraints,
         "summary": {
@@ -846,6 +981,17 @@ def validate_plan(
                 raise UniversalPlanError(f"未知扩展角色不得自动替换：{path}")
         if action in {"replace", "compile", "compile-specialized"} and not isinstance(item.get("source"), dict):
             raise UniversalPlanError(f"替换目标缺少源 face：{path}")
+        composite_sources = item.get("compositeSources")
+        if composite_sources is not None:
+            if (
+                not isinstance(composite_sources, dict)
+                or not composite_sources
+                or not set(composite_sources) <= set(COMPOSITE_ROLES)
+                or not all(isinstance(ref, dict) and ref.get("uid") for ref in composite_sources.values())
+            ):
+                raise UniversalPlanError(f"组合目标来源无效：{path}")
+            if item.get("source") not in composite_sources.values():
+                raise UniversalPlanError(f"组合目标主来源不在分工内：{path}")
 
     missing_role_slots = plan.get("missingRoleSlots")
     if not isinstance(missing_role_slots, list):

@@ -15,7 +15,10 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 
 import device_font_template as template_engine
 import font_coverage
+import font_role_shadow
 import font_source_profile
+import minimal_xml_router
+import universal_font_plan
 import universal_font_compiler_test as fixture
 
 ASCII_POINTS = tuple(range(0x20, 0x7F))
@@ -25,7 +28,8 @@ def make_cjk_font(path: Path, *, family: str, variable: bool = False, y_max: int
     """A CJK base with >= MIN_CORE_HAN Han glyphs, the CJK probes and ASCII."""
     han = list(range(0x4E00, 0x4E00 + font_coverage.MIN_CORE_HAN + 64))
     points = sorted(set(han) | set(template_engine.PROBE_GROUPS["cjk"])
-                    | set(template_engine.PROBE_GROUPS["punctuationFullwidth"]) | set(ASCII_POINTS))
+                    | set(template_engine.PROBE_GROUPS["punctuationFullwidth"]) | set(ASCII_POINTS)
+                    | set(font_coverage.CJK_COMMON) | set(font_coverage.PUNCTUATION))
     cmap = {cp: f"u{cp:04X}" for cp in points}
     order = [".notdef", *cmap.values()]
     builder = FontBuilder(1000, isTTF=True)
@@ -112,10 +116,143 @@ def test_profile(temp: Path) -> dict[str, Path]:
     return {"cjk": cjk, "latin": latin, "digit": digit}
 
 
+def build_device(temp: Path) -> tuple[dict, dict, dict[str, Path], dict[str, Path]]:
+    """Stock slots: Latin UI, CJK fallback, OEM broad UI (Han+Latin), clock."""
+    stocks = {
+        "/system/fonts/Roboto-Regular.ttf": temp / "Roboto-Regular.ttf",
+        "/system/fonts/NotoSansCJK-Regular.ttf": temp / "NotoSansCJK-Regular.ttf",
+        "/system/fonts/MiSansVF.ttf": temp / "MiSansVF.ttf",
+        "/system/fonts/AndroidClock.ttf": temp / "AndroidClock.ttf",
+    }
+    fixture.make_font(stocks["/system/fonts/Roboto-Regular.ttf"], family="Stock Roboto", variable=True)
+    make_cjk_font(stocks["/system/fonts/NotoSansCJK-Regular.ttf"], family="Stock CJK", variable=True)
+    make_cjk_font(stocks["/system/fonts/MiSansVF.ttf"], family="Stock MiSans", variable=True)
+    fixture.make_font(stocks["/system/fonts/AndroidClock.ttf"], family="Stock Clock", advance=760)
+    weights = (400, 700)
+    families = {
+        "/system/fonts/Roboto-Regular.ttf": ("sans-serif", {}),
+        "/system/fonts/NotoSansCJK-Regular.ttf": ("", {"lang": "zh-Hans"}),
+        "/system/fonts/MiSansVF.ttf": ("mipro", {}),
+        "/system/fonts/AndroidClock.ttf": ("clock-ui", {}),
+    }
+    xml_nodes = []
+    slots = {}
+    for logical, stock in stocks.items():
+        family, attrs = families[logical]
+        declared = Path(logical).name
+        clock = "Clock" in declared
+        slot = fixture.slot_from_stock(logical, stock, family=family or "zh", source_xml="/system/etc/fonts.xml",
+                                       declared=declared)
+        slot["families"] = [family] if family else []
+        refs = []
+        for weight in ((400,) if clock else weights):
+            refs.append(dict(slot["xmlRefs"][0], family=family, familyNormalized=family,
+                             familyAttributes=attrs, weight=weight))
+        slot["xmlRefs"] = refs
+        slots[logical] = slot
+        attr_text = "".join(f' {k}="{v}"' for k, v in attrs.items())
+        name_text = f' name="{family}"' if family else ""
+        xml_nodes.append(f"<family{name_text}{attr_text}>" + "".join(
+            f'<font weight="{w}" style="normal">{declared}'
+            + ("" if clock else f'<axis tag="wght" stylevalue="{w}"/>') + "</font>"
+            for w in ((400,) if clock else weights)
+        ) + "</family>")
+    xml = temp / "fonts.xml"
+    xml.write_text("<familyset>" + "".join(xml_nodes) + "</familyset>", encoding="utf-8")
+    topology = {
+        "schema": "device-font-topology-v1", "topologyRevision": 2, "state": "ready",
+        "buildKey": "composite-test", "romKind": "hyperos",
+        "summary": {"slotCount": len(slots), "dataFontFileCount": 0,
+                    "dataFontConfigReferenceCount": 0, "unresolvedXmlRefCount": 0},
+        "slots": slots, "families": {}, "xmlAliases": [], "unresolvedXmlRefs": [], "runtime": {},
+    }
+    roles, _shadow = font_role_shadow.build(topology)
+    return topology, roles, stocks, {"/system/etc/fonts.xml": xml}
+
+
+def uid_of(profile: dict, name: str) -> str:
+    return next(f for f in profile["files"] if f["sourcePath"].endswith(name))["faces"][0]["uid"]
+
+
+def test_plan(temp: Path, fonts: dict[str, Path]) -> None:
+    topology, roles, stocks, xml_map = build_device(temp)
+    role_of = {path: item["role"] for path, item in roles["slots"].items()}
+    assert role_of == {
+        "/system/fonts/Roboto-Regular.ttf": "ui-sans",
+        "/system/fonts/NotoSansCJK-Regular.ttf": "cjk",
+        "/system/fonts/MiSansVF.ttf": "ui-sans",
+        "/system/fonts/AndroidClock.ttf": "clock",
+    }, role_of
+
+    modes = {"cjk": "auto", "latin": "auto", "digit": "fixed"}
+    axes = {"cjk": "wght=400", "latin": "wght=400", "digit": "wght=500"}
+    profile = font_source_profile.build(
+        [], {"cjk": [fonts["cjk"]], "latin": [fonts["latin"]], "digit": [fonts["digit"]]}, modes, axes
+    )
+    plan = universal_font_plan.build_plan(topology, roles, profile)
+    universal_font_plan.validate_plan(plan)
+    targets = plan["targets"]
+    cjk_uid, latin_uid, digit_uid = (uid_of(profile, n) for n in ("UserCJK.ttf", "UserLatin.ttf", "UserDigit.ttf"))
+
+    def sources(path: str) -> dict[str, str]:
+        return {role: ref["uid"] for role, ref in targets[path]["compositeSources"].items()}
+
+    # The CJK base also has full ASCII; Latin/digit slots must still use B/C.
+    assert sources("/system/fonts/Roboto-Regular.ttf") == {"latin": latin_uid, "digit": digit_uid}
+    assert targets["/system/fonts/Roboto-Regular.ttf"]["source"]["uid"] == latin_uid
+    assert "composite-multi-source" in targets["/system/fonts/Roboto-Regular.ttf"]["requirements"]
+    assert sources("/system/fonts/NotoSansCJK-Regular.ttf") == {"cjk": cjk_uid}
+    assert "composite-multi-source" not in targets["/system/fonts/NotoSansCJK-Regular.ttf"]["requirements"]
+    assert sources("/system/fonts/MiSansVF.ttf") == {"cjk": cjk_uid, "latin": latin_uid, "digit": digit_uid}
+    assert targets["/system/fonts/MiSansVF.ttf"]["source"]["uid"] == cjk_uid
+    assert sources("/system/fonts/AndroidClock.ttf") == {"digit": digit_uid}
+    digit_ref = targets["/system/fonts/AndroidClock.ttf"]["compositeSources"]["digit"]
+    assert digit_ref["compositeMode"] == "fixed" and digit_ref["compositeAxes"] == {"wght": 500.0}
+    assert targets["/system/fonts/AndroidClock.ttf"]["selection"]["targetWeight"] == 500
+
+    # Router: the CJK fallback slot shares one variable artifact (single auto
+    # source); Roboto and MiSans need several sources and stay per node.
+    route = minimal_xml_router.build_route_plan(plan, xml_map, None, False)
+    ops = route["documents"]["/system/etc/fonts.xml"]["operations"]
+    per_target: dict[str, set[str]] = {}
+    for op in ops:
+        per_target.setdefault(op["targetPath"], set()).add(op["artifact"]["artifactId"])
+    assert len(per_target["/system/fonts/NotoSansCJK-Regular.ttf"]) == 1, per_target
+    assert len(per_target["/system/fonts/Roboto-Regular.ttf"]) == 2, per_target
+    assert len(per_target["/system/fonts/MiSansVF.ttf"]) == 2, per_target
+
+    # Latin and digits from the same auto face: Roboto becomes single-source
+    # again and may share a variable artifact across its weights.
+    same = font_source_profile.build(
+        [], {"cjk": [fonts["cjk"]], "latin": [fonts["latin"]], "digit": [fonts["latin"]]},
+        {"cjk": "auto", "latin": "auto", "digit": "auto"}, {"cjk": "", "latin": "", "digit": ""},
+    )
+    same_plan = universal_font_plan.build_plan(topology, roles, same)
+    roboto = same_plan["targets"]["/system/fonts/Roboto-Regular.ttf"]
+    assert "composite-multi-source" not in roboto["requirements"], roboto["requirements"]
+    same_route = minimal_xml_router.build_route_plan(same_plan, xml_map, None, False)
+    roboto_ids = {op["artifact"]["artifactId"] for op in same_route["documents"]["/system/etc/fonts.xml"]["operations"]
+                  if op["targetPath"] == "/system/fonts/Roboto-Regular.ttf"}
+    assert len(roboto_ids) == 1, roboto_ids
+
+    # A different digit font changes Roboto's artifacts even though its primary
+    # (Latin) source is identical.
+    swapped = font_source_profile.build(
+        [], {"cjk": [fonts["cjk"]], "latin": [fonts["latin"]], "digit": [fonts["cjk"]]}, modes, axes
+    )
+    swapped_route = minimal_xml_router.build_route_plan(
+        universal_font_plan.build_plan(topology, roles, swapped), xml_map, None, False
+    )
+    swapped_ids = {op["artifact"]["artifactId"] for op in swapped_route["documents"]["/system/etc/fonts.xml"]["operations"]
+                   if op["targetPath"] == "/system/fonts/Roboto-Regular.ttf"}
+    assert swapped_ids.isdisjoint(per_target["/system/fonts/Roboto-Regular.ttf"])
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-composite-") as raw:
         temp = Path(raw)
-        test_profile(temp)
+        fonts = test_profile(temp)
+        test_plan(temp, fonts)
     print("universal_composite_test: PASS")
     return 0
 

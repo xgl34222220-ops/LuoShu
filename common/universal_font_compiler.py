@@ -962,6 +962,7 @@ def _physical_artifact(target: dict[str, Any], font_plan: dict[str, Any]) -> dic
         "requirements": target.get("requirements"),
         "source": target.get("source"),
         "targetContract": contract,
+        **({"compositeSources": target["compositeSources"]} if target.get("compositeSources") else {}),
     }
     digest = _canonical_hash(semantic)
     ext = _artifact_extension(target)
