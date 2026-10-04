@@ -41,6 +41,7 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
+from fontTools import subset as ft_subset
 from fontTools.varLib.instancer import instantiateVariableFont
 
 import device_font_slot_build_base as slot_build
@@ -1363,6 +1364,59 @@ def _compile_source_as_base(
             source_original.close()
 
 
+def _subset_variable_source_for_stock(source: TTFont, stock: Path, face_index: int) -> int:
+    """Shrink a variable source to the codepoints a stock-shell can use.
+
+    Stock-shell only copies glyphs for codepoints present in the stock face,
+    plus the geometry probes. Instancing a full CJK source (tens of thousands
+    of glyphs) for a few hundred Latin slots dominated compile time; pruning
+    first keeps every glyph that is read later byte-identical while the
+    instancer works on a fraction of the font. Returns kept glyph count, or 0
+    when the source was left untouched.
+    """
+    if "fvar" not in source or "glyf" not in source:
+        return 0
+    stock_font = _open_face(stock, face_index, lazy=True)
+    try:
+        wanted = set(stock_font.getBestCmap() or {})
+    finally:
+        stock_font.close()
+    for points in template_engine.PROBE_GROUPS.values():
+        wanted.update(points)
+    wanted.update(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
+    source_cmap = source.getBestCmap() or {}
+    keep = wanted.intersection(source_cmap)
+    if len(keep) * 2 >= len(source_cmap):
+        return 0
+    options = ft_subset.Options()
+    options.glyph_names = True
+    options.notdef_outline = True
+    options.notdef_glyph = True
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.name_legacy = True
+    # Only outlines, advances and cmap are read from the source; its layout
+    # tables never reach the stock-shell output and are costly to instance.
+    options.layout_features = []
+    options.legacy_kern = False
+    options.hinting = True
+    options.passthrough_tables = False
+    options.drop_tables = [
+        "GSUB", "GPOS", "GDEF", "BASE", "JSTF", "MATH", "kern", "morx", "feat",
+        "vhea", "vmtx", "VORG", "VVAR", "DSIG", "meta",
+    ]
+    options.recalc_bounds = False
+    options.recalc_timestamp = False
+    options.prune_unicode_ranges = False
+    options.prune_codepage_ranges = False
+    options.recalc_average_width = False
+    options.recalc_max_context = False
+    subsetter = ft_subset.Subsetter(options)
+    subsetter.populate(unicodes=sorted(keep))
+    subsetter.subset(source)
+    return len(source.getGlyphOrder())
+
+
 def _compile_stock_shell(
     target: dict[str, Any],
     artifact: dict[str, Any],
@@ -1384,12 +1438,16 @@ def _compile_stock_shell(
         conversion = font_web_convert.convert(source_path, temp_root / "web")
         materialized = Path(str(conversion["outputPath"]))
 
-    source_original = _open_face(materialized, max(0, _int(source_info.get("faceIndex"), 0)))
+    # Lazy: a variable source is pruned before any glyph is decoded.
+    source_original = _open_face(materialized, max(0, _int(source_info.get("faceIndex"), 0)), lazy=True)
     source_instance: TTFont | None = None
     stock_geometry: TTFont | None = None
     base: TTFont | None = None
     collection: TTCollection | None = None
     try:
+        subset_glyphs = _subset_variable_source_for_stock(
+            source_original, stock, max(0, _int(artifact.get("requiredFaceIndex"), 0))
+        )
         source_axes = _source_axis_spec_for_route(source_original, artifact, weight)
         source_instance, source_location = _instantiate(source_original, weight, source_axes)
         if source_instance is source_original:
@@ -1440,6 +1498,7 @@ def _compile_stock_shell(
         )
         return {
             "mode": "stock-shell",
+            "sourceSubsetGlyphs": subset_glyphs,
             "sourceContainer": source_container,
             "sourceLocation": source_location,
             "stockLocation": stock_location,
