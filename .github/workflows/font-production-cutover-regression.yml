@@ -1,14 +1,18 @@
-name: Universal Font Production Cutover regression
+name: Font engine and cutover regression
 
 on:
   pull_request:
     paths:
-      - common/universal_font_cutover_gate.py
+      - common/luoshu_engine.py
+      - common/luoshu_engine.sh
+      - common/luoshu_merge.py
+      - common/luoshu_payload.py
+      - common/luoshu_verify.py
+      - common/luoshu_diagnostics.py
       - common/universal_font_cutover.sh
-      - common/universal_font_deployment.py
-      - common/universal_font_deployment.sh
+      - common/universal_composite.sh
       - common/universal_next_boot.sh
-      - common/universal_font_runtime_verify.py
+      - common/universal_mount_runtime.sh
       - common/universal_font_runtime_verify.sh
       - common/next_boot_payload.sh
       - common/font_manager.sh
@@ -17,14 +21,16 @@ on:
       - android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt
       - android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeContract.kt
       - android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/home/HomeContractTest.kt
-      - scripts/universal_font_cutover_gate_test.py
+      - scripts/font_fixtures.py
+      - scripts/luoshu_engine_test.py
+      - scripts/luoshu_engine_bridge_test.py
+      - scripts/luoshu_verify_test.py
+      - scripts/luoshu_diagnostics_test.py
       - scripts/universal_font_cutover_test.sh
       - scripts/universal_cutover_next_boot_test.sh
-      - scripts/universal_font_deployment_test.py
-      - scripts/universal_font_runtime_verify_test.py
       - scripts/app_bridge_status_test.sh
       - scripts/module_payload_manifest.txt
-      - docs/UNIVERSAL_FONT_ENGINE_REFACTOR.md
+      - docs/LUOSHU_ENGINE_V3.md
       - .github/workflows/font-production-cutover-regression.yml
   workflow_dispatch:
 
@@ -32,7 +38,7 @@ permissions:
   contents: read
 
 jobs:
-  production-cutover:
+  engine:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -53,30 +59,22 @@ jobs:
       - name: Install font dependencies
         run: |
           python3 -m pip install --disable-pip-version-check 'fonttools==4.63.0'
-      - name: Validate Phase 9 cutover
+      - name: Validate engine v3 and cutover
         run: |
           set -eu
           python3 -m py_compile \
-            common/universal_font_cutover_gate.py \
-            common/universal_font_deployment.py \
-            common/universal_font_runtime_verify.py \
-            scripts/universal_font_cutover_gate_test.py \
-            scripts/universal_font_runtime_verify_test.py
-          sh -n common/universal_font_cutover.sh
-          sh -n common/universal_font_deployment.sh
-          sh -n common/universal_next_boot.sh
-          sh -n common/universal_font_runtime_verify.sh
-          sh -n common/next_boot_payload.sh
-          sh -n common/font_manager.sh
-          sh -n common/font_switch_task.sh
-          sh -n common/app_bridge.sh
-          sh -n scripts/universal_font_cutover_test.sh
-          sh -n scripts/universal_cutover_next_boot_test.sh
-          sh -n scripts/app_bridge_status_test.sh
+            common/luoshu_engine.py common/luoshu_merge.py common/luoshu_payload.py \
+            common/luoshu_verify.py common/luoshu_diagnostics.py
+          for file in common/luoshu_engine.sh common/universal_font_cutover.sh common/universal_composite.sh \
+            common/universal_next_boot.sh common/universal_font_runtime_verify.sh common/next_boot_payload.sh \
+            common/font_manager.sh common/font_switch_task.sh common/app_bridge.sh; do
+            sh -n "$file"
+          done
 
-          python3 scripts/universal_font_cutover_gate_test.py
-          python3 scripts/universal_font_deployment_test.py
-          python3 scripts/universal_font_runtime_verify_test.py
+          python3 scripts/luoshu_engine_test.py
+          python3 scripts/luoshu_engine_bridge_test.py
+          python3 scripts/luoshu_verify_test.py
+          python3 scripts/luoshu_diagnostics_test.py
           sh scripts/universal_font_cutover_test.sh
           sh scripts/universal_cutover_next_boot_test.sh
           sh scripts/app_bridge_status_test.sh
@@ -85,7 +83,7 @@ jobs:
           gradle --no-daemon --stacktrace :app:testDebugUnitTest
           cd ..
 
-          grep -qx 'common/universal_font_cutover_gate.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_cutover.sh' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_runtime_verify.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_runtime_verify.sh' scripts/module_payload_manifest.txt
+          for path in common/luoshu_engine.py common/luoshu_engine.sh common/luoshu_merge.py \
+            common/luoshu_payload.py common/luoshu_verify.py common/universal_font_cutover.sh; do
+            grep -qx "$path" scripts/module_payload_manifest.txt
+          done

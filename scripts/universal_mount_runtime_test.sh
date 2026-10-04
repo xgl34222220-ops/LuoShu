@@ -13,7 +13,7 @@ cat > "$MOD/common/luoshu_payload.py" <<'PY'
 #!/usr/bin/env python3
 import sys
 # Mount runtime only needs a zero/non-zero integrity verdict here; the real
-# deployment validator is covered by universal_font_deployment_test.py.
+# payload validator is covered by luoshu_engine_test.py and luoshu_verify_test.py.
 raise SystemExit(0 if "--validate-payload-only" in sys.argv else 2)
 PY
 printf 'dynamic-font-content\n' > "$MOD/.luoshu-payload/.luoshu-dynamic/test.ttf"

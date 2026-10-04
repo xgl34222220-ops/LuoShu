@@ -18,8 +18,8 @@ import dataclasses
 
 import font_role_shadow
 import luoshu_engine
-import universal_composite_test as composite
-import universal_font_compiler_test as fixture
+import font_fixtures as composite
+import font_fixtures as fixture
 
 
 def main() -> int:

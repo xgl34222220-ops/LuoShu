@@ -10,17 +10,7 @@ on:
       - common/font_topology_snapshot.sh
       - common/font_role_shadow.py
       - common/font_role_shadow.sh
-      - common/font_source_profile.py
-      - common/font_source_profile.sh
       - common/font_web_convert.py
-      - common/universal_font_plan.py
-      - common/universal_font_plan.sh
-      - common/minimal_xml_router.py
-      - common/minimal_xml_router.sh
-      - common/universal_font_compiler.py
-      - common/universal_font_compiler.sh
-      - common/universal_font_deployment.py
-      - common/universal_font_deployment.sh
       - common/universal_next_boot.sh
       - common/universal_mount_runtime.sh
       - common/stock_inventory_scan.py
@@ -34,16 +24,6 @@ on:
       - scripts/font_inventory_scan_test.py
       - scripts/font_topology_snapshot_test.py
       - scripts/font_role_shadow_test.py
-      - scripts/font_source_profile_test.py
-      - scripts/font_source_profile_bridge_test.sh
-      - scripts/universal_font_plan_test.py
-      - scripts/universal_font_plan_bridge_test.sh
-      - scripts/minimal_xml_router_test.py
-      - scripts/minimal_xml_router_bridge_test.sh
-      - scripts/universal_font_compiler_test.py
-      - scripts/universal_font_compiler_bridge_test.sh
-      - scripts/universal_font_deployment_test.py
-      - scripts/universal_font_deployment_bridge_test.sh
       - scripts/universal_mount_runtime_test.sh
       - scripts/stock_inventory_scan_wrapper_test.py
       - scripts/rom_adapter_inventory_test.sh
@@ -65,23 +45,13 @@ jobs:
       - name: Validate inventory scanners and runtime mapper
         run: |
           set -eu
-          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/font_topology_snapshot.py common/font_role_shadow.py common/font_source_profile.py common/font_web_convert.py common/universal_font_plan.py common/minimal_xml_router.py common/universal_font_compiler.py common/universal_font_deployment.py common/stock_inventory_scan.py common/font_metrics_normalize.py
+          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/font_topology_snapshot.py common/font_role_shadow.py common/font_web_convert.py common/stock_inventory_scan.py common/font_metrics_normalize.py
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_test.py --font "$FONT"
           python3 scripts/font_inventory_scan_test.py --font "$FONT"
           python3 scripts/font_topology_snapshot_test.py
           python3 scripts/font_role_shadow_test.py
-          python3 scripts/font_source_profile_test.py --font "$FONT"
-          sh scripts/font_source_profile_bridge_test.sh "$FONT"
-          python3 scripts/universal_font_plan_test.py
-          sh scripts/universal_font_plan_bridge_test.sh
-          python3 scripts/minimal_xml_router_test.py
-          sh scripts/minimal_xml_router_bridge_test.sh
-          python3 scripts/universal_font_compiler_test.py
-          sh scripts/universal_font_compiler_bridge_test.sh
-          python3 scripts/universal_font_deployment_test.py
-          sh scripts/universal_font_deployment_bridge_test.sh
           sh scripts/universal_mount_runtime_test.sh
           python3 scripts/stock_inventory_scan_wrapper_test.py
           sh scripts/rom_adapter_inventory_test.sh "$FONT"
@@ -95,11 +65,6 @@ jobs:
           sh -n common/rom_adapters.sh
           sh -n common/font_topology_snapshot.sh
           sh -n common/font_role_shadow.sh
-          sh -n common/font_source_profile.sh
-          sh -n common/universal_font_plan.sh
-          sh -n common/minimal_xml_router.sh
-          sh -n common/universal_font_compiler.sh
-          sh -n common/universal_font_deployment.sh
           sh -n common/universal_next_boot.sh
           sh -n common/universal_mount_runtime.sh
           sh -n common/device_font_payload_policy.sh
@@ -123,17 +88,7 @@ jobs:
           grep -qx 'common/font_topology_snapshot.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/font_role_shadow.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_role_shadow.sh' scripts/module_payload_manifest.txt
-          grep -qx 'common/font_source_profile.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/font_source_profile.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/font_web_convert.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_plan.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_plan.sh' scripts/module_payload_manifest.txt
-          grep -qx 'common/minimal_xml_router.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/minimal_xml_router.sh' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_compiler.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_compiler.sh' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_deployment.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/universal_font_deployment.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/universal_next_boot.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/universal_mount_runtime.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt

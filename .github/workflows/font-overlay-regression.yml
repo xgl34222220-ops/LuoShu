@@ -5,12 +5,7 @@ on:
       - main
     paths:
       - common/font_config_overlay.py
-      - common/universal_font_plan.py
-      - common/minimal_xml_router.py
-      - common/minimal_xml_router.sh
       - scripts/font_config_overlay_test.py
-      - scripts/minimal_xml_router_test.py
-      - scripts/minimal_xml_router_bridge_test.sh
       - .github/workflows/font-overlay-regression.yml
 permissions:
   contents: read
@@ -24,9 +19,5 @@ jobs:
           python-version: '3.12'
       - name: Compile and run overlay tests
         run: |
-          python3 -m py_compile common/font_config_overlay.py common/universal_font_plan.py common/minimal_xml_router.py scripts/font_config_overlay_test.py scripts/minimal_xml_router_test.py
-          sh -n common/minimal_xml_router.sh
-          sh -n scripts/minimal_xml_router_bridge_test.sh
+          python3 -m py_compile common/font_config_overlay.py scripts/font_config_overlay_test.py
           python3 scripts/font_config_overlay_test.py
-          python3 scripts/minimal_xml_router_test.py
-          sh scripts/minimal_xml_router_bridge_test.sh

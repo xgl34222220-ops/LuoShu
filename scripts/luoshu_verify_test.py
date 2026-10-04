@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "common"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import luoshu_engine as engine
-import universal_composite_test as composite
+import font_fixtures as composite
 
 
 def conf(path: Path) -> dict[str, str]:

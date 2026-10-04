@@ -153,10 +153,10 @@ def _recent_sources(config: Path) -> list[dict[str, Any]]:
 def _keep_codepoints() -> set[int]:
     import device_font_template as template
     import font_coverage
-    import universal_font_compiler as compiler
+    import luoshu_merge
     keep = set(range(0x20, 0x7F)) | set(range(0xA0, 0x180))
-    keep.update(compiler.PROBE_CODEPOINTS, compiler.COMPOSITE_LATIN_CODEPOINTS,
-                compiler.COMPOSITE_DIGIT_CODEPOINTS, font_coverage.CJK_COMMON, font_coverage.PUNCTUATION)
+    keep.update(luoshu_merge.LATIN_CODEPOINTS, luoshu_merge.DIGIT_CODEPOINTS,
+                font_coverage.CJK_COMMON, font_coverage.PUNCTUATION)
     for points in template.PROBE_GROUPS.values():
         keep.update(points)
     return keep

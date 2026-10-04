@@ -1,5 +1,7 @@
 # 组合字体接入通用字体引擎：方案（草案）
 
+> **已被取代（2026-10）**：本文描述的 Phase 4–9 流水线（FontPlan / XML Route / 编译器 / 部署构建 / 接管闸门）已删除，由字体引擎 v3 取代，见 `docs/LUOSHU_ENGINE_V3.md`。拓扑、角色分类、下次启动暂存与自挂载仍沿用本文对应部分。本文仅作历史记录。
+
 状态：**方案 B 已实现（B1–B4），待真机验证**。维护者决定组合与单字体都不再回退旧引擎（见 `docs/UNIVERSAL_FONT_ENGINE_REFACTOR.md` Phase 10）。
 
 所属阶段：Phase 9 之后的扩展，记为 **Phase 10 — Role-Assigned Composite**。按路线图“变更纪律”，实施前先在 `docs/UNIVERSAL_FONT_ENGINE_REFACTOR.md` 登记。

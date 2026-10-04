@@ -153,21 +153,15 @@ jobs:
             common/font_topology_snapshot.sh \
             common/font_role_shadow.py \
             common/font_role_shadow.sh \
-            common/font_source_profile.py \
-            common/font_source_profile.sh \
-            common/universal_font_plan.py \
-            common/universal_font_plan.sh \
-            common/minimal_xml_router.py \
-            common/minimal_xml_router.sh \
-            common/universal_font_compiler.py \
-            common/universal_font_compiler.sh \
-            common/universal_font_deployment.py \
-            common/universal_font_deployment.sh \
+            common/luoshu_engine.py \
+            common/luoshu_engine.sh \
+            common/luoshu_merge.py \
+            common/luoshu_payload.py \
+            common/luoshu_verify.py \
             common/universal_mount_runtime.sh \
             common/universal_next_boot.sh \
             common/universal_font_runtime_verify.py \
             common/universal_font_runtime_verify.sh \
-            common/universal_font_cutover_gate.py \
             common/universal_font_cutover.sh; do
             grep -qx "$path" /tmp/luoshu-candidate-files.txt
           done
@@ -194,7 +188,7 @@ jobs:
           unzip -p "$module" .luoshu-runtime/compat/v227/customize.sh | grep -q 'stock_inventory_scan.py'
           unzip -p "$module" .luoshu-runtime/compat/v227/customize.sh | grep -q 'font_topology_snapshot.sh'
           unzip -p "$module" common/font_manager.sh | grep -q 'universal_font_cutover.sh'
-          unzip -p "$module" common/universal_font_cutover.sh | grep -q 'universal_font_cutover_gate.py'
+          unzip -p "$module" common/universal_font_cutover.sh | grep -q 'luoshu_engine.sh'
           unzip -p "$module" post-fs-data.sh | grep -q 'universal_font_next_boot_activate'
           unzip -p "$module" service.sh | grep -q 'universal_font_runtime_verify.sh'
           unzip -p "$module" common/font_switch_task.sh | grep -q 'TIMEOUT_SECONDS'
@@ -209,13 +203,11 @@ jobs:
             "$tmp/common/font_inventory_scan.py" \
             "$tmp/common/font_topology_snapshot.py" \
             "$tmp/common/font_role_shadow.py" \
-            "$tmp/common/font_source_profile.py" \
-            "$tmp/common/universal_font_plan.py" \
-            "$tmp/common/minimal_xml_router.py" \
-            "$tmp/common/universal_font_compiler.py" \
-            "$tmp/common/universal_font_deployment.py" \
-            "$tmp/common/universal_font_runtime_verify.py" \
-            "$tmp/common/universal_font_cutover_gate.py"
+            "$tmp/common/luoshu_engine.py" \
+            "$tmp/common/luoshu_merge.py" \
+            "$tmp/common/luoshu_payload.py" \
+            "$tmp/common/luoshu_verify.py" \
+            "$tmp/common/universal_font_runtime_verify.py"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"
@@ -228,11 +220,7 @@ jobs:
           sh -n "$tmp/common/mount_fast_sync.sh"
           sh -n "$tmp/common/font_topology_snapshot.sh"
           sh -n "$tmp/common/font_role_shadow.sh"
-          sh -n "$tmp/common/font_source_profile.sh"
-          sh -n "$tmp/common/universal_font_plan.sh"
-          sh -n "$tmp/common/minimal_xml_router.sh"
-          sh -n "$tmp/common/universal_font_compiler.sh"
-          sh -n "$tmp/common/universal_font_deployment.sh"
+          sh -n "$tmp/common/luoshu_engine.sh"
           sh -n "$tmp/common/universal_mount_runtime.sh"
           sh -n "$tmp/common/universal_next_boot.sh"
           sh -n "$tmp/common/universal_font_runtime_verify.sh"

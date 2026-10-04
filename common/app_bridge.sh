@@ -16,11 +16,6 @@ SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
-SOURCE_PROFILE="$MODDIR/common/font_source_profile.sh"
-UNIVERSAL_PLAN="$MODDIR/common/universal_font_plan.sh"
-MINIMAL_XML_ROUTER="$MODDIR/common/minimal_xml_router.sh"
-UNIVERSAL_COMPILER="$MODDIR/common/universal_font_compiler.sh"
-UNIVERSAL_DEPLOYMENT="$MODDIR/common/universal_font_deployment.sh"
 UNIVERSAL_VERIFY="$MODDIR/common/universal_font_runtime_verify.sh"
 DIAGNOSTICS="$MODDIR/common/luoshu_diagnostics.sh"
 PYROOT="$MODDIR/common/python"
@@ -384,26 +379,6 @@ case "${1:-status}" in
     preview_source) preview_source_json "${2:-}" "${3:-400}" ;;
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
-    source_profile)
-        [ -f "$SOURCE_PROFILE" ] || { printf '{"status":"error","message":"源字体 Profile 组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$SOURCE_PROFILE" family "${2:-}"
-        ;;
-    universal_plan)
-        [ -f "$UNIVERSAL_PLAN" ] || { printf '{"status":"error","message":"Universal FontPlan 组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$UNIVERSAL_PLAN" build "${2:-}"
-        ;;
-    xml_route_plan)
-        [ -f "$MINIMAL_XML_ROUTER" ] || { printf '{"status":"error","message":"Minimal XML Router 组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$MINIMAL_XML_ROUTER" build "${2:-}"
-        ;;
-    font_compile)
-        [ -f "$UNIVERSAL_COMPILER" ] || { printf '{"status":"error","message":"Universal Font Compiler 组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$UNIVERSAL_COMPILER" compile "${2:-}"
-        ;;
-    font_deployment)
-        [ -f "$UNIVERSAL_DEPLOYMENT" ] || { printf '{"status":"error","message":"Universal Deployment 组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$UNIVERSAL_DEPLOYMENT" prepare "${2:-}"
-        ;;
     font_runtime_verify)
         [ -f "$UNIVERSAL_VERIFY" ] || { printf '{"status":"error","message":"Runtime Verification 组件不可用"}\n'; exit 1; }
         case "${2:-status}" in

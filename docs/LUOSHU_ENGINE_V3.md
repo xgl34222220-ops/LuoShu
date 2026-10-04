@@ -64,4 +64,6 @@ v3 的原则：**换掉文字字体文件本身，只保留原厂的行高**。�
 - E2：接入单字体/组合切换入口与暂存（`common/luoshu_engine.sh`；`universal_font_cutover.sh` 的 `_uc_universal` 改为“生成 → 暂存”，不再经过旧闸门）。负载格式与校验独立为 `common/luoshu_payload.py`，下次启动、自挂载与回滚改用它。
 - E3：开机验证适配（`common/luoshu_verify.py`）：运行/挂载身份一致、每个负载文件在系统路径可见且摘要一致，否则 FAIL 并自动回滚；FontManager 未引用替换文件只记 WARN。
 - E4：诊断包与电脑复现改用 v3。
-- E5：删除旧通用流水线（plan/router/compiler/deployment builder/gate）与旧引擎 `legacy_v14_4`。
+- E4：诊断包记录引擎报告与源字体，`tools/replay_diagnostics.py` 在电脑上用 v3 重放。
+- E5a（已完成）：删除旧通用流水线（FontPlan、XML Route、编译器、部署构建、接管闸门、源字体 Profile）及其测试与专用 CI 工作流；测试夹具移到 `scripts/font_fixtures.py`。旧 Phase 8 验证器保留，用于升级前已生效的旧格式负载。
+- E5b：删除旧引擎 `legacy_v14_4`（导入、校验、启动与安装脚本仍在引用，需逐项迁移）。

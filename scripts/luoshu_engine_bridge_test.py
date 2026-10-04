@@ -14,8 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-import universal_composite_test as composite
-import universal_font_compiler_test as fixture
+import font_fixtures as composite
+import font_fixtures as fixture
 import luoshu_payload as payload_format
 
 

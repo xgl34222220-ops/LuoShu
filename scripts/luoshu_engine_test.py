@@ -16,8 +16,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from fontTools.ttLib import TTCollection, TTFont
 
 import luoshu_engine as engine
-import universal_composite_test as composite
-import universal_font_compiler_test as fixture
+import font_fixtures as composite
+import font_fixtures as fixture
 import luoshu_payload as payload_format
 
 ROBOTO = "/system/fonts/Roboto-Regular.ttf"

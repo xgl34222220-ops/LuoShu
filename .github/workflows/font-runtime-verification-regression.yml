@@ -5,7 +5,9 @@ on:
     paths:
       - common/universal_font_runtime_verify.py
       - common/universal_font_runtime_verify.sh
-      - common/universal_font_deployment.py
+      - common/luoshu_payload.py
+      - common/luoshu_verify.py
+      - scripts/luoshu_verify_test.py
       - common/universal_mount_runtime.sh
       - common/app_bridge.sh
       - service.sh
@@ -33,11 +35,13 @@ jobs:
       - name: Validate Phase 8 runtime verifier
         run: |
           set -eu
-          python3 -m py_compile             common/universal_font_runtime_verify.py             scripts/universal_font_runtime_verify_test.py
+          python3 -m py_compile common/universal_font_runtime_verify.py common/luoshu_verify.py common/luoshu_payload.py \
+            scripts/universal_font_runtime_verify_test.py scripts/luoshu_verify_test.py
           sh -n common/universal_font_runtime_verify.sh
           sh -n common/universal_mount_runtime.sh
           sh -n common/app_bridge.sh
           sh -n service.sh
           python3 scripts/universal_font_runtime_verify_test.py
+          python3 scripts/luoshu_verify_test.py
           grep -qx 'common/universal_font_runtime_verify.py' scripts/module_payload_manifest.txt
           grep -qx 'common/universal_font_runtime_verify.sh' scripts/module_payload_manifest.txt
