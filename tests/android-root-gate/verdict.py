@@ -23,6 +23,29 @@ PREVIEW_SOURCE_CASES = {
     'matching-directory-rejected', 'different-family-rejected', 'empty-library',
     'large-independent-library', 'quiet-and-stdout-parser-agree',
 }
+COMPOSITE_ERROR_CASES = {
+    'chinese-native-error', 'ascii-escaped-error', 'pretty-top-level-error',
+    'nested-lookalike-error', 'plain-text-fallback', 'unavailable-helper-fallback',
+    'bounded-valid-log-tail', 'timeout-code-priority', 'oom-code-priority',
+    'signal-code-priority', 'no-execute-code-priority', 'runtime-code-priority',
+    'missing-runtime-code-priority', 'wrong-abi-code-priority', 'empty-default-error',
+}
+
+
+def composite_error_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS'
+            or value.get('schema') != 'luoshu-composite-error-contract-v1'
+            or value.get('environment') != 'ANDROID' or value.get('selinux') != 'Enforcing'
+            or not re.fullmatch(r'[0-9a-f-]{36}', str(value.get('boot_id', '')))
+            or value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh'):
+        return ['actual Android composite error function context missing or failed']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(COMPOSITE_ERROR_CASES)
+            or len(cases) != len(COMPOSITE_ERROR_CASES) or any(not isinstance(case, dict) for case in cases)
+            or {case.get('name') for case in cases} != COMPOSITE_ERROR_CASES
+            or any(case.get('result') != 'PASS' for case in cases)):
+        return ['actual Android composite error function case set incomplete or failed']
+    return []
 
 
 def preview_source_blockers(value):
@@ -199,6 +222,7 @@ def delivery_blockers(report):
     errors.extend(scope_blockers(report.get('magisk_request_scope'), REQUEST_CASES, True))
     errors.extend(mix_handoff_blockers(report.get('magisk_mix_handoff')))
     errors.extend(preview_source_blockers(report.get('magisk_preview_source')))
+    errors.extend(composite_error_blockers(report.get('magisk_composite_error')))
     errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
     axes_ui = report.get('app_axes', {})
     observed = axes_ui.get('observed_labels', [])

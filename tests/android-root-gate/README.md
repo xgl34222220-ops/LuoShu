@@ -81,6 +81,15 @@ The report binds the exact module, shell, unchanged boot and Enforcing context;
 host results, missing/duplicated/failed cases cannot satisfy this gate. This
 contract does not replace actual App timings, font rendering or mount evidence.
 
+The current installed `font_mix.sh` error function separately runs all 15 cases
+from `scripts/composite_error_contract_test.py`, using that original ARM64 Python
+and Android shell. The harness extracts the real installed function to avoid
+executing the entry's dispatcher. It proves UTF-8/escaped/pretty/nested JSON
+handling, bounded JSON log tails, old return-code priority and plain-text/helper
+failure fallback. Exact boot, Enforcing context and complete named cases are
+required. This is error-function evidence, separate from complete CLI generation;
+the frozen legacy engine stays byte-for-byte intact.
+
 `app_axis_gate.py` inspects an original generated variable TTF with `wdth`,
 named custom `XTRA` and hidden `HIDN`, without applying it. The fixture enters
 through the existing native importer's trusted `.stabletest` cache intake;

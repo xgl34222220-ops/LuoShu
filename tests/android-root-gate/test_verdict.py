@@ -2,7 +2,7 @@
 import copy
 import unittest
 from test_composite_gate import valid_composite
-from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES
+from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES, COMPOSITE_ERROR_CASES
 
 BOOT = {'before': '11111111-1111-1111-1111-111111111111', 'after': '22222222-2222-2222-2222-222222222222'}
 
@@ -65,6 +65,12 @@ def valid_delivery():
         'shell': '/system/bin/sh', 'case_count': len(PREVIEW_SOURCE_CASES),
         'cases': [{'name': name, 'result': 'PASS'} for name in sorted(PREVIEW_SOURCE_CASES)],
     }
+    report['magisk_composite_error'] = {
+        'schema': 'luoshu-composite-error-contract-v1', 'result': 'PASS', 'environment': 'ANDROID',
+        'selinux': 'Enforcing', 'boot_id': BOOT['before'], 'module': '/data/adb/modules/LuoShu',
+        'shell': '/system/bin/sh', 'case_count': len(COMPOSITE_ERROR_CASES),
+        'cases': [{'name': name, 'result': 'PASS'} for name in sorted(COMPOSITE_ERROR_CASES)],
+    }
     weight = {'tag': 'wght', 'name': 'Weight', 'min': 400, 'default': 400, 'max': 900, 'hidden': False}
     report['axis_metadata'] = {'status': 'ok', 'variable': True, 'hasWeight': True, 'weight': weight, 'axes': [weight]}
     report['app_axes'] = {'result': 'PASS', 'package': PACKAGE, 'font_id': 'LuoShuAxisGate',
@@ -126,6 +132,23 @@ class VerdictTests(unittest.TestCase):
         for key, value in (('boot_id', ''), ('selinux', 'Permissive'),
                            ('module', '/data/local/tmp/fixture'), ('shell', 'sh')):
             r = valid_delivery(); r['magisk_preview_source'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_composite_error_requires_actual_android_complete_case_set(self):
+        for mutation in ('host', 'missing', 'duplicate', 'failed', 'malformed'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['magisk_composite_error']
+                if mutation == 'host': value['environment'] = 'HOST_ONLY'
+                elif mutation == 'missing': value['cases'].pop()
+                elif mutation == 'duplicate': value['cases'][0] = value['cases'][1].copy()
+                elif mutation == 'failed': value['cases'][0]['result'] = 'FAIL'
+                else: value['cases'][0] = None
+                self.assertTrue(delivery_blockers(r))
+
+    def test_composite_error_requires_installed_module_and_enforcing_boot(self):
+        for key, value in (('boot_id', ''), ('selinux', 'Permissive'),
+                           ('module', '/data/local/tmp/fixture'), ('shell', 'sh')):
+            r = valid_delivery(); r['magisk_composite_error'][key] = value
             self.assertTrue(delivery_blockers(r))
 
     def test_actual_collection_axis_name_flags_and_bounds_are_required(self):
