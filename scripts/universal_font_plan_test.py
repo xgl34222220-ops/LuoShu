@@ -523,7 +523,9 @@ def main() -> int:
         assert blocked.returncode == 0, blocked.stderr or blocked.stdout
         latin_plan = json.loads(latin_plan_path.read_text(encoding="utf-8"))
         assert latin_plan["targets"]["/system/fonts/UiCjk.ttf"]["action"] == "blocked"
-        assert latin_plan["targets"]["/product/fonts/CjkFallback.otf"]["action"] == "blocked"
+        # Without an XML zh-* language this fallback is not core: it keeps the
+        # stock font instead of taking the Latin face.
+        assert latin_plan["targets"]["/product/fonts/CjkFallback.otf"]["action"] == "keep-stock"
         assert latin_plan["targets"]["/system/fonts/RobotoMono.ttf"]["action"] == "preserve"
 
         # Cross-device role data must never be accepted.

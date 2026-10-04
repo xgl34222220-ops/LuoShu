@@ -254,7 +254,12 @@ run_worker() {
             [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
         else
             mark_load_verification_pending "$_font" || true
-            write_task "$_task" success "$_font" '100% · 字体已准备完成，完整重启后生效' \
+            _done='100% · 字体已准备完成，完整重启后生效'
+            _kept="$MODDIR/config/universal-kept-stock.conf"
+            if [ "$(sed -n 's/^font=//p' "$_kept" 2>/dev/null | head -n1)" = "$_font" ]; then
+                _done="$_done；$(sed -n 's/^count=//p' "$_kept" | head -n1) 个非核心字体保留原厂：$(sed -n 's/^files=//p' "$_kept" | head -n1)"
+            fi
+            write_task "$_task" success "$_font" "$_done" \
                 "$_started" "$_finished" '' '' '' 0 '' false 100
             [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
         fi

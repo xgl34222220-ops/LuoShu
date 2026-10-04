@@ -120,6 +120,30 @@ _uc_paths() {
     [ -s "$UC_PLAN" ] && [ -s "$UC_ROUTE" ] && [ -s "$UC_ARTIFACTS" ] && [ -s "$UC_DEPLOYMENT" ] && [ -d "$UC_PAYLOAD" ]
 }
 
+# Non-core slots the engine left stock in this switch, for the task message.
+KEPT_STOCK_FILE="$CONFIG_DIR/universal-kept-stock.conf"
+
+_uc_record_kept_stock() {
+    rm -f "$KEPT_STOCK_FILE" 2>/dev/null || true
+    _uck_list=$(_uc_python - "$UC_PLAN" <<'PY' 2>/dev/null
+import json, sys
+from pathlib import Path
+plan = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+names = sorted(Path(path).name for path, item in (plan.get("targets") or {}).items()
+               if isinstance(item, dict) and item.get("action") == "keep-stock")
+if names:
+    print(f"{len(names)}|{'、'.join(names[:5])}{' 等' if len(names) > 5 else ''}")
+PY
+)
+    [ -n "$_uck_list" ] || return 0
+    _uc_log "universal kept stock font=$1 slots=$_uck_list"
+    {
+        printf 'font=%s\n' "$1"
+        printf 'count=%s\n' "${_uck_list%%|*}"
+        printf 'files=%s\n' "${_uck_list#*|}"
+    } > "$KEPT_STOCK_FILE" 2>/dev/null || true
+}
+
 # Runs Universal prepare -> readiness gate -> stage-next for one family key.
 # Returns 0 after staging (stage JSON on stdout). On failure nothing has been
 # staged; UC_FAIL holds a reason code and UC_FAIL_DETAIL a short diagnostic.
@@ -133,6 +157,7 @@ _uc_universal() {
     fi
 
     _uc_write_state preparing "$_uc_font" universal preparing
+    rm -f "$KEPT_STOCK_FILE" 2>/dev/null || true
     _uc_progress 8 "通用引擎正在分析设备字体拓扑"
     _uc_budget=$(_uc_budget_seconds)
     _uc_started=$(date +%s 2>/dev/null || echo 0)
@@ -182,6 +207,7 @@ _uc_universal() {
     fi
 
     _uc_write_state staged "$_uc_font" universal ready-next-boot
+    _uc_record_kept_stock "$_uc_font"
     _uc_progress 96 "通用字体负载已准备，完整重启后自动验收"
     printf '%s\n' "$_uc_stage_output"
     return 0

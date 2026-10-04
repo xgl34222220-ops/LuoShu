@@ -10,6 +10,8 @@ ROLES="$CONFIG_DIR/device_font_roles.json"
 PROFILE_BRIDGE="$MODDIR/common/font_source_profile.sh"
 PLANNER="$MODDIR/common/universal_font_plan.py"
 PLAN_DIR="$CONFIG_DIR/universal-font-plans"
+# Non-core slots the compiler could not build in this switch keep their stock font.
+EXCLUSION_DIR="$CONFIG_DIR/universal-font-exclusions"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 
@@ -41,6 +43,11 @@ _ufp_output() {
     printf "%s/%s.json\n" "$PLAN_DIR" "$_ufo_key"
 }
 
+_ufp_exclusions() {
+    _ufe_key=$(_ufp_family_key "$1") || return 1
+    printf "%s/%s.json\n" "$EXCLUSION_DIR" "$_ufe_key"
+}
+
 _ufp_profile_path() {
     MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$PROFILE_BRIDGE" path "$1"
 }
@@ -64,11 +71,14 @@ _ufp_build() {
     rm -rf "$CONFIG_DIR/minimal-xml-route-plans" 2>/dev/null || true
     mkdir -p "$PLAN_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建 FontPlan 缓存目录"}\n'; return 1; }
     _ufb_output=$(_ufp_output "$_ufb_family") || return 1
-    _ufp_exec "$PLANNER" \
+    set -- "$PLANNER" \
         --topology "$TOPOLOGY" \
         --roles "$ROLES" \
         --source-profile "$_ufb_profile" \
         --output "$_ufb_output"
+    _ufb_exclusions=$(_ufp_exclusions "$_ufb_family") || return 1
+    [ -s "$_ufb_exclusions" ] && set -- "$@" --exclusions "$_ufb_exclusions"
+    _ufp_exec "$@"
 }
 
 _ufp_validate() {
@@ -94,8 +104,11 @@ case "${1:-build}" in
     path)
         _ufp_output "${2:-}"
         ;;
+    exclusions)
+        _ufp_exclusions "${2:-}"
+        ;;
     *)
-        echo "Usage: $0 {build|refresh|validate|path} <font-family>" >&2
+        echo "Usage: $0 {build|refresh|validate|path|exclusions} <font-family>" >&2
         exit 2
         ;;
 esac

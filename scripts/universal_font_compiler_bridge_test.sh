@@ -13,6 +13,7 @@ cat > "$MOD/common/universal_font_plan.sh" <<'SH'
 P="$CONFIG_DIR/universal-font-plans/test.json"
 case "$1" in
   path) printf "%s\n" "$P" ;;
+  exclusions) printf "%s\n" "$CONFIG_DIR/universal-font-exclusions/test.json" ;;
   *) exit 2 ;;
 esac
 SH
@@ -23,6 +24,7 @@ cat > "$MOD/common/minimal_xml_router.sh" <<'SH'
 P="$CONFIG_DIR/minimal-xml-route-plans/test.json"
 case "$1" in
   build)
+    echo build >> "$CONFIG_DIR/route-builds"
     mkdir -p "${P%/*}"
     printf '{"schema":"minimal-xml-route-plan-v1","state":"planned"}\n' > "$P"
     printf '{"status":"ok"}\n'
@@ -45,7 +47,15 @@ p.add_argument("--manifest")
 p.add_argument("--validate")
 p.add_argument("--stock-map")
 p.add_argument("--allow-live-stock", action="store_true")
+p.add_argument("--exclusions-out")
 a=p.parse_args()
+import os, sys
+if a.exclusions_out and os.environ.get("FAKE_REPLAN") and (
+    os.environ["FAKE_REPLAN"] == "always" or not Path(a.exclusions_out).exists()
+):
+    Path(a.exclusions_out).write_text('{"targets":{"/system/fonts/Extra.ttf":"x"}}')
+    print('{"status":"retry"}')
+    sys.exit(3)
 assert Path(a.font_plan).is_file()
 assert Path(a.route_plan).is_file()
 if a.validate:
@@ -93,6 +103,24 @@ test -s "$OUTDIR/fake.ttf"
 
 VALID=$(sh "$MOD/common/universal_font_compiler.sh" validate DemoFamily)
 printf "%s\n" "$VALID" | grep -q '"status":"ok"'
+
+# Only non-core slots failed: keep them stock and re-plan once.
+rm -f "$CONFIG_DIR/route-builds"
+mkdir -p "$LUOSHU_COMPILER_CACHE/stale-family"
+REPLAN=$(FAKE_REPLAN=once sh "$MOD/common/universal_font_compiler.sh" compile DemoFamily)
+printf "%s\n" "$REPLAN" | grep -q '"status":"ok"'
+test "$(wc -l < "$CONFIG_DIR/route-builds")" -eq 2
+test -s "$CONFIG_DIR/universal-font-exclusions/test.json"
+test ! -e "$LUOSHU_COMPILER_CACHE/stale-family"
+test -s "$OUTDIR/fake.ttf"
+
+# A fresh switch starts without the previous exclusions; a loop is bounded.
+rm -f "$CONFIG_DIR/route-builds"
+if LOOP=$(FAKE_REPLAN=always sh "$MOD/common/universal_font_compiler.sh" compile DemoFamily); then
+    printf "%s\n" "$LOOP" | grep -q '"status":"error"'
+fi
+printf "%s\n" "$LOOP" | grep -q '多次保留原厂后仍有字体无法替换'
+test "$(wc -l < "$CONFIG_DIR/route-builds")" -eq 4
 
 # Compiler bridge must stay private: no system or payload tree is created.
 test ! -e "$MOD/system"

@@ -72,8 +72,8 @@ _mxr_build() {
     [ -s "$_mxb_plan" ] || { printf '{"status":"error","message":"Universal FontPlan 未生成"}\n'; return 1; }
 
     _mxr_capture_stock >/dev/null 2>&1 || true
+    # Compiled artifacts stay cached; the compiler reuses only exact matches.
     rm -rf "$CONFIG_DIR/universal-font-artifact-manifests" 2>/dev/null || true
-    rm -rf "${LUOSHU_COMPILER_CACHE:-$MODDIR/cache/universal-font-artifacts}" 2>/dev/null || true
     mkdir -p "$ROUTE_DIR" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建 XML Route Plan 缓存目录"}\n'
         return 1

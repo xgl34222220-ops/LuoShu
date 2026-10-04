@@ -2267,6 +2267,40 @@ def validate_manifest(
         raise CompilerError("Artifact manifest manifestId 完整性校验失败")
 
 
+EXIT_REPLAN = 3
+
+
+def _record_exclusions(manifest: dict[str, Any], font_plan: dict[str, Any], path: Path) -> list[str]:
+    """Adds blocked non-core targets to the exclusion file and returns them.
+
+    Raises when a core target is blocked: those must be replaced or the
+    switch fails without changing the running font."""
+    targets = font_plan.get("targets") if isinstance(font_plan.get("targets"), dict) else {}
+    core: dict[str, str] = {}
+    optional: dict[str, str] = {}
+    for item in manifest.get("artifacts") or []:
+        if not isinstance(item, dict) or item.get("status") != "blocked":
+            continue
+        target_path = str(item.get("targetPath") or "")
+        reason = str(item.get("reason") or "未知原因")
+        target = targets.get(target_path)
+        bucket = core if isinstance(target, dict) and universal_font_plan.is_core_target(target) else optional
+        bucket.setdefault(target_path, reason)
+    if core:
+        details = "；".join(f"{Path(key).name}: {value[:160]}" for key, value in sorted(core.items())[:3])
+        more = f" 等 {len(core)} 个" if len(core) > 3 else ""
+        raise CompilerError(f"核心字体无法安全替换（{details}{more}）")
+    if not optional:
+        return []
+    existing = universal_font_plan.load_exclusions(path)
+    fresh = sorted(key for key in optional if key not in existing)
+    if not fresh:
+        raise CompilerError("保留原厂后仍有字体无法替换：" + "、".join(Path(key).name for key in sorted(optional)[:3]))
+    existing.update(optional)
+    _atomic_json(path, {"targets": dict(sorted(existing.items()))})
+    return fresh
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--font-plan", required=True, type=Path)
@@ -2276,6 +2310,8 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--validate", type=Path)
     parser.add_argument("--allow-live-stock", action="store_true")
+    parser.add_argument("--exclusions-out", type=Path,
+                        help="record blocked non-core slots here; exit 3 asks for a re-plan")
     args = parser.parse_args()
 
     try:
@@ -2298,6 +2334,15 @@ def main() -> int:
                 args.allow_live_stock,
             )
             _atomic_json(args.manifest, manifest)
+            if args.exclusions_out is not None:
+                retry = _record_exclusions(manifest, font_plan, args.exclusions_out)
+                if retry:
+                    print(json.dumps({
+                        "status": "retry",
+                        "message": "非核心字体无法安全替换，将保留原厂后重新规划",
+                        "keptStock": retry,
+                    }, ensure_ascii=False, separators=(",", ":")))
+                    return EXIT_REPLAN
 
         print(json.dumps({
             "status": "ok",

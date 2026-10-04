@@ -330,6 +330,15 @@ Cutover readiness gate 必须至少满足：
 - 编译器 `composite-shell` 按旧组合引擎的 LATIN/DIGIT 码位集合从对应字体取字形，其余跟随中文基底；单一 auto 可变来源的槽位共用 `source-variable-preserve` 产物
 - 组合失败不回退旧引擎
 
+### Phase 11 — 核心必须成功 + 设备诊断包
+状态：**已实现，待真机验证**
+
+- **核心槽位**（`universal_font_plan.is_core_target`）：系统界面字体（`ui-sans`，至少有一个正体 XML 节点）、XML `lang` 为中文的 CJK 回退、时钟与数字。核心槽位必须替换，否则整个切换报错，当前字体不变。
+- **非核心槽位**（斜体专用、非中文 CJK、拉丁回退等）若规划阶段无可用来源，或编译阶段被拦下，FontPlan 动作改为 `keep-stock`：该文件与其 XML 节点保持原厂。编译桥最多重新规划 4 次（未改变的产物走缓存），任务完成提示列出保留原厂的文件（`config/universal-kept-stock.conf`）。
+- `keep-stock` 不得出现在核心槽位上（`validate_plan` 拒绝）。
+- 编译缓存不再在每次路由构建时清空，只清理其他字体家族的旧产物。
+- **诊断包**：App 日志页“导出完整引擎诊断包”或 `洛书 诊断` 生成 `/sdcard/LuoShu/diagnostics/LuoShu-engine-*.zip`，包含 XML 快照、目标槽位的原厂字体（取自挂载前 lower/mirror 快照，字体生效时不读取被覆盖的实时路径）、最近的源字体、各阶段 JSON 与日志。`tools/replay_diagnostics.py` 在电脑上用当前代码重放整条链路并列出失败与保留原厂的槽位；真机问题先在重放中修到通过，再发测试包。
+
 ## 当前迁移策略
 
 旧的 HyperOS / ColorOS / Generic 路由暂时保留，只作为“当前生产实现”。

@@ -57,8 +57,46 @@ _ufc_route_plan() {
         sh "$ROUTE_BRIDGE" path "$1"
 }
 
+_ufc_exclusions() {
+    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+        sh "$FONT_PLAN_BRIDGE" exclusions "$1" 2>/dev/null
+}
+
+# Keeps only the current family's artifacts so the cache cannot grow per font.
+_ufc_prune_cache() {
+    _upc_keep="$1"
+    for _upc_dir in "$CACHE_ROOT"/*; do
+        [ -d "$_upc_dir" ] || continue
+        [ "$_upc_dir" = "$_upc_keep" ] && continue
+        rm -rf "$_upc_dir" 2>/dev/null || true
+    done
+}
+
+# One switch: compile, and while only non-core slots fail, keep them stock and
+# re-plan. Unchanged artifacts come from the cache, so a re-plan is cheap.
 _ufc_compile() {
+    _ucl_family="$1"
+    _ucl_exclusions=$(_ufc_exclusions "$_ucl_family")
+    [ -z "$_ucl_exclusions" ] || rm -f "$_ucl_exclusions" 2>/dev/null || true
+    _ucl_pass=1
+    while :; do
+        _ucl_result=$(_ufc_compile_pass "$_ucl_family" "$_ucl_exclusions")
+        _ucl_rc=$?
+        if [ "$_ucl_rc" -ne 3 ] || [ "$_ucl_pass" -ge 4 ]; then
+            [ "$_ucl_rc" -ne 3 ] || {
+                printf '{"status":"error","message":"多次保留原厂后仍有字体无法替换"}\n'
+                return 1
+            }
+            printf '%s\n' "$_ucl_result"
+            return "$_ucl_rc"
+        fi
+        _ucl_pass=$((_ucl_pass + 1))
+    done
+}
+
+_ufc_compile_pass() {
     _uc_family="$1"
+    _uc_exclusions="$2"
     [ -n "$_uc_family" ] || { printf '{"status":"error","message":"未指定字体家族"}\n'; return 1; }
     [ -f "$COMPILER" ] || { printf '{"status":"error","message":"Universal Font Compiler 组件不可用"}\n'; return 1; }
     [ -f "$FONT_PLAN_BRIDGE" ] || { printf '{"status":"error","message":"Universal FontPlan 组件不可用"}\n'; return 1; }
@@ -98,6 +136,11 @@ _ufc_compile() {
     if [ "${LUOSHU_COMPILER_ALLOW_LIVE_STOCK:-0}" = 1 ]; then
         set -- "$@" --allow-live-stock
     fi
+    if [ -n "$_uc_exclusions" ]; then
+        mkdir -p "${_uc_exclusions%/*}" 2>/dev/null || true
+        set -- "$@" --exclusions-out "$_uc_exclusions"
+    fi
+    _ufc_prune_cache "$_uc_output"
     _ufc_exec "$@"
 }
 

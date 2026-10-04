@@ -144,35 +144,50 @@ def main() -> int:
     _rebuild_profile(device_profile, index.get("sources") or {}, bundle_root, profile)
 
     plan = out / "font_plan.json"
-    rc, _, _, _ = _run("plan", [str(COMMON / "universal_font_plan.py"), "--topology", str(topology),
-                                "--roles", str(roles), "--source-profile", str(profile), "--output", str(plan)], env)
-    if rc:
-        return 1
-
     route = out / "route_plan.json"
-    rc, _, _, _ = _run("route", [str(COMMON / "minimal_xml_router.py"), "--font-plan", str(plan),
-                                 "--snapshot-root", str(config / "font-config-source"), "--output", str(route)], env)
-    if rc:
-        return 1
-
+    artifacts = out / "artifacts.json"
+    exclusions = out / "exclusions.json"
     stock_map = out / "stock_map.json"
     stock_map.write_text(json.dumps({
         logical: str(bundle_root / entry["file"]) for logical, entry in (index.get("stock") or {}).items()
     }, ensure_ascii=False), encoding="utf-8")
-    artifacts = out / "artifacts.json"
-    rc, _, _, compile_time = _run("compile", [
-        str(COMMON / "universal_font_compiler.py"), "--font-plan", str(plan), "--route-plan", str(route),
-        "--stock-map", str(stock_map), "--output-dir", str(out / "artifacts"), "--manifest", str(artifacts),
-    ], env)
-    if artifacts.is_file():
-        manifest = _load(artifacts)
-        blocked = [item for item in manifest.get("artifacts") or [] if item.get("status") == "blocked"]
-        modes: dict[str, int] = {}
-        for item in manifest.get("artifacts") or []:
-            modes[str(item.get("mode"))] = modes.get(str(item.get("mode")), 0) + 1
-        print(f"artifacts: {len(manifest.get('artifacts') or [])} modes={modes} blocked={len(blocked)}")
-        for item in blocked:
-            print(f"  BLOCKED {item.get('targetPath')} role={item.get('role')} reason={item.get('reason')}")
+    compile_time = 0.0
+    # Same loop as universal_font_compiler.sh: blocked non-core slots keep stock.
+    for attempt in range(1, 5):
+        plan_args = [str(COMMON / "universal_font_plan.py"), "--topology", str(topology),
+                     "--roles", str(roles), "--source-profile", str(profile), "--output", str(plan)]
+        if exclusions.is_file():
+            plan_args += ["--exclusions", str(exclusions)]
+        rc, _, _, _ = _run(f"plan#{attempt}", plan_args, env)
+        if rc:
+            return 1
+        rc, _, _, _ = _run("route", [str(COMMON / "minimal_xml_router.py"), "--font-plan", str(plan),
+                                     "--snapshot-root", str(config / "font-config-source"),
+                                     "--output", str(route)], env)
+        if rc:
+            return 1
+        rc, _, _, elapsed = _run("compile", [
+            str(COMMON / "universal_font_compiler.py"), "--font-plan", str(plan), "--route-plan", str(route),
+            "--stock-map", str(stock_map), "--output-dir", str(out / "artifacts"), "--manifest", str(artifacts),
+            "--exclusions-out", str(exclusions),
+        ], env)
+        compile_time += elapsed
+        if artifacts.is_file():
+            manifest = _load(artifacts)
+            blocked = [item for item in manifest.get("artifacts") or [] if item.get("status") == "blocked"]
+            modes: dict[str, int] = {}
+            for item in manifest.get("artifacts") or []:
+                modes[str(item.get("mode"))] = modes.get(str(item.get("mode")), 0) + 1
+            print(f"artifacts: {len(manifest.get('artifacts') or [])} modes={modes} blocked={len(blocked)}")
+            for item in blocked:
+                print(f"  BLOCKED {item.get('targetPath')} role={item.get('role')} reason={item.get('reason')}")
+        if rc != 3:
+            break
+    kept = {path: item.get("keptStockReason") for path, item in (_load(plan).get("targets") or {}).items()
+            if item.get("action") == "keep-stock"}
+    print(f"kept stock: {len(kept)}")
+    for path, reason in sorted(kept.items()):
+        print(f"  KEPT {path} reason={reason}")
     if rc:
         return 1
 

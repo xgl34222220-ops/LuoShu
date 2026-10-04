@@ -202,7 +202,11 @@ worker() {
         update_task "$_wanted" failed '组合配置保存失败' 100 "$(date +%s)"
         exit 1
     }
-    update_task "$_wanted" success '组合字体已准备，完整重启后生效' 100 "$(date +%s)"
+    _done='组合字体已准备，完整重启后生效'
+    if [ "$(read_value "$CONFIG_DIR/universal-kept-stock.conf" font)" = mix ]; then
+        _done="$_done；$(read_value "$CONFIG_DIR/universal-kept-stock.conf" count) 个非核心字体保留原厂：$(read_value "$CONFIG_DIR/universal-kept-stock.conf" files)"
+    fi
+    update_task "$_wanted" success "$_done" 100 "$(date +%s)"
     if type luoshu_clear_task_pid >/dev/null 2>&1; then luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; fi
 }
 

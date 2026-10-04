@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,10 @@ PROTECTED_ROLES = {
 }
 TEXT_ROLES = {"ui-sans", "cjk", "latin"}
 SPECIALIZED_ROLES = {"numeric", "clock"}
+# A non-core slot that cannot be replaced safely keeps its stock font; the
+# switch reports it instead of failing. Core slots never take this action.
+KEEP_STOCK = "keep-stock"
+CHINESE_LANG_TOKENS = ("zh", "hans", "hant", "hani")
 
 
 class UniversalPlanError(RuntimeError):
@@ -437,6 +442,57 @@ def _source_ref(face: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_core_target(target: dict[str, Any]) -> bool:
+    """Slots whose text the user sees everywhere: the upright UI face, the
+    Chinese text fallback, and the clock/numeric faces. These must be replaced
+    or the whole switch fails; every other slot may keep its stock font."""
+    role = str(target.get("role") or "")
+    if role in SPECIALIZED_ROLES:
+        return True
+    if role not in {"ui-sans", "cjk"}:
+        return False
+    refs = [ref for ref in target.get("xmlRefs") or [] if isinstance(ref, dict)]
+    if refs:
+        upright = [ref for ref in refs if str(ref.get("style") or "").lower() not in {"italic", "oblique"}]
+    else:
+        name = str(target.get("slotName") or target.get("path") or "").lower()
+        upright = [] if "italic" in name or "oblique" in name else [{}]
+    if not upright:
+        return False
+    if role == "ui-sans":
+        return True
+    for ref in upright:
+        attributes = ref.get("familyAttributes") if isinstance(ref.get("familyAttributes"), dict) else {}
+        for lang in re.split(r"[\s,]+", str(attributes.get("lang") or "").lower()):
+            if any(part in CHINESE_LANG_TOKENS for part in lang.split("-")):
+                return True
+    return False
+
+
+def load_exclusions(path: Path | None) -> dict[str, str]:
+    """Slots a previous compile pass could not build: {path: reason}."""
+    if path is None or not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    targets = raw.get("targets") if isinstance(raw, dict) else None
+    if not isinstance(targets, dict):
+        return {}
+    return {str(key): str(value)[:300] for key, value in targets.items() if str(key).startswith("/")}
+
+
+def _keep_stock(target: dict[str, Any], reason: str) -> None:
+    target.update(
+        action=KEEP_STOCK,
+        status="ready",
+        compiler="none",
+        keptStockReason=reason,
+        reasons=sorted({*target.get("reasons", []), "non-core-kept-stock"}),
+    )
+
+
 def _xml_refs(slot: dict[str, Any]) -> list[dict[str, Any]]:
     raw = slot.get("xmlRefs")
     if not isinstance(raw, list):
@@ -843,6 +899,7 @@ def build_plan(
     topology: dict[str, Any],
     roles: dict[str, Any],
     profile: dict[str, Any],
+    exclusions: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     build_key, profile_id = _validate_inputs(topology, roles, profile)
     slots = _topology_slots(topology)
@@ -861,7 +918,13 @@ def build_plan(
                 "confidence": 0,
                 "action": "review",
             }
-        targets[path] = _plan_slot(path, slots[path], role_info, faces, composite)
+        target = _plan_slot(path, slots[path], role_info, faces, composite)
+        if not is_core_target(target):
+            if target["action"] == "blocked":
+                _keep_stock(target, "no-compatible-source-face:" + ",".join(target.get("risks") or []))
+            elif exclusions and path in exclusions and target["action"] in {"replace", "compile", "compile-specialized"}:
+                _keep_stock(target, exclusions[path])
+        targets[path] = target
 
     action_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
@@ -987,9 +1050,11 @@ def validate_plan(
             raise UniversalPlanError(f"受保护字体不得进入替换计划：{path}")
         if role == "unknown-protected" and action != "review":
             raise UniversalPlanError(f"未知字体不得自动替换：{path}")
-        if role in SPECIALIZED_ROLES and action not in {"compile-specialized", "blocked"}:
+        if action == KEEP_STOCK and is_core_target(item):
+            raise UniversalPlanError(f"核心字体不得保留原厂：{path}")
+        if role in SPECIALIZED_ROLES and action not in {"compile-specialized", "blocked", KEEP_STOCK}:
             raise UniversalPlanError(f"Clock/Numeric 不得走普通替换：{path}")
-        if role in TEXT_ROLES and action not in {"replace", "compile", "blocked"}:
+        if role in TEXT_ROLES and action not in {"replace", "compile", "blocked", KEEP_STOCK}:
             raise UniversalPlanError(f"文本目标包含无效动作：{path}")
         if role not in PROTECTED_ROLES | TEXT_ROLES | SPECIALIZED_ROLES | {"unknown-protected"}:
             if action != "preserve":
@@ -1060,6 +1125,7 @@ def main() -> int:
     parser.add_argument("--source-profile", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--validate", type=Path)
+    parser.add_argument("--exclusions", type=Path, help="non-core slots to keep stock: {targets:{path:reason}}")
     args = parser.parse_args()
 
     try:
@@ -1079,7 +1145,7 @@ def main() -> int:
                 _int(profile.get("profileRevision")),
             )
         else:
-            plan = build_plan(topology, roles, profile)
+            plan = build_plan(topology, roles, profile, load_exclusions(args.exclusions))
             if args.output is not None:
                 _atomic_write(args.output, plan)
     except (UniversalPlanError, OSError, json.JSONDecodeError) as error:
