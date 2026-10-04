@@ -123,33 +123,84 @@ def test_static_family(temp: Path) -> None:
     assert any(item["kind"] == "xml-font" for item in manifest["files"])
 
 
-def test_composite(temp: Path) -> None:
-    topology, stocks, xml_map = device(temp)
+def _bounds(font: TTFont, char: str, weight: float | None = None):
+    from fontTools.pens.boundsPen import BoundsPen
+    glyph_set = font.getGlyphSet(location={"wght": weight} if weight else None)
+    pen = BoundsPen(glyph_set)
+    glyph_set[font.getBestCmap()[ord(char)]].draw(pen)
+    return pen.bounds
+
+
+def widen_at_max_weight(path: Path) -> None:
+    """Rectangle glyphs grow 40 units wider (right edge and advance) at wght max."""
+    from fontTools.ttLib.tables.TupleVariation import TupleVariation
+    font = TTFont(str(path))
+    for name in font.getGlyphOrder():
+        if name != ".notdef" and font["glyf"][name].numberOfContours == 1:
+            font["gvar"].variations[name] = [TupleVariation(
+                {"wght": (0.0, 1.0, 1.0)},
+                [(0, 0), (40, 0), (40, 0), (0, 0), (0, 0), (40, 0), (0, 0), (0, 0)],
+            )]
+    if "HVAR" in font:
+        del font["HVAR"]
+    font.save(str(path))
+
+
+def _mix_spec(temp: Path, cjk_mode: str) -> dict:
     cjk, latin, digit = temp / "MixCJK.ttf", temp / "MixLatin.ttf", temp / "MixDigit.ttf"
     composite.make_cjk_font(cjk, family="Mix CJK", variable=True, pentagon=True)
-    fixture.make_font(latin, family="Mix Latin", variable=True, triangle=True)
-    fixture.make_font(digit, family="Mix Digit", advance=560)
-    spec = {"mode": "composite", "roles": {
-        "cjk": {"files": [str(cjk)], "mode": "auto"},
+    fixture.make_font(latin, family="Mix Latin", variable=True)
+    widen_at_max_weight(latin)
+    fixture.make_font(digit, family="Mix Digit", advance=560, triangle=True)
+    return {"mode": "composite", "roles": {
+        "cjk": {"files": [str(cjk)], "mode": cjk_mode, "axes": {"wght": 400} if cjk_mode == "fixed" else {}},
         "latin": {"files": [str(latin)], "mode": "auto"},
         "digit": {"files": [str(digit)], "mode": "fixed", "axes": {"wght": 500}},
     }}
+
+
+def test_composite_variable(temp: Path) -> None:
+    topology, stocks, xml_map = device(temp)
+    spec = _mix_spec(temp, "auto")
     manifest, report, payload = run(temp, "mix", topology, spec, xml_map)
     assert {item["path"] for item in report["replaced"]} == {ROBOTO, CJK, MISANS, CLOCK}
+    assert all(item["variable"] for item in report["replaced"])
+    assert report["stats"]["instancesBuilt"] == 1, report["stats"]
+    for logical in (ROBOTO, MISANS):
+        with TTFont(str(payload / logical.lstrip("/"))) as font:
+            assert "fvar" in font and "HVAR" not in font
+            assert glyph_points(font, "\u4e00") == 5, "Han from the CJK font"
+            assert glyph_points(font, "A") == 4, "Latin from the Latin font"
+            assert glyph_points(font, "0") == 3, "digits from the digit font"
+            assert font["hhea"].ascent == TTFont(str(stocks[logical]))["hhea"].ascent
+            # Latin keeps the source's weight variation; fixed digits do not vary.
+            assert _bounds(font, "A", 900)[2] > _bounds(font, "A")[2] + 20, "Latin must vary with wght"
+            heavy = font.getGlyphSet(location={"wght": 900})[font.getBestCmap()[ord("A")]]
+            heavy.draw(__import__("fontTools.pens.recordingPen", fromlist=["RecordingPen"]).RecordingPen())
+            assert heavy.width > font["hmtx"].metrics[font.getBestCmap()[ord("A")]][0] + 20, "advance varies too"
+            assert _bounds(font, "0", 900) == _bounds(font, "0"), "fixed digits stay static"
+    nodes = xml_nodes(payload, xml_map[FONTS_XML])
+    assert all(axes == {"wght": weight} for _name, weight, axes in nodes), nodes
+    assert not any(name.startswith("LuoShu-") for name, *_ in nodes)
+    _manifest, again, _payload = run(temp, "mix-again", topology, spec, xml_map)
+    assert again["stats"]["instancesBuilt"] == 0 and again["stats"]["outputsBuilt"] == 0, again["stats"]
+    assert again["deploymentId"] == report["deploymentId"]
+
+
+def test_composite_static(temp: Path) -> None:
+    topology, stocks, xml_map = device(temp)
+    spec = _mix_spec(temp, "fixed")
+    _manifest, report, payload = run(temp, "mix-static", topology, spec, xml_map)
+    assert not any(item["variable"] for item in report["replaced"])
     for logical in (ROBOTO, MISANS):
         with TTFont(str(payload / logical.lstrip("/"))) as font:
             assert "fvar" not in font
-            assert glyph_points(font, "一") == 5, "Han from the CJK font"
-            assert glyph_points(font, "A") == 3, "Latin from the Latin font"
-            assert glyph_points(font, "0") == 4, "digits from the digit font (the CJK base draws pentagons)"
+            assert glyph_points(font, "\u4e00") == 5 and glyph_points(font, "A") == 4
+            assert glyph_points(font, "0") == 3
             assert font["hhea"].ascent == TTFont(str(stocks[logical]))["hhea"].ascent
     nodes = xml_nodes(payload)
     assert all(not axes for _name, _weight, axes in nodes), nodes
     assert ("LuoShu-MiSansVF-700.ttf", "700", {}) in nodes
-    # A second build with the same inputs reuses every cached instance.
-    _manifest, again, _payload = run(temp, "mix-again", topology, spec, xml_map)
-    assert again["stats"]["instancesBuilt"] == 0 and again["stats"]["outputsBuilt"] == 0, again["stats"]
-    assert again["deploymentId"] == report["deploymentId"]
 
 
 def test_latin_only(temp: Path) -> None:
@@ -216,7 +267,8 @@ def test_no_ui_target(temp: Path) -> None:
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-engine-") as raw:
         temp = Path(raw)
-        for test in (test_variable_single, test_static_family, test_composite, test_latin_only,
+        for test in (test_variable_single, test_static_family, test_composite_variable, test_composite_static,
+                     test_latin_only,
                      test_collection_and_protected, test_no_ui_target):
             sub = temp / test.__name__
             sub.mkdir()

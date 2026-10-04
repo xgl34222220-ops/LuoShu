@@ -95,6 +95,7 @@ class Face:
     latin: int
     digits: int
     identity: str
+    glyf: bool = True
 
     @property
     def variable_weight(self) -> tuple[float, float] | None:
@@ -140,6 +141,7 @@ def _inspect(path: Path) -> list[Face]:
                 latin=sum(1 for point in LATIN_LETTERS if point in cmap),
                 digits=sum(1 for point in DIGITS if point in cmap),
                 identity=f"{identity}:{index}",
+                glyf="glyf" in font,
             ))
         finally:
             font.close()
@@ -233,6 +235,44 @@ class Sources:
         if not candidates:
             return None
         return max(candidates, key=lambda face: face.variable_weight[1] - face.variable_weight[0])
+
+    def _variable_glyf(self, role: str) -> Face | None:
+        faces = [face for face in self.faces[role]
+                 if face.variable_weight and face.glyf and not face.italic]
+        return max(faces, key=lambda face: face.variable_weight[1] - face.variable_weight[0], default=None)
+
+    def composite_variable(self) -> bool:
+        """A variable CJK base in auto mode: one variable composite serves every weight."""
+        return (self.mode == "composite" and self.settings["cjk"]["mode"] == "auto"
+                and self._variable_glyf("cjk") is not None)
+
+    def is_variable(self) -> bool:
+        return self.variable_face(False) is not None or self.composite_variable()
+
+    def variable_key(self) -> str:
+        if self.mode == "single":
+            face = self.variable_face(False)
+            return _canonical({"variable": face.identity if face else "", "rev": ENGINE_REVISION})
+        return _canonical({"variableComposite": self.identity(), "rev": ENGINE_REVISION})
+
+    def build_variable_composite(self) -> TTFont:
+        face = self._variable_glyf("cjk")
+        assert face is not None
+        base = _load(face)
+        for role in ("latin", "digit"):
+            setting = self.settings[role]
+            source_face = None if setting["mode"] == "fixed" else self._variable_glyf(role)
+            fixed: dict[str, float] | None = None
+            if source_face is None:
+                source_face, location = self._role_pick(role, int(dict(
+                    (tag, default) for tag, _min, default, _max in face.axes).get("wght", 400)))
+                fixed = location or {}
+            source = _load(source_face)
+            try:
+                luoshu_merge.import_glyphs_variable(base, source, role, fixed)
+            finally:
+                source.close()
+        return base
 
     def identity(self) -> str:
         return _canonical({
@@ -429,19 +469,20 @@ class Builder:
         self.stats = {"instancesBuilt": 0, "instancesCached": 0, "outputsBuilt": 0, "outputsCached": 0}
 
     def _base_path(self, kind: str, weight: int, italic: bool) -> tuple[Path, str]:
-        if kind == "variable":
+        if kind == "variable" and self.sources.mode == "single":
             face = self.sources.variable_face(italic)
             assert face is not None
             key = _canonical({"variable": face.identity, "rev": ENGINE_REVISION})
             return face.path, key
-        key = self.sources.instance_key(weight, italic)
+        key = self.sources.variable_key() if kind == "variable" else self.sources.instance_key(weight, italic)
         path = self.cache / f"inst-{key[:32]}.ttf"
         self.used.add(path)
         if path.is_file():
             self.stats["instancesCached"] += 1
             return path, key
         _deadline_check(self.deadline)
-        font = self.sources.build_instance(weight, italic)
+        font = (self.sources.build_variable_composite() if kind == "variable"
+                else self.sources.build_instance(weight, italic))
         try:
             for tag in ("DSIG", "LTSH", "hdmx", "VDMX"):
                 if tag in font:
@@ -457,7 +498,7 @@ class Builder:
     def output(self, kind: str, weight: int, italic: bool, line: dict[str, int], faces: int) -> Path:
         base, key = self._base_path(kind, weight, italic)
         index = 0
-        if kind == "variable":
+        if kind == "variable" and self.sources.mode == "single":
             face = self.sources.variable_face(italic)
             index = face.index if face else 0
         out_key = _canonical({"base": key, "line": line, "faces": faces, "rev": ENGINE_REVISION})
@@ -625,7 +666,7 @@ def build(
             line = _line_metrics(target)
             italic_variable = sources.variable_face(True)
             upright_variable = sources.variable_face(False)
-            variable = upright_variable is not None
+            variable = sources.is_variable()
             actions: dict[tuple[int, bool], NodeAction] = {}
             if variable:
                 own_italic = target.italic and italic_variable is not None and italic_variable is not upright_variable

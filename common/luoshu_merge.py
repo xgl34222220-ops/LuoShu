@@ -12,6 +12,7 @@ import math
 import statistics
 from typing import Iterable
 
+from fontTools.pens.basePen import NullPen
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.qu2cuPen import Qu2CuPen
@@ -189,7 +190,10 @@ def import_glyphs(base: TTFont, src: TTFont, role: str, location: dict[str, floa
         done.add((base_name, src_name))
         try:
             advance, lsb = src["hmtx"].metrics[src_name]
-            width = getattr(glyph_set[src_name], "width", None)
+            # Without HVAR the varied advance is only known after drawing.
+            sampled = glyph_set[src_name]
+            sampled.draw(NullPen())
+            width = getattr(sampled, "width", None)
             if isinstance(width, (int, float)):
                 advance = width
         except (KeyError, TypeError):
@@ -210,4 +214,161 @@ def import_glyphs(base: TTFont, src: TTFont, role: str, location: dict[str, floa
         replaced += 1
     if replaced < len(required):
         raise MergeError(f"{'英文' if role == 'latin' else '数字'}替换数量异常（仅 {replaced} 个）")
+    return replaced
+
+
+# ------------------------------------------------------------ variable import
+#
+# A variable CJK base keeps its wght axis; Latin/digit glyphs are drawn from a
+# variable source at a few base weights and stored as gvar deltas, so one
+# output serves every weight instead of one static font per weight.
+
+VARIABLE_SAMPLES = (-1.0, -0.5, 0.0, 0.5, 1.0)
+
+
+def can_vary(base: TTFont, src: TTFont | None) -> bool:
+    """Whether ``src`` glyphs can be imported into ``base`` with variations."""
+    if "glyf" not in base or "gvar" not in base or "fvar" not in base:
+        return False
+    if not any(axis.axisTag == "wght" for axis in base["fvar"].axes):
+        return False
+    if src is None:
+        return True
+    return "glyf" in src and "fvar" in src and any(axis.axisTag == "wght" for axis in src["fvar"].axes)
+
+
+def _axis(font: TTFont, tag: str):
+    return next(axis for axis in font["fvar"].axes if axis.axisTag == tag)
+
+
+def _user_weight(base: TTFont, normalized: float) -> float:
+    """Base user-space wght for a normalized coordinate (inverting avar)."""
+    if "avar" in base:
+        segments = base["avar"].segments.get("wght") or {}
+        points = sorted(segments.items())
+        if len(points) >= 2:
+            # avar maps input->output; invert piecewise-linearly.
+            for (in_a, out_a), (in_b, out_b) in zip(points, points[1:]):
+                if out_a <= normalized <= out_b and out_b != out_a:
+                    normalized = in_a + (normalized - out_a) * (in_b - in_a) / (out_b - out_a)
+                    break
+    axis = _axis(base, "wght")
+    if normalized < 0:
+        return axis.defaultValue + normalized * (axis.defaultValue - axis.minValue)
+    return axis.defaultValue + normalized * (axis.maxValue - axis.defaultValue)
+
+
+def _sample(glyph_set, name: str, scale: float, shift: float, fallback_width: float):
+    """Glyph outline and advance at the glyph set's location.
+
+    The advance must be read from the same glyph object after drawing: without
+    HVAR, fontTools derives it from the gvar phantom points while drawing.
+    """
+    source = glyph_set[name]
+    recorder = DecomposingRecordingPen(glyph_set)
+    source.draw(recorder)
+    pen = TTGlyphPen(None)
+    recorder.replay(TransformPen(pen, (scale, 0, 0, scale, 0, shift)))
+    width = getattr(source, "width", None)
+    if not isinstance(width, (int, float)):
+        width = fallback_width
+    return pen.glyph(), int(round(float(width) * scale))
+
+
+def import_glyphs_variable(base: TTFont, src: TTFont, role: str, fixed: dict[str, float] | None = None) -> int:
+    """Like :func:`import_glyphs` but keeps the source's weight variation.
+
+    ``fixed`` pins the source (fixed mode or a static source): glyphs are
+    imported static and stay the same at every base weight.
+    """
+    from fontTools.misc.vector import Vector
+    from fontTools.ttLib.tables.TupleVariation import TupleVariation
+    from fontTools.varLib.models import VariationModel
+
+    codepoints: Iterable[int] = LATIN_CODEPOINTS if role == "latin" else DIGIT_CODEPOINTS
+    required = REQUIRED[role]
+    base_cmap = base.getBestCmap() or {}
+    src_cmap = src.getBestCmap() or {}
+    src_axes = {axis.axisTag: axis for axis in src["fvar"].axes} if "fvar" in src else {}
+
+    def src_location(user_weight: float) -> dict[str, float] | None:
+        if not src_axes:
+            return None
+        location = {tag: axis.defaultValue for tag, axis in src_axes.items()}
+        if fixed:
+            location.update({tag: value for tag, value in fixed.items() if tag in location})
+        elif "wght" in src_axes:
+            axis = src_axes["wght"]
+            location["wght"] = max(axis.minValue, min(axis.maxValue, user_weight))
+        return location
+
+    samples = [0.0] if fixed is not None or not src_axes else list(VARIABLE_SAMPLES)
+    default_weight = _axis(base, "wght").defaultValue
+    glyph_sets = {value: src.getGlyphSet(location=src_location(_user_weight(base, value)))
+                  for value in samples}
+    scale, shift = _role_transform(base, src, glyph_sets[0.0], role)
+    model = VariationModel([{} if value == 0.0 else {"wght": value} for value in samples], axisOrder=["wght"])
+    gvar = base["gvar"]
+    glyf = base["glyf"]
+    replaced = 0
+    done: set[tuple[str, str]] = set()
+    for codepoint in sorted(codepoints):
+        base_name, src_name = base_cmap.get(codepoint), src_cmap.get(codepoint)
+        if not base_name or not src_name:
+            if codepoint in required:
+                raise MergeError(f"源字体或中文基底缺少必要字符 U+{codepoint:04X}")
+            continue
+        if (base_name, src_name) in done:
+            continue
+        done.add((base_name, src_name))
+        try:
+            sampled = [_sample(glyph_sets[value], src_name, scale, shift, src["hmtx"].metrics[src_name][0])
+                       for value in samples]
+            glyphs = [glyph for glyph, _ in sampled]
+            advances = [advance for _, advance in sampled]
+            coordinates = []
+            for glyph, advance in zip(glyphs, advances):
+                points, ends, _flags = glyph.getCoordinates(glyf)
+                coordinates.append((list(points), list(ends), advance))
+            first_points, first_ends, _ = coordinates[0]
+            if any(len(points) != len(first_points) or ends != first_ends for points, ends, _ in coordinates):
+                raise MergeError("轮廓在不同字重下点数不一致")
+        except MergeError:
+            if codepoint in required:
+                raise
+            continue
+        except Exception as error:
+            if codepoint in required:
+                raise MergeError(f"必要字符 U+{codepoint:04X} 的字形转换失败：{error}") from error
+            continue
+        default = glyphs[samples.index(0.0)]
+        glyf[base_name] = default
+        default.recalcBounds(glyf)
+        if not hasattr(default, "xMin"):
+            default.xMin = default.yMin = default.xMax = default.yMax = 0
+        _enclose_bounds(base, (default.xMin, default.yMin, default.xMax, default.yMax))
+        default_advance = advances[samples.index(0.0)]
+        lsb = int(getattr(default, "xMin", 0))
+        base["hmtx"].metrics[base_name] = (default_advance, lsb)
+        variations = []
+        if len(samples) > 1:
+            # Master values: every point plus the four phantom points (advance last-but-two).
+            masters = []
+            for points, _ends, advance in coordinates:
+                flat = [coordinate for point in points for coordinate in point]
+                flat += [0, 0, advance, 0, 0, 0, 0, 0]
+                masters.append(Vector(flat))
+            deltas = model.getDeltas(masters)
+            for support, delta in zip(model.supports[1:], deltas[1:]):
+                pairs = [(int(round(delta[i])), int(round(delta[i + 1]))) for i in range(0, len(delta), 2)]
+                if any(pairs):
+                    variations.append(TupleVariation(support, pairs))
+        gvar.variations[base_name] = variations
+        replaced += 1
+    if replaced < len(required):
+        raise MergeError(f"{'英文' if role == 'latin' else '数字'}替换数量异常（仅 {replaced} 个）")
+    # Advance variation for imported glyphs lives in gvar phantom points; HVAR
+    # would override it, so drop HVAR and let every glyph use gvar.
+    if "HVAR" in base:
+        del base["HVAR"]
     return replaced
