@@ -140,6 +140,14 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 
 验收脚本现已补齐 `lastanr` 的精确 `Reason:` 识别。上一轮原始报告在旧匹配器下为 false，新匹配器为 true；其他进程的 ANR 报告即使含目标 Activity 元数据，也不会被误归属。失败时优先按 [AOSP 官方栈诊断说明](https://source.android.com/docs/core/tests/debug/read-bug-reports#find-stack-traces) 保存 `/data/anr` 中精确目标进程块；最多 4 文件、每个 4 MiB，不导出其他进程线程栈，记录时间/PID/哈希/完整性，缺失明确标记不可用。栈只是某一时刻状态，仍须绑定 ANR 时间和 PID 才能分析原因，不将晚采集的 idle 状态当成根因。新增 11 个识别/采集回归，本次完整宿主 harness 105 个测试于 0.598 秒通过，仅证明脚本逻辑，尚待新 Android 执行。不点击 ANR 的“等待”、不扩大期限、不跳过最后实际 App 检查。
 
+## 第七批：可重复的包和原始 Android 证据核验
+
+采用理由：依据 [AOSP ANR 诊断](https://source.android.com/docs/core/tests/debug/read-bug-reports#find-stack-traces) 的进程归属、时间/PID 绑定及晚采集栈限制，把本轮已有的独立核验过程保存为 [可执行工具](../tests/reviewed-artifacts/README.md)，复用原判定器和挂载/轴选择 helper。除了报告布尔值，还读取真实 Root 阶段的原始日志与 Android XML，发现已记录的目标 ANR或仍存在的弹窗就拒绝通过；初次无 Root 的 App 阶段单独保留。没有复制上游实现，也没有新增 Android 操作、引擎或后台服务。
+
+包核验绑定 GitHub artifact SHA-256、确切源码、模块内外 APK、9 个运行文件、17 冻结文件及旧引擎。Root 核验使用运行时固定 harness，复算实际启动 ID、CFF2 编译、原厂别名挂载、实际导入/UI 和回收；同时拒绝重复/格式错误的内核启动 ID。
+
+[本地重放证明](ARTIFACT_VERIFIER_REPLAY_20261004.json) 标注 `HOST_ARTIFACT_REPLAY`：本轮第六批候选原包验真 PASS；错误的源码身份与 artifact 摘要分别被拒绝。第四批原包被拒绝，识别出 4 个含目标 ANR 的文件与 3 个弹窗 XML；第五批原包被拒绝，目标 ANR 文件为 0，仍有 3 个真实 System UI 弹窗 XML。重放不会变成新的 Android 测试结果，第六批实际 Root 任务继续执行。
+
 ## 不可越过的边界
 
 不修改 1.1.1 挂载核心及 17 个冻结文件；不引入 hook、字体配置重写或后台常驻监听。
