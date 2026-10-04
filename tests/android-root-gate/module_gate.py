@@ -417,12 +417,21 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 if len(selected) != 1 or selected[0].get('valid') is not True or selected[0].get('variable') is not True:
                     raise RuntimeError('Original variable-axis fixture is not visible in actual root inventory')
                 from app_axis_gate import qualify as qualify_axes
-                report['app_axes'] = qualify_axes(adb, output / 'app-axes', selected[0]['name'],
-                                                  [font['name'] for font in fonts])
-                report['app_axes']['source_sha256'] = source_sha256
-                report['app_axes']['import_result'] = imported
-                report['app_axes']['imported_sha256'] = root('sha256sum ' + axis_fixture).split()[0]
-                report['app_axes']['font_id'] = selected[0]['id']
+                try:
+                    report['app_axes'] = qualify_axes(adb, output / 'app-axes', selected[0]['name'],
+                                                      [font['name'] for font in fonts])
+                except Exception:
+                    # Keep the real FAIL and its import provenance in the top-level
+                    # report too. Missing success fields must still block verdict.
+                    failure_report = output / 'app-axes' / 'report.json'
+                    if failure_report.is_file():
+                        report['app_axes'] = json.loads(failure_report.read_text())
+                    raise
+                finally:
+                    if 'app_axes' in report:
+                        report['app_axes'].update(source_sha256=source_sha256, import_result=imported,
+                                                  font_id=selected[0]['id'])
+                        report['app_axes']['imported_sha256'] = root('sha256sum ' + axis_fixture).split()[0]
                 report['app_axes']['stock_hashes_unchanged'] = font_hashes() == original_fonts
                 if not report['app_axes']['stock_hashes_unchanged']:
                     raise RuntimeError('Read-only App axis inspection changed live system font bytes')

@@ -63,7 +63,7 @@
   "scope": "Disposable CI emulator only. Passing completed stages cannot substitute for full gate.",
   "native_crash_classification": {
     "tombstone_count": 1,
-    "cmdline": "sed -n s/.*\"message\":\"\\([^\" ]*\\)\".*/\\1/p (full cmdline retained in artifact)",
+    "cmdline": "sed -n s/.*\"message\":\"\\([^\"]*\\)\".*/\\1/p /data/adb/modules/LuoShu/config/switch_task.conf.output.1791071529-7129",
     "task_id": "1791071529-7129",
     "matching_stage": "baseline commit_failure.data.task",
     "backtrace": [

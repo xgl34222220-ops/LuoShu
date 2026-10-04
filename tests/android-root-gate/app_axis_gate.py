@@ -111,7 +111,8 @@ def qualify(adb, output, font_name, font_names):
         nonlocal frame_index
         raw = dump_ui(serial, '/data/local/tmp/luoshu-axis-ui')
         path = output / f'frame-{frame_index:02d}.xml'; path.write_text(raw); frame_index += 1
-        logs = run('logcat', '-d', '-s', 'AndroidRuntime:E', 'ActivityManager:I', '*:S')
+        logs = run('logcat', '-d', '-s', 'LuoShuAxis:I', 'LuoShuStartup:I',
+                   'AndroidRuntime:E', 'ActivityManager:I', '*:S')
         (output / 'runtime.log').write_text(logs)
         reason = crash_reason(logs, PACKAGE)
         if reason or "isn't responding" in raw or 'is not responding' in raw:

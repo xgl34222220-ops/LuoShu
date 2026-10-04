@@ -15,6 +15,7 @@
 | Font Manager | [JSON 读取实现及函数文档](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/lib/json/font-manager-json.c)、[字体元数据实现](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/lib/common/font-manager-freetype.c)、[项目文档](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/README.md)、[GPL-3.0 许可证](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/COPYING) | 它使用结构化 JSON 和真实字体属性。洛书剩余组合任务错误路径仍用贪婪正则读 JSON；改为复用现有有界解析器。轴名称也应来自字体元数据。借鉴做法，独立实现，没有复制其代码。 |
 | FontTools | [fvar 源码](https://github.com/fonttools/fonttools/blob/f4e996be2fd6207b7b8a9506e9c6b367c91c50db/Lib/fontTools/ttLib/tables/_f_v_a_r.py)、[TTFont 文档](https://fonttools.readthedocs.io/en/stable/ttLib/ttFont.html)、[实例化文档](https://fonttools.readthedocs.io/en/stable/varLib/instancer.html)、[MIT 许可证](https://github.com/fonttools/fonttools/blob/f4e996be2fd6207b7b8a9506e9c6b367c91c50db/LICENSE) | 已有按需读取和轴名称能力，无需换引擎或升级依赖。洛书轴读取器却先调用 `read_bytes()` 读取整个字体；应只检查四字节文件头，再读取需要的表。 |
 | Inter Font Pack | [名称适配源码](https://github.com/kdrag0n/inter-font-pack/blob/d74a915d562e6cf1852546a97e18139a74e48475/patch-font-names.sh)、[兼容性文档](https://github.com/kdrag0n/inter-font-pack/blob/d74a915d562e6cf1852546a97e18139a74e48475/README.md)、[MIT 许可证](https://github.com/kdrag0n/inter-font-pack/blob/d74a915d562e6cf1852546a97e18139a74e48475/LICENSE) | 其兼容性文档强调保留系统名称与未覆盖字符的正常回退。洛书已有更严格的集合/系统框架保护，应继续验收这些契约。其修改字体配置的方式不适用于洛书既定边界，本轮不采用。字体资源的 OFL 与模块代码许可证分别处理，没有引入其字体资源。 |
+| AndroidX Compose 字体解析 | [有界请求缓存源码](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/compose/ui/ui-text/src/commonMain/kotlin/androidx/compose/ui/text/font/FontFamilyResolver.kt)、[字体与可变轴文档](https://developer.android.com/develop/ui/compose/text/fonts)、[Apache-2.0 许可证](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt) | 请求身份、可缓存结果和有界缓存应一致；它将加载去重责任留给实际加载器。洛书默认轴与控件分开读取并缓存错误，应复用一个成功结果缓存。串行 Root 元数据读取、内容版本键和失败重试是针对洛书的独立实现，没有复制上游代码。 |
 
 另参考 [OpenType fvar 规范](https://learn.microsoft.com/en-us/typography/opentype/spec/fvar)：轴名称来自 `axisNameID`，轴有各自的范围和默认值。本文的任务身份校验是洛书独立设计，不归因于参考项目。
 
@@ -81,9 +82,13 @@ Root workflow 只绑定上述已通过、已下载验真的候选包。新增门
 
 [Root 37162597156](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37162597156) 实际选中了可变夹具，导航已跨过此前失败；App 显示“字体轴读取失败：命令执行超时”。整体继续 BLOCKED，100/1000 库及实际 App 应用/恢复未运行。[新失败证据](ROOT_ANDROID_FAILURE_37162597156.json) 保留 artifact 哈希、13 个 UI 帧、失败截图哈希和未验证项目。来源查找、Python 读取和 Root 请求哪一段超时尚未证明。
 
-代码核对发现，选择器的默认轴读取和控件的轴读取分别调用 `weight_axis`，默认轴缓存只按字体 ID，失败还会缓存成 400。这是独立可证明的可靠性差距。沿用已有 FontTools/OpenType 元数据路径，改为两处共享一个有界的成功结果缓存，以 `sourceRevision` 为键，最多 64 个版本，并串行化元数据请求。取消和失败不写缓存；同名同大小替换也会重新读取。宽度轴字体的元数据和默认轴不伪造字重轴。
+代码核对发现，选择器的默认轴读取和控件的轴读取分别调用 `weight_axis`，默认轴缓存只按字体 ID，失败还会缓存成 400。这是独立可证明的可靠性差距。参考 AndroidX 的按请求身份保存可缓存结果、有界缓存及实际加载器负责去重的设计，沿用已有 FontTools/OpenType 元数据路径，两处共享一个有界的成功结果缓存，以 `sourceRevision` 为键，最多 64 个版本，并串行化元数据请求。取消和失败不写缓存；同名同大小替换也会重新读取。宽度轴字体的元数据和默认轴不伪造字重轴。
 
-选择器总预算仍为 20 秒，包含等待正在运行的轴读取；控件的命令预算仍为 25 秒。本批不靠扩大超时通过门禁。隔离测试候选版增加数值阶段耗时标记，不记录字体 ID、路径、元数据或任意命令错误；正式版不开诊断。新增并发、替换、重试、取消、缓存上限及无字重轴回归须由新构建执行，尚未预填通过。
+提交 [`de69988d`](https://github.com/xgl34222220-ops/LuoShu/commit/de69988d61d313908532d0cfd80ec2815e91fbc5)。选择器总预算仍为 20 秒，包含等待正在运行的轴读取；控件的命令预算仍为 25 秒。本批不靠扩大超时通过门禁。隔离测试候选版增加数值阶段耗时标记，不记录字体 ID、路径、元数据或任意命令错误；正式版不开诊断。
+
+[新构建 37165156535](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37165156535) 全部成功，含源码、补充、原厂 Android 15 CFF2 夹具回归、App lint/`:app:testDebugUnitTest`/构建及包校验。新增 6 个缓存回归覆盖并发、同名替换、失败重试、取消、缓存上限及无字重轴；不填未读取的 JVM 总测试数。下载 artifact `11288959193` 后，[独立核验](TEST_CANDIDATE_VERIFICATION_37165156535.json) 通过：外层 ZIP `d38402bb881fade9fe437e8a1a0ec1ed0fab34bbe90412213dbdbcc40c651758`，模块 `b398de7f4bcc5270f6aad7878872c42796c773425c54bc37c498d91c95bad7bb`，APK `bbd97255df688c447de8d884f861b11777f103d7b051a737fe1239c54760143f`；来源、内外 APK、7 个运行源码和 17 个冻结文件逐一一致。
+
+完整 Root workflow 现改绑这个验真的新候选；App 门禁同时保存数值阶段日志，失败仍按 FAIL/BLOCKED 判定，并将原始失败报告及真实导入来源保留到模块报告。当前改动的宿主 harness 90 个测试通过，只证明脚本逻辑；新 Android 结果仍待实际执行。
 
 ## 不可越过的边界
 
