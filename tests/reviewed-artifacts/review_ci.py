@@ -57,13 +57,14 @@ def main(pin_path, output_path):
     pin = json.loads(Path(pin_path).read_text())
     if pin.get('schema') != 'luoshu-reviewed-root-artifact-v1':
         raise ValueError('Unknown artifact-review pin schema')
-    for key in ('runtime_source', 'harness_commit'):
+    candidate_only = pin.get('review_scope') == 'CANDIDATE_ONLY'
+    for key in (('runtime_source',) if candidate_only else ('runtime_source', 'harness_commit')):
         if not re.fullmatch('[0-9a-f]{40}', pin[key]):
             raise ValueError('Immutable source and harness commits are required')
-    for key in ('root_run', 'candidate_run'):
+    for key in (('candidate_run',) if candidate_only else ('root_run', 'candidate_run')):
         if type(pin[key]) is not int or pin[key] <= 0:
             raise ValueError('Positive immutable run IDs are required')
-    if pin['expected_root_result'] not in ('PASS', 'FAIL'):
+    if not candidate_only and pin['expected_root_result'] not in ('PASS', 'FAIL'):
         raise ValueError('Expected preserved verdict must be explicit')
     token = os.environ['REVIEW_TOKEN']
     output = Path(output_path)
@@ -71,13 +72,22 @@ def main(pin_path, output_path):
     temp = Path(os.environ['RUNNER_TEMP']) / ('luoshu-artifact-review-' + uuid.uuid4().hex)
     temp.mkdir()
     candidate_zip = download(pin['candidate_artifact'], pin['candidate_run'], pin['runtime_source'], temp, token)
-    root_zip = download(pin['root_artifact'], pin['root_run'], pin['harness_commit'], temp, token)
     candidate_proof = output / 'candidate-proof.json'
     with (output / 'candidate-verifier.txt').open('w') as log:
         subprocess.run([sys.executable, str(repo / 'tests/reviewed-artifacts/verify_candidate.py'),
                         str(candidate_zip), pin['runtime_source'], str(pin['candidate_run']),
                         str(pin['candidate_artifact']['id']), pin['candidate_artifact']['sha256'],
                         str(candidate_proof)], cwd=repo, stdout=log, stderr=subprocess.STDOUT, check=True)
+    verified_candidate = json.loads(candidate_proof.read_text())
+    emit('CANDIDATE_PROOF', verified_candidate)
+    if candidate_only:
+        summary = dict(result='REVIEW_COMPLETED', candidate_run=pin['candidate_run'],
+                       scope='READ_ONLY_CANDIDATE_ARCHIVE_NOT_ANDROID_EXECUTION',
+                       review_commit=os.environ['GITHUB_SHA'])
+        (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+        emit('SUMMARY', summary)
+        return
+    root_zip = download(pin['root_artifact'], pin['root_run'], pin['harness_commit'], temp, token)
     harness = temp / 'pinned-harness'
     harness.mkdir()
     archive = temp / 'pinned-harness.tar'
