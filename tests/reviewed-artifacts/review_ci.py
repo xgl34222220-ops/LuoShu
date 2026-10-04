@@ -9,6 +9,7 @@ import subprocess
 import sys
 import uuid
 import zipfile
+import xml.etree.ElementTree as ET
 
 REPOSITORY = 'xgl34222220-ops/LuoShu'
 PREFIX = 'LUOSHU_REVIEW_JSON '
@@ -132,10 +133,17 @@ def main(pin_path, output_path):
                            app_axis_stage=stage, owned_stage_reports=stage_reports,
                            raw_composite_runtime_log=z.read('app-composite/runtime.log').decode('utf-8', errors='replace')
                            if 'app-composite/runtime.log' in z.namelist() else None,
-                           composite_xml_frames=[dict(path=name, xml=z.read(name).decode('utf-8', errors='replace'))
+                           composite_xml_frames=[dict(path=name, sha256=sha256(z.read(name)).hexdigest(),
+                               nodes=[{key: node.get(key, '') for key in
+                                       ('text', 'content-desc', 'bounds', 'class', 'resource-id', 'clickable', 'scrollable')}
+                                      for node in ET.fromstring(z.read(name)).iter('node')
+                                      if node.get('package') == 'io.github.xgl34222220.luoshu.stabletest'
+                                      and (node.get('text') or node.get('content-desc') or node.get('scrollable') == 'true')])
                                for name in sorted(n for n in z.namelist() if re.fullmatch(r'app-composite/frame-\d+\.xml', n))[-8:]],
-                           raw_composite_commands=z.read('app-composite/commands.jsonl').decode('utf-8', errors='replace')
-                           if 'app-composite/commands.jsonl' in z.namelist() else None,
+                           composite_commands=[{key: entry.get(key) for key in ('argv', 'exit', 'stderr')}
+                               for line in z.read('app-composite/commands.jsonl').decode('utf-8', errors='replace').splitlines()
+                               if line.strip() for entry in [json.loads(line)] if entry.get('argv', [None])[0] != 'logcat']
+                               if 'app-composite/commands.jsonl' in z.namelist() else None,
                            raw_axis_runtime_log=z.read('app-axes/runtime.log').decode('utf-8', errors='replace')
                            if 'app-axes/runtime.log' in z.namelist() else None,
                            raw_axis_commands=z.read('app-axes/commands.jsonl').decode('utf-8', errors='replace')
