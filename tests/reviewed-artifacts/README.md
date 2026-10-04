@@ -26,7 +26,7 @@ new mandatory gates may correctly reject an older artifact. A missing gate is
 never greened by an optional parser: the selected verdict remains authoritative.
 
 The candidate tool checks ZIP integrity, external hashes, build provenance,
-inner/outer APK bytes, the 17-file 1.1.1 manifest, nine reviewed runtime files
+inner/outer APK bytes, the 17-file 1.1.1 manifest, ten reviewed runtime files
 against Git and the unchanged legacy engine. The Root tool checks the selected
 verdict, actual stock CFF2 face compilation, kernel boot identities, canonical
 mount provenance, native-crash task ownership, actual import/axis XML and cleanup.

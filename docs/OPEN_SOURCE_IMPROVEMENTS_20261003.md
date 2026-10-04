@@ -190,7 +190,13 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 
 artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37177845100.json) PASS：外层 ZIP `239cfa8dd4428f557c1ac444234e004587c84f015a73a183f83dc08a34828485`，模块 `50024470b5758bc76282fe970545752ed0564c849e2691ceec3c6acb2a50bb1c`，APK `07d2951dd0d858aa1d43fdcff3e35683e9413395e62f527ee188a9c4ab47a9c8`。确切 Git 源码、内外 APK、9 个运行文件、17 冻结文件及旧冻结引擎一致。新 Root workflow 现在只绑定这个新包；Android 阶段仍待实际执行。
 
-验收提交 [`93b4075d`](https://github.com/xgl34222220-ops/LuoShu/commit/93b4075dcb24919579ca2af64ff6f96ad40fee48) 的[第八批完整 Root 37178617912](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37178617912) 已启动；前置、候选身份和一次性 AVD 准备通过，完整 Android 长步骤仍在执行。后续提交不会改变它固定的包或 harness；没有取消或重复启动该任务。
+验收提交 [`93b4075d`](https://github.com/xgl34222220-ops/LuoShu/commit/93b4075dcb24919579ca2af64ff6f96ad40fee48) 的[第八批完整 Root 37178617912](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37178617912) 已于 05:36:32 UTC 成功。下载 artifact `11294953144`，独立验证外层 SHA-256 `b393f36810e29cbbef8f290c3dc28c5d2bcc1c0c965c26cac8dae618ed1d3f46`，用本轮固定判定器重新计算 [Android 证明](ROOT_ANDROID_VERIFICATION_37178617912.json) 为 PASS。实际前置是 111 个宿主测试；Android 的 32 个交接、18 个预览来源、15 个当前组合错误用例均通过，5 面真实 CFF2 编译、14 次不同内核启动 ID、19 条规范挂载证明（2 个别名）、9 个实际轴 UI 帧、CLI 组合和 App 单字体应用/重启/默认恢复重新验证通过。
+
+14 个实际冷/暖采样与本轮原始日志逐一匹配，保留 [数值证据](INVENTORY_ANDROID_TIMINGS_37178617912.json) 和 [最终冷](evidence/root-final-cold-37178617912.txt)/[最终暖](evidence/root-final-warm-37178617912.txt)、[1000 库冷](evidence/root-library1000-cold-37178617912.txt)/[1000 库暖](evidence/root-library1000-warm-37178617912.txt) 日志。1000 库暖复核为 5390/5649/5365 ms，首库存帧 449/440/436 ms；最终冷复核为 46785 ms（含实际导航），暖复核 8218 ms。所检查的所有 App 门禁原始请求没有非零退出码，Root 原始日志没有目标 ANR 或阻断弹窗；不将本次成功归因于尚未证明的旧 ANR/超时根因，也不当作真机速度保证。
+
+最终冷扫描仍需 26871 ms：既有监督器计时 23274.124 ms，库存函数执行与 stdout 19096.482 ms。尚未拆分目录快照、头读取、缓存写入、输出等内部阶段，不能推断是其中某一项或据此直接并发扫描。2 份 tombstone 均由任务号绑定到未改的原版失败注入，候选无意外原生崩溃。初次无 Root 仅 App 启动检查 PASS；临时 Root 政策已撤销、工作空间为空、两个 AVD 已回收、KVM 元数据未变。
+
+本批不覆盖原生 ARM64/OEM 真机、App 完整组合创建 UI、像素字形几何、备份恢复 API、1000 份不同真实字体内容或 Android 失败分支的线程栈采集。第九批 helper 改动不在本轮固定候选内，另跑门禁。
 
 ## 第九批：原厂扫描错误消息复用现有有界 JSON 解码
 
@@ -204,4 +210,8 @@ artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37
 - 新增 4 个管道回归后，完整消息/切换错误测试 14 个于 0.604 秒 PASS；实际 CLI 覆盖字面文件名兼容，2 MiB 噪声读取使用固定块且尾部/消息有界。共享解码器的当前组合错误 15 个重新 PASS；原厂扫描序列化/等待复用测试 PASS，17 个冻结文件匹配。
 - 当前宿主真实进程回归仍 FAIL：[原始限制记录](STOCK_ERROR_HOST_PROCESS_LIMIT_20261004.json) 保留 task_scope 20 个中 12 失败/2 错误及有限请求 5 失败。只读比较发现 `os.getpid()` 与 `/proc/self` 指向不同 PID，未改版本和工作版读取到同样错误视图；不能通过降低身份检查或跳过门禁“修复”这一宿主环境。正常新 CI 与隔离 Android 的进程门禁仍必须重新通过。
 
-新源检查把 14 个当前扫描错误函数与完整消息/切换错误测试作为必跑项；本批新 CI 和新 Android 结果尚待执行。第八批 Android 仍按其固定 `cb321a66`/`93b4075d` 跟进，不拿它为这批新 helper 背书。
+代码提交 [`634a6d45`](https://github.com/xgl34222220-ops/LuoShu/commit/634a6d45dae07e59fc73ffb36725b98e2dcee080) 的 [第九批新候选 CI 37180012702](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37180012702) 完整 PASS，含 App lint/JVM/构建、源码/补充门禁、原厂 CFF2 夹具和包校验。[本轮原始 CI 日志节选](evidence/candidate-stock-process-37180012702.txt) 保留 14 个扫描错误用例、14 个消息回归，以及在正常 Linux 上重新通过的真实 `task_scope` 20 个（24.667 秒）和有限请求 5 个（9.557 秒）；强制发布前检查再次通过。候选 CI 的前置 harness 为 111 个，不能写成尚未上传的新 harness 113 个；不编造 JVM 总测试数。新的 CI 进程 PASS 不改写上面的本地环境失败。
+
+下载 artifact `11295201887` 后 [独立包核验](TEST_CANDIDATE_VERIFICATION_37180012702.json) PASS：外层 ZIP `5b448894e42c1628c3fe69035fe6088d6bd7e9e69433c59458773de79ce2a0ed`，模块 `99180db7357c0035b6baa60fec2ef6a667106adb89e05aabaf2b3329a4514882`，APK `1eb859a22d3b428c46b0e590972e8a6c7fe21f3a9c35dcab074b77f9fa9cc6a7`。10 个运行文件、来源/内外 APK、17 个冻结文件及旧冻结引擎逐项一致。
+
+新 Root workflow 只绑定这个已验真的包，新增实际安装模块下的 14 个扫描错误函数用例，要求原 ARM64 Python、Android shell、同一内核启动 ID、Enforcing 及正确 helper 哈希。判定器拒绝错环境、缺失/重复/失败用例；独立 verifier 进一步核对真实命令 stdout 与 Git helper 字节。新宿主 harness 113 个于 0.638 秒 PASS，仅证明脚本与判定逻辑；完整 Android 结果仍待本次新运行。第八批固定候选的 PASS 保留为该批证据，不替代第九批验收。

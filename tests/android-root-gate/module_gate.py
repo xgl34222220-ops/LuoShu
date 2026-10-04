@@ -371,6 +371,24 @@ def run_gate(adb, magisk, baseline, candidate, output):
             error_failures = composite_error_blockers(engine_error)
             if error_failures:
                 raise RuntimeError('; '.join(error_failures))
+            stock_error_script = Path(__file__).resolve().parents[2] / 'scripts/stock_error_contract_test.py'
+            command(['push', str(stock_error_script), '/data/local/tmp/luoshu-stock-error-contract.py'])
+            stock_error_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-stock-error-contract.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-stock-error-contract.json', timeout=240)
+            report['magisk_stock_error'] = json.loads(root('cat /data/local/tmp/luoshu-stock-error-contract.json'))
+            stock_error = report['magisk_stock_error']
+            stock_error['boot_id'] = root('cat /proc/sys/kernel/random/boot_id').strip()
+            stock_error['selinux'] = root('getenforce').strip()
+            installed_helper = root(f'sha256sum {MODULE}/common/task_scope.py').split()[0]
+            if stock_error['boot_id'] != stock_error_boot or stock_error['helper_sha256'] != installed_helper:
+                raise RuntimeError('Android stock-error boot or installed helper identity changed')
+            from verdict import stock_error_blockers
+            stock_errors = stock_error_blockers(stock_error)
+            if stock_errors:
+                raise RuntimeError('; '.join(stock_errors))
             report['axis_metadata'] = json.loads(root(
                 f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '

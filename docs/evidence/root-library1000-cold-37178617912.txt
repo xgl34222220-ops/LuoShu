@@ -1,0 +1,14 @@
+--------- beginning of main
+10-04 05:29:19.235 12426 12426 I LuoShuStartup: event=app_start elapsed_ms=338808
+10-04 05:29:24.117 12426 12426 I LuoShuStartup: event=font_index_visible elapsed_ms=343689 count=100 verified=false
+10-04 05:29:24.117 12426 12426 I LuoShuStartup: event=font_index_visible elapsed_ms=343690 count=100 verified=false
+10-04 05:29:31.329 12426 12426 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=443.748 count=1000 code=0
+10-04 05:29:31.329 12426 12426 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=4077.503 code=0 cleaned=true reason=success
+10-04 05:29:31.329 12426 12426 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=350902 duration_ms=7212 code=0
+10-04 05:29:31.874 12426 12426 I LuoShuStartup: event=library_open elapsed_ms=351447
+10-04 05:29:32.491 12426 12426 I LuoShuStartup: event=library_frame elapsed_ms=352063 count=100 verified=false
+10-04 05:29:38.055 12426 12426 I LuoShuStartup: event=font_request_phase stage=scan phase=inventory duration_ms=1549.423 count=1000 code=0
+10-04 05:29:38.055 12426 12426 I LuoShuStartup: event=font_request_phase stage=scan phase=scope duration_ms=4054.985 code=0 cleaned=true reason=success
+10-04 05:29:38.055 12426 12426 I LuoShuStartup: event=font_request stage=scan elapsed_ms=357628 duration_ms=6725 code=0
+10-04 05:29:38.457 12426 12426 I LuoShuStartup: event=font_index_verified elapsed_ms=358030 count=1000 verified=true
+10-04 05:29:38.787 12426 12426 I LuoShuStartup: event=library_frame elapsed_ms=358360 count=1000 verified=true

@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
@@ -87,6 +88,21 @@ with zipfile.ZipFile(path) as z:
                 errors.append('composite error function report differs from actual ARM64 command stdout')
         if engine_error.get('boot_id') != preview.get('boot_id'):
             errors.append('composite error and preview boot context changed')
+    stock_error = m.get('magisk_stock_error')
+    if stock_error is not None:
+        stock_steps = [step for step in m.get('steps', [])
+                       if any('luoshu-stock-error-contract.py --module ' in str(arg) for arg in step.get('argv', []))]
+        if len(stock_steps) != 1 or stock_steps[0].get('exit') != 0:
+            errors.append('actual installed stock-error function command missing or failed')
+        else:
+            stock_stdout = json.loads(stock_steps[0].get('stdout', ''))
+            if {k:v for k,v in stock_error.items() if k not in ('boot_id', 'selinux')} != stock_stdout:
+                errors.append('stock-error function report differs from actual ARM64 command stdout')
+        helper_bytes = subprocess.check_output(['git', 'show', source + ':common/task_scope.py'], cwd=repo)
+        if stock_error.get('helper_sha256') != sha256(helper_bytes).hexdigest():
+            errors.append('stock-error helper differs from reviewed runtime source')
+        if stock_error.get('boot_id') != preview.get('boot_id'):
+            errors.append('stock-error and preview boot context changed')
     for name in ('emulator-cleanup.json', 'magisk-emulator-cleanup.json'):
         if report(name).get('emulator_reaped') is not True:
             errors.append(name + ': owned emulator not reaped')
@@ -214,6 +230,7 @@ with zipfile.ZipFile(path) as z:
         actual_android_mix_handoff=m.get('magisk_mix_handoff'),
         actual_android_preview_source=preview,
         actual_android_composite_error=engine_error,
+        actual_android_stock_error=stock_error,
         preview_selection_command_seconds=preview_steps[0].get('elapsed_seconds') if preview_steps else None,
         actual_cff2_axis_metadata=m.get('axis_metadata'), actual_app_axes=axes,
         app_axis_screenshot_sha256=sha256(screenshot).hexdigest(),

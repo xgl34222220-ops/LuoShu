@@ -49,6 +49,32 @@ def composite_error_blockers(value):
     return []
 
 
+STOCK_ERROR_CASES = {
+    'chinese-quotes-and-path', 'ascii-unicode-escapes', 'pretty-top-level-message',
+    'nested-message-lookalike', 'nested-only-fallback', 'last-valid-log-record',
+    'control-characters', 'plain-log-fallback', 'unavailable-helper-fallback',
+    'empty-default-error', 'nonstring-message-fallback', 'bounded-log-tail',
+    'success-stays-success', 'zero-exit-without-inventory-fails',
+}
+
+
+def stock_error_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS' or
+            value.get('schema') != 'luoshu-stock-error-contract-v1' or value.get('environment') != 'ANDROID' or
+            value.get('tested_scope') != 'CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN' or
+            value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh' or
+            value.get('selinux') != 'Enforcing' or
+            not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', str(value.get('boot_id', ''))) or
+            not re.fullmatch('[0-9a-f]{64}', str(value.get('helper_sha256', '')))):
+        return ['current stock error function not proven on original Root Android runtime']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(STOCK_ERROR_CASES) or
+            len(cases) != len(STOCK_ERROR_CASES) or any(not isinstance(case, dict) for case in cases) or
+            {case.get('name') for case in cases} != STOCK_ERROR_CASES or any(case.get('result') != 'PASS' for case in cases)):
+        return ['current stock error function cases incomplete or failed']
+    return []
+
+
 def preview_source_blockers(value):
     if (not isinstance(value, dict) or value.get('result') != 'PASS'
             or value.get('schema') != 'luoshu-preview-source-contract-v1'
@@ -224,6 +250,7 @@ def delivery_blockers(report):
     errors.extend(mix_handoff_blockers(report.get('magisk_mix_handoff')))
     errors.extend(preview_source_blockers(report.get('magisk_preview_source')))
     errors.extend(composite_error_blockers(report.get('magisk_composite_error')))
+    errors.extend(stock_error_blockers(report.get('magisk_stock_error')))
     errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
     axes_ui = report.get('app_axes', {})
     observed = axes_ui.get('observed_labels', [])

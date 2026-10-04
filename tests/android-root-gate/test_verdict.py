@@ -2,7 +2,7 @@
 import copy
 import unittest
 from test_composite_gate import valid_composite
-from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES, COMPOSITE_ERROR_CASES
+from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES, COMPOSITE_ERROR_CASES, STOCK_ERROR_CASES
 
 BOOT = {'before': '11111111-1111-1111-1111-111111111111', 'after': '22222222-2222-2222-2222-222222222222'}
 
@@ -75,6 +75,12 @@ def valid_delivery():
         'shell': '/system/bin/sh', 'case_count': len(COMPOSITE_ERROR_CASES),
         'cases': [{'name': name, 'result': 'PASS'} for name in sorted(COMPOSITE_ERROR_CASES)],
     }
+    report['magisk_stock_error'] = {
+        'schema':'luoshu-stock-error-contract-v1','result':'PASS','environment':'ANDROID',
+        'tested_scope':'CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN','helper_sha256':'a'*64,
+        'selinux':'Enforcing','boot_id':BOOT['before'],'module':'/data/adb/modules/LuoShu','shell':'/system/bin/sh',
+        'case_count':len(STOCK_ERROR_CASES),'cases':[{'name':name,'result':'PASS'} for name in sorted(STOCK_ERROR_CASES)],
+    }
     weight = {'tag': 'wght', 'name': 'Weight', 'min': 400, 'default': 400, 'max': 900, 'hidden': False}
     report['axis_metadata'] = {'status': 'ok', 'variable': True, 'hasWeight': True, 'weight': weight, 'axes': [weight]}
     report['app_axes'] = {'result': 'PASS', 'package': PACKAGE, 'font_id': 'LuoShuAxisGate',
@@ -92,6 +98,22 @@ def valid_delivery():
 
 
 class VerdictTests(unittest.TestCase):
+    def test_stock_error_requires_complete_unique_actual_android_function_cases(self):
+        for mutation in ('host','missing','duplicate','failed','malformed'):
+            r=valid_delivery(); value=r['magisk_stock_error']
+            if mutation=='host': value['environment']='HOST_ONLY'
+            elif mutation=='missing': value['cases'].pop()
+            elif mutation=='duplicate': value['cases'][0]=value['cases'][1].copy()
+            elif mutation=='failed': value['cases'][0]['result']='FAIL'
+            else: value['cases'][0]=None
+            self.assertTrue(delivery_blockers(r))
+
+    def test_stock_error_requires_installed_helper_and_enforcing_boot(self):
+        for key,value in [('helper_sha256',''),('boot_id','invalid'),('selinux','Permissive'),
+                          ('module','/tmp/fixture'),('shell','sh'),('tested_scope','FULL_STOCK_SCAN')]:
+            r=valid_delivery();r['magisk_stock_error'][key]=value
+            self.assertTrue(delivery_blockers(r))
+
     def test_inventory_timing_presence_cannot_be_claimed_by_a_boolean(self):
         r=valid_delivery()
         r['library_timings'][0]['samples'][0]['request_timings']=True

@@ -1,0 +1,148 @@
+Source 634a6d45dae07e59fc73ffb36725b98e2dcee080 / candidate workflow 37180012702 / job 111370498539
+Exact lines from current CI log. Each suite may run again in the mandatory pre-release gate; repeats are not distinct cases.
+
+2026-10-04T05:33:00.5272989Z Composite entry delegates immediately, preserves arguments and reports a missing core.
+2026-10-04T05:33:00.5282727Z {"schema":"luoshu-preview-source-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"sh","result":"PASS","cases":[{"name":"static-nearest","result":"PASS"},{"name":"exact-static","result":"PASS"},{"name":"invalid-weight-default","result":"PASS"},{"name":"static-tie-order","result":"PASS"},{"name":"cross-format-tie-order","result":"PASS"},{"name":"later-variable-wins-over-exact-static","result":"PASS"},{"name":"first-variable-order","result":"PASS"},{"name":"uppercase-extension","result":"PASS"},{"name":"chinese-space-family","result":"PASS"},{"name":"literal-backslash-family","result":"PASS"},{"name":"leading-echo-option-family","result":"PASS"},{"name":"single-pass-suffixes","result":"PASS"},{"name":"trailing-name-separators","result":"PASS"},{"name":"matching-directory-rejected","result":"PASS"},{"name":"different-family-rejected","result":"PASS"},{"name":"empty-library","result":"PASS"},{"name":"large-independent-library","result":"PASS"},{"name":"quiet-and-stdout-parser-agree","result":"PASS"}],"case_count":18}
+2026-10-04T05:33:00.5293271Z {"schema":"luoshu-composite-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"sh","result":"PASS","cases":[{"name":"chinese-native-error","result":"PASS"},{"name":"ascii-escaped-error","result":"PASS"},{"name":"pretty-top-level-error","result":"PASS"},{"name":"nested-lookalike-error","result":"PASS"},{"name":"plain-text-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"bounded-valid-log-tail","result":"PASS"},{"name":"timeout-code-priority","result":"PASS"},{"name":"oom-code-priority","result":"PASS"},{"name":"signal-code-priority","result":"PASS"},{"name":"no-execute-code-priority","result":"PASS"},{"name":"runtime-code-priority","result":"PASS"},{"name":"missing-runtime-code-priority","result":"PASS"},{"name":"wrong-abi-code-priority","result":"PASS"},{"name":"empty-default-error","result":"PASS"}],"case_count":15}
+2026-10-04T05:33:00.5301005Z {"schema":"luoshu-stock-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"/bin/sh","result":"PASS","cases":[{"name":"chinese-quotes-and-path","result":"PASS"},{"name":"ascii-unicode-escapes","result":"PASS"},{"name":"pretty-top-level-message","result":"PASS"},{"name":"nested-message-lookalike","result":"PASS"},{"name":"nested-only-fallback","result":"PASS"},{"name":"last-valid-log-record","result":"PASS"},{"name":"control-characters","result":"PASS"},{"name":"plain-log-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"empty-default-error","result":"PASS"},{"name":"nonstring-message-fallback","result":"PASS"},{"name":"bounded-log-tail","result":"PASS"},{"name":"success-stays-success","result":"PASS"},{"name":"zero-exit-without-inventory-fails","result":"PASS"}],"tested_scope":"CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN","case_count":14,"helper_sha256":"cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f"}
+2026-10-04T05:33:00.5306038Z ..............
+2026-10-04T05:33:00.5306481Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5306929Z Ran 14 tests in 3.333s
+2026-10-04T05:33:00.5307119Z 
+2026-10-04T05:33:00.5307228Z OK
+2026-10-04T05:33:00.5307607Z Native weighted preview source regression test passed.
+2026-10-04T05:33:00.5308171Z LuoShu App bridge distinguishes configured and effective fonts.
+2026-10-04T05:33:00.5308792Z Verified active font and identical composite requests reuse metadata only.
+
+2026-10-04T05:33:00.5419162Z Font digest memoization tests passed.
+2026-10-04T05:33:00.5419540Z foreground_quick_xml_test: PASS
+2026-10-04T05:33:00.5419840Z ..............
+2026-10-04T05:33:00.5420230Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5420646Z Ran 14 tests in 3.338s
+2026-10-04T05:33:00.5420812Z 
+2026-10-04T05:33:00.5420910Z OK
+2026-10-04T05:33:00.5421196Z font_switch_task_test: PASS
+2026-10-04T05:33:00.5421685Z font_switch_lock_test: PASS
+
+2026-10-04T05:33:00.5486489Z Stock inventory scan is serialized and a waiting App reuses the completed boot scan.
+2026-10-04T05:33:00.5487035Z LuoShu App-only source checks passed.
+2026-10-04T05:33:00.5487676Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T05:33:00.5488322Z .....
+2026-10-04T05:33:00.5488714Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5489127Z Ran 5 tests in 0.079s
+2026-10-04T05:33:00.5489295Z 
+2026-10-04T05:33:00.5489396Z OK
+2026-10-04T05:33:00.5489644Z ....................
+2026-10-04T05:33:00.5490054Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5490587Z Ran 20 tests in 24.667s
+2026-10-04T05:33:00.5490789Z 
+2026-10-04T05:33:00.5490905Z OK
+2026-10-04T05:33:00.5491128Z .............
+2026-10-04T05:33:00.5491655Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5492063Z Ran 13 tests in 0.576s
+
+2026-10-04T05:33:00.5539519Z test_signal_cancel_reaps_detached_descendants (__main__.RequestScopeTest.test_signal_cancel_reaps_detached_descendants) ... ok
+2026-10-04T05:33:00.5540520Z test_success_reaps_detached_descendants (__main__.RequestScopeTest.test_success_reaps_detached_descendants) ... ok
+2026-10-04T05:33:00.5541621Z test_timeout_reaps_detached_descendants (__main__.RequestScopeTest.test_timeout_reaps_detached_descendants) ... ok
+2026-10-04T05:33:00.5542770Z test_worker_failure_reaps_detached_descendants (__main__.RequestScopeTest.test_worker_failure_reaps_detached_descendants) ... ok
+2026-10-04T05:33:00.5543298Z 
+2026-10-04T05:33:00.5543551Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5543963Z Ran 5 tests in 9.557s
+2026-10-04T05:33:00.5544128Z 
+2026-10-04T05:33:00.5544227Z OK
+2026-10-04T05:33:00.5544673Z SYNC_SCOPE disconnect: code=130 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:33:00.5545451Z SYNC_SCOPE cancel: code=143 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:33:00.5546057Z SYNC_SCOPE success: code=0 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:33:00.5546670Z SYNC_SCOPE timeout: code=124 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:33:00.5547261Z SYNC_SCOPE error: code=7 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:33:00.5547715Z system health tests passed
+2026-10-04T05:33:00.5548029Z .................
+2026-10-04T05:33:00.5548422Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5548833Z Ran 17 tests in 1.852s
+2026-10-04T05:33:00.5548998Z 
+2026-10-04T05:33:00.5549100Z OK
+2026-10-04T05:33:00.5549573Z ...............................................................................................................
+2026-10-04T05:33:00.5550153Z ----------------------------------------------------------------------
+2026-10-04T05:33:00.5550559Z Ran 111 tests in 0.438s
+2026-10-04T05:33:00.5550729Z 
+2026-10-04T05:33:00.5550833Z OK
+2026-10-04T05:33:00.5580446Z ##[group]Run set -euo pipefail
+2026-10-04T05:33:00.5580842Z [36;1mset -euo pipefail[0m
+
+2026-10-04T05:34:24.7732771Z + grep -q "percent":100
+2026-10-04T05:34:24.7733151Z + grep -q luoshu_start_detached /home/runner/work/LuoShu/LuoShu/common/font_switch_task.sh
+2026-10-04T05:34:24.7733504Z + python3 /home/runner/work/LuoShu/LuoShu/scripts/font_switch_error_message_test.py
+2026-10-04T05:34:24.7733611Z ..............
+2026-10-04T05:34:24.7733862Z ----------------------------------------------------------------------
+2026-10-04T05:34:24.7734000Z Ran 14 tests in 3.332s
+2026-10-04T05:34:24.7734011Z 
+2026-10-04T05:34:24.7734114Z OK
+2026-10-04T05:34:24.7734287Z + echo font_switch_task_test: PASS
+2026-10-04T05:34:24.7734443Z font_switch_task_test: PASS
+2026-10-04T05:34:24.7734597Z + rm -rf /tmp/tmp.GUjTDwLECi
+
+2026-10-04T05:40:11.2247955Z {"schema":"luoshu-composite-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"sh","result":"PASS","cases":[{"name":"chinese-native-error","result":"PASS"},{"name":"ascii-escaped-error","result":"PASS"},{"name":"pretty-top-level-error","result":"PASS"},{"name":"nested-lookalike-error","result":"PASS"},{"name":"plain-text-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"bounded-valid-log-tail","result":"PASS"},{"name":"timeout-code-priority","result":"PASS"},{"name":"oom-code-priority","result":"PASS"},{"name":"signal-code-priority","result":"PASS"},{"name":"no-execute-code-priority","result":"PASS"},{"name":"runtime-code-priority","result":"PASS"},{"name":"missing-runtime-code-priority","result":"PASS"},{"name":"wrong-abi-code-priority","result":"PASS"},{"name":"empty-default-error","result":"PASS"}],"case_count":15}
+2026-10-04T05:40:11.9964997Z {"schema":"luoshu-stock-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"/bin/sh","result":"PASS","cases":[{"name":"chinese-quotes-and-path","result":"PASS"},{"name":"ascii-unicode-escapes","result":"PASS"},{"name":"pretty-top-level-message","result":"PASS"},{"name":"nested-message-lookalike","result":"PASS"},{"name":"nested-only-fallback","result":"PASS"},{"name":"last-valid-log-record","result":"PASS"},{"name":"control-characters","result":"PASS"},{"name":"plain-log-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"empty-default-error","result":"PASS"},{"name":"nonstring-message-fallback","result":"PASS"},{"name":"bounded-log-tail","result":"PASS"},{"name":"success-stays-success","result":"PASS"},{"name":"zero-exit-without-inventory-fails","result":"PASS"}],"tested_scope":"CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN","case_count":14,"helper_sha256":"cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f"}
+2026-10-04T05:40:15.4310738Z ..............
+2026-10-04T05:40:15.4311859Z ----------------------------------------------------------------------
+2026-10-04T05:40:15.4312565Z Ran 14 tests in 3.350s
+2026-10-04T05:40:15.4312832Z 
+2026-10-04T05:40:15.4313025Z OK
+2026-10-04T05:40:15.8860715Z Native weighted preview source regression test passed.
+2026-10-04T05:40:16.4939611Z LuoShu App bridge distinguishes configured and effective fonts.
+2026-10-04T05:40:16.7839781Z Verified active font and identical composite requests reuse metadata only.
+
+2026-10-04T05:41:05.1578125Z foreground_quick_xml_test: PASS
+2026-10-04T05:41:47.6027019Z ..............
+2026-10-04T05:41:47.6027810Z ----------------------------------------------------------------------
+2026-10-04T05:41:47.6028571Z Ran 14 tests in 3.338s
+2026-10-04T05:41:47.6028866Z 
+2026-10-04T05:41:47.6029052Z OK
+2026-10-04T05:41:47.6162034Z font_switch_task_test: PASS
+2026-10-04T05:41:47.9670207Z font_switch_lock_test: PASS
+
+2026-10-04T05:42:09.3908186Z Stock inventory scan is serialized and a waiting App reuses the completed boot scan.
+2026-10-04T05:42:09.3921798Z LuoShu App-only source checks passed.
+2026-10-04T05:42:09.4214728Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T05:42:09.5483795Z .....
+2026-10-04T05:42:09.5484920Z ----------------------------------------------------------------------
+2026-10-04T05:42:09.5486071Z Ran 5 tests in 0.078s
+2026-10-04T05:42:09.5486557Z 
+2026-10-04T05:42:09.5486862Z OK
+2026-10-04T05:42:34.0265707Z ....................
+2026-10-04T05:42:34.0266559Z ----------------------------------------------------------------------
+2026-10-04T05:42:34.0267409Z Ran 20 tests in 24.394s
+2026-10-04T05:42:34.0267723Z 
+2026-10-04T05:42:34.0267914Z OK
+2026-10-04T05:42:34.6460748Z .............
+2026-10-04T05:42:34.6461831Z ----------------------------------------------------------------------
+2026-10-04T05:42:34.6462410Z Ran 13 tests in 0.556s
+
+2026-10-04T05:42:47.6377975Z test_signal_cancel_reaps_detached_descendants (__main__.RequestScopeTest.test_signal_cancel_reaps_detached_descendants) ... ok
+2026-10-04T05:42:49.5289428Z test_success_reaps_detached_descendants (__main__.RequestScopeTest.test_success_reaps_detached_descendants) ... ok
+2026-10-04T05:42:51.8199834Z test_timeout_reaps_detached_descendants (__main__.RequestScopeTest.test_timeout_reaps_detached_descendants) ... ok
+2026-10-04T05:42:53.7111786Z test_worker_failure_reaps_detached_descendants (__main__.RequestScopeTest.test_worker_failure_reaps_detached_descendants) ... ok
+2026-10-04T05:42:53.7112545Z 
+2026-10-04T05:42:53.7112907Z ----------------------------------------------------------------------
+2026-10-04T05:42:53.7113446Z Ran 5 tests in 9.555s
+2026-10-04T05:42:53.7113671Z 
+2026-10-04T05:42:53.7113796Z OK
+2026-10-04T05:42:53.7114384Z SYNC_SCOPE disconnect: code=130 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:42:53.7115184Z SYNC_SCOPE cancel: code=143 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:42:53.7115936Z SYNC_SCOPE success: code=0 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:42:53.7116683Z SYNC_SCOPE timeout: code=124 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:42:53.7117421Z SYNC_SCOPE error: code=7 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T05:42:53.8613974Z system health tests passed
+2026-10-04T05:42:55.7558670Z .................
+2026-10-04T05:42:55.7559573Z ----------------------------------------------------------------------
+2026-10-04T05:42:55.7560203Z Ran 17 tests in 1.847s
+2026-10-04T05:42:55.7560434Z 
+2026-10-04T05:42:55.7560575Z OK
+2026-10-04T05:42:56.2923017Z ...............................................................................................................
+2026-10-04T05:42:56.2924101Z ----------------------------------------------------------------------
+2026-10-04T05:42:56.2925191Z Ran 111 tests in 0.439s
+2026-10-04T05:42:56.2925471Z 
+2026-10-04T05:42:56.2925635Z OK
+2026-10-04T05:43:01.3212083Z Built: /home/runner/work/LuoShu/LuoShu/dist/LuoShu-v1.1.1.zip
+2026-10-04T05:43:01.3213186Z Bundled App: /home/runner/work/LuoShu/LuoShu/dist/LuoShu/bundled/LuoShu-App.apk (io.github.xgl34222220.luoshu.stabletest)
+
