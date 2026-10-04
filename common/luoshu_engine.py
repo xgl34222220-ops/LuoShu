@@ -358,6 +358,81 @@ def _face_count(path: str, slot: dict[str, Any], stock_paths: dict[str, Path]) -
     return from_refs
 
 
+def _stock_file(path: str, stock_paths: dict[str, Path]) -> Path | None:
+    """The stock bytes of a slot: an explicit map, the pre-mount lower snapshot,
+    then the live path (a previous LuoShu output there keeps stock line metrics)."""
+    parts = Path(path).parts
+    candidates = [stock_paths.get(path)]
+    if len(parts) >= 4 and parts[2] == "fonts":
+        lower = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
+        candidates.append(lower / "lower" / f"{parts[1]}-fonts" / Path(*parts[3:]))
+    if not Path(path).is_symlink():  # a link (HyperOS theme overlay) is never a stock file
+        candidates.append(Path(path))
+    return next((item for item in candidates if item is not None and item.is_file()), None)
+
+
+def _read_metrics(file: Path, face_index: int = 0) -> dict[str, Any]:
+    """Topology-style metrics read from the stock file itself. The scanner only
+    measures legacy-replaceable slots, so OEM UI fonts (ColorOS SysFont-*,
+    OSans-Solid-Digits) can arrive without them."""
+    try:
+        font = TTFont(str(file), fontNumber=face_index if _collection_count(file) > 1 else -1, lazy=True)
+    except Exception:  # unreadable stock file: the slot stays stock
+        return {}
+    try:
+        hhea = font["hhea"]
+        result: dict[str, Any] = {
+            "upem": int(font["head"].unitsPerEm),
+            "hhea": {"ascent": int(hhea.ascent), "descent": int(hhea.descent), "lineGap": int(hhea.lineGap)},
+        }
+        if "OS/2" in font:
+            os2 = font["OS/2"]
+            result["os2"] = {
+                "typoAscender": int(os2.sTypoAscender), "typoDescender": int(os2.sTypoDescender),
+                "typoLineGap": int(os2.sTypoLineGap), "winAscent": int(os2.usWinAscent),
+                "winDescent": int(os2.usWinDescent), "fsSelection": int(os2.fsSelection),
+            }
+            result["weightClass"] = int(os2.usWeightClass)
+        cmap = font.getBestCmap() or {}
+        han = sum(1 for point in cmap if 0x4E00 <= point <= 0x9FFF)
+        latin = sum(1 for point in cmap if 0x41 <= point <= 0x5A or 0x61 <= point <= 0x7A)
+        digits = sum(1 for point in range(0x30, 0x3A) if point in cmap)
+        result["coverage"] = {"hasHan": han > 0, "hanCount": han, "hasLatin": latin > 0, "latinCount": latin,
+                              "hasDigits": digits == 10, "digitCount": digits}
+        return result
+    except (KeyError, AttributeError):
+        return {}
+    finally:
+        font.close()
+
+
+def enrich_topology(topology: dict[str, Any], stock_paths: dict[str, Path]) -> dict[str, Any]:
+    """Fills in metrics the scanner skipped, for slots that may be text fonts.
+
+    The scanner measures only legacy-replaceable slots; ColorOS SysFont-*,
+    OSans-* and OplusOSUI-* arrive bare, so without their coverage they were
+    unclassifiable (unknown-protected) or kept stock for missing metrics."""
+    roles, _shadow = font_role_shadow.build(topology)
+    role_slots = roles.get("slots") if isinstance(roles.get("slots"), dict) else {}
+    slots = dict(topology.get("slots") or {})
+    changed = False
+    for path, slot in slots.items():
+        if not isinstance(slot, dict) or path.startswith("/data/"):
+            continue
+        metrics = slot.get("metrics") if isinstance(slot.get("metrics"), dict) else {}
+        if isinstance(metrics.get("hhea"), dict) and metrics.get("upem"):
+            continue
+        role = str((role_slots.get(path) or {}).get("role") or "unknown-protected")
+        if role not in REPLACE_ROLES and role != "unknown-protected":
+            continue
+        stock = _stock_file(path, stock_paths)
+        measured = _read_metrics(stock, int(slot.get("faceIndex") or 0)) if stock is not None else {}
+        if measured:
+            slots[path] = dict(slot, metrics=measured)
+            changed = True
+    return dict(topology, slots=slots) if changed else topology
+
+
 def plan_targets(
     topology: dict[str, Any],
     roles: dict[str, Any],
@@ -373,6 +448,7 @@ def plan_targets(
         if not isinstance(slot, dict):
             continue
         role = str((role_slots.get(path) or {}).get("role") or "unknown-protected")
+        metrics = slot.get("metrics") if isinstance(slot.get("metrics"), dict) else {}
         coverage = _coverage(slot)
         has_han = bool(coverage.get("hasHan")) or int(coverage.get("hanCount") or 0) > 0
         has_latin = bool(coverage.get("hasLatin")) or int(coverage.get("latinCount") or 0) > 0
@@ -390,7 +466,6 @@ def plan_targets(
             if not has_han and has_latin and not sources.has_latin:
                 kept[path] = "source-has-no-latin"
                 continue
-        metrics = slot.get("metrics") if isinstance(slot.get("metrics"), dict) else {}
         if not isinstance(metrics.get("hhea"), dict) or not metrics.get("upem"):
             kept[path] = "stock-metrics-missing"
             continue
@@ -674,6 +749,7 @@ def build(
     stale snapshot of a removed file would fail boot verification); None skips
     the check (host replay)."""
     started = time.monotonic()
+    topology = enrich_topology(topology, stock_paths or {})
     roles, _shadow = font_role_shadow.build(topology)
     sources = Sources.from_spec(spec)
     targets, kept = plan_targets(topology, roles, sources, stock_paths or {})

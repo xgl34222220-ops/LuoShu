@@ -120,7 +120,10 @@ def _wanted_slots(config: Path, full: bool = False) -> list[tuple[str, str, str]
     report = _load(config / "luoshu-engine-build" / "report.json")
     replaced = [item for item in report.get("replaced") or [] if item.get("path")]
     if replaced and not full:
-        return [(str(item["path"]), str(item.get("role") or ""), "replace") for item in replaced]
+        # Kept-stock slots too, so a replay can see why they were kept.
+        kept = [item for item in report.get("keptStock") or [] if item.get("path")]
+        return [(str(item["path"]), str(item.get("role") or ""), "replace") for item in replaced] + \
+            [(str(item["path"]), "", "kept") for item in kept]
     topology = _load(config / "device_font_topology.json")
     roles = _load(config / "device_font_roles.json").get("slots") or {}
     shadow = _load(config / "device_font_shadow_plan.json").get("slots") or {}

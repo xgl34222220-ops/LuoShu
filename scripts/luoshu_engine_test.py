@@ -319,12 +319,42 @@ def test_no_ui_target(temp: Path) -> None:
         raise AssertionError("a device without replaceable UI fonts must fail unchanged")
 
 
+def test_metrics_from_stock_file(temp: Path) -> None:
+    # The topology scanner measures only legacy-replaceable slots; ColorOS
+    # SysFont-* and OSans-Solid-Digits arrive without metrics. They are read
+    # from the stock file instead of keeping the slot stock.
+    topology, stocks, xml_map = device(temp)
+    slot = topology["slots"][CLOCK]
+    expected = TTFont(str(stocks[CLOCK]))["hhea"].ascent
+    topology["slots"][CLOCK] = {key: value for key, value in slot.items() if key not in {"metrics", "weight"}}
+    user = temp / "UserVF.ttf"
+    composite.make_cjk_font(user, family="User VF", variable=True, pentagon=True)
+    _manifest, report, payload = run(temp, "nometrics", topology, {"mode": "single", "files": [str(user)]},
+                                     xml_map, stock_paths={CLOCK: stocks[CLOCK]})
+    assert CLOCK in {item["path"] for item in report["replaced"]}, report
+    assert TTFont(str(payload / CLOCK.lstrip("/")))["hhea"].ascent == expected
+    # ColorOS SysFont-Regular.ttf: no XML family, no metrics, Latin coverage
+    # only. Measured from the stock file it is a Latin text font and replaced.
+    bare = "/system/fonts/SysFont-Regular.ttf"
+    topology["slots"][bare] = {"path": bare, "slotName": "SysFont-Regular.ttf", "partition": "system",
+                               "families": [], "source": "physical-scan"}
+    _manifest, report, _payload = run(temp, "bare", topology, {"mode": "single", "files": [str(user)]},
+                                      xml_map, stock_paths={CLOCK: stocks[CLOCK], bare: stocks[ROBOTO]})
+    assert {"path": bare, "role": "latin"} in [{"path": item["path"], "role": item["role"]}
+                                               for item in report["replaced"]], report["replaced"]
+    del topology["slots"][bare]
+    # No stock bytes anywhere: still kept, with the reason.
+    _manifest, report, _payload = run(temp, "nometrics-none", topology,
+                                      {"mode": "single", "files": [str(user)]}, xml_map)
+    assert {"path": CLOCK, "reason": "stock-metrics-missing"} in report["keptStock"], report["keptStock"]
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-engine-") as raw:
         temp = Path(raw)
         for test in (test_variable_single, test_static_family, test_composite_variable, test_composite_static,
                      test_latin_only,
-                     test_collection_and_protected, test_no_ui_target):
+                     test_collection_and_protected, test_no_ui_target, test_metrics_from_stock_file):
             sub = temp / test.__name__
             sub.mkdir()
             test(sub)
