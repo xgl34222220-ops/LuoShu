@@ -115,6 +115,23 @@ def main() -> int:
                 "MysteryBroad.ttf", [], han=True, latin=True, digits=True,
                 replaceable=True,
             ),
+            # OEM global UI families carry Han + Latin without a sans-serif name.
+            "/system/fonts/MiSansVF.ttf": slot(
+                "MiSansVF.ttf", ["mipro"], han=True, latin=True, digits=True,
+                replaceable=True,
+            ),
+            "/system/fonts/SysFont-Regular.ttf": slot(
+                "SysFont-Regular.ttf", ["sysfont"], han=True, latin=True, digits=True,
+                replaceable=True,
+            ),
+            "/my_product/fonts/OPlusSans3.0.ttf": slot(
+                "OPlusSans3.0.ttf", ["oplus-sans"], han=True, latin=True, digits=True,
+                replaceable=True,
+            ),
+            "/system/fonts/MitypeVF.ttf": slot(
+                "MitypeVF.ttf", ["mitype"], latin=True, digits=True,
+                replaceable=False,
+            ),
         }
 
         topology.write_text(
@@ -204,6 +221,18 @@ def main() -> int:
         assert role("/vendor/fonts/MysteryBroad.ttf") == "unknown-protected"
         assert action("/vendor/fonts/MysteryBroad.ttf") == "review"
 
+        for oem_ui in (
+            "/system/fonts/MiSansVF.ttf",
+            "/system/fonts/SysFont-Regular.ttf",
+            "/my_product/fonts/OPlusSans3.0.ttf",
+        ):
+            assert role(oem_ui) == "ui-sans", (oem_ui, role_map["slots"][oem_ui])
+            assert action(oem_ui) == "replace", oem_ui
+
+        # HyperOS Mitype drives lock-screen/status-bar digits: exact-width path.
+        assert role("/system/fonts/MitypeVF.ttf") == "clock"
+        assert action("/system/fonts/MitypeVF.ttf") == "specialized"
+
         # Phase 2 safety invariants.
         for item in shadow["slots"].values():
             if item["role"] in {"emoji", "symbol-icon", "serif", "monospace", "special-fallback"}:
@@ -214,9 +243,9 @@ def main() -> int:
                 assert item["action"] == "review"
 
         assert shadow["summary"]["actionCounts"]["preserve"] == 6
-        assert shadow["summary"]["actionCounts"]["specialized"] == 2
+        assert shadow["summary"]["actionCounts"]["specialized"] == 3
         assert shadow["summary"]["actionCounts"]["conditional"] == 2
-        assert shadow["summary"]["actionCounts"]["replace"] == 1
+        assert shadow["summary"]["actionCounts"]["replace"] == 4
         assert shadow["summary"]["actionCounts"]["review"] == 1
 
         validated = run(

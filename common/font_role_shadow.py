@@ -15,9 +15,12 @@ import time
 from pathlib import Path
 from typing import Any
 
+from font_config_overlay import is_safe_family as _overlay_is_safe_family
+
 ROLE_SCHEMA = "device-font-roles-v1"
 PLAN_SCHEMA = "device-font-shadow-plan-v1"
-ROLE_REVISION = 1
+# Revision 2: OEM UI families (mipro, sysfont, oplus-sans ...) and Mitype clocks.
+ROLE_REVISION = 2
 PLAN_REVISION = 1
 
 PROTECTED_ROLES = {"emoji", "symbol-icon", "serif", "monospace", "special-fallback"}
@@ -33,7 +36,7 @@ SYMBOL_TOKENS = (
 )
 CLOCK_TOKENS = (
     "clock", "clockopia", "lockscreen", "lock-screen", "numeral",
-    "mitypemono", "mitype-mono",
+    "mitype",
 )
 NUMERIC_TOKENS = ("numeric", "number-font", "numberfont", "digit-font", "digitfont")
 MONO_FAMILIES = (
@@ -232,6 +235,10 @@ def _ui_family(families: list[str]) -> bool:
         ):
             return True
         if family.startswith("system-ui-") or family.startswith("ui-sans-"):
+            return True
+        # OEM global UI families (HyperOS mipro/misans, ColorOS sysfont/oplus-sans,
+        # ...). The overlay owns this list so both engines agree on what is UI.
+        if _overlay_is_safe_family(raw):
             return True
     return False
 
