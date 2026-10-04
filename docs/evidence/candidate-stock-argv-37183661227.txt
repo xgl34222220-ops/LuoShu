@@ -1,0 +1,92 @@
+CI run 37183661227 / source 57aa02ed950a50d054cb1596021a51df0349d0d8 / job 111381072372
+Selected raw log sections; omitted sections are not additional test evidence.
+
+2026-10-04T06:47:36.3235193Z {"schema":"luoshu-stock-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"/bin/sh","result":"PASS","cases":[{"name":"chinese-quotes-and-path","result":"PASS"},{"name":"ascii-unicode-escapes","result":"PASS"},{"name":"pretty-top-level-message","result":"PASS"},{"name":"nested-message-lookalike","result":"PASS"},{"name":"nested-only-fallback","result":"PASS"},{"name":"last-valid-log-record","result":"PASS"},{"name":"control-characters","result":"PASS"},{"name":"plain-log-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"empty-default-error","result":"PASS"},{"name":"nonstring-message-fallback","result":"PASS"},{"name":"bounded-log-tail","result":"PASS"},{"name":"success-stays-success","result":"PASS"},{"name":"zero-exit-without-inventory-fails","result":"PASS"}],"tested_scope":"CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN","case_count":14,"helper_sha256":"cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f"}
+2026-10-04T06:47:36.3239120Z ..............
+2026-10-04T06:47:36.3239538Z ----------------------------------------------------------------------
+2026-10-04T06:47:36.3239976Z Ran 14 tests in 3.335s
+2026-10-04T06:47:36.3240155Z 
+
+2026-10-04T06:47:36.3422807Z 
+2026-10-04T06:47:36.3423023Z OK
+2026-10-04T06:47:36.3423593Z Composite finalization is idempotent, generation-bound, and repeated mixes drop every old text slot.
+2026-10-04T06:47:36.3424373Z Stock inventory scan is serialized and a waiting App reuses the completed boot scan.
+2026-10-04T06:47:36.3424908Z LuoShu App-only source checks passed.
+2026-10-04T06:47:36.3425548Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T06:47:36.3426053Z .....
+2026-10-04T06:47:36.3426427Z ----------------------------------------------------------------------
+2026-10-04T06:47:36.3426835Z Ran 5 tests in 0.079s
+2026-10-04T06:47:36.3427001Z 
+2026-10-04T06:47:36.3427101Z OK
+2026-10-04T06:47:36.3427349Z ....................
+2026-10-04T06:47:36.3427749Z ----------------------------------------------------------------------
+2026-10-04T06:47:36.3428155Z Ran 20 tests in 24.689s
+2026-10-04T06:47:36.3428326Z 
+2026-10-04T06:47:36.3428424Z OK
+
+2026-10-04T06:47:36.3431763Z test_abnormal_cache_and_config_reads_are_bounded (__main__.InventoryTest.test_abnormal_cache_and_config_reads_are_bounded) ... ok
+2026-10-04T06:47:36.3432932Z test_add_delete_replace_permission_and_empty_invalidation (__main__.InventoryTest.test_add_delete_replace_permission_and_empty_invalidation) ... ok
+2026-10-04T06:47:36.3434015Z test_cache_hit_and_corruption_recovery (__main__.InventoryTest.test_cache_hit_and_corruption_recovery) ... ok
+2026-10-04T06:47:36.3435265Z test_cli_failed_snapshot_retains_failure_and_emits_no_successful_work_counts (__main__.InventoryTest.test_cli_failed_snapshot_retains_failure_and_emits_no_successful_work_counts) ... ok
+2026-10-04T06:47:36.3436747Z test_cli_subphase_spans_and_counters_are_numeric_and_exclude_private_paths (__main__.InventoryTest.test_cli_subphase_spans_and_counters_are_numeric_and_exclude_private_paths) ... ok
+2026-10-04T06:47:36.3438096Z test_config_is_data_and_metadata_edits_invalidate_fingerprint (__main__.InventoryTest.test_config_is_data_and_metadata_edits_invalidate_fingerprint) ... ok
+2026-10-04T06:47:36.3439435Z test_failed_live_verification_finishes_its_span_without_writing_cache (__main__.InventoryTest.test_failed_live_verification_finishes_its_span_without_writing_cache) ... ok
+2026-10-04T06:47:36.3440839Z test_family_and_weight_match_existing_shell_single_pass (__main__.InventoryTest.test_family_and_weight_match_existing_shell_single_pass) ... ok
+2026-10-04T06:47:36.3441883Z test_formats_size_errors_and_exclusions (__main__.InventoryTest.test_formats_size_errors_and_exclusions) ... ok
+2026-10-04T06:47:36.3442972Z test_fresh_and_reused_scan_bind_same_request_verification (__main__.InventoryTest.test_fresh_and_reused_scan_bind_same_request_verification) ... ok
+2026-10-04T06:47:36.3444170Z test_grouping_variants_and_representative_preserve_order (__main__.InventoryTest.test_grouping_variants_and_representative_preserve_order) ... ok
+2026-10-04T06:47:36.3445365Z test_imported_variable_probe_wins_over_single_file_name (__main__.InventoryTest.test_imported_variable_probe_wins_over_single_file_name) ... ok
+2026-10-04T06:47:36.3446655Z test_invalid_or_duplicate_cached_rows_are_rebuilt_without_a_retry_loop (__main__.InventoryTest.test_invalid_or_duplicate_cached_rows_are_rebuilt_without_a_retry_loop) ... ok
+2026-10-04T06:47:36.3447964Z test_large_library_uses_single_batch_and_returns_all_rows (__main__.InventoryTest.test_large_library_uses_single_batch_and_returns_all_rows) ... ok
+2026-10-04T06:47:36.3449478Z test_matching_thousand_font_index_reuses_rows_but_checks_two_live_snapshots (__main__.InventoryTest.test_matching_thousand_font_index_reuses_rows_but_checks_two_live_snapshots) ... ok
+2026-10-04T06:47:36.3450986Z test_mid_scan_change_preserves_previous_cache_and_key (__main__.InventoryTest.test_mid_scan_change_preserves_previous_cache_and_key) ... ok
+2026-10-04T06:47:36.3452209Z test_permission_loss_during_scan_cannot_publish_verified_cache (__main__.InventoryTest.test_permission_loss_during_scan_cannot_publish_verified_cache) ... ok
+2026-10-04T06:47:36.3453570Z test_phase_counts_separate_rebuild_and_reuse_without_changing_authority (__main__.InventoryTest.test_phase_counts_separate_rebuild_and_reuse_without_changing_authority) ... ok
+2026-10-04T06:47:36.3454812Z test_preview_real_rows_are_never_valid_or_persisted (__main__.InventoryTest.test_preview_real_rows_are_never_valid_or_persisted) ... ok
+2026-10-04T06:47:36.3456013Z test_reused_index_cannot_bless_a_change_between_live_snapshots (__main__.InventoryTest.test_reused_index_cannot_bless_a_change_between_live_snapshots) ... ok
+2026-10-04T06:47:36.3457259Z test_scanner_revision_invalidates_persisted_semantic_cache (__main__.InventoryTest.test_scanner_revision_invalidates_persisted_semantic_cache) ... ok
+2026-10-04T06:47:36.3458533Z test_shared_metadata_does_not_reclassify_every_multiweight_file (__main__.InventoryTest.test_shared_metadata_does_not_reclassify_every_multiweight_file) ... ok
+2026-10-04T06:47:36.3459763Z test_symlink_lstat_size_and_target_replacement_identity (__main__.InventoryTest.test_symlink_lstat_size_and_target_replacement_identity) ... ok
+2026-10-04T06:47:36.3460335Z 
+2026-10-04T06:47:36.3460917Z ----------------------------------------------------------------------
+2026-10-04T06:47:36.3461351Z Ran 23 tests in 0.662s
+2026-10-04T06:47:36.3461519Z 
+2026-10-04T06:47:36.3461622Z OK
+2026-10-04T06:47:36.3462021Z HOST batch inventory 1000 files: 0.0805s (not Android latency)
+2026-10-04T06:47:36.3463682Z test_alias_creation_failure_does_not_remove_an_existing_destination (__main__.CollectionContractTests.test_alias_creation_failure_does_not_remove_an_existing_destination) ... [MIX] 无法把单字体写入字体集合目标：/tmp/tmp8h6ppsdz/.luoshu-mix-stage/system/fonts/existing.ttc
+
+2026-10-04T06:47:36.3482129Z test_caller_pipe_disconnect_reaps_detached_descendants (__main__.RequestScopeTest.test_caller_pipe_disconnect_reaps_detached_descendants) ... ok
+2026-10-04T06:47:36.3483245Z test_signal_cancel_reaps_detached_descendants (__main__.RequestScopeTest.test_signal_cancel_reaps_detached_descendants) ... ok
+2026-10-04T06:47:36.3484246Z test_success_reaps_detached_descendants (__main__.RequestScopeTest.test_success_reaps_detached_descendants) ... ok
+2026-10-04T06:47:36.3485219Z test_timeout_reaps_detached_descendants (__main__.RequestScopeTest.test_timeout_reaps_detached_descendants) ... ok
+2026-10-04T06:47:36.3486227Z test_worker_failure_reaps_detached_descendants (__main__.RequestScopeTest.test_worker_failure_reaps_detached_descendants) ... ok
+2026-10-04T06:47:36.3486743Z 
+2026-10-04T06:47:36.3486991Z ----------------------------------------------------------------------
+2026-10-04T06:47:36.3487393Z Ran 5 tests in 9.552s
+2026-10-04T06:47:36.3487557Z 
+2026-10-04T06:47:36.3487654Z OK
+2026-10-04T06:47:36.3488102Z SYNC_SCOPE disconnect: code=130 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T06:47:36.3488732Z SYNC_SCOPE cancel: code=143 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T06:47:36.3489339Z SYNC_SCOPE success: code=0 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T06:47:36.3489938Z SYNC_SCOPE timeout: code=124 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T06:47:36.3490667Z SYNC_SCOPE error: code=7 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T06:47:36.3491119Z system health tests passed
+
+2026-10-04T06:47:36.3492976Z ......................................................................................................................
+2026-10-04T06:47:36.3493559Z ----------------------------------------------------------------------
+2026-10-04T06:47:36.3493961Z Ran 118 tests in 0.455s
+2026-10-04T06:47:36.3494124Z 
+2026-10-04T06:47:36.3494222Z OK
+
+2026-10-04T06:57:05.8916255Z ....................
+2026-10-04T06:57:05.8916942Z ----------------------------------------------------------------------
+2026-10-04T06:57:05.8917450Z Ran 20 tests in 24.383s
+2026-10-04T06:57:05.8917654Z 
+2026-10-04T06:57:05.8917785Z OK
+
+2026-10-04T06:57:25.7216745Z 
+2026-10-04T06:57:25.7217067Z ----------------------------------------------------------------------
+2026-10-04T06:57:25.7217566Z Ran 5 tests in 9.506s
+2026-10-04T06:57:25.7217763Z 
+2026-10-04T06:57:25.7217906Z OK
+

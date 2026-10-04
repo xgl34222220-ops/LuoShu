@@ -1,0 +1,29 @@
+--------- beginning of main
+10-04 08:51:42.885 11869 11869 I LuoShuStartup: event=font_index_visible elapsed_ms=310657 count=3 verified=false
+10-04 08:51:57.972 11869 11869 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=98.235 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=7.774 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 08:51:57.972 11869 11869 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=108.89 count=3 code=0
+10-04 08:51:57.972 11869 11869 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=325744 duration_ms=15087 code=124
+--------- beginning of system
+10-04 08:51:59.280  1162  2901 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 08:52:01.358 11869 11869 I LuoShuStartup: event=font_index_visible elapsed_ms=329130 count=3 verified=false
+10-04 08:52:07.730  1162  2901 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 08:52:08.024 11869 11869 I LuoShuAxis: event=axis_request duration_ms=25135 code=124 stdout_bytes=0
+10-04 08:52:08.025 11869 11869 I LuoShuAxis: axis_stage=source_start uptime=334.42
+10-04 08:52:08.025 11869 11869 I LuoShuAxis: axis_stage=source_ready uptime=334.71
+10-04 08:52:08.025 11869 11869 I LuoShuAxis: axis_stage=metadata_start uptime=334.76
+10-04 08:52:10.714  1162  2362 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 08:52:10.993  1162  1201 I ActivityManager: Process PhantomProcessRecord {a15f30c 13419:11869:su/u0a209} died
+10-04 08:52:11.642  1162  1201 I ActivityManager: Process PhantomProcessRecord {2ae5455 13701:11869:su/u0a209} died
+10-04 08:52:11.666 11869 11869 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=29.824 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=0.977 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 08:52:11.666 11869 11869 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=33.333 count=3 code=0
+10-04 08:52:11.666 11869 11869 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=4601.001 code=0 cleaned=true reason=success
+10-04 08:52:11.666 11869 11869 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=339438 duration_ms=10308 code=0
+10-04 08:52:11.667 11869 11869 I LuoShuStartup: event=font_index_verified elapsed_ms=339438 count=3 verified=true
+10-04 08:52:13.209  1162  4145 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found
+10-04 08:52:14.579  1162  1201 I ActivityManager: Process PhantomProcessRecord {be9fbe 13880:11869:su/u0a209} died
+10-04 08:52:14.605 11869 11869 I LuoShuAxis: event=axis_request duration_ms=6579 code=0 stdout_bytes=328
+10-04 08:52:14.605 11869 11869 I LuoShuAxis: axis_stage=source_start uptime=340.75
+10-04 08:52:14.605 11869 11869 I LuoShuAxis: axis_stage=source_ready uptime=340.78
+10-04 08:52:14.605 11869 11869 I LuoShuAxis: axis_stage=metadata_start uptime=340.78
+10-04 08:52:14.605 11869 11869 I LuoShuAxis: axis_stage=metadata_end uptime=342.33
+10-04 08:52:15.712  1162  4144 W ActivityManager: Unable to start service Intent { cmp=com.google.android.apps.tachyon/.clientapi.ClientApiService } U=0: not found

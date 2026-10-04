@@ -1,8 +1,9 @@
 """Synthetic schema tests only; these fixtures are never Android test reports."""
 import copy
+import json
 import unittest
 from test_composite_gate import valid_composite
-from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers
+from verdict import delivery_blockers, preflight_blockers, qualification_blockers, OLD_CASES, REQUEST_CASES, PACKAGE, input_validation_blockers, MIX_HANDOFF_CASES, PREVIEW_SOURCE_CASES, COMPOSITE_ERROR_CASES, STOCK_ERROR_CASES, INVENTORY_OUTPUT_CASES, inventory_output_evidence_blockers
 
 BOOT = {'before': '11111111-1111-1111-1111-111111111111', 'after': '22222222-2222-2222-2222-222222222222'}
 
@@ -29,7 +30,8 @@ def scope(expected, request=False):
 
 
 def valid_delivery():
-    report = {'legacy_composite': valid_composite(), 'run_scope': 'FULL_GATE', 'cycles': [], 'magisk_task_scope': scope(OLD_CASES),
+    from test_app_composite_gate import valid_app_composite
+    report = {'legacy_composite': valid_composite(), 'app_composite': valid_app_composite(), 'run_scope': 'FULL_GATE', 'cycles': [], 'magisk_task_scope': scope(OLD_CASES),
               'magisk_request_scope': scope(REQUEST_CASES, True),
               'app_root': 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY', 'library_timings': [],
               'candidate_apk_sha256': 'b'*64, 'fixture_inventory': [{'files':n,'unique_content_hashes':['c'*64,'d'*64]} for n in (100,1000)],
@@ -46,13 +48,63 @@ def valid_delivery():
             'commit_failure': {'data': {'state': 'failed'}, 'injection_hit': 'exact synthetic marker', 'reboot': copy.deepcopy(BOOT), 'crash_buffer': ''}})
     for count in (100,1000):
         samples = [{'kind': kind,'repetition': i,'count':count,'verified':True,'pid':'123','target_fatal':False,'anr':False,
-                    'first_inventory_frame_ms':1000,'library_open_to_inventory_first_ms':100}
+                    'first_inventory_frame_ms':1000,'library_open_to_inventory_first_ms':100,
+                    'start_ms':1,'request_timings':[{'stage':'fingerprint','completed_at_ms':100,'duration_ms':20,'code':0,
+                        'phases':{'inventory_detail':{'storage_ms':0,'snapshot_ms':1,'cache_ms':0,'build_ms':0,
+                                                    'verify_ms':0,'write_ms':0,'output_ms':0.5,'cache_hit':0,
+                                                    'snapshot_count':1,'build_count':0,'write_count':0,'code':0},
+                                  'inventory':{'duration_ms':2,'count':count,'code':0},
+                                  'scope':{'duration_ms':10,'code':0,'cleaned':True,'reason':'success'}}}]}
                    for kind in ('app_start','library_open') for i in range(3)]
         report['library_timings'].append({'inventory_count':count,'result':'PASS','samples':samples})
+    report['final_ui']['observations']={'samples':copy.deepcopy([s for s in samples if s['repetition']==0])}
     report['app_apply'] = {'result':'PASS','font_id':'synthetic','task':{'data':{'state':'success','font':'synthetic','task':'new-task','bootId':BOOT['before']}},
                           'reboot':copy.deepcopy(BOOT),'restore_reboot':copy.deepcopy(BOOT),
                           'restore_hashes_equal_stock':True,'mounted':{'font':'synthetic','mount_proofs':{'/system/fonts/a.ttf':{}}},'restore':{'data':{'state':'success'}}}
     identity = {'task': 'new-task', 'boot': BOOT['before'], 'token': 'a'*32}
+    report['magisk_mix_handoff'] = {
+        'schema': 'luoshu-mix-handoff-contract-v1', 'result': 'PASS', 'environment': 'ANDROID',
+        'selinux': 'Enforcing', 'boot_id': BOOT['before'], 'module': '/data/adb/modules/LuoShu',
+        'shell': '/system/bin/sh', 'case_count': len(MIX_HANDOFF_CASES),
+        'cases': [{'name': name, 'result': 'PASS'} for name in sorted(MIX_HANDOFF_CASES)],
+    }
+    report['magisk_preview_source'] = {
+        'schema': 'luoshu-preview-source-contract-v1', 'result': 'PASS', 'environment': 'ANDROID',
+        'selinux': 'Enforcing', 'boot_id': BOOT['before'], 'module': '/data/adb/modules/LuoShu',
+        'shell': '/system/bin/sh', 'case_count': len(PREVIEW_SOURCE_CASES),
+        'cases': [{'name': name, 'result': 'PASS'} for name in sorted(PREVIEW_SOURCE_CASES)],
+    }
+    report['magisk_composite_error'] = {
+        'schema': 'luoshu-composite-error-contract-v1', 'result': 'PASS', 'environment': 'ANDROID',
+        'selinux': 'Enforcing', 'boot_id': BOOT['before'], 'module': '/data/adb/modules/LuoShu',
+        'shell': '/system/bin/sh', 'case_count': len(COMPOSITE_ERROR_CASES),
+        'cases': [{'name': name, 'result': 'PASS'} for name in sorted(COMPOSITE_ERROR_CASES)],
+    }
+    report['magisk_stock_error'] = {
+        'schema':'luoshu-stock-error-contract-v1','result':'PASS','environment':'ANDROID',
+        'tested_scope':'CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN','helper_sha256':'a'*64,
+        'selinux':'Enforcing','boot_id':BOOT['before'],'module':'/data/adb/modules/LuoShu','shell':'/system/bin/sh',
+        'case_count':len(STOCK_ERROR_CASES),'cases':[{'name':name,'result':'PASS'} for name in sorted(STOCK_ERROR_CASES)],
+    }
+    report['magisk_inventory_output'] = {
+        'schema':'luoshu-inventory-output-contract-v1','result':'PASS','environment':'ANDROID',
+        'tested_scope':'CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS','router_sha256':'a'*64,
+        'selinux':'Enforcing','boot_id':BOOT['before'],'module':'/data/adb/modules/LuoShu','shell':'/system/bin/sh',
+        'case_count':len(INVENTORY_OUTPUT_CASES),
+        'cases':[dict(name=name,result='PASS',input_bytes=values[0],output_bytes=values[1],code=values[2])
+                 for name,values in INVENTORY_OUTPUT_CASES.items()],
+    }
+    weight = {'tag': 'wght', 'name': 'Weight', 'min': 400, 'default': 400, 'max': 900, 'hidden': False}
+    report['axis_metadata'] = {'status': 'ok', 'variable': True, 'hasWeight': True, 'weight': weight, 'axes': [weight]}
+    report['app_axes'] = {'result': 'PASS', 'package': PACKAGE, 'font_id': 'LuoShuAxisGate',
+        'actual_app_pid': '123', 'source_sha256': 'e'*64, 'stock_hashes_unchanged': True,
+        'imported_sha256': 'e'*64, 'import_result': {'status': 'ok', 'data': {'kind': 'font',
+            'id': 'LuoShuAxisGate', 'supportsCjk': True, 'duplicate': False}},
+        'target_fatal': False, 'anr': False, 'hidden_axis_visible': False, 'cjk_card_scanned_to_next_slot': True,
+        'next_slot_detail_bounds': '[0,150][200,190]',
+        'observed_labels': ['字宽', '纹理细节', 'XTRA', '可变字体', '英文字形']}
+    report['app_axes']['library_preflight'] = copy.deepcopy(report['final_ui']['observations'])
+    report['app_axes']['library_preflight'].update(result='PASS', inventory_count=1000)
     source = {'snapshot_digest': 'b'*64, 'source_fingerprint': 'font-selection-v1:' + 'c'*64}
     report['app_apply']['input_events'] = [dict(identity, event='snapshot', **source),
         dict(identity, event='full_validation', valid=True, code=0),
@@ -61,6 +113,82 @@ def valid_delivery():
 
 
 class VerdictTests(unittest.TestCase):
+    def test_inventory_output_rejects_missing_duplicate_or_changed_bytes_and_codes(self):
+        for mutation in ('absent','missing','duplicate','failed','malformed','short-output','exit-code','boolean'):
+            r=valid_delivery(); value=r['magisk_inventory_output']
+            if mutation=='absent': del r['magisk_inventory_output']
+            elif mutation=='missing': value['cases'].pop()
+            elif mutation=='duplicate': value['cases'][0]=value['cases'][1].copy()
+            elif mutation=='failed': value['cases'][0]['result']='FAIL'
+            elif mutation=='malformed': value['cases'][0]=None
+            elif mutation=='short-output': value['cases'][1]['output_bytes']=0
+            elif mutation=='exit-code': value['cases'][2]['code']=0
+            else: value['cases'][0]['code']=False
+            self.assertTrue(delivery_blockers(r),mutation)
+
+    def test_inventory_output_requires_exact_android_scope_and_enforcing_source(self):
+        for key,value in [('environment','HOST_ONLY'),('router_sha256',''),('boot_id','invalid'),
+                          ('selinux','Permissive'),('module','/tmp/fixture'),('shell','sh'),
+                          ('tested_scope','FULL_INVENTORY_OR_MOUNTS')]:
+            r=valid_delivery(); r['magisk_inventory_output'][key]=value
+            self.assertTrue(delivery_blockers(r),key)
+
+    def test_inventory_output_evidence_binds_raw_stdout_command_source_and_boot(self):
+        value=valid_delivery()['magisk_inventory_output']
+        raw={k:v for k,v in value.items() if k not in ('boot_id','selinux','module','shell')}
+        command={'argv':['shell','su','-mm','-c',
+            '/runtime/bin/luoshu-python /data/local/tmp/luoshu-inventory-output-contract.py '
+            '--module /data/adb/modules/LuoShu --shell /system/bin/sh '
+            '--output /data/local/tmp/luoshu-inventory-output-contract.json'],
+            'exit':0,'stdout':json.dumps(raw)}
+        self.assertEqual(inventory_output_evidence_blockers(value,[command],'a'*64,BOOT['before']),[])
+        for mutation in ('missing','duplicate','failed','wrong-shell','empty','malformed','changed','source','boot'):
+            steps=[copy.deepcopy(command)]; source='a'*64; boot=BOOT['before']
+            if mutation=='missing': steps=[]
+            elif mutation=='duplicate': steps.append(copy.deepcopy(command))
+            elif mutation=='failed': steps[0]['exit']=7
+            elif mutation=='wrong-shell': steps[0]['argv'][-1]=steps[0]['argv'][-1].replace('--shell /system/bin/sh','--shell sh')
+            elif mutation=='empty': steps[0]['stdout']=''
+            elif mutation=='malformed': steps[0]['stdout']='{'
+            elif mutation=='changed':
+                changed=copy.deepcopy(raw); changed['cases'][1]['output_bytes']=0
+                steps[0]['stdout']=json.dumps(changed)
+            elif mutation=='source': source='b'*64
+            else: boot=BOOT['after']
+            self.assertTrue(inventory_output_evidence_blockers(value,steps,source,boot),mutation)
+
+    def test_stock_error_requires_complete_unique_actual_android_function_cases(self):
+        for mutation in ('host','missing','duplicate','failed','malformed'):
+            r=valid_delivery(); value=r['magisk_stock_error']
+            if mutation=='host': value['environment']='HOST_ONLY'
+            elif mutation=='missing': value['cases'].pop()
+            elif mutation=='duplicate': value['cases'][0]=value['cases'][1].copy()
+            elif mutation=='failed': value['cases'][0]['result']='FAIL'
+            else: value['cases'][0]=None
+            self.assertTrue(delivery_blockers(r))
+
+    def test_stock_error_requires_installed_helper_and_enforcing_boot(self):
+        for key,value in [('helper_sha256',''),('boot_id','invalid'),('selinux','Permissive'),
+                          ('module','/tmp/fixture'),('shell','sh'),('tested_scope','FULL_STOCK_SCAN')]:
+            r=valid_delivery();r['magisk_stock_error'][key]=value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_inventory_timing_presence_cannot_be_claimed_by_a_boolean(self):
+        r=valid_delivery()
+        r['library_timings'][0]['samples'][0]['request_timings']=True
+        self.assertTrue(any('request phase timings' in e for e in delivery_blockers(r)))
+        r=valid_delivery()
+        del r['final_ui']['observations']
+        self.assertTrue(any('final cold/warm live request' in e for e in delivery_blockers(r)))
+
+    def test_each_library_and_final_observation_requires_same_request_subphases(self):
+        for group in ('100', '1000', 'final'):
+            r=valid_delivery()
+            sample=(r['final_ui']['observations']['samples'][0] if group=='final' else
+                    r['library_timings'][0 if group=='100' else 1]['samples'][0])
+            del sample['request_timings'][0]['phases']['inventory_detail']
+            self.assertTrue(delivery_blockers(r),group)
+
     def test_app_input_chain_requires_exact_order_and_identity(self):
         for mutation in ('order', 'task', 'boot', 'token', 'digest', 'valid', 'rechecked'):
             report = valid_delivery()
@@ -74,6 +202,87 @@ class VerdictTests(unittest.TestCase):
 
     def test_complete_schema(self):
         self.assertEqual(delivery_blockers(valid_delivery()), [])
+
+    def test_host_missing_duplicate_or_failed_handoff_cases_cannot_pass_android(self):
+        for mutation in ('host', 'missing', 'duplicate', 'failed'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['magisk_mix_handoff']
+                if mutation == 'host': value['environment'] = 'HOST_ONLY'
+                elif mutation == 'missing': value['cases'].pop()
+                elif mutation == 'duplicate': value['cases'][0] = value['cases'][1].copy()
+                else: value['cases'][0]['result'] = 'FAIL'
+                self.assertTrue(delivery_blockers(r))
+
+    def test_handoff_context_must_remain_the_exact_enforcing_module(self):
+        for key, value in (('boot_id', ''), ('selinux', 'Permissive'), ('module', '/data/adb/modules/LuoShu-copy')):
+            r = valid_delivery(); r['magisk_mix_handoff'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_preview_source_requires_all_actual_android_selection_cases(self):
+        for mutation in ('host', 'missing', 'duplicate', 'failed', 'malformed'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['magisk_preview_source']
+                if mutation == 'host': value['environment'] = 'HOST_ONLY'
+                elif mutation == 'missing': value['cases'].pop()
+                elif mutation == 'duplicate': value['cases'][0] = value['cases'][1].copy()
+                elif mutation == 'failed': value['cases'][0]['result'] = 'FAIL'
+                else: value['cases'][0] = None
+                self.assertTrue(delivery_blockers(r))
+
+    def test_preview_selection_requires_original_enforcing_module_context(self):
+        for key, value in (('boot_id', ''), ('selinux', 'Permissive'),
+                           ('module', '/data/local/tmp/fixture'), ('shell', 'sh')):
+            r = valid_delivery(); r['magisk_preview_source'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_composite_error_requires_actual_android_complete_case_set(self):
+        for mutation in ('host', 'missing', 'duplicate', 'failed', 'malformed'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['magisk_composite_error']
+                if mutation == 'host': value['environment'] = 'HOST_ONLY'
+                elif mutation == 'missing': value['cases'].pop()
+                elif mutation == 'duplicate': value['cases'][0] = value['cases'][1].copy()
+                elif mutation == 'failed': value['cases'][0]['result'] = 'FAIL'
+                else: value['cases'][0] = None
+                self.assertTrue(delivery_blockers(r))
+
+    def test_composite_error_requires_installed_module_and_enforcing_boot(self):
+        for key, value in (('boot_id', ''), ('selinux', 'Permissive'),
+                           ('module', '/data/local/tmp/fixture'), ('shell', 'sh')):
+            r = valid_delivery(); r['magisk_composite_error'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_actual_collection_axis_name_flags_and_bounds_are_required(self):
+        for key, value in (('name', ''), ('hidden', True), ('default', 450), ('tag', 'wdth')):
+            r = valid_delivery(); r['axis_metadata']['weight'][key] = value
+            self.assertTrue(delivery_blockers(r))
+
+    def test_axis_ui_pass_requires_visible_names_complete_card_and_no_mount_changes(self):
+        for mutation in ('label', 'hidden', 'stock', 'card'):
+            r = valid_delivery(); value = r['app_axes']
+            if mutation == 'label': value['observed_labels'].remove('纹理细节')
+            elif mutation == 'hidden': value['observed_labels'].append('HIDN')
+            elif mutation == 'stock': value['stock_hashes_unchanged'] = False
+            else: value['cjk_card_scanned_to_next_slot'] = False
+            self.assertTrue(delivery_blockers(r))
+
+    def test_axis_ui_requires_a_real_new_import_with_exact_source_bytes(self):
+        for mutation in ('missing', 'duplicate', 'id', 'hash', 'unsupported'):
+            with self.subTest(mutation=mutation):
+                r = valid_delivery(); value = r['app_axes']
+                if mutation == 'missing': value.pop('import_result')
+                elif mutation == 'hash': value['imported_sha256'] = 'f'*64
+                else:
+                    data = value['import_result']['data']
+                    if mutation == 'duplicate': data['duplicate'] = True
+                    elif mutation == 'id': data['id'] = 'other-font'
+                    else: data['supportsCjk'] = False
+                self.assertTrue(delivery_blockers(r))
+
+    def test_card_scan_requires_actual_detail_heading_coordinates(self):
+        for invalid in ('', 'summary-only', '[0,0][0,0]extra'):
+            r = valid_delivery(); r['app_axes']['next_slot_detail_bounds'] = invalid
+            self.assertTrue(delivery_blockers(r))
     def test_diagnostic_fake_pass_blocked(self):
         r=valid_delivery();r.update(run_scope='APP_DIAGNOSTIC_ONLY',delivery_gate='PASS')
         self.assertTrue(delivery_blockers(r))

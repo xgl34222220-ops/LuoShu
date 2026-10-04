@@ -1,0 +1,10 @@
+{
+  "schema": "luoshu-reviewed-root-artifact-v1",
+  "review_scope": "CANDIDATE_ONLY",
+  "candidate_run": 37197455936,
+  "runtime_source": "d12168a88a06193b238821c87d0f4bf844a74b96",
+  "candidate_artifact": {
+    "id": 11302085754,
+    "sha256": "e8e29d6d71b92d6ba983741afcfad00c25bb8835c2ba3af7951ac2af17871e87"
+  }
+}

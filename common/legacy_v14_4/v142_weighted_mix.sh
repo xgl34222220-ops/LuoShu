@@ -209,7 +209,8 @@ run_instance() {
     ) >"$_report" 2>"$_error"
     _code=$?
     if [ "$_code" -ne 0 ] || [ ! -s "$_destination" ]; then
-        _message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_error" "$_report" 2>/dev/null | tail -n1)
+        _message=$(luoshu_mix_task_message_from_response "$_report" 2>/dev/null || true)
+        [ -n "$_message" ] || _message=$(luoshu_mix_task_message_from_response "$_error" 2>/dev/null || true)
         [ -n "$_message" ] || _message=$(tail -n1 "$_error" 2>/dev/null | tr -d '\r')
         [ -n "$_message" ] || _message="字体实例化失败（代码 $_code）"
         echo "错误：$_message" >&2
@@ -307,7 +308,7 @@ worker() {
             _child=$(luoshu_resolve_nested_mix_task "$_response_file" "$BASE_TASK_FILE" "$_previous_child" \
                 LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
         else
-            _child=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+            _child=''
         fi
         [ -z "$_child" ] || break
         kill -0 "$_starter_pid" 2>/dev/null || break
@@ -324,7 +325,7 @@ worker() {
         if type luoshu_mix_task_message_from_response >/dev/null 2>&1; then
             _message=$(luoshu_mix_task_message_from_response "$_response_file" 2>/dev/null)
         else
-            _message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+            _message=''
         fi
         [ -n "$_message" ] || _message='完整复合字体子任务在 20 秒内未登记，已停止等待'
         update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
@@ -341,7 +342,7 @@ worker() {
             _base_message=$(read_value "$BASE_TASK_FILE" message)
             _base_percent=0
             if [ -s "$PROGRESS_FILE" ]; then
-                _base_percent=$(sed -n 's/^.*"percent":\([0-9][0-9]*\).*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
+                _base_percent=$(luoshu_mix_progress_percent "$PROGRESS_FILE")
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
             _mapped=$((36 + (_base_percent * 64 / 100)))

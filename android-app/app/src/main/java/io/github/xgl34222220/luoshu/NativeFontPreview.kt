@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.widget.TextView
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,23 +34,6 @@ private const val PREVIEW_CACHE_MAX_FILES = 32
 private const val PREVIEW_CACHE_MAX_BYTES = 384L * 1024L * 1024L
 private const val PREVIEW_MEMORY_MAX_ENTRIES = 24
 private const val PREVIEW_EXPORT_CONCURRENCY = 2
-
-internal data class VariableAxisInfo(
-    val tag: String,
-    val min: Float,
-    val default: Float,
-    val max: Float,
-)
-
-internal data class WeightAxisInfo(
-    val loading: Boolean = true,
-    val hasWeight: Boolean = false,
-    val min: Int = 100,
-    val default: Int = 400,
-    val max: Int = 900,
-    val axes: List<VariableAxisInfo> = emptyList(),
-    val error: String = "",
-)
 
 private data class PreviewTypefaceState(
     val typeface: Typeface? = null,
@@ -113,8 +97,10 @@ private class PreviewTextView(context: Context) : TextView(context) {
 private val previewMemoryCache = object : LruCache<String, PreviewMemoryEntry>(PREVIEW_MEMORY_MAX_ENTRIES) {}
 private val previewLocks = ConcurrentHashMap<String, Mutex>()
 private val previewExportSemaphore = Semaphore(PREVIEW_EXPORT_CONCURRENCY)
-private val axisInfoCache = ConcurrentHashMap<String, WeightAxisInfo>()
-private val axisInfoLocks = ConcurrentHashMap<String, Mutex>()
+internal val fontAxisRepository = FontAxisRepository()
+
+internal suspend fun resolveFontAxisInfo(font: FontItem): WeightAxisInfo =
+    fontAxisRepository.resolve(font.sourceRevision) { loadWeightAxisInfo(font) }
 
 private fun previewMemoryGet(key: String): PreviewMemoryEntry? = synchronized(previewMemoryCache) {
     previewMemoryCache.get(key)
@@ -127,7 +113,8 @@ private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchroni
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
     val revision = font?.sourceRevision
-    val cached = remember(revision) { revision?.let(axisInfoCache::get) }
+    val successfulEntries by fontAxisRepository.successes.collectAsState()
+    val cached = revision?.let(successfulEntries::get)
     val info by produceState(
         initialValue = cached ?: WeightAxisInfo(loading = font?.variable == true),
         key1 = revision,
@@ -138,73 +125,27 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
             font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
             !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
             cached != null -> cached
-            else -> {
-                val lock = axisInfoLocks.computeIfAbsent(font.sourceRevision) { Mutex() }
-                lock.withLock {
-                    axisInfoCache[font.sourceRevision] ?: loadWeightAxisInfo(font).also { loaded ->
-                        if (loaded.error.isBlank()) axisInfoCache[font.sourceRevision] = loaded
-                    }
-                }
-            }
+            else -> resolveFontAxisInfo(font)
         }
     }
-    return info
+    // A picker or another control may finish a retry after this control failed.
+    // Prefer that real success without another read or a deadline extension.
+    return cached ?: info
 }
 
 private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
-    val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
+    val diagnostics = if (BuildConfig.STARTUP_DIAGNOSTICS) "LUOSHU_AXIS_DIAGNOSTICS=1 " else ""
+    val command = "${diagnostics}sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
+    val startedAt = System.nanoTime()
     val result = RootShell.exec(command, timeoutMs = 25_000L)
+    FontLoadDiagnostics.axisRequest((System.nanoTime() - startedAt) / 1_000_000L, result)
     if (result.code != 0) {
         error(result.stderr.ifBlank { bridgeError(result.stdout, "字体轴读取失败") })
     }
     val jsonLine = result.stdout.lineSequence()
         .firstOrNull { it.trimStart().startsWith("{") }
         ?: error("未收到字体轴数据")
-    val root = JSONObject(jsonLine.trim())
-    if (root.optString("status") != "ok") {
-        error(root.optString("message", "字体轴读取失败"))
-    }
-    val rawAxes = root.optJSONArray("axes")
-    val axes = buildList {
-        if (rawAxes != null) {
-            for (index in 0 until rawAxes.length()) {
-                val axis = rawAxes.optJSONObject(index) ?: continue
-                val tag = axis.optString("tag").trim()
-                val minimum = axis.optDouble("min", Double.NaN).toFloat()
-                val maximum = axis.optDouble("max", Double.NaN).toFloat()
-                val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
-                if (
-                    tag.length == 4 &&
-                    minimum.isFinite() &&
-                    maximum.isFinite() &&
-                    defaultValue.isFinite() &&
-                    maximum >= minimum
-                ) {
-                    add(
-                        VariableAxisInfo(
-                            tag = tag,
-                            min = minimum,
-                            default = defaultValue.coerceIn(minimum, maximum),
-                            max = maximum,
-                        ),
-                    )
-                }
-            }
-        }
-    }
-    val weight = axes.firstOrNull { it.tag == "wght" }
-    if (weight == null) {
-        WeightAxisInfo(loading = false, hasWeight = false, axes = axes)
-    } else {
-        WeightAxisInfo(
-            loading = false,
-            hasWeight = true,
-            min = weight.min.roundToInt(),
-            default = weight.default.roundToInt(),
-            max = weight.max.roundToInt(),
-            axes = axes,
-        )
-    }
+    parseWeightAxisInfo(JSONObject(jsonLine.trim()))
 } catch (cancelled: CancellationException) {
     throw cancelled
 } catch (error: Throwable) {

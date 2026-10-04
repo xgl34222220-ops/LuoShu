@@ -1,10 +1,11 @@
 # Root Android delivery gate
 
-`luoshu-root-android-probe.yml` is an environment qualification check, **not a
-release check**. PASS proves the unmodified baseline ARM64 ELF can execute its
-Python/FontTools/native extensions and launch children on that specific AVD,
-before and after a verified kernel reboot. It does not prove module installation,
-font activation, rollback, child cleanup, or persistent font mounts.
+`luoshu-root-android-probe.yml` now contains runtime qualification and separate
+baseline/candidate module, cleanup, composite and App checks on one disposable
+AOSP API35 x86_64/nativebridge AVD. Each component needs its own evidence; runtime
+qualification alone cannot prove font activation or a complete delivery result.
+The workflow pins the exact candidate build and module digest. A green scoped
+AVD result is not physical ARM64/OEM qualification or permission to release.
 
 The probe uses the SHA256-pinned official `refactor-v1.1.1` ZIP. It never replaces
 the runtime with host Python or an x86 build. Executable-format errors, missing
@@ -31,7 +32,7 @@ actual evidence. JNI ARM translation support is not evidence for standalone ELF.
 Any proposed x86 Android test runtime needs a separate scope decision and results
 must remain labeled x86; it cannot validate the original ARM64 delivery package.
 
-## Required delivery evidence (all pending until actually executed)
+## Required delivery evidence (recorded separately for each execution)
 
 For BOTH exact official baseline and exact candidate package hashes on a qualified
 Root Android target, run the following without editing frozen mount code:
@@ -60,8 +61,60 @@ Root Android target, run the following without editing frozen mount code:
    Any missing, skipped, unsupported or failed requirement blocks delivery.
 
 Do not give a downloadable candidate to the user as "tested" until all applicable
-requirements are evidenced. This probe deliberately reports `delivery_gate:
-NOT_RUN`, including when `qualification: PASS`.
+requirements are evidenced. The runtime-only `qualification.json` deliberately
+reports `delivery_gate: NOT_RUN`, including when `qualification: PASS`; the
+separate module delivery report records the full gate's actual result.
+
+The candidate additionally runs the 32 composite-handoff/UTF-8 message cases
+from `scripts/mix_handoff_contract_test.py` using its installed original ARM64
+Python and Android shell in the Enforcing Magisk guest. Host results, duplicate
+or missing cases, wrong module/shell or changed boot identity cannot pass.
+The installed axis helper must read the pinned actual CFF2 collection's axis
+name, 400/400/900 weight range and non-hidden flag.
+
+The installed preview source selector additionally runs all 18 cases from
+`scripts/preview_source_contract_test.py` under that original ARM64 Python and
+Android shell. Selection-only files cover variable-source priority, nearest/tied
+static weights, format ordering, literal and Chinese names, rejected directories,
+missing sources and a 1000-file inventory. They are not rendering-font fixtures.
+The report binds the exact module, shell, unchanged boot and Enforcing context;
+host results, missing/duplicated/failed cases cannot satisfy this gate. This
+contract does not replace actual App timings, font rendering or mount evidence.
+
+The current installed `font_mix.sh` error function separately runs all 15 cases
+from `scripts/composite_error_contract_test.py`, using that original ARM64 Python
+and Android shell. The harness extracts the real installed function to avoid
+executing the entry's dispatcher. It proves UTF-8/escaped/pretty/nested JSON
+handling, bounded JSON log tails, old return-code priority and plain-text/helper
+failure fallback. Exact boot, Enforcing context and complete named cases are
+required. This is error-function evidence, separate from complete CLI generation;
+the frozen legacy engine stays byte-for-byte intact.
+
+`app_axis_gate.py` inspects an original generated variable TTF with `wdth`,
+named custom `XTRA` and hidden `HIDN`, without applying it. The fixture enters
+through the existing native importer's trusted `.stabletest` cache intake;
+the importer must accept it as new CJK-capable font and preserve its SHA256.
+No font-index cache or variable-font configuration is fabricated by the gate.
+The real App must show the variable-font capability and the custom axis name,
+retain the established Chinese label for width, and omit the hidden axis from
+ordinary controls. Actual UI XML through the next font slot, a real screenshot,
+live App PID, absent target fatal/ANR and unchanged system-font hashes are all
+required. Cleanup removes only this new fixture, its importer-generated config
+and its owned intake files. Selecting a font is UI evidence; it does not prove
+App composite generation, native ARM64 phone rendering or OEM behavior.
+The composition summary repeats slot titles: selectors must bind the actual
+detailed CJK heading/explanation and ignore clickable summary ancestors. Only
+the following detailed card can terminate the full-card scan. The recorded
+`fixtures/axis-navigation-37160499707.xml` is a selector regression fixture;
+replaying it is not a new Android run or evidence of successful axis display.
+
+The legacy CLI composite component also requires the generated CJK collection's
+sidecar and finalization report. They must match this request, source-composite
+digest, original system TTC digest, ordered indexes and exact next-payload bytes.
+Structural-only evidence cannot pass this component. Its activation still needs
+a completed boot with a changed kernel ID, matching mounts/state, then a second
+completed boot restoring the original font hashes. This does not exercise the
+App's composite UI or every OEM partition/variable-font configuration.
 
 ## Architecture references
 
@@ -128,6 +181,19 @@ App evidence requires actual verified library frames for 100/1000 synthetic
 fonts and a new matching switch task following a real UI apply click.
 Pending, unsupported or failed stages must remain blocked.
 
+Actual library readiness also checks both log `ANR in` and Android
+`dumpsys activity lastanr` `Reason:` ownership. Other-process ANRs cannot be
+attributed to the candidate merely because the activity dump mentions it.
+Any target ANR still blocks acceptance after the UI recovers.
+
+On a rooted App-stage failure, `app_anr.py` reads up to four newest `/data/anr`
+text files, each bounded to 4 MiB, before UI/CLI diagnostics or force-stop.
+Only exact `.stabletest` process blocks are saved; raw other-process thread
+dumps are excluded from command reports. Read hashes/limits and incomplete
+blocks are recorded. Missing traces remain explicitly unavailable and never
+satisfy acceptance. This uses the existing authorized Magisk access on
+`emulator-5554`, adds no grant and never dismisses the target ANR dialog.
+
 
 ## Legacy composite commit regression gate
 
@@ -172,3 +238,23 @@ remain distinct from the existing actual-App single-font apply test. They are
 AOSP API35 x86_64/nativebridge evidence only, never ColorOS, physical-device,
 native-ARM64 or App-composite-UI validation. Host schema/fixture tests alone cannot
 satisfy this Android gate.
+
+The additional `app_composite` gate selects all three slots through the actual
+App, clicks `生成并应用`, binds a new persisted task to those choices and proves
+the visible completed state in the same App process. It shares the existing
+generation/monitor/finalizer/reboot/mount/default-restoration checks; CLI start
+cannot substitute for App admission. Full current delivery requires both paths,
+16 actual module boot transitions and seven mounted views. Axis selection first
+requires two verified live cold/warm library observations in the same process;
+these are separate from the 14 current performance observations.
+
+Before App stages, `magisk_inventory_output` runs five list-router transport
+fixtures using the installed original ARM64 runtime and `/system/bin/sh`.
+The 1000-row and backend-error fixtures exceed 300 KiB and include Chinese,
+quotes and literal shell-looking text. Exact byte counts and backend exit codes
+must pass. This tests the extracted installed compatibility router with a
+synthetic backend, not complete inventory scanning or mount acceptance. Its
+installed router hash, Enforcing boot, actual command arguments and raw stdout
+are independently bound to the reviewed candidate source. Host PASS, empty
+stdout, changed counts/codes, duplicate commands or stale source cannot satisfy
+the current gate. Historical artifacts retain their pinned harness requirements.

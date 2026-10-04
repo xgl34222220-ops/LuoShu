@@ -1,0 +1,32 @@
+{
+  "result": "PASS",
+  "run_id": 37189036319,
+  "artifact_id": 11298680369,
+  "artifact_sha256": "114797201b8e51c6fd6f9fcbc108b7ddbfb69ebe3df0d0a5c3950e08b58cca25",
+  "runtime_source": "a70b19c89a0c8daf21d724d10201915fda7eafc8",
+  "module_sha256": "f8e357c0b4ad0f47c2ed1f078e5e89f522d934fed2d858fc5689001ba41f86d3",
+  "apk_sha256": "72fd36d03d7c548356e20bb0bc358e7c25ab5257d9397b1928062313c6793356",
+  "frozen_files_verified": 17,
+  "source_files_verified": [
+    "common/mix_task_handoff.sh",
+    "common/weighted_mix_task.sh",
+    "common/legacy_v14_4/v142_weighted_mix.sh",
+    "common/font_axis_info.py",
+    "common/font_metadata.py",
+    "common/task_scope.py",
+    "common/app_bridge.sh",
+    "common/util_functions_core.sh",
+    "common/font_mix.sh",
+    "common/font_manager.sh",
+    "common/font_inventory_batch.py"
+  ],
+  "provenance": {
+    "sourceCommit": "a70b19c89a0c8daf21d724d10201915fda7eafc8",
+    "package": "io.github.xgl34222220.luoshu.stabletest",
+    "apkSha256": "72fd36d03d7c548356e20bb0bc358e7c25ab5257d9397b1928062313c6793356"
+  },
+  "legacy_frozen_engine": {
+    "sha256": "f71280c692253f70397edb275c483fad677de337bd3dfcba73bd511dfd4bcbd6",
+    "unchanged": true
+  }
+}

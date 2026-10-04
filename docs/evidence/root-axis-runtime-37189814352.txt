@@ -1,0 +1,22 @@
+--------- beginning of main
+10-04 09:26:03.029  7850  7850 I LuoShuStartup: event=font_index_visible elapsed_ms=289756 count=3 verified=false
+10-04 09:26:16.822  7850  7850 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=39.755 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=10.844 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 09:26:16.822  7850  7850 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=80.002 count=3 code=0
+10-04 09:26:16.822  7850  7850 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=8617.567 code=0 cleaned=true reason=success
+10-04 09:26:16.822  7850  7850 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=303549 duration_ms=13793 code=0
+10-04 09:26:17.174  7850  7850 I LuoShuStartup: event=font_index_verified elapsed_ms=303901 count=3 verified=true
+10-04 09:26:20.873  7850  7850 I LuoShuStartup: event=font_index_visible elapsed_ms=307600 count=3 verified=false
+10-04 09:26:28.228  7850  7850 I LuoShuAxis: event=axis_request duration_ms=25163 code=124 stdout_bytes=0
+10-04 09:26:28.229  7850  7850 I LuoShuAxis: axis_stage=source_start uptime=307.68
+10-04 09:26:28.229  7850  7850 I LuoShuAxis: axis_stage=source_ready uptime=308.00
+10-04 09:26:28.229  7850  7850 I LuoShuAxis: axis_stage=metadata_start uptime=308.03
+10-04 09:26:31.107  7850  7850 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory_detail storage_ms=0.0 snapshot_ms=6.965 cache_ms=0.0 build_ms=0.0 verify_ms=0.0 write_ms=0.0 output_ms=1.338 cache_hit=0 snapshot_count=1 build_count=0 write_count=0 code=0
+10-04 09:26:31.107  7850  7850 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=10.64 count=3 code=0
+10-04 09:26:31.107  7850  7850 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=3819.502 code=0 cleaned=true reason=success
+10-04 09:26:31.107  7850  7850 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=317835 duration_ms=10234 code=0
+10-04 09:26:31.108  7850  7850 I LuoShuStartup: event=font_index_verified elapsed_ms=317835 count=3 verified=true
+10-04 09:26:33.767  7850  7850 I LuoShuAxis: event=axis_request duration_ms=5538 code=0 stdout_bytes=328
+10-04 09:26:33.768  7850  7850 I LuoShuAxis: axis_stage=source_start uptime=318.87
+10-04 09:26:33.768  7850  7850 I LuoShuAxis: axis_stage=source_ready uptime=318.91
+10-04 09:26:33.768  7850  7850 I LuoShuAxis: axis_stage=metadata_start uptime=318.91
+10-04 09:26:33.768  7850  7850 I LuoShuAxis: axis_stage=metadata_end uptime=320.43

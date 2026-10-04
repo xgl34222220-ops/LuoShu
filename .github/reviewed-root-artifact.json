@@ -1,0 +1,16 @@
+{
+  "schema": "luoshu-reviewed-root-artifact-v1",
+  "root_run": 37198566413,
+  "candidate_run": 37197455936,
+  "runtime_source": "d12168a88a06193b238821c87d0f4bf844a74b96",
+  "harness_commit": "d694f58d072a4ce3c7bb4a0f4fe3b55241ff5404",
+  "expected_root_result": "PASS",
+  "root_artifact": {
+    "id": 11302008315,
+    "sha256": "a1be84f605b2b8df2474da8cb2870fd35faf8341fe09376f89fc9edb8f248b33"
+  },
+  "candidate_artifact": {
+    "id": 11302085754,
+    "sha256": "e8e29d6d71b92d6ba983741afcfad00c25bb8835c2ba3af7951ac2af17871e87"
+  }
+}

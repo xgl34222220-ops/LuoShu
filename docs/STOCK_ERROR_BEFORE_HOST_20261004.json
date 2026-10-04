@@ -1,0 +1,6 @@
+{
+  "evidence_kind": "HOST_ONLY_BEFORE_FIX",
+  "source_commit": "93b4075dcb24919579ca2af64ff6f96ad40fee48",
+  "exit": 1,
+  "observed_failure": "RuntimeError: chinese-quotes-and-path: exit=1 output={'status': 'error', 'message': '无法分析 \\\\'} stderr=''; expected='无法分析 \"中文 字体.ttf\"；请检查 C:\\\\data\\\\font 😀'"
+}

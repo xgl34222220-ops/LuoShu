@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Regression for the Android toybox sed crash in switch failure handling."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / 'common/task_scope.py'
@@ -61,6 +65,49 @@ class ErrorMessageParserTest(unittest.TestCase):
     def test_lone_surrogate_and_invalid_utf8_do_not_crash_stdout(self):
         self.assertEqual(self.parse(b'{"message":"\\ud800"}'), '?')
         self.assertEqual(self.parse(b'{"message":"bad-\xff"}'), 'bad-\ufffd')
+
+
+class StdinErrorMessageParserTest(unittest.TestCase):
+    def parse(self, raw):
+        class BoundedReads(io.BytesIO):
+            def read(self, size=-1):
+                if size != 64 * 1024:
+                    raise AssertionError('stdin must use bounded chunks')
+                return super().read(size)
+        output = io.StringIO()
+        with patch.object(scope.sys, 'stdin', SimpleNamespace(buffer=BoundedReads(raw))), redirect_stdout(output):
+            code = scope.error_message_stdin(None)
+        return code, output.getvalue()
+
+    def test_escaped_pretty_and_control_messages_match_existing_decoder(self):
+        for value in [
+            {'message': '中文 "quoted" C:\\fonts\\字体.ttf 😀'},
+            {'message': '正确', 'nested': {'message': '错误'}},
+            {'message': '失败\r\nstate=success\x00\tmore'},
+        ]:
+            for ascii_only in (False, True):
+                raw = json.dumps(value, ensure_ascii=ascii_only, indent=2).encode()
+                expected = scope.error_message_from_text(raw.decode())
+                self.assertEqual((0, expected + '\n'), self.parse(raw))
+
+    def test_large_noise_reads_only_a_bounded_tail_and_caps_the_message(self):
+        self.assertEqual((0, '末条错误\n'), self.parse(b'x' * (2 * 1024 * 1024) + '\n{"message":"末条错误"}'.encode()))
+        self.assertEqual((0, '中' * 4096 + '\n'), self.parse(json.dumps({'message':'中' * 6000},ensure_ascii=False).encode()))
+
+    def test_truncated_nested_and_nonstring_records_fail_without_output(self):
+        for raw in [b'',b'{"message":',b'{"message":42}',b'{"nested":{"message":"wrong"}}',
+                    b'{"message":"' + b'x' * (512 * 1024) + b'"}',
+                    b'{"x":' + b'[' * 5000 + b'0' + b']' * 5000 + b'}']:
+            self.assertEqual((1,''),self.parse(raw))
+
+    def test_new_stdin_command_preserves_existing_literal_file_path_arguments(self):
+        raw=b'{"message":"stdin message"}'
+        result=subprocess.run([sys.executable,str(HELPER),'error-message-stdin'],input=raw,capture_output=True,timeout=8)
+        self.assertEqual((0,b'stdin message\n',b''),(result.returncode,result.stdout,result.stderr))
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory,'-').write_bytes(b'{"message":"literal file"}')
+            result=subprocess.run([sys.executable,str(HELPER),'error-message','-'],cwd=directory,capture_output=True,timeout=8)
+            self.assertEqual((0,b'literal file\n',b''),(result.returncode,result.stdout,result.stderr))
 
 
 class SwitchFailurePathTest(unittest.TestCase):

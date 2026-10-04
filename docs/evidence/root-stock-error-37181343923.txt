@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/data/local/tmp/luoshu-stock-error-contract.py", line 99, in <module>
+    value = json.dumps(run(args.module.resolve(), args.shell), ensure_ascii=False, separators=(',', ':')) + '\n'
+                       ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/local/tmp/luoshu-stock-error-contract.py", line 86, in run
+    raise RuntimeError(f'{name}: exit={result.returncode} output={value!r} stderr={result.stderr!r}; expected={expected!r}')
+RuntimeError: bounded-log-tail: exit=1 output={'status': 'error', 'message': ''} stderr='/data/local/tmp/luoshu-stock-error-a12acb25/error-function.sh[75]: /system/bin/printf: Argument list too long\n/data/local/tmp/luoshu-stock-error-a12acb25/error-function.sh[75]: /system/bin/printf: Argument list too long\n/data/local/tmp/luoshu-stock-error-a12acb25/error-function.sh[75]: /system/bin/printf: Argument list too long\n'; expected='末条错误'

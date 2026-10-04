@@ -1,0 +1,57 @@
+{
+  "result": "BLOCKED",
+  "run_id": 37160499707,
+  "run_url": "https://github.com/xgl34222220-ops/LuoShu/actions/runs/37160499707",
+  "harness_source": "fa42162554ccc5a0181df8baadedc2b29fe26542",
+  "runtime_source": "17783f2229e8ecb946bbd280a7c6343292e296da",
+  "artifact_id": 11287897610,
+  "artifact_sha256": "1e2a133b73011a7042cb225e55114b4b836a72d965a88ba72e7c0eb042c9e287",
+  "error": "Actual App axis navigation did not converge",
+  "blockers": [
+    "execution recorded an error",
+    "actual synthetic file inventory/hashes incomplete",
+    "actual App font-declared axis UI/read-only evidence incomplete or failed",
+    "actual App root not proven",
+    "100/1000 real libraries not both measured",
+    "actual App apply task not proven",
+    "App task/boot/selected font identity binding missing",
+    "ordered snapshot/full validation/core entry evidence missing",
+    "App-applied font exact restoration evidence missing",
+    "actual App apply/reboot/restore mount proof missing",
+    "App-applied font restore did not succeed",
+    "fresh final App crash/ANR observation absent or failed"
+  ],
+  "native_import_command": {
+    "argv": [
+      "shell",
+      "/debug_ramdisk/magisk su -mm -c 'sh /data/adb/modules/LuoShu/common/app_bridge.sh import_file /data/user/0/io.github.xgl34222220.luoshu.stabletest/cache/native_import/luoshu-axis-gate/LuoShuAxisGate.ttf LuoShuAxisGate.ttf'"
+    ],
+    "exit": 0,
+    "elapsed_seconds": 3.8397345409998707,
+    "stdout": "{\"status\":\"ok\",\"data\":{\"kind\":\"font\",\"id\":\"LuoShuAxisGate\",\"name\":\"LuoShuAxisGate\",\"format\":\"TTF\",\"supportsCjk\":true,\"duplicate\":false,\"message\":\"字体已导入\"}}\n",
+    "stderr": ""
+  },
+  "fixture_inventory": {
+    "id": "LuoShuAxisGate",
+    "valid": true,
+    "variable": true,
+    "supportsCjk": true
+  },
+  "actual_axis_ui_frames": 39,
+  "last_ui_frame_sha256": "de3c74458c509ac8f467fb5b09a606bc43740616be6e214641753b59da5ade0c",
+  "root_cause": "Real App has both clickable summary tiles and non-clickable detailed slot headings. The new harness incorrectly required the visible CJK title to be globally unique, so it never tapped the actual detailed font chooser.",
+  "selected_original_axis_fixture": "NOT_RUN",
+  "axis_labels": "NOT_RUN",
+  "library_timings": "NOT_RUN",
+  "actual_app_apply_restore": "NOT_RUN",
+  "root_policy_revoked": true,
+  "final_workspace": {
+    "result": "PASS",
+    "entries": [],
+    "delayed_recheck_seconds": 1
+  },
+  "launcher_reaped": true,
+  "kvm_metadata_unchanged": true,
+  "correction": "Bind detailed CJK heading to its exact explanation, reject clickable summary ancestors, preserve font/slot position checks, and require a real detailed following heading as the full-card endpoint. Add actual XML replay regression; replay is not new Android proof.",
+  "scope": "Only disposable CI emulator; complete delivery remains blocked."
+}

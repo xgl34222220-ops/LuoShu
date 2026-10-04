@@ -1,0 +1,2556 @@
+{
+  "schema": "luoshu-actual-app-composite-completion-v1",
+  "scope": "READ_ONLY_PROJECTION_OF_ORIGINAL_VERIFIED_ANDROID_ARTIFACT_NOT_NEW_EXECUTION",
+  "root_run": 37198566413,
+  "artifact_id": 11302008315,
+  "artifact_sha256": "a1be84f605b2b8df2474da8cb2870fd35faf8341fe09376f89fc9edb8f248b33",
+  "runtime_source": "d12168a88a06193b238821c87d0f4bf844a74b96",
+  "harness_commit": "d694f58d072a4ce3c7bb4a0f4fe3b55241ff5404",
+  "result": "PASS",
+  "entry": "ACTUAL_APP_GENERATE_AND_APPLY",
+  "ui": {
+    "result": "PASS",
+    "package": "io.github.xgl34222220.luoshu.stabletest",
+    "selected": {
+      "cjk": {
+        "id": "LuoShuSyntheticGate0000",
+        "name": "LuoShuSyntheticGate0000",
+        "frame": "frame-003.xml"
+      },
+      "latin": {
+        "id": "LuoShuSyntheticGate0001",
+        "name": "LuoShuSyntheticGate0001",
+        "frame": "frame-006.xml"
+      },
+      "digit": {
+        "id": "LuoShuSyntheticGate0002",
+        "name": "LuoShuSyntheticGate0002",
+        "frame": "frame-009.xml"
+      }
+    },
+    "old_task": "axes-1791113958-5250",
+    "boot_id": "94e34c32-b27c-454f-bdd8-b81151f4e397",
+    "stage": "actual-App-completed",
+    "pid": "4682",
+    "action_frame": "frame-014.xml",
+    "action": "生成并应用",
+    "admitted_task": "axes-1791114801-19395",
+    "admitted_state": {
+      "task": "axes-1791114801-19395",
+      "state": "queued",
+      "message": "任务已进入后台队列",
+      "cjk": "LuoShuSyntheticGate0000",
+      "latin": "LuoShuSyntheticGate0001",
+      "digit": "LuoShuSyntheticGate0002",
+      "cjkAxes": "wght=400",
+      "latinAxes": "wght=400",
+      "digitAxes": "wght=400",
+      "root": "/data/adb/modules/LuoShu/.legacy-v14-runtime/cache/axes-mix/axes-1791114801-19395",
+      "childTask": "",
+      "started": "1791114801",
+      "finished": "",
+      "percent": "1"
+    },
+    "completed_frame": "frame-019.xml",
+    "completed_message": "完整复合字体已准备，完整重启后生效",
+    "completed_pid": "4682",
+    "completed_screenshot": "completed.png",
+    "completed_screenshot_sha256": "a712131950817564a638d55b89c9766f2d3ba7d2498e93fe1cbc1a56127fc0a5",
+    "target_fatal": false,
+    "anr": false
+  },
+  "axes_task": {
+    "task": "axes-1791114801-19395",
+    "state": "success",
+    "message": "完整复合字体已准备，完整重启后生效",
+    "cjk": "LuoShuSyntheticGate0000",
+    "latin": "LuoShuSyntheticGate0001",
+    "digit": "LuoShuSyntheticGate0002",
+    "cjkAxes": "wght=400",
+    "latinAxes": "wght=400",
+    "digitAxes": "wght=400",
+    "root": "/data/adb/modules/LuoShu/.legacy-v14-runtime/cache/axes-mix/axes-1791114801-19395",
+    "childTask": "mix-1791114820-27167",
+    "started": "1791114801",
+    "finished": "1791114904",
+    "percent": "100"
+  },
+  "engine_task": {
+    "task": "mix-1791114820-27167",
+    "state": "success",
+    "message": "完整复合字体已准备，完整重启后生效",
+    "cjk": "LuoShuMixCJK",
+    "latin": "LuoShuMixLatin",
+    "digit": "LuoShuMixDigit",
+    "started": "1791114820",
+    "finished": "1791114903"
+  },
+  "generation_runtime": {
+    "result": "PASS",
+    "task": "mix-1791114820-27167",
+    "crashLines": [],
+    "logSha256": "eeeadcfac3598416d2d03a720a9b0b34239fc1069938936fab48e45e934e81c6"
+  },
+  "background_finalize": {
+    "state": "success",
+    "requestId": "mix-request-1791114768-6804",
+    "message": "复合字体已准备，完整重启后生效",
+    "time": "1791114907"
+  },
+  "collection_build": {
+    "schema": "composite-collection-build-v1",
+    "requestId": "mix-request-1791114768-6804",
+    "target": "/system/fonts/NotoSansCJK-Regular.ttc",
+    "sourceSha256": "186a2ff135560d5af597eafc76a67a4853930656092099e6fa89def851d70b9f",
+    "stockSha256": "3e7e5afaac2c6d872592d76abedac03a51c6f0fc42d11e311ff2816a6c368afe",
+    "sourceFace": -1,
+    "stockFaces": 5,
+    "faces": [
+      {
+        "index": 0,
+        "contract": {
+          "tables": {
+            "cmap": "6383d0ba5023ffd7c33837e652cce579d8d08288dc7ccb3145a1b0575398cda9",
+            "GSUB": "bec7b82cad753586ea46912537495f9b0779e7e49049f5360c1768f43dddcd4f",
+            "GPOS": "753cbad3099e8118900c971558c2646c7b44f85254e258f67b19b15a0c54802c",
+            "GDEF": "79df11d990f7a2e11b24dc31ea27797ec99f6033498f6b648c5e411108d023da",
+            "name": "7a0a5c1b3dedf01ce06e78950fc806d81d5d08ae71739e4ef3dedec15cc3f724",
+            "hhea": "f055367eeb47020c09d24881d821ea470c16c600265e067b3921309737c4d9c3",
+            "OS/2": "b2a66397d0ab09e013715fb2bad160e0d546fdb2b1aa39912e1f3a8637227d14",
+            "vhea": "5d6972935a3efa8485f460e117d7ec70a6f4f93e0a4461c3fd5be845c4ab1e52",
+            "vmtx": "ac0303d36502031faaeb0af132ead015675c19c7d318b7d2aadcad0dd0802243",
+            "VORG": "662ee73086d8dd75530dd9106b1845b9b19d45c0f4ae6662e7d8f65fd67b7355",
+            "fvar": "c82c2c50d6b2fe4e52477e85977990384cdc516fbf069e0ec2a9ff5e723fc64a",
+            "avar": "7a802e0141d8a2c8d0553176f4f254f6adb93382d60179eaac1106adf5547c65",
+            "STAT": "06cde3cc17c2d2f71afc3b98e06238b053239efeec87ef2d265b0026abeda0f8",
+            "BASE": "dc688b87e2adf5ea12b6bc68010bdfc617e47f8f99839fb9473c1dcb9ed64667",
+            "VVAR": "138855ce23c3fafc351db74bfa74446c3291e80c9a4c02190f6aa5ff6ba1fe41"
+          },
+          "glyphOrder": "a2e5a91ed734fbd9970edf74ab8069ade73388a258b58b12ba93343469b41c25",
+          "frame": [
+            1000,
+            -1002,
+            -1048,
+            2928,
+            1808
+          ]
+        },
+        "mode": "compiled",
+        "replaced": {
+          "cjk": 20463,
+          "latin": 83,
+          "digit": 10
+        },
+        "uncovered": 10649,
+        "retainedSharedSlots": 515,
+        "retainedUnencodedGlyphs": true,
+        "outline": "CFF2",
+        "retainedVariationAxes": true,
+        "replacementVariation": "fixed-source-at-selected-weight"
+      },
+      {
+        "index": 1,
+        "contract": {
+          "tables": {
+            "cmap": "936f5709aafc07c589993b59c8a833bacb30fb6453fc19fe01d8f2383a3f20c9",
+            "GSUB": "64d1219019556539c06819b727270f443e8179b83e7c7e96585a0e2f7dbdbcb3",
+            "GPOS": "a9b4e8d6b41224d916a615e73c3b6bcd1412e8f069a2eb8c952a3a56dff1bc35",
+            "GDEF": "79df11d990f7a2e11b24dc31ea27797ec99f6033498f6b648c5e411108d023da",
+            "name": "d122004f4b312c40566fad2ec0c01b8ead72f9e6684043ca12f6db7fcfb8feaf",
+            "hhea": "f055367eeb47020c09d24881d821ea470c16c600265e067b3921309737c4d9c3",
+            "OS/2": "b2a66397d0ab09e013715fb2bad160e0d546fdb2b1aa39912e1f3a8637227d14",
+            "vhea": "5d6972935a3efa8485f460e117d7ec70a6f4f93e0a4461c3fd5be845c4ab1e52",
+            "vmtx": "ac0303d36502031faaeb0af132ead015675c19c7d318b7d2aadcad0dd0802243",
+            "VORG": "662ee73086d8dd75530dd9106b1845b9b19d45c0f4ae6662e7d8f65fd67b7355",
+            "fvar": "c82c2c50d6b2fe4e52477e85977990384cdc516fbf069e0ec2a9ff5e723fc64a",
+            "avar": "7a802e0141d8a2c8d0553176f4f254f6adb93382d60179eaac1106adf5547c65",
+            "STAT": "06cde3cc17c2d2f71afc3b98e06238b053239efeec87ef2d265b0026abeda0f8",
+            "BASE": "dc688b87e2adf5ea12b6bc68010bdfc617e47f8f99839fb9473c1dcb9ed64667",
+            "VVAR": "138855ce23c3fafc351db74bfa74446c3291e80c9a4c02190f6aa5ff6ba1fe41"
+          },
+          "glyphOrder": "c1e8a6a9ce20ad98904b6e68781728d73706a8b21eea9947feb312d4063c58b0",
+          "frame": [
+            1000,
+            -1002,
+            -1048,
+            2928,
+            1808
+          ]
+        },
+        "mode": "compiled",
+        "replaced": {
+          "cjk": 20380,
+          "latin": 83,
+          "digit": 10
+        },
+        "uncovered": 10649,
+        "retainedSharedSlots": 598,
+        "retainedUnencodedGlyphs": true,
+        "outline": "CFF2",
+        "retainedVariationAxes": true,
+        "replacementVariation": "fixed-source-at-selected-weight"
+      },
+      {
+        "index": 2,
+        "contract": {
+          "tables": {
+            "cmap": "4862e66fc3379ce6b97ca0b5c92deebba6b8846169e6053d1f2116966c1d570e",
+            "GSUB": "a2d8e8bb37e0b8cd6eace2aca768a34e6602ddedad963a9e8dcd6c7166e0b49d",
+            "GPOS": "70363ba296e07e48e6d7f1491d464aaa4b5a82259a1180e6b0e6aac30e39d051",
+            "GDEF": "79df11d990f7a2e11b24dc31ea27797ec99f6033498f6b648c5e411108d023da",
+            "name": "2398545c3191e062d8249a40645a02ea9626dd20b14820f4e17efbb0926cd3e1",
+            "hhea": "f055367eeb47020c09d24881d821ea470c16c600265e067b3921309737c4d9c3",
+            "OS/2": "b2a66397d0ab09e013715fb2bad160e0d546fdb2b1aa39912e1f3a8637227d14",
+            "vhea": "5d6972935a3efa8485f460e117d7ec70a6f4f93e0a4461c3fd5be845c4ab1e52",
+            "vmtx": "ac0303d36502031faaeb0af132ead015675c19c7d318b7d2aadcad0dd0802243",
+            "VORG": "662ee73086d8dd75530dd9106b1845b9b19d45c0f4ae6662e7d8f65fd67b7355",
+            "fvar": "c82c2c50d6b2fe4e52477e85977990384cdc516fbf069e0ec2a9ff5e723fc64a",
+            "avar": "7a802e0141d8a2c8d0553176f4f254f6adb93382d60179eaac1106adf5547c65",
+            "STAT": "06cde3cc17c2d2f71afc3b98e06238b053239efeec87ef2d265b0026abeda0f8",
+            "BASE": "dc688b87e2adf5ea12b6bc68010bdfc617e47f8f99839fb9473c1dcb9ed64667",
+            "VVAR": "138855ce23c3fafc351db74bfa74446c3291e80c9a4c02190f6aa5ff6ba1fe41"
+          },
+          "glyphOrder": "f96ca2f0757100611b25289de6a10cf535e2e78a4c942b630dd74ce5d770c963",
+          "frame": [
+            1000,
+            -1002,
+            -1048,
+            2928,
+            1808
+          ]
+        },
+        "mode": "compiled",
+        "replaced": {
+          "cjk": 20600,
+          "latin": 83,
+          "digit": 10
+        },
+        "uncovered": 10649,
+        "retainedSharedSlots": 378,
+        "retainedUnencodedGlyphs": true,
+        "outline": "CFF2",
+        "retainedVariationAxes": true,
+        "replacementVariation": "fixed-source-at-selected-weight"
+      },
+      {
+        "index": 3,
+        "contract": {
+          "tables": {
+            "cmap": "3a57bef9d4229bac9fb7129b263cbeb0d152ac9482ba309de474455188e86e4d",
+            "GSUB": "1412014416fa46f4dd5d7e482c4608aa60d7e67875dccd36f0d4b44d54d60e09",
+            "GPOS": "125497bd9d8933b8be7588eab41bf8e529da5f73e566618999c796b4564055a5",
+            "GDEF": "79df11d990f7a2e11b24dc31ea27797ec99f6033498f6b648c5e411108d023da",
+            "name": "47786a0ac56c19c1505b33e52c5f666b49b6e9a70ac7c8cdb58aefa46467a9c7",
+            "hhea": "f055367eeb47020c09d24881d821ea470c16c600265e067b3921309737c4d9c3",
+            "OS/2": "e09918e7287674be35930acf045af347ff0e48858667dbe4101673323d6d427f",
+            "vhea": "5d6972935a3efa8485f460e117d7ec70a6f4f93e0a4461c3fd5be845c4ab1e52",
+            "vmtx": "ac0303d36502031faaeb0af132ead015675c19c7d318b7d2aadcad0dd0802243",
+            "VORG": "662ee73086d8dd75530dd9106b1845b9b19d45c0f4ae6662e7d8f65fd67b7355",
+            "fvar": "c82c2c50d6b2fe4e52477e85977990384cdc516fbf069e0ec2a9ff5e723fc64a",
+            "avar": "7a802e0141d8a2c8d0553176f4f254f6adb93382d60179eaac1106adf5547c65",
+            "STAT": "06cde3cc17c2d2f71afc3b98e06238b053239efeec87ef2d265b0026abeda0f8",
+            "BASE": "dc688b87e2adf5ea12b6bc68010bdfc617e47f8f99839fb9473c1dcb9ed64667",
+            "VVAR": "138855ce23c3fafc351db74bfa74446c3291e80c9a4c02190f6aa5ff6ba1fe41"
+          },
+          "glyphOrder": "dfbf17cfea490fe4afcf88afb2aadd0882b40c29a77b24e87c9d8d21db11a8b8",
+          "frame": [
+            1000,
+            -1002,
+            -1048,
+            2928,
+            1808
+          ]
+        },
+        "mode": "compiled",
+        "replaced": {
+          "cjk": 20647,
+          "latin": 83,
+          "digit": 10
+        },
+        "uncovered": 10649,
+        "retainedSharedSlots": 331,
+        "retainedUnencodedGlyphs": true,
+        "outline": "CFF2",
+        "retainedVariationAxes": true,
+        "replacementVariation": "fixed-source-at-selected-weight"
+      },
+      {
+        "index": 4,
+        "contract": {
+          "tables": {
+            "cmap": "bb20e8fdb93481a39ddf0a27a30cf8f44f78dd1b592ec010d947280b56cb0577",
+            "GSUB": "4b6caa37d9cea67dc63db632da3c236156b36b201344c43362d8b1f6d68363d6",
+            "GPOS": "fcb899b72cf832d1366e329564c88510f7b394fc705461819b28ef193b9b63b5",
+            "GDEF": "79df11d990f7a2e11b24dc31ea27797ec99f6033498f6b648c5e411108d023da",
+            "name": "00b7ab2aacb048980f3162a90bd78cf23073e9a914b4ec2c85c9b8425febb631",
+            "hhea": "f055367eeb47020c09d24881d821ea470c16c600265e067b3921309737c4d9c3",
+            "OS/2": "e09918e7287674be35930acf045af347ff0e48858667dbe4101673323d6d427f",
+            "vhea": "5d6972935a3efa8485f460e117d7ec70a6f4f93e0a4461c3fd5be845c4ab1e52",
+            "vmtx": "ac0303d36502031faaeb0af132ead015675c19c7d318b7d2aadcad0dd0802243",
+            "VORG": "662ee73086d8dd75530dd9106b1845b9b19d45c0f4ae6662e7d8f65fd67b7355",
+            "fvar": "c82c2c50d6b2fe4e52477e85977990384cdc516fbf069e0ec2a9ff5e723fc64a",
+            "avar": "7a802e0141d8a2c8d0553176f4f254f6adb93382d60179eaac1106adf5547c65",
+            "STAT": "06cde3cc17c2d2f71afc3b98e06238b053239efeec87ef2d265b0026abeda0f8",
+            "BASE": "dc688b87e2adf5ea12b6bc68010bdfc617e47f8f99839fb9473c1dcb9ed64667",
+            "VVAR": "138855ce23c3fafc351db74bfa74446c3291e80c9a4c02190f6aa5ff6ba1fe41"
+          },
+          "glyphOrder": "3d642f72bb8e824da60d9cdcb8066180067308b68af1a7b2a1310f4aa65819d0",
+          "frame": [
+            1000,
+            -1002,
+            -1048,
+            2928,
+            1808
+          ]
+        },
+        "mode": "compiled",
+        "replaced": {
+          "cjk": 20632,
+          "latin": 83,
+          "digit": 10
+        },
+        "uncovered": 10649,
+        "retainedSharedSlots": 346,
+        "retainedUnencodedGlyphs": true,
+        "outline": "CFF2",
+        "retainedVariationAxes": true,
+        "replacementVariation": "fixed-source-at-selected-weight"
+      }
+    ],
+    "outputSha256": "b8a8028bc50e391a008028604a9ea6937945bd88b5977625bf753edf7c10afac",
+    "result": "PASS"
+  },
+  "collection_finalization": {
+    "schema": "composite-collection-contract-v1",
+    "requestId": "mix-request-1791114768-6804",
+    "result": "PASS",
+    "collections": [
+      {
+        "path": "system/fonts/NotoSansCJK-Regular.ttc",
+        "faces": 5,
+        "stockFaces": 5,
+        "generatedContractVerified": true
+      }
+    ],
+    "errors": []
+  },
+  "live_unchanged_before_reboot": true,
+  "commit_lock_probe": {
+    "result": "PASS",
+    "environment": "ACTUAL_ANDROID_QEMU_ROOT_ENFORCING",
+    "shell": "/system/bin/sh",
+    "runtime": "/data/adb/modules/LuoShu/common/python/bin/luoshu-python",
+    "unexported_fd_control": {
+      "fstat_errno": 9,
+      "fstat_error": "EBADF",
+      "flock_errno": 9,
+      "flock_error": "EBADF",
+      "exit": 0,
+      "stderr": ""
+    },
+    "caller_retains_lock": {
+      "result": "PASS",
+      "errno": 11
+    },
+    "contention": {
+      "exit": 1,
+      "stdout": "",
+      "stderr": "[task-scope] lock-fd timeout fd=9 errno=11 (EAGAIN) wait=0.2s\n"
+    },
+    "waiter_blocked_while_owned": true,
+    "owner_release": {
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    "waiter_after_release": {
+      "exit": 0,
+      "stdout": "ACQUIRED\n",
+      "stderr": ""
+    },
+    "persistent_inode_preserved": true
+  },
+  "concurrent_finalize": [
+    {
+      "exit": 0,
+      "response": {
+        "status": "ok",
+        "data": {
+          "font": "mix",
+          "rebootRequired": true,
+          "pipeline": "atomic-next-boot-composite"
+        }
+      }
+    },
+    {
+      "exit": 0,
+      "response": {
+        "status": "ok",
+        "data": {
+          "font": "mix",
+          "rebootRequired": true,
+          "pipeline": "atomic-next-boot-composite"
+        }
+      }
+    },
+    {
+      "exit": 0,
+      "response": {
+        "status": "ok",
+        "data": {
+          "font": "mix",
+          "rebootRequired": true,
+          "pipeline": "atomic-next-boot-composite"
+        }
+      }
+    }
+  ],
+  "concurrent_finalize_unchanged": true,
+  "stage_cleared": true,
+  "worker_sidecars_cleared": true,
+  "reboot": {
+    "before": "94e34c32-b27c-454f-bdd8-b81151f4e397",
+    "after": "0bb94256-4fe7-41ce-af68-650651f00255"
+  },
+  "restore": {
+    "status": "ok",
+    "data": {
+      "task": "1791114980-3994",
+      "state": "success",
+      "font": "default",
+      "message": "100% · 字体已准备完成，完整重启后生效",
+      "started": 1791114980,
+      "finished": 1791114990,
+      "heartbeat": 1791114990,
+      "timeout": 360,
+      "elapsed": 0,
+      "percent": 100,
+      "bootId": "0bb94256-4fe7-41ce-af68-650651f00255",
+      "reused": false
+    }
+  },
+  "restore_reboot": {
+    "before": "0bb94256-4fe7-41ce-af68-650651f00255",
+    "after": "ab3240d1-d6c4-4580-beff-099134f17e0e"
+  },
+  "restore_hashes_equal_stock": true,
+  "frame_states": [
+    {
+      "path": "app-composite/frame-000.xml",
+      "sha256": "eb7d85d0db93aba1935fee1e36eb8aafabef3c244c926dbefe27a8e8687a355f",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        6
+      ],
+      "labels": [
+        "洛书",
+        "正在连接",
+        "检测中…",
+        "当前字体",
+        "系统默认字体",
+        "字里行间，自有风格。",
+        "Aa Bb  ·  0123456789",
+        "重新检查",
+        "我的字体",
+        "从挑选到组合，让每一处文字更合心意",
+        "字体库",
+        "导入 · 预览 · 应用",
+        "字体组合",
+        "中文 · 英文 · 数字",
+        "恢复系统字体",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-001.xml",
+      "sha256": "f1f740638cc3504f4ed5121ce9008c6e988a9ef557d0964fda571144fafd2a30",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        12
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0002",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-002.xml",
+      "sha256": "618bc61bc3750832ef61774488803679d4c92f5f40cba1ab47d239855cf7bc84",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        16
+      ],
+      "labels": [
+        "FONT SOURCE",
+        "选择中文字体",
+        "1000 个",
+        "搜索字体",
+        "中",
+        "LuoShuSyntheticGate0000",
+        "TTF · 常规",
+        "中",
+        "LuoShuSyntheticGate0001",
+        "TTF · 常规",
+        "中",
+        "LuoShuSyntheticGate0002",
+        "TTF · 常规",
+        "中",
+        "LuoShuSyntheticGate0003",
+        "TTF · 常规",
+        "中",
+        "LuoShuSyntheticGate0004",
+        "TTF · 常规",
+        "中",
+        "LuoShuSyntheticGate0005",
+        "关闭"
+      ]
+    },
+    {
+      "path": "app-composite/frame-003.xml",
+      "sha256": "6ed6e85fbbb0e559e8d277b02a51ce374e49e1ea9e02e8d2b304acd0b75410d5",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        18
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0001",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "Aa",
+        "英文字形",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-004.xml",
+      "sha256": "6ed6e85fbbb0e559e8d277b02a51ce374e49e1ea9e02e8d2b304acd0b75410d5",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        20
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0001",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "Aa",
+        "英文字形",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-005.xml",
+      "sha256": "813a24d7916e6596757a2ef2ae1a15b08d560954d200ed2b8b945a4086545217",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        22
+      ],
+      "labels": [
+        "FONT SOURCE",
+        "选择英文字体",
+        "1000 个",
+        "搜索字体",
+        "Aa",
+        "LuoShuSyntheticGate0000",
+        "TTF · 常规",
+        "Aa",
+        "LuoShuSyntheticGate0001",
+        "TTF · 常规",
+        "Aa",
+        "LuoShuSyntheticGate0002",
+        "TTF · 常规",
+        "Aa",
+        "LuoShuSyntheticGate0003",
+        "TTF · 常规",
+        "Aa",
+        "LuoShuSyntheticGate0004",
+        "TTF · 常规",
+        "Aa",
+        "LuoShuSyntheticGate0005",
+        "关闭"
+      ]
+    },
+    {
+      "path": "app-composite/frame-006.xml",
+      "sha256": "6ed6e85fbbb0e559e8d277b02a51ce374e49e1ea9e02e8d2b304acd0b75410d5",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        26
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0001",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "Aa",
+        "英文字形",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-007.xml",
+      "sha256": "6ed6e85fbbb0e559e8d277b02a51ce374e49e1ea9e02e8d2b304acd0b75410d5",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        28
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0001",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "Aa",
+        "英文字形",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-008.xml",
+      "sha256": "e0c5be2915354040fc095aa89215c9ff47951740007a944c432d0c359a7479c8",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        30
+      ],
+      "labels": [
+        "FONT SOURCE",
+        "选择数字字体",
+        "1000 个",
+        "搜索字体",
+        "123",
+        "LuoShuSyntheticGate0000",
+        "TTF · 常规",
+        "123",
+        "LuoShuSyntheticGate0001",
+        "TTF · 常规",
+        "123",
+        "LuoShuSyntheticGate0002",
+        "TTF · 常规",
+        "123",
+        "LuoShuSyntheticGate0003",
+        "TTF · 常规",
+        "123",
+        "LuoShuSyntheticGate0004",
+        "TTF · 常规",
+        "123",
+        "LuoShuSyntheticGate0005",
+        "关闭"
+      ]
+    },
+    {
+      "path": "app-composite/frame-009.xml",
+      "sha256": "342800d9f3c6f2c60281cf4d76eb824014e0a2f9f37af6b667d81d8771621f96",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        32
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0002",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "Aa",
+        "英文字形",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-010.xml",
+      "sha256": "342800d9f3c6f2c60281cf4d76eb824014e0a2f9f37af6b667d81d8771621f96",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        34
+      ],
+      "labels": [
+        "字体组合",
+        "组合你的专属字体",
+        "中文、英文、数字，分别挑选喜欢的样子。",
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "Aa",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "123",
+        "数字字形",
+        "LuoShuSyntheticGate0002",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "Aa",
+        "英文字形",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-011.xml",
+      "sha256": "96e0b1ea0d9c4eb8ded7b6f30cd93679abe84f0012696e5e3aae742a7988bb23",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        38
+      ],
+      "labels": [
+        "LuoShuSyntheticGate0000",
+        "LuoShuSyntheticGate0001",
+        "LuoShuSyntheticGate0002",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "字重：常规 400 · 无需调节",
+        "Aa",
+        "英文字形",
+        "替换拉丁字母与英文标点轮廓",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0001",
+        "TTF",
+        "LuoShu Typography 0123"
+      ]
+    },
+    {
+      "path": "app-composite/frame-012.xml",
+      "sha256": "0c97245454c8a98984b7d819116a09f60c7c2ad9130ffafd64c41059815c166b",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        40
+      ],
+      "labels": [
+        "洛书中文 Aa 0123",
+        "字重：常规 400 · 无需调节",
+        "Aa",
+        "英文字形",
+        "替换拉丁字母与英文标点轮廓",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0001",
+        "TTF",
+        "LuoShu Typography 0123",
+        "字重：常规 400 · 无需调节",
+        "123",
+        "数字字形",
+        "替换数字与相关半角标点",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0002",
+        "TTF"
+      ]
+    },
+    {
+      "path": "app-composite/frame-013.xml",
+      "sha256": "b8d3cb17ed25593ea521198fde82868cf630a00566737ff354fffd6bc8463b05",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        44
+      ],
+      "labels": [
+        "Aa",
+        "英文字形",
+        "替换拉丁字母与英文标点轮廓",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0001",
+        "TTF",
+        "LuoShu Typography 0123",
+        "字重：常规 400 · 无需调节",
+        "123",
+        "数字字形",
+        "替换数字与相关半角标点",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0002",
+        "TTF",
+        "0123456789 Aa",
+        "字重：常规 400 · 无需调节"
+      ]
+    },
+    {
+      "path": "app-composite/frame-014.xml",
+      "sha256": "237264582095eb7c580e0bf31fcb166465687373595418a3a780f724c9b38f90",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        52,
+        46
+      ],
+      "labels": [
+        "字重：常规 400 · 无需调节",
+        "123",
+        "数字字形",
+        "替换数字与相关半角标点",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0002",
+        "TTF",
+        "0123456789 Aa",
+        "字重：常规 400 · 无需调节",
+        "让这个组合成为日常",
+        "按上面的字体和字重生成组合，然后应用到系统。",
+        "生成并应用",
+        "字形覆盖",
+        "需要时查看所选中文字体包含哪些字符",
+        "所选字体覆盖率"
+      ]
+    },
+    {
+      "path": "app-composite/frame-015.xml",
+      "sha256": "237264582095eb7c580e0bf31fcb166465687373595418a3a780f724c9b38f90",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        55,
+        14
+      ],
+      "labels": [
+        "字重：常规 400 · 无需调节",
+        "123",
+        "数字字形",
+        "替换数字与相关半角标点",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0002",
+        "TTF",
+        "0123456789 Aa",
+        "字重：常规 400 · 无需调节",
+        "让这个组合成为日常",
+        "按上面的字体和字重生成组合，然后应用到系统。",
+        "生成并应用",
+        "字形覆盖",
+        "需要时查看所选中文字体包含哪些字符",
+        "所选字体覆盖率"
+      ]
+    },
+    {
+      "path": "app-composite/frame-016.xml",
+      "sha256": "ecefc54536555c975a7c4b1e360e801d499d31ab83fa83bf8d07ff3459d73c21",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        55,
+        18
+      ],
+      "labels": [
+        "替换拉丁字母与英文标点轮廓",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0001",
+        "TTF",
+        "LuoShu Typography 0123",
+        "字重：常规 400 · 无需调节",
+        "123",
+        "数字字形",
+        "替换数字与相关半角标点",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0002",
+        "TTF",
+        "0123456789 Aa",
+        "让这个组合成为日常",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-017.xml",
+      "sha256": "a3e5748109ac13e1a236040d0a8a757c3dd1ca0ae5c18f76cd7e2e6769e63707",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        55,
+        20
+      ],
+      "labels": [
+        "洛书中文 Aa 0123",
+        "字重：常规 400 · 无需调节",
+        "Aa",
+        "英文字形",
+        "替换拉丁字母与英文标点轮廓",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0001",
+        "TTF",
+        "LuoShu Typography 0123",
+        "字重：常规 400 · 无需调节",
+        "123",
+        "数字字形",
+        "替换数字与相关半角标点",
+        "LuoShuSyntheticGate0002",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-018.xml",
+      "sha256": "dcaae84b718c2a886f6bbbfa0df35fd931703b7bd7ab621fa50e3ef0f4b99f68",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        55,
+        24
+      ],
+      "labels": [
+        "完整复合字体已准备，完整重启后生效",
+        "100%",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "字重：常规 400 · 无需调节",
+        "Aa",
+        "英文字形",
+        "替换拉丁字母与英文标点轮廓",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0001",
+        "TTF",
+        "LuoShu Typography 0123",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    },
+    {
+      "path": "app-composite/frame-019.xml",
+      "sha256": "8b4c0863ed3dfa3ef501527820c4aedcadecca99aebca0a5e174c28e1b9bba46",
+      "archived_time": [
+        2026,
+        10,
+        4,
+        11,
+        55,
+        26
+      ],
+      "labels": [
+        "中",
+        "中文基底",
+        "LuoShuSyntheticGate0000",
+        "英文字形",
+        "LuoShuSyntheticGate0001",
+        "数字字形",
+        "LuoShuSyntheticGate0002",
+        "组合字体已生成",
+        "完整复合字体已准备，完整重启后生效",
+        "100%",
+        "中",
+        "中文基底",
+        "完整中文、符号与系统回退基底",
+        "固定 · 常规 400",
+        "LuoShuSyntheticGate0000",
+        "TTF",
+        "洛书中文 Aa 0123",
+        "字重：常规 400 · 无需调节",
+        "固定 · 常规 400",
+        "首页",
+        "字体库",
+        "组合",
+        "设置"
+      ]
+    }
+  ],
+  "last_xml_visible_node_projections": [
+    {
+      "path": "app-composite/frame-012.xml",
+      "sha256": "0c97245454c8a98984b7d819116a09f60c7c2ad9130ffafd64c41059815c166b",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "洛书中文 Aa 0123",
+          "content-desc": "",
+          "bounds": "[127,73][953,294]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,346][951,407]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "Aa",
+          "content-desc": "",
+          "bounds": "[122,605][184,667]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "英文字形",
+          "content-desc": "",
+          "bounds": "[243,571][431,640]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换拉丁字母与英文标点轮廓",
+          "content-desc": "",
+          "bounds": "[243,640][646,701]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,743][332,804]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0001",
+          "content-desc": "",
+          "bounds": "[129,875][597,936]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,936][185,997]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShu Typography 0123",
+          "content-desc": "",
+          "bounds": "[127,1050][953,1271]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1323][951,1384]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "123",
+          "content-desc": "",
+          "bounds": "[108,1582][198,1644]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[243,1548][431,1617]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换数字与相关半角标点",
+          "content-desc": "",
+          "bounds": "[243,1617][584,1678]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,1720][332,1781]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[129,1852][597,1913]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,1913][185,1920]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-013.xml",
+      "sha256": "b8d3cb17ed25593ea521198fde82868cf630a00566737ff354fffd6bc8463b05",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "Aa",
+          "content-desc": "",
+          "bounds": "[122,63][184,91]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "英文字形",
+          "content-desc": "",
+          "bounds": "[243,63][431,64]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换拉丁字母与英文标点轮廓",
+          "content-desc": "",
+          "bounds": "[243,64][646,125]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,167][332,228]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0001",
+          "content-desc": "",
+          "bounds": "[129,299][597,360]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,360][185,421]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShu Typography 0123",
+          "content-desc": "",
+          "bounds": "[127,474][953,695]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,747][951,808]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "123",
+          "content-desc": "",
+          "bounds": "[108,1006][198,1068]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[243,972][431,1041]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换数字与相关半角标点",
+          "content-desc": "",
+          "bounds": "[243,1041][584,1102]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,1144][332,1205]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[129,1276][597,1337]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,1337][185,1398]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "0123456789 Aa",
+          "content-desc": "",
+          "bounds": "[127,1451][953,1672]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1724][951,1785]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-014.xml",
+      "sha256": "237264582095eb7c580e0bf31fcb166465687373595418a3a780f724c9b38f90",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,83][951,144]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "123",
+          "content-desc": "",
+          "bounds": "[108,342][198,404]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[243,308][431,377]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换数字与相关半角标点",
+          "content-desc": "",
+          "bounds": "[243,377][584,438]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,480][332,541]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[129,612][597,673]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,673][185,734]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "0123456789 Aa",
+          "content-desc": "",
+          "bounds": "[127,787][953,1008]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1060][951,1121]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "让这个组合成为日常",
+          "content-desc": "",
+          "bounds": "[245,1285][641,1350]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "按上面的字体和字重生成组合，然后应用到系统。",
+          "content-desc": "",
+          "bounds": "[245,1350][927,1411]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "生成并应用",
+          "content-desc": "",
+          "bounds": "[480,1484][675,1545]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字形覆盖",
+          "content-desc": "",
+          "bounds": "[47,1681][223,1745]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "需要时查看所选中文字体包含哪些字符",
+          "content-desc": "",
+          "bounds": "[47,1753][574,1798]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "所选字体覆盖率",
+          "content-desc": "",
+          "bounds": "[95,1896][389,1920]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-015.xml",
+      "sha256": "237264582095eb7c580e0bf31fcb166465687373595418a3a780f724c9b38f90",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,83][951,144]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "123",
+          "content-desc": "",
+          "bounds": "[108,342][198,404]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[243,308][431,377]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换数字与相关半角标点",
+          "content-desc": "",
+          "bounds": "[243,377][584,438]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,480][332,541]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[129,612][597,673]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,673][185,734]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "0123456789 Aa",
+          "content-desc": "",
+          "bounds": "[127,787][953,1008]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1060][951,1121]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "让这个组合成为日常",
+          "content-desc": "",
+          "bounds": "[245,1285][641,1350]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "按上面的字体和字重生成组合，然后应用到系统。",
+          "content-desc": "",
+          "bounds": "[245,1350][927,1411]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "生成并应用",
+          "content-desc": "",
+          "bounds": "[480,1484][675,1545]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字形覆盖",
+          "content-desc": "",
+          "bounds": "[47,1681][223,1745]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "需要时查看所选中文字体包含哪些字符",
+          "content-desc": "",
+          "bounds": "[47,1753][574,1798]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "所选字体覆盖率",
+          "content-desc": "",
+          "bounds": "[95,1896][389,1920]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-016.xml",
+      "sha256": "ecefc54536555c975a7c4b1e360e801d499d31ab83fa83bf8d07ff3459d73c21",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "替换拉丁字母与英文标点轮廓",
+          "content-desc": "",
+          "bounds": "[243,63][646,73]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,115][332,176]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0001",
+          "content-desc": "",
+          "bounds": "[129,247][597,308]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,308][185,369]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShu Typography 0123",
+          "content-desc": "",
+          "bounds": "[127,422][953,643]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,695][951,756]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "123",
+          "content-desc": "",
+          "bounds": "[108,954][198,1016]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[243,920][431,989]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换数字与相关半角标点",
+          "content-desc": "",
+          "bounds": "[243,989][584,1050]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,1092][332,1153]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[129,1224][597,1285]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,1285][185,1346]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "0123456789 Aa",
+          "content-desc": "",
+          "bounds": "[127,1399][953,1620]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "让这个组合成为日常",
+          "content-desc": "",
+          "bounds": "[245,1897][641,1920]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "首页",
+          "content-desc": "",
+          "bounds": "[156,1741][218,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字体库",
+          "content-desc": "",
+          "bounds": "[377,1741][470,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "组合",
+          "content-desc": "",
+          "bounds": "[627,1741][691,1788]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "设置",
+          "content-desc": "",
+          "bounds": "[863,1741][925,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-017.xml",
+      "sha256": "a3e5748109ac13e1a236040d0a8a757c3dd1ca0ae5c18f76cd7e2e6769e63707",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "洛书中文 Aa 0123",
+          "content-desc": "",
+          "bounds": "[127,89][953,310]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,362][951,423]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "Aa",
+          "content-desc": "",
+          "bounds": "[122,621][184,683]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "英文字形",
+          "content-desc": "",
+          "bounds": "[243,587][431,656]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换拉丁字母与英文标点轮廓",
+          "content-desc": "",
+          "bounds": "[243,656][646,717]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,759][332,820]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0001",
+          "content-desc": "",
+          "bounds": "[129,891][597,952]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,952][185,1013]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShu Typography 0123",
+          "content-desc": "",
+          "bounds": "[127,1066][953,1287]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1339][951,1400]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "123",
+          "content-desc": "",
+          "bounds": "[108,1598][198,1652]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[243,1564][431,1633]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换数字与相关半角标点",
+          "content-desc": "",
+          "bounds": "[243,1633][584,1652]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[129,1868][597,1920]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "首页",
+          "content-desc": "",
+          "bounds": "[156,1741][218,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字体库",
+          "content-desc": "",
+          "bounds": "[377,1741][470,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "组合",
+          "content-desc": "",
+          "bounds": "[627,1741][691,1788]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "设置",
+          "content-desc": "",
+          "bounds": "[863,1741][925,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-018.xml",
+      "sha256": "dcaae84b718c2a886f6bbbfa0df35fd931703b7bd7ab621fa50e3ef0f4b99f68",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "完整复合字体已准备，完整重启后生效",
+          "content-desc": "",
+          "bounds": "[232,63][759,108]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "100%",
+          "content-desc": "",
+          "bounds": "[882,63][959,80]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "中",
+          "content-desc": "",
+          "bounds": "[127,318][179,393]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "中文基底",
+          "content-desc": "",
+          "bounds": "[243,290][431,359]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "完整中文、符号与系统回退基底",
+          "content-desc": "",
+          "bounds": "[243,359][677,420]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,462][332,523]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0000",
+          "content-desc": "",
+          "bounds": "[129,594][597,655]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,655][185,716]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "洛书中文 Aa 0123",
+          "content-desc": "",
+          "bounds": "[127,769][953,990]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1042][951,1103]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "Aa",
+          "content-desc": "",
+          "bounds": "[122,1301][184,1363]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "英文字形",
+          "content-desc": "",
+          "bounds": "[243,1267][431,1336]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "替换拉丁字母与英文标点轮廓",
+          "content-desc": "",
+          "bounds": "[243,1336][646,1397]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,1439][332,1500]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0001",
+          "content-desc": "",
+          "bounds": "[129,1571][597,1632]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,1632][185,1652]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShu Typography 0123",
+          "content-desc": "",
+          "bounds": "[127,1746][953,1920]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "首页",
+          "content-desc": "",
+          "bounds": "[156,1741][218,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字体库",
+          "content-desc": "",
+          "bounds": "[377,1741][470,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "组合",
+          "content-desc": "",
+          "bounds": "[627,1741][691,1788]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "设置",
+          "content-desc": "",
+          "bounds": "[863,1741][925,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    },
+    {
+      "path": "app-composite/frame-019.xml",
+      "sha256": "8b4c0863ed3dfa3ef501527820c4aedcadecca99aebca0a5e174c28e1b9bba46",
+      "nodes": [
+        {
+          "text": "",
+          "content-desc": "",
+          "bounds": "[0,63][1080,1920]",
+          "class": "android.view.View",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "true"
+        },
+        {
+          "text": "中",
+          "content-desc": "",
+          "bounds": "[121,63][184,80]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "中文基底",
+          "content-desc": "",
+          "bounds": "[121,93][245,154]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0000",
+          "content-desc": "",
+          "bounds": "[121,154][353,215]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "英文字形",
+          "content-desc": "",
+          "bounds": "[423,75][547,136]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0001",
+          "content-desc": "",
+          "bounds": "[423,136][656,197]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "数字字形",
+          "content-desc": "",
+          "bounds": "[726,75][850,136]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0002",
+          "content-desc": "",
+          "bounds": "[726,136][959,197]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "组合字体已生成",
+          "content-desc": "",
+          "bounds": "[232,379][505,440]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "完整复合字体已准备，完整重启后生效",
+          "content-desc": "",
+          "bounds": "[232,440][759,499]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "100%",
+          "content-desc": "",
+          "bounds": "[882,410][959,471]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "中",
+          "content-desc": "",
+          "bounds": "[127,709][179,784]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "中文基底",
+          "content-desc": "",
+          "bounds": "[243,681][431,750]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "完整中文、符号与系统回退基底",
+          "content-desc": "",
+          "bounds": "[243,750][677,811]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,853][332,914]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "LuoShuSyntheticGate0000",
+          "content-desc": "",
+          "bounds": "[129,985][597,1046]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "TTF",
+          "content-desc": "",
+          "bounds": "[129,1046][185,1107]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "洛书中文 Aa 0123",
+          "content-desc": "",
+          "bounds": "[127,1160][953,1381]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字重：常规 400 · 无需调节",
+          "content-desc": "",
+          "bounds": "[129,1433][951,1494]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "固定 · 常规 400",
+          "content-desc": "",
+          "bounds": "[121,1830][332,1891]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "首页",
+          "content-desc": "",
+          "bounds": "[156,1741][218,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "字体库",
+          "content-desc": "",
+          "bounds": "[377,1741][470,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "组合",
+          "content-desc": "",
+          "bounds": "[627,1741][691,1788]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        },
+        {
+          "text": "设置",
+          "content-desc": "",
+          "bounds": "[863,1741][925,1786]",
+          "class": "android.widget.TextView",
+          "resource-id": "",
+          "clickable": "false",
+          "scrollable": "false"
+        }
+      ]
+    }
+  ],
+  "original_png_exports": [
+    {
+      "path": "app-axes/actual-axis-ui.png",
+      "bytes": 196794,
+      "sha256": "299f3c4bdcf945aee2c39eb226d75a3749a2caa53c9166831e6ffdac53dc4da6",
+      "export_status": "EXPORTED"
+    },
+    {
+      "path": "app-composite/completed.png",
+      "bytes": 288755,
+      "sha256": "a712131950817564a638d55b89c9766f2d3ba7d2498e93fe1cbc1a56127fc0a5",
+      "export_status": "EXPORTED"
+    }
+  ],
+  "limits": [
+    "AOSP API35 x86_64 with original ARM64 runtime via nativebridge; no native ARM64 or OEM-ROM claim",
+    "100/1000 independent filenames contain two original synthetic TTF contents",
+    "Baseline App performance and backup restore API not tested or counted as PASS"
+  ]
+}

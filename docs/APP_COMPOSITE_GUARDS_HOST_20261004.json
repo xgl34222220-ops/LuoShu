@@ -1,0 +1,23 @@
+{
+  "result": "PASS",
+  "environment": "HOST_SYNTHETIC_HARNESS_TESTS",
+  "scope": "UI evidence parser and rejection guards, not actual Android App execution",
+  "total_tests": 126,
+  "new_test_methods": 8,
+  "raw_log": "evidence/app-composite-harness-host-20261004.txt",
+  "guards": [
+    "wrong-package, disabled and duplicate targets",
+    "font name outside selected slot cannot pass",
+    "CLI composite cannot substitute for actual App entry",
+    "old task, changed source, changed boot or PID rejected",
+    "raw selected/action/completion XML independently checked",
+    "raw screenshot and PID command stdout bound",
+    "CLI rescue and unowned frame rejected",
+    "failed UI admission has no CLI fallback"
+  ],
+  "runtime_candidate": "57aa02ed950a50d054cb1596021a51df0349d0d8",
+  "runtime_changes": false,
+  "android_result": "NOT_YET_EXECUTED",
+  "reference_source": "https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java",
+  "license": "Apache-2.0, principles only, no implementation copied"
+}

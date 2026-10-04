@@ -1,0 +1,464 @@
+{
+  "run_id": 37178617912,
+  "artifact_sha256": "b393f36810e29cbbef8f290c3dc28c5d2bcc1c0c965c26cac8dae618ed1d3f46",
+  "source": "cb321a6635733d09d726a35b66b7838813d85ce8",
+  "evidence_kind": "FRESH_ANDROID_RAW_LOGS",
+  "verified_samples": 14,
+  "samples": [
+    {
+      "group": "library-100",
+      "kind": "app_start",
+      "repetition": 0,
+      "elapsed_ms": 18536,
+      "first_inventory_ms": 5011,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 244868,
+          "duration_ms": 6843,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 198.833,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 3640.239,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        },
+        {
+          "stage": "scan",
+          "completed_at_ms": 251351,
+          "duration_ms": 6339,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 399.281,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 3622.848,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-100",
+      "kind": "library_open",
+      "repetition": 0,
+      "elapsed_ms": 5141,
+      "first_inventory_ms": 470,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 265969,
+          "duration_ms": 4864,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 59.532,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2525.377,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-100",
+      "kind": "app_start",
+      "repetition": 1,
+      "elapsed_ms": 11672,
+      "first_inventory_ms": 571,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 280646,
+          "duration_ms": 6594,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 184.674,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 3628.702,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-100",
+      "kind": "library_open",
+      "repetition": 1,
+      "elapsed_ms": 5846,
+      "first_inventory_ms": 472,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 300215,
+          "duration_ms": 5566,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 145.676,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2842.747,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-100",
+      "kind": "app_start",
+      "repetition": 2,
+      "elapsed_ms": 10833,
+      "first_inventory_ms": 632,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 314561,
+          "duration_ms": 5814,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 73.41,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2732.136,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-100",
+      "kind": "library_open",
+      "repetition": 2,
+      "elapsed_ms": 5489,
+      "first_inventory_ms": 455,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 333585,
+          "duration_ms": 5053,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 43.634,
+              "count": 100,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2026.696,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-1000",
+      "kind": "app_start",
+      "repetition": 0,
+      "elapsed_ms": 19552,
+      "first_inventory_ms": 6913,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 350902,
+          "duration_ms": 7212,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 443.748,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 4077.503,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        },
+        {
+          "stage": "scan",
+          "completed_at_ms": 357628,
+          "duration_ms": 6725,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 1549.423,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 4054.985,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-1000",
+      "kind": "library_open",
+      "repetition": 0,
+      "elapsed_ms": 5390,
+      "first_inventory_ms": 449,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 372790,
+          "duration_ms": 4960,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 370.219,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2564.28,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-1000",
+      "kind": "app_start",
+      "repetition": 1,
+      "elapsed_ms": 13016,
+      "first_inventory_ms": 858,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 388227,
+          "duration_ms": 7125,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 730.558,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 3431.0,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-1000",
+      "kind": "library_open",
+      "repetition": 1,
+      "elapsed_ms": 5649,
+      "first_inventory_ms": 440,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 407254,
+          "duration_ms": 5458,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 489.611,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2827.889,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-1000",
+      "kind": "app_start",
+      "repetition": 2,
+      "elapsed_ms": 12100,
+      "first_inventory_ms": 577,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 421890,
+          "duration_ms": 6657,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 269.879,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 3008.617,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "library-1000",
+      "kind": "library_open",
+      "repetition": 2,
+      "elapsed_ms": 5365,
+      "first_inventory_ms": 436,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 440708,
+          "duration_ms": 4948,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 431.463,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 2849.418,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "final-ui",
+      "kind": "app_start",
+      "repetition": 0,
+      "elapsed_ms": 46785,
+      "first_inventory_ms": 742,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 58750,
+          "duration_ms": 12023,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 1146.003,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 7105.696,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        },
+        {
+          "stage": "scan",
+          "completed_at_ms": 85760,
+          "duration_ms": 26871,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 19096.482,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 23274.124,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "group": "final-ui",
+      "kind": "library_open",
+      "repetition": 0,
+      "elapsed_ms": 8218,
+      "first_inventory_ms": 451,
+      "requests": [
+        {
+          "stage": "fingerprint",
+          "completed_at_ms": 104236,
+          "duration_ms": 7912,
+          "code": 0,
+          "phases": {
+            "inventory": {
+              "duration_ms": 495.219,
+              "count": 1000,
+              "code": 0
+            },
+            "scope": {
+              "duration_ms": 3572.911,
+              "code": 0,
+              "cleaned": true,
+              "reason": "success"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "nonzero_requests": [],
+  "limits": [
+    "Cross-run samples do not prove a causal speedup or physical-device performance",
+    "Scope span omits its own imports/argument parsing/recovery; inventory span omits worker imports",
+    "Final scan 19096.482 ms covers execute and stdout, not yet separated into snapshot/build/write subphases"
+  ]
+}

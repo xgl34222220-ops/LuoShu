@@ -1,0 +1,41 @@
+name: Review preserved Root artifact
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/stable-composite-contract-20261003]
+    paths:
+      - .github/workflows/reviewed-root-artifact.yml
+      - .github/reviewed-root-artifact.json
+      - .github/reviewed-candidate-artifact.json
+      - tests/reviewed-artifacts/review_ci.py
+permissions:
+  contents: read
+  actions: read
+jobs:
+  review:
+    name: Read-only ${{ matrix.kind }} review, not Android execution
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: Root
+            pin: .github/reviewed-root-artifact.json
+          - kind: Candidate
+            pin: .github/reviewed-candidate-artifact.json
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Independently verify pinned original archives and verdict
+        env:
+          REVIEW_TOKEN: ${{ github.token }}
+        run: python3 tests/reviewed-artifacts/review_ci.py "${{ matrix.pin }}" artifact-review-output
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Reviewed-${{ matrix.kind }}-Artifact
+          path: artifact-review-output/
+          if-no-files-found: error
+          retention-days: 14

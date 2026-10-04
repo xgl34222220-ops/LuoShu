@@ -4,6 +4,7 @@
 No replacement engine or synthetic success state is installed. The entry, frozen
 engine, monitor, finalizer and next-boot mount path all come from the candidate.
 """
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -27,12 +28,63 @@ def last_json(text):
     raise RuntimeError('Legacy composite returned no JSON: ' + text[-1000:])
 
 
-def composite_blockers(report):
+COLLECTION_TARGET = '/system/fonts/NotoSansCJK-Regular.ttc'
+
+
+def runtime_log_evidence(log, task):
+    lines = log.splitlines()
+    starts = [index for index, line in enumerate(lines)
+              if ' mix start:' in line and line.rpartition('task=')[2].strip() == task]
+    if not starts:
+        return {'result': 'FAIL', 'task': task, 'reason': 'Current engine start marker absent'}
+    current = lines[starts[-1]:]
+    crashes = [line for line in current if re.search(
+        r'(?:^|\]\s*)(?:Segmentation fault\b|Fatal signal [0-9]+\b|Aborted\b)', line.strip())]
+    return {'result': 'FAIL' if crashes else 'PASS', 'task': task, 'crashLines': crashes,
+            'logSha256': hashlib.sha256('\n'.join(current).encode()).hexdigest()}
+
+
+def collection_blockers(report):
+    try:
+        build = report.get('collection_build', {})
+        finalized = report.get('collection_finalization', {})
+        state = report.get('next_state', {})
+        count = build.get('stockFaces')
+        faces = build.get('faces', [])
+        rows = [row for row in finalized.get('collections', [])
+                if row.get('path') == COLLECTION_TARGET.lstrip('/')]
+        output = report.get('collection_output_path', '')
+        if (build.get('schema') != 'composite-collection-build-v1' or build.get('result') != 'PASS' or
+                not isinstance(state.get('requestId'), str) or not state['requestId'] or
+                build.get('requestId') != state.get('requestId') or build.get('target') != COLLECTION_TARGET or
+                not re.fullmatch('[0-9a-f]{64}', build.get('sourceSha256', '')) or
+                build.get('sourceSha256') != state.get('compositeHash') or
+                not re.fullmatch('[0-9a-f]{64}', report.get('collection_stock_sha256', '')) or
+                build.get('stockSha256') != report.get('collection_stock_sha256') or
+                type(count) is not int or not 1 <= count <= 256 or len(faces) != count or
+                any(type(face.get('index')) is not int or face['index'] != index
+                    for index, face in enumerate(faces)) or
+                not any(face.get('mode') == 'compiled' for face in faces) or
+                not output.endswith('/.luoshu-payload-next' + COLLECTION_TARGET) or
+                not re.fullmatch('[0-9a-f]{64}', build.get('outputSha256', '')) or
+                report.get('next_payload_hashes', {}).get(output) != build.get('outputSha256') or
+                finalized.get('schema') != 'composite-collection-contract-v1' or
+                finalized.get('result') != 'PASS' or finalized.get('requestId') != state.get('requestId') or
+                len(rows) != 1 or rows[0].get('generatedContractVerified') is not True or
+                rows[0].get('faces') != count or rows[0].get('stockFaces') != count):
+            return ['generated collection request, stock/index or final payload proof incomplete']
+    except (TypeError, AttributeError, KeyError, ValueError):
+        return ['malformed generated collection evidence']
+    return []
+
+
+def composite_blockers(report, expected_entry='common/font_mix_controller.sh start'):
     if not isinstance(report, dict):
         return ['legacy composite evidence absent']
     errors = []
+    errors.extend(collection_blockers(report))
     try:
-        if report.get('result') != 'PASS' or report.get('entry') != 'common/font_mix_controller.sh start':
+        if report.get('result') != 'PASS' or report.get('entry') != expected_entry:
             errors.append('actual legacy composite entry did not pass')
         probe = report.get('commit_lock_probe', {})
         if (probe.get('result') != 'PASS' or probe.get('environment') != 'ACTUAL_ANDROID_QEMU_ROOT_ENFORCING' or
@@ -52,6 +104,10 @@ def composite_blockers(report):
         task = report.get('task', {}).get('data', {})
         axes = report.get('axes_task', {})
         child = report.get('engine_task', {})
+        runtime = report.get('generation_runtime', {})
+        if (runtime.get('result') != 'PASS' or runtime.get('task') != child.get('task') or
+                runtime.get('crashLines') != [] or not re.fullmatch('[0-9a-f]{64}', runtime.get('logSha256', ''))):
+            errors.append('current composite native-crash-free log unproven')
         final = report.get('background_finalize', {})
         manifest = report.get('generation_manifest', {})
         state = report.get('next_state', {})
@@ -101,9 +157,11 @@ def composite_blockers(report):
     return errors
 
 
-def run(report, module, root, command, boot, font_hashes, assert_mounted, switch, stock, ids, output):
-    report.update(result='FAIL', entry='common/font_mix_controller.sh start',
-                  scope='Candidate legacy CLI composite on disposable AOSP x86_64/nativebridge; not App composite UI or ColorOS validation')
+def run(report, module, root, command, boot, font_hashes, assert_mounted, switch, stock, ids, output,
+        app_admit=None, app_prepared=None):
+    entry_kind = 'ACTUAL_APP_GENERATE_AND_APPLY' if app_admit else 'common/font_mix_controller.sh start'
+    report.update(result='FAIL', entry=entry_kind,
+                  scope='Actual App composite' if app_admit else 'Candidate legacy CLI composite; not App composite UI')
     probe = Path(__file__).with_name('commit_lock_device.py')
     remote_probe = '/data/local/tmp/luoshu-commit-lock-device.py'
     remote_report = '/data/local/tmp/luoshu-commit-lock-device-' + uuid.uuid4().hex + '.json'
@@ -130,10 +188,11 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
         raise RuntimeError('Actual Android commit-lock transport failed; see errno evidence')
     before = font_hashes()
     root('test ! -e ' + module + '/.luoshu-payload-next && test ! -e ' + module + '/config/font-payload-next.conf')
-    sources = dict(cjk=ids[0], latin=ids[1], digit=ids[1])
+    sources = dict(cjk=ids[0], latin=ids[1], digit=ids[2] if len(ids) > 2 else ids[1])
     report['sources'] = sources
     entry = 'sh ' + module + '/common/font_mix_controller.sh '
-    report['start'] = last_json(root(entry + shlex.join(['start', *sources.values(), 'wght=400', 'wght=400', 'wght=400']), timeout=180))
+    report['start'] = (app_admit(sources) if app_admit else
+                       last_json(root(entry + shlex.join(['start', *sources.values(), 'wght=400', 'wght=400', 'wght=400']), timeout=180)))
     task = report['start'].get('data', {}).get('task')
     if report['start'].get('status') != 'ok' or not task:
         raise RuntimeError('Actual legacy composite entry did not admit a task')
@@ -158,6 +217,7 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
             raise RuntimeError('Legacy composite parent task identity changed')
         if any(value.get('state') in ('failed', 'error', 'cancelled') for value in (axes, child, final)):
             report['failure_log'] = root('tail -n 180 ' + module + '/logs/fontswitch.log', required=False)
+            (Path(output) / 'legacy-composite-failure.log').write_text(report['failure_log'])
             raise RuntimeError('Legacy composite generation/background finalizer failed')
         if all(value.get('state') == 'success' for value in (axes, child, final)):
             # success is written before the monitor's final mode/log writes.
@@ -166,8 +226,14 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
             log = root('tail -n 240 ' + module + '/logs/fontswitch.log')
             marker = 'legacy-v14 composite task committed for next boot: ' + child.get('task', 'NO_TASK')
             if marker in log:
-                report['background_monitor_committed'] = True
+                report['generation_runtime'] = runtime_log_evidence(log, child['task'])
+                if report['generation_runtime'].get('reason'):
+                    log = root('cat ' + module + '/logs/fontswitch.log')
+                    report['generation_runtime'] = runtime_log_evidence(log, child['task'])
                 (Path(output) / 'legacy-composite.log').write_text(log)
+                if report['generation_runtime']['result'] != 'PASS':
+                    raise RuntimeError('Current composite native crash or complete log unproven')
+                report['background_monitor_committed'] = True
                 break
         time.sleep(1)
     else:
@@ -179,6 +245,12 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
         text = root('find ' + module + '/.luoshu-payload-next -type f -exec sha256sum {} \\; | sort')
         return {line.split(None, 1)[1]: line.split()[0] for line in text.splitlines() if re.match(r'^[0-9a-f]{64}  ', line)}
     report['next_payload_hashes'] = next_hashes()
+    report['collection_output_path'] = module + '/.luoshu-payload-next' + COLLECTION_TARGET
+    report['collection_stock_sha256'] = stock.get(COLLECTION_TARGET, '')
+    report['collection_build'] = json.loads(root('cat ' + report['collection_output_path'] + '.luoshu-collection.json'))
+    report['collection_finalization'] = json.loads(root('cat ' + module + '/config/composite-font-contract.json'))
+    if collection_blockers(report):
+        raise RuntimeError('Generated collection proof does not match this Android composite')
     report['live_unchanged_before_reboot'] = font_hashes() == before
     root('test ! -e ' + module + '/.luoshu-mix-stage && test ! -e ' + module + '/config/mix-stage-next.conf')
     report['stage_cleared'] = True
@@ -215,6 +287,8 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
         fields(root('cat ' + module + '/config/font-payload-next.conf')) == report['next_state'])
     root('test ! -e ' + module + '/.luoshu-mix-stage && test ! -e ' + module + '/config/mix-stage-next.conf')
     report['stage_cleared_after_replay'] = True
+    if app_prepared:
+        app_prepared()
     report['reboot'] = boot()
     report['activated_state'] = fields(root('cat ' + module + '/config/font-payload-activated.conf'))
     _, report['mounted'] = assert_mounted('mix', stock)
@@ -222,7 +296,7 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
     report['restore_reboot'] = boot()
     report['restore_hashes_equal_stock'] = font_hashes() == stock
     report['result'] = 'PASS'
-    report['blockers'] = composite_blockers(report)
+    report['blockers'] = composite_blockers(report, entry_kind)
     if report['blockers']:
         report['result'] = 'FAIL'
         raise RuntimeError('Legacy composite evidence incomplete: ' + '; '.join(report['blockers']))

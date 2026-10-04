@@ -7,6 +7,10 @@ import org.json.JSONException
 import org.json.JSONObject
 
 internal data class FontLibraryFingerprint(val value: String, val currentFont: String)
+internal data class FontLibraryScan(
+    val index: CachedFontIndex,
+    val checkedFingerprint: FontLibraryFingerprint? = null,
+)
 
 /** Reads are separate from module status: neither cached rows nor refresh wait for ROM diagnostics. */
 internal interface FontLibrarySource {
@@ -14,6 +18,7 @@ internal interface FontLibrarySource {
     suspend fun preview(): CachedFontIndex? = null
     suspend fun fingerprint(): FontLibraryFingerprint
     suspend fun scan(refresh: Boolean): CachedFontIndex
+    suspend fun scanForVerification(refresh: Boolean): FontLibraryScan = FontLibraryScan(scan(refresh))
 }
 
 /** Publishes known rows before any slow validation. A failed check must never manufacture an empty library. */
@@ -36,12 +41,17 @@ internal suspend fun loadFontLibrary(
     }
 
     // First-run cache misses scan before checking: the scan initializes public storage.
-    // This response carries its PRE-scan fingerprint and is display-only until rechecked.
-    val scanned = source.scan(refresh = force || initial != null).withSourceRevision()
+    // A matching new module rechecks in the same request; older modules need a
+    // separate fingerprint call before these rows become actionable.
+    // A stale App list does not imply a stale module index. A normal scan checks
+    // the live directory and can reuse the module's matching index, then binds
+    // a second snapshot to this request. Only explicit refresh bypasses it.
+    val scan = source.scanForVerification(refresh = force)
+    val scanned = scan.index.withSourceRevision()
     // Preserve a known list until this replacement is confirmed. In particular, a failed
     // post-scan permission check must not replace known rows with an unconfirmed empty scan.
     if (initial == null && preview == null) publish(scanned, false)
-    val afterScan = source.fingerprint()
+    val afterScan = scan.checkedFingerprint ?: source.fingerprint()
     check(scanned.fingerprint.startsWith("font-list-v5:") && scanned.fingerprint == afterScan.value) {
         "字体目录在扫描期间发生变化，列表尚未核实，请刷新重试"
     }
@@ -60,13 +70,17 @@ internal fun fontLibraryContains(verified: Boolean, fonts: List<FontItem>, fontI
 
 internal class RootFontLibrarySource(
     private val diagnostics: (String, Long, Int) -> Unit = { _, _, _ -> },
+    private val phaseDiagnostics: (String, ShellResult) -> Unit = { _, _ -> },
     private val execute: suspend (String, Long) -> ShellResult = RootShell::fontInventory,
 ) : FontLibrarySource {
     private suspend fun request(action: String, timeoutMs: Long): ShellResult {
         val started = System.nanoTime()
         var code = -1
         try {
-            return execute(action, timeoutMs).also { code = it.code }
+            return execute(action, timeoutMs).also {
+                code = it.code
+                phaseDiagnostics(action, it)
+            }
         } finally {
             diagnostics(action, (System.nanoTime() - started) / 1_000_000L, code)
         }
@@ -87,7 +101,13 @@ internal class RootFontLibrarySource(
             else -> return null
         }
         if (root.optJSONObject("data")?.optJSONArray("fonts") == null) return null
-        return parseIndex(root)
+        return try {
+            parseIndex(root)
+        } catch (_: JSONException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
     }
 
     private suspend fun parseCachedRoot(raw: String): JSONObject? = withContext(Dispatchers.Default) {
@@ -121,9 +141,26 @@ internal class RootFontLibrarySource(
     }
 
     override suspend fun scan(refresh: Boolean): CachedFontIndex {
+        return scanForVerification(refresh).index
+    }
+
+    override suspend fun scanForVerification(refresh: Boolean): FontLibraryScan {
         val root = parseRoot(request(if (refresh) "refresh" else "scan", 60_000L))
         require(root.optString("status") == "ok") { root.optString("message", "字体库读取失败") }
-        return parseIndex(root)
+        val index = parseIndex(root)
+        val data = root.getJSONObject("data")
+        val proof = data.optJSONObject("verification")
+        require(!data.has("verification") || proof != null) { "字体索引核查记录格式错误" }
+        // Older modules still use the separate check. A malformed new proof must
+        // fail, rather than silently blessing rows or causing a retry loop.
+        val checked = proof?.let {
+            require(it.optString("schema") == "font-list-verification-v1" &&
+                index.fingerprint.startsWith("font-list-v5:") &&
+                it.optString("fingerprint") == index.fingerprint &&
+                it.optString("current") == index.currentFont) { "字体索引核查记录不匹配" }
+            FontLibraryFingerprint(index.fingerprint, index.currentFont)
+        }
+        return FontLibraryScan(index, checked)
     }
 
     private suspend fun parseRoot(result: ShellResult): JSONObject = withContext(Dispatchers.Default) {
@@ -149,10 +186,13 @@ internal class RootFontLibrarySource(
 }
 
 internal fun parseFontItems(array: JSONArray): List<FontItem> = buildList {
+    val seen = HashSet<String>()
     for (index in 0 until array.length()) {
-        val item = array.optJSONObject(index) ?: continue
-        val id = item.optString("id").trim()
-        if (id.isBlank() || id == "default") continue
+        val item = requireNotNull(array.optJSONObject(index)) { "字体索引包含无效字体记录" }
+        val id = (item.opt("id") as? String)?.trim().orEmpty()
+        require(id.isNotBlank()) { "字体索引缺少有效字体 ID" }
+        if (id == "default") continue
+        require(seen.add(id)) { "字体索引包含重复字体 ID：$id" }
         val weightsArray = item.optJSONArray("weights") ?: JSONArray()
         val weights = buildList {
             for (weightIndex in 0 until weightsArray.length()) {

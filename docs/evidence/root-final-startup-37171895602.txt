@@ -1,0 +1,2 @@
+--------- beginning of main
+10-04 03:28:32.916  3508  3508 I LuoShuStartup: event=app_start elapsed_ms=49531

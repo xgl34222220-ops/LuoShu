@@ -1,7 +1,7 @@
 name: Build Test Candidate
 on:
   push:
-    branches: [feat/stable-runtime-cleanup-20261002]
+    branches: [feat/stable-runtime-cleanup-20261002, fix/stable-composite-contract-20261003]
     paths:
       - common/**
       - android-app/**
@@ -52,7 +52,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv mksh fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv mksh fonts-noto-cjk fonts-dejavu-core libfreetype6 >/dev/null
 
       - uses: actions/cache@v4
         with:
@@ -79,18 +79,38 @@ jobs:
           fi
           cat "$log"
 
-      - name: Run supplemental candidate gates
-        continue-on-error: true
+      - name: Verify the original torn-snapshot control
+        shell: bash
         run: |
-          sh -x scripts/background_task_test.sh
-          sh -x scripts/device_font_foreground_quick_test.sh
-          sh -x scripts/font_switch_task_test.sh
-          sh -x scripts/mount_fast_sync_test.sh
-          FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
-          test -s "$FONT"
-          python3 scripts/font_inventory_scan_test.py --font "$FONT"
-          grep -q '多字重 · ${weights.size} 档' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt
-          grep -q '静态字体现在始终按当前所选字重走快速单文件组合' common/mix_weight_mode.sh
+          git fetch --no-tags --depth=1 origin 9487ca4dbce5684c6391dbadd3a12311de9fc10c
+          git show 9487ca4dbce5684c6391dbadd3a12311de9fc10c:common/legacy_v14_4/mix_router.sh > "$RUNNER_TEMP/luoshu-old-mix-router.sh"
+          python3 scripts/mix_snapshot_contract_test.py --old-source "$RUNNER_TEMP/luoshu-old-mix-router.sh"
+      - name: Run supplemental candidate gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/luoshu-supplemental-check.log"
+          if ! bash scripts/candidate_supplemental_check.sh >"$log" 2>&1; then
+            echo '补充候选门禁失败，输出最后 180 行：' >&2
+            tail -n 180 "$log" >&2
+            mkdir -p dist
+            cp -f "$log" dist/supplemental-check.log
+            exit 1
+          fi
+          cat "$log"
+
+      - name: Verify actual Android 15 variable CJK regression
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/NotoSansCJK-Android15-variable.ttc"
+          curl --fail --location --retry 3 --output "${fixture}.base64" \
+            'https://android.googlesource.com/platform/external/noto-fonts/+/1763da7de494446263d6e6b7b9e9328eac8ecdd8/notosanscjk/NotoSansCJK-wght-400-900.otf.ttc?format=TEXT'
+          base64 --decode "${fixture}.base64" > "$fixture"
+          echo "3e7e5afaac2c6d872592d76abedac03a51c6f0fc42d11e311ff2816a6c368afe  $fixture" | sha256sum -c -
+          PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages" \
+            python3 scripts/composite_collection_real_test.py --stock "$fixture" --expected-retained 0
+          rm -f "${fixture}.base64" "$fixture"
 
       - name: Enforce current pre-release readiness
         shell: bash
@@ -161,6 +181,9 @@ jobs:
             common/font_archive_export.sh \
             common/font_inventory.py \
             common/font_inventory_scan.py \
+            common/composite_collection_build.py \
+            common/composite_collection_build.sh \
+            common/composite_collection_contract.py \
             common/font_switch_task.sh \
             common/legacy_v14_4/payload_clone.sh \
             common/mix_weight_mode.sh \
@@ -196,7 +219,9 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" \
+            "$tmp/common/composite_collection_build.py" "$tmp/common/composite_collection_contract.py"
+          sh -n "$tmp/common/composite_collection_build.sh"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"

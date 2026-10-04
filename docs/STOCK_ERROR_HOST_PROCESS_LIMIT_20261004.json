@@ -1,0 +1,22 @@
+{
+  "evidence_kind": "HOST_ENVIRONMENT_PROCESS_IDENTITY_BLOCKED",
+  "observed": {
+    "os_getpid": 5,
+    "proc_self_pid": 391749,
+    "pid_views_match": false
+  },
+  "before_source": "93b4075dcb24919579ca2af64ff6f96ad40fee48",
+  "comparative_read": "Before and working proc_info returned the same unrelated low-PID record; process implementation is byte-identical before the decoder",
+  "task_scope_test": {
+    "executed": 20,
+    "failures": 12,
+    "errors": 2,
+    "result": "FAIL"
+  },
+  "font_request_scope_test": {
+    "executed": 5,
+    "failures": 5,
+    "result": "FAIL"
+  },
+  "resolution": "Do not change identity checks or claim host process acceptance. Fresh normal CI and actual Android gates remain mandatory."
+}

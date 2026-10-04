@@ -1,0 +1,14 @@
+{
+  "schema": "luoshu-mix-snapshot-host-proof-v1",
+  "scope": "FRESH_HOST_REAL_SHELL_ROUTER_NOT_ANDROID_OR_MOUNTS",
+  "run_id": 37197455936,
+  "runtime_source": "d12168a88a06193b238821c87d0f4bf844a74b96",
+  "current_cases": 8,
+  "first_seconds": 0.163,
+  "prepack_seconds": 0.148,
+  "old_source": "9487ca4dbce5684c6391dbadd3a12311de9fc10c",
+  "old_torn_control": "PASS_OBSERVED_OLD_ID_WITH_NEW_STATE_MESSAGE_SOURCE_PROGRESS",
+  "current_atomic_control": "PASS_ALL_FIELDS_FROM_ONE_OPEN_OLD_INODE",
+  "artifact_id": 11302085754,
+  "artifact_sha256": "e8e29d6d71b92d6ba983741afcfad00c25bb8835c2ba3af7951ac2af17871e87"
+}

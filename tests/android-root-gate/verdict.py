@@ -1,9 +1,181 @@
 """Fail-closed structured verdicts. A printed PASS or green job is not evidence."""
 import re
+import json
+from inventory_timings import verified_timing
 
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 OLD_CASES = {'success': 0, 'failure': 7, 'timeout': 124, 'cancel': 143}
 REQUEST_CASES = {**OLD_CASES, 'cancel_int': 130, 'cancel_hup': 129, 'stdin_eof': 130, 'writer_death': 130}
+MIX_HANDOFF_CASES = {
+    'silent-start', 'conflicting-output', 'truncated-output', 'logged-task-lookalike',
+    'queued-task', 'completed-task', 'failed-task', 'stale-task-with-fresh-output',
+    'wrong-cjk', 'wrong-latin', 'wrong-digit', 'unknown-state', 'missing-state', 'missing-task',
+    'chinese-native-regex-regression', 'escaped-quote-and-path', 'pretty-json', 'ascii-unicode-escapes',
+    'task-field-injection', 'nested-message-lookalike', 'pretty-nested-message', 'truncated-json',
+    'wrong-message-type', 'last-valid-log-record', 'bounded-long-log-tail',
+    'progress-chinese-native-regression', 'progress-escaped-quote-and-path', 'progress-control-escape',
+    'progress-truncated-message', 'progress-invalid-string-tail', 'progress-unsupported-unicode-escape',
+    'progress-oversized-message',
+}
+PREVIEW_SOURCE_CASES = {
+    'static-nearest', 'exact-static', 'invalid-weight-default', 'static-tie-order',
+    'cross-format-tie-order', 'later-variable-wins-over-exact-static', 'first-variable-order',
+    'uppercase-extension', 'chinese-space-family', 'literal-backslash-family',
+    'leading-echo-option-family', 'single-pass-suffixes', 'trailing-name-separators',
+    'matching-directory-rejected', 'different-family-rejected', 'empty-library',
+    'large-independent-library', 'quiet-and-stdout-parser-agree',
+}
+COMPOSITE_ERROR_CASES = {
+    'chinese-native-error', 'ascii-escaped-error', 'pretty-top-level-error',
+    'nested-lookalike-error', 'plain-text-fallback', 'unavailable-helper-fallback',
+    'bounded-valid-log-tail', 'timeout-code-priority', 'oom-code-priority',
+    'signal-code-priority', 'no-execute-code-priority', 'runtime-code-priority',
+    'missing-runtime-code-priority', 'wrong-abi-code-priority', 'empty-default-error',
+}
+
+
+def composite_error_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS'
+            or value.get('schema') != 'luoshu-composite-error-contract-v1'
+            or value.get('environment') != 'ANDROID' or value.get('selinux') != 'Enforcing'
+            or not re.fullmatch(r'[0-9a-f-]{36}', str(value.get('boot_id', '')))
+            or value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh'):
+        return ['actual Android composite error function context missing or failed']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(COMPOSITE_ERROR_CASES)
+            or len(cases) != len(COMPOSITE_ERROR_CASES) or any(not isinstance(case, dict) for case in cases)
+            or {case.get('name') for case in cases} != COMPOSITE_ERROR_CASES
+            or any(case.get('result') != 'PASS' for case in cases)):
+        return ['actual Android composite error function case set incomplete or failed']
+    return []
+
+
+STOCK_ERROR_CASES = {
+    'chinese-quotes-and-path', 'ascii-unicode-escapes', 'pretty-top-level-message',
+    'nested-message-lookalike', 'nested-only-fallback', 'last-valid-log-record',
+    'control-characters', 'plain-log-fallback', 'unavailable-helper-fallback',
+    'empty-default-error', 'nonstring-message-fallback', 'bounded-log-tail',
+    'success-stays-success', 'zero-exit-without-inventory-fails',
+}
+
+
+def stock_error_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS' or
+            value.get('schema') != 'luoshu-stock-error-contract-v1' or value.get('environment') != 'ANDROID' or
+            value.get('tested_scope') != 'CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN' or
+            value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh' or
+            value.get('selinux') != 'Enforcing' or
+            not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', str(value.get('boot_id', ''))) or
+            not re.fullmatch('[0-9a-f]{64}', str(value.get('helper_sha256', '')))):
+        return ['current stock error function not proven on original Root Android runtime']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(STOCK_ERROR_CASES) or
+            len(cases) != len(STOCK_ERROR_CASES) or any(not isinstance(case, dict) for case in cases) or
+            {case.get('name') for case in cases} != STOCK_ERROR_CASES or any(case.get('result') != 'PASS' for case in cases)):
+        return ['current stock error function cases incomplete or failed']
+    return []
+
+
+INVENTORY_OUTPUT_CASES = {
+    # Exact synthetic transport fixture sizes, not limits on real inventories.
+    'small-list': (389, 389, 0),
+    'thousand-row-list': (332948, 332948, 0),
+    'large-backend-error': (307262, 307262, 7),
+    'unavailable-scanner-direct-output': (332948, 332948, 0),
+    'empty-backend-failure': (0, 1, 7),
+}
+
+
+def inventory_output_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS' or
+            value.get('schema') != 'luoshu-inventory-output-contract-v1' or
+            value.get('environment') != 'ANDROID' or
+            value.get('tested_scope') != 'CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS' or
+            value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh' or
+            value.get('selinux') != 'Enforcing' or
+            not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', str(value.get('boot_id', ''))) or
+            not re.fullmatch('[0-9a-f]{64}', str(value.get('router_sha256', '')))):
+        return ['current inventory output router not proven on original Root Android runtime']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(INVENTORY_OUTPUT_CASES) or
+            len(cases) != len(INVENTORY_OUTPUT_CASES) or any(not isinstance(case, dict) for case in cases) or
+            {case.get('name') for case in cases} != set(INVENTORY_OUTPUT_CASES)):
+        return ['current inventory output router case set incomplete or duplicated']
+    for case in cases:
+        fields = ('input_bytes', 'output_bytes', 'code')
+        if (case.get('result') != 'PASS' or any(type(case.get(field)) is not int for field in fields) or
+                tuple(case[field] for field in fields) != INVENTORY_OUTPUT_CASES[case['name']]):
+            return ['current inventory output bytes or backend exit code incomplete or failed']
+    return []
+
+
+def inventory_output_evidence_blockers(value, steps, router_sha, boot):
+    errors = inventory_output_blockers(value)
+    if errors:
+        return errors
+    commands = [step for step in steps if isinstance(step, dict) and
+                any('luoshu-inventory-output-contract.py --module ' in str(arg) for arg in step.get('argv', []))]
+    expected = ('luoshu-inventory-output-contract.py --module /data/adb/modules/LuoShu '
+                '--shell /system/bin/sh --output /data/local/tmp/luoshu-inventory-output-contract.json')
+    if (len(commands) != 1 or commands[0].get('exit') != 0 or
+            not any(expected in str(arg) for arg in commands[0].get('argv', []))):
+        errors.append('actual installed inventory output command missing, duplicated or failed')
+    else:
+        try:
+            actual = json.loads(commands[0].get('stdout', ''))
+        except (ValueError, TypeError):
+            actual = None
+        if {k:v for k,v in value.items() if k not in ('boot_id', 'selinux', 'module', 'shell')} != actual:
+            errors.append('inventory output report differs from actual ARM64 command stdout')
+    if value['router_sha256'] != router_sha:
+        errors.append('inventory output router differs from reviewed runtime source')
+    if value['boot_id'] != boot:
+        errors.append('inventory output and stock-error boot context changed')
+    return errors
+
+
+def preview_source_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS'
+            or value.get('schema') != 'luoshu-preview-source-contract-v1'
+            or value.get('environment') != 'ANDROID' or value.get('selinux') != 'Enforcing'
+            or not re.fullmatch(r'[0-9a-f-]{36}', str(value.get('boot_id', '')))
+            or value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh'):
+        return ['actual Android preview source context missing or failed']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(PREVIEW_SOURCE_CASES)
+            or len(cases) != len(PREVIEW_SOURCE_CASES) or any(not isinstance(case, dict) for case in cases)
+            or {case.get('name') for case in cases} != PREVIEW_SOURCE_CASES
+            or any(case.get('result') != 'PASS' for case in cases)):
+        return ['actual Android preview source selection case set incomplete or failed']
+    return []
+
+
+def mix_handoff_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS'
+            or value.get('schema') != 'luoshu-mix-handoff-contract-v1'
+            or value.get('environment') != 'ANDROID' or value.get('selinux') != 'Enforcing'
+            or not re.fullmatch(r'[0-9a-f-]{36}', str(value.get('boot_id', '')))
+            or value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh'):
+        return ['actual Android composite handoff context missing or failed']
+    cases = value.get('cases', [])
+    if (value.get('case_count') != len(MIX_HANDOFF_CASES) or len(cases) != len(MIX_HANDOFF_CASES)
+            or {case.get('name') for case in cases} != MIX_HANDOFF_CASES
+            or any(case.get('result') != 'PASS' for case in cases)):
+        return ['actual Android composite handoff/UTF-8 case set incomplete or failed']
+    return []
+
+
+def axis_metadata_blockers(value):
+    if (not isinstance(value, dict) or value.get('status') != 'ok'
+            or value.get('variable') is not True or value.get('hasWeight') is not True):
+        return ['actual CFF2 collection axis metadata missing or failed']
+    weight = value.get('weight', {})
+    if (value.get('axes') != [weight] or weight.get('tag') != 'wght'
+            or (weight.get('min'), weight.get('default'), weight.get('max')) != (400, 400, 900)
+            or not isinstance(weight.get('name'), str) or not weight['name'].strip()
+            or weight.get('hidden') is not False):
+        return ['actual CFF2 collection axis name/range/flags unproven']
+    return []
 
 
 def reboot_ok(value):
@@ -132,8 +304,37 @@ def delivery_blockers(report):
             errors.append('candidate error path has missing/native-crash evidence')
     from composite_gate import composite_blockers
     errors.extend(composite_blockers(report.get('legacy_composite')))
+    from app_composite_gate import app_composite_blockers
+    errors.extend(app_composite_blockers(report.get('app_composite')))
     errors.extend(scope_blockers(report.get('magisk_task_scope'), OLD_CASES))
     errors.extend(scope_blockers(report.get('magisk_request_scope'), REQUEST_CASES, True))
+    errors.extend(mix_handoff_blockers(report.get('magisk_mix_handoff')))
+    errors.extend(preview_source_blockers(report.get('magisk_preview_source')))
+    errors.extend(composite_error_blockers(report.get('magisk_composite_error')))
+    errors.extend(stock_error_blockers(report.get('magisk_stock_error')))
+    errors.extend(inventory_output_blockers(report.get('magisk_inventory_output')))
+    errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
+    axes_ui = report.get('app_axes', {})
+    from app_axis_gate import library_preflight_ok
+    if not library_preflight_ok(axes_ui.get('library_preflight', {}), axes_ui.get('actual_app_pid')):
+        errors.append('fresh verified App library preflight missing before axis selection')
+    observed = axes_ui.get('observed_labels', [])
+    imported = axes_ui.get('import_result', {})
+    imported_data = imported.get('data', {})
+    if (axes_ui.get('result') != 'PASS' or axes_ui.get('package') != PACKAGE
+            or axes_ui.get('font_id') != 'LuoShuAxisGate' or not str(axes_ui.get('actual_app_pid', '')).isdigit()
+            or not re.fullmatch('[0-9a-f]{64}', axes_ui.get('source_sha256', ''))
+            or axes_ui.get('imported_sha256') != axes_ui.get('source_sha256')
+            or imported.get('status') != 'ok' or imported_data.get('kind') != 'font'
+            or imported_data.get('id') != 'LuoShuAxisGate' or imported_data.get('supportsCjk') is not True
+            or imported_data.get('duplicate') is not False
+            or axes_ui.get('stock_hashes_unchanged') is not True or axes_ui.get('target_fatal') is not False
+            or axes_ui.get('anr') is not False or axes_ui.get('hidden_axis_visible') is not False
+            or axes_ui.get('cjk_card_scanned_to_next_slot') is not True
+            or not re.fullmatch(r'\[\d+,\d+\]\[\d+,\d+\]', axes_ui.get('next_slot_detail_bounds', ''))
+            or not all(label in observed for label in ('字宽', '纹理细节', 'XTRA', '可变字体', '英文字形'))
+            or any(label in observed for label in ('HIDN', '内置参数'))):
+        errors.append('actual App font-declared axis UI/read-only evidence incomplete or failed')
     if report.get('app_root') != 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY':
         errors.append('actual App root not proven')
     timings = report.get('library_timings', [])
@@ -153,6 +354,8 @@ def delivery_blockers(report):
                 errors.append(f'{count}: verified App identity/count missing')
             if not isinstance(sample.get('first_inventory_frame_ms'), int) or not isinstance(sample.get('library_open_to_inventory_first_ms'), int) or sample['library_open_to_inventory_first_ms'] < 0:
                 errors.append(f'{count}: target-count first frame absent; empty frames do not count')
+            if not verified_timing(sample.get('request_timings'), sample.get('start_ms', 0), count):
+                errors.append(f'{count}: current live request phase timings incomplete or inconsistent')
     app = report.get('app_apply', {})
     if app.get('result') != 'PASS' or app.get('task', {}).get('data', {}).get('state') != 'success' or app.get('task', {}).get('data', {}).get('font') != app.get('font_id'):
         errors.append('actual App apply task not proven')
@@ -171,6 +374,10 @@ def delivery_blockers(report):
         errors.append('upgrade preservation not proven')
     if report.get('final_ui', {}).get('result') != 'PASS' or report.get('final_ui', {}).get('target_fatal') is not False or report.get('final_ui', {}).get('anr') is not False:
         errors.append('fresh final App crash/ANR observation absent or failed')
+    final_samples = report.get('final_ui', {}).get('observations', {}).get('samples', [])
+    if (len(final_samples) != 2 or {sample.get('kind') for sample in final_samples} != {'app_start', 'library_open'} or
+            any(not verified_timing(sample.get('request_timings'), sample.get('start_ms', 0), 1000) for sample in final_samples)):
+        errors.append('final cold/warm live request phase timings incomplete or inconsistent')
     workspace = report.get('final_workspace', {})
     if workspace.get('result') != 'PASS' or workspace.get('entries') != []:
         errors.append('final owned transient workspace not proven empty')

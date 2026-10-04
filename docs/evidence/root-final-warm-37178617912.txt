@@ -1,0 +1,9 @@
+--------- beginning of main
+10-04 05:36:00.762  3385  3385 I LuoShuStartup: event=library_open elapsed_ms=96323
+10-04 05:36:00.762  3385  3385 I LuoShuStartup: event=font_index_visible elapsed_ms=96323 count=1000 verified=false
+10-04 05:36:01.213  3385  3385 I LuoShuStartup: event=library_frame elapsed_ms=96774 count=1000 verified=false
+10-04 05:36:08.675  3385  3385 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=inventory duration_ms=495.219 count=1000 code=0
+10-04 05:36:08.675  3385  3385 I LuoShuStartup: event=font_request_phase stage=fingerprint phase=scope duration_ms=3572.911 code=0 cleaned=true reason=success
+10-04 05:36:08.675  3385  3385 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=104236 duration_ms=7912 code=0
+10-04 05:36:08.675  3385  3385 I LuoShuStartup: event=font_index_verified elapsed_ms=104237 count=1000 verified=true
+10-04 05:36:08.979  3385  3385 I LuoShuStartup: event=library_frame elapsed_ms=104541 count=1000 verified=true

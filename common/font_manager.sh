@@ -95,7 +95,9 @@ stock_scan_json() {
             rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
             stock_scan_lock_release
             trap - EXIT HUP INT TERM
-            printf '%s\n' "$(printf '%s\n' "$_stock_out" | tail -n1)"
+            tail -n1 <<LUOSHU_STOCK_OUTPUT
+$_stock_out
+LUOSHU_STOCK_OUTPUT
             return 0
         fi
     fi
@@ -110,7 +112,10 @@ stock_scan_json() {
                 --output "$STOCK_INVENTORY" 2>&1
     )
     _stock_rc=$?
-    _stock_last=$(printf '%s\n' "$_stock_out" | tail -n1)
+    _stock_last=$(tail -n1 <<LUOSHU_STOCK_OUTPUT
+$_stock_out
+LUOSHU_STOCK_OUTPUT
+    )
     if [ "$_stock_rc" -eq 0 ] && [ -s "$STOCK_INVENTORY" ]; then
         rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
         stock_scan_lock_release
@@ -118,7 +123,21 @@ stock_scan_json() {
         printf '%s\n' "$_stock_last"
         return 0
     fi
-    _stock_message=$(printf '%s\n' "$_stock_last" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
+    # Reuse the bounded top-level decoder. The scanner has already completed;
+    # Redirect captured data to stdin: Android printf is an external executable
+    # and cannot accept a single log argument larger than the kernel argv limit.
+    # Variable contents are data, never a second round of shell source expansion.
+    _stock_message=''
+    if [ -f "$MODDIR/common/task_scope.py" ]; then
+        _stock_message=$(
+            PYTHONHOME="$PYROOT" \
+                PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+                LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                    "$PYBIN" "$MODDIR/common/task_scope.py" error-message-stdin 2>/dev/null <<LUOSHU_STOCK_OUTPUT
+$_stock_out
+LUOSHU_STOCK_OUTPUT
+        ) || _stock_message=''
+    fi
     [ -n "$_stock_message" ] || _stock_message="$_stock_out"
     [ -n "$_stock_message" ] || _stock_message='原厂字体扫描失败'
     stock_scan_lock_release
@@ -168,7 +187,9 @@ case "${1:-}:${2:-}" in
         if stock_scan_available; then
             _manager_out=$(sh "$CURRENT_MANAGER" "$@")
             _manager_rc=$?
-            printf '%s\n' "$_manager_out" | sed 's/"nativeAvailable":false/"nativeAvailable":true/g'
+            sed 's/"nativeAvailable":false/"nativeAvailable":true/g' <<LUOSHU_MANAGER_OUTPUT
+$_manager_out
+LUOSHU_MANAGER_OUTPUT
             exit "$_manager_rc"
         fi
         ;;

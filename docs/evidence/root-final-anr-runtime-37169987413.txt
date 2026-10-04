@@ -1,0 +1,19 @@
+10-04 02:45:19.828  1153  3806 E ActivityManager: ANR in io.github.xgl34222220.luoshu.stabletest (io.github.xgl34222220.luoshu.stabletest/io.github.xgl34222220.luoshu.MainActivity)
+10-04 02:45:19.828  1153  3806 E ActivityManager: PID: 3461
+10-04 02:45:19.828  1153  3806 E ActivityManager: Reason: Input dispatching timed out (b7d70b5 io.github.xgl34222220.luoshu.stabletest/io.github.xgl34222220.luoshu.MainActivity (server) is not responding. Waited 5014ms for FocusEvent(hasFocus=true)).
+10-04 02:45:19.828  1153  3806 E ActivityManager: ErrorId: 0be88d22-484e-487d-bcef-b1d5ce02f5a1
+10-04 02:45:19.828  1153  3806 E ActivityManager: Frozen: false
+10-04 02:45:19.828  1153  3806 E ActivityManager: Load: 12.19 / 2.93 / 0.98
+10-04 02:45:19.828  1153  3806 E ActivityManager: ----- Output from /proc/pressure/memory -----
+10-04 02:45:19.828  1153  3806 E ActivityManager: some avg10=12.59 avg60=2.66 avg300=0.57 total=1793288
+10-04 02:45:19.828  1153  3806 E ActivityManager: full avg10=0.00 avg60=0.00 avg300=0.00 total=10964
+10-04 02:45:19.828  1153  3806 E ActivityManager: ----- Output from /proc/pressure/cpu -----
+10-04 02:45:19.828  1153  3806 E ActivityManager: some avg10=86.77 avg60=42.39 avg300=11.26 total=37286977
+10-04 02:45:19.828  1153  3806 E ActivityManager: full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+10-04 02:45:19.828  1153  3806 E ActivityManager: ----- Output from /proc/pressure/io -----
+10-04 02:45:19.828  1153  3806 E ActivityManager: some avg10=12.23 avg60=6.65 avg300=1.84 total=6460505
+10-04 02:45:19.828  1153  3806 E ActivityManager: full avg10=0.03 avg60=0.20 avg300=0.06 total=315304
+10-04 02:45:19.828  1153  3806 E ActivityManager: CPU usage from 37584ms to -4ms ago (2026-10-04 02:44:41.592 to 2026-10-04 02:45:19.180):
+10-04 02:45:19.828  1153  3806 E ActivityManager: 99% TOTAL: 32% user + 66% kernel + 0% iowait + 0.6% softirq
+10-04 02:45:19.828  1153  3806 E ActivityManager: CPU usage from 30ms to 481ms later (2026-10-04 02:45:19.207 to 2026-10-04 02:45:19.657):
+10-04 02:45:19.831  1153  3806 E ActivityManager: 100% TOTAL: 43% user + 55% kernel + 1.1% softirq

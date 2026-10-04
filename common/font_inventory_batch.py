@@ -31,8 +31,40 @@ MAGIC = {b'\x00\x01\x00\x00': 'TTF', b'true': 'TTF', b'\x00\x02\x00\x00': 'TTF',
          b'OTTO': 'OTF', b'ttcf': 'TTC', b'wOFF': 'WOFF', b'wOF2': 'WOFF2',
          b'PK\x03\x04': 'ZIP'}
 PROTOCOL = 'font-list-v5'
+# Include interpretation changes in the fingerprint too: the App may verify a
+# previously persisted index without asking the module to rebuild its cache.
+SCANNER_REVISION = 2
 MAX_CACHE_BYTES = 4 * 1024 * 1024
 MAX_CONFIG_BYTES = 64 * 1024
+
+
+class InventoryTrace:
+    """Fixed numeric spans only; these diagnostics never authorize inventory use."""
+    PHASES = ('storage', 'snapshot', 'cache', 'build', 'verify', 'write', 'output')
+
+    def __init__(self):
+        self.durations = dict.fromkeys(self.PHASES, 0.0)
+        self.calls = dict.fromkeys(self.PHASES, 0)
+        self.cache_hit = False
+
+    def measure(self, phase, function, *args, **kwargs):
+        started = time.monotonic()
+        self.calls[phase] += 1
+        try:
+            return function(*args, **kwargs)
+        finally:
+            self.durations[phase] += (time.monotonic() - started) * 1000
+
+    def fields(self):
+        values = [f'{phase}_ms={round(self.durations[phase], 3)}' for phase in self.PHASES]
+        values.extend((f'cache_hit={int(self.cache_hit)}',
+                       f'snapshot_count={self.calls["snapshot"] + self.calls["verify"]}',
+                       f'build_count={self.calls["build"]}', f'write_count={self.calls["write"]}'))
+        return ' '.join(values)
+
+
+def measured(trace, phase, function, *args, **kwargs):
+    return function(*args, **kwargs) if trace is None else trace.measure(phase, function, *args, **kwargs)
 
 
 def family_of(name):
@@ -44,7 +76,7 @@ def family_of(name):
     return family.rstrip(' \t\r\n\v\f-_')
 
 
-def weight_of(name):
+def weight_of(name, *, allow_variable=True):
     lower = name.lower()
     groups = (
         ('variable', ('variable', 'var', '可变', 'vf')),
@@ -57,7 +89,8 @@ def weight_of(name):
         ('bold', ('bold', '-700.', '_700.', '粗体')),
         ('black', ('black', 'heavy', '-900.', '_900.', '特粗', '重体')),
     )
-    return next((weight for weight, patterns in groups if any(p in lower for p in patterns)), 'regular')
+    return next((weight for weight, patterns in groups
+                 if (allow_variable or weight != 'variable') and any(p in lower for p in patterns)), 'regular')
 
 
 def size_label(size):
@@ -118,7 +151,8 @@ def snapshot(font_dir):
         target = entry.stat(follow_symlinks=True)
         fingerprints.append(['config', name, identity(info), identity(target)])
         configs[family] = font_dir / name
-    encoded = json.dumps(fingerprints, ensure_ascii=True, separators=(',', ':')).encode()
+    encoded = json.dumps([PROTOCOL, SCANNER_REVISION, fingerprints],
+                         ensure_ascii=True, separators=(',', ':')).encode()
     digest = hashlib.sha256(encoded).hexdigest()
     total = sum(row['stat'].st_size for row in files)
     return families, configs, f'{PROTOCOL}:{digest}:{len(files)}:{total}', total
@@ -128,17 +162,23 @@ def config_values(path):
     if path is None:
         return {}
     values = {}
-    # Bound even an abnormal single line, while retaining first-key/CR semantics.
+    # Bound even an abnormal single line. Normalize CRLF while retaining the
+    # first occurrence of each key, without evaluating any config text.
     with path.open('rb') as stream:
         raw = stream.read(MAX_CONFIG_BYTES + 1)
     if len(raw) > MAX_CONFIG_BYTES:
         raise ValueError('字体配置超过 64 KiB 限制')
-    for line in raw.decode('utf-8', errors='replace').split('\n'):
+    for line in raw.decode('utf-8', errors='replace').splitlines():
         if '=' in line:
             key, value = line.split('=', 1)
-            if key in ('name', 'supports_cjk') and key not in values:
+            if key in ('name', 'supports_cjk', 'is_variable') and key not in values:
                 values[key] = value
     return values
+
+
+def boolean_config(values, key):
+    value = values.get(key, '').strip().lower()
+    return {'true': True, 'false': False}.get(value)
 
 
 def current_font(config_dir):
@@ -153,13 +193,20 @@ def inventory(font_dir, config_dir, *, preview=False, captured=None):
     families, configs, fingerprint, total = captured or snapshot(font_dir)
     fonts = []
     for family, records in families.items():
+        config = config_values(configs.get(family))
+        imported_variable = boolean_config(config, 'is_variable')
         variants = {}
         for row in records:
-            variants.setdefault(row['weight'], row['name'])
+            # Direct imports record a real fvar probe. Use it for a single-file
+            # family, including names with no VF hint or a coincidental "var".
+            # One shared family config cannot reclassify every multiweight file.
+            weight = row['weight']
+            if len(records) == 1 and imported_variable is not None:
+                weight = 'variable' if imported_variable else weight_of(row['name'], allow_variable=False)
+            variants.setdefault(weight, row['name'])
         weights = [weight for weight in WEIGHTS if weight in variants]
         representative = min(records, key=lambda row: PREFERRED.index(row['weight']))
         info = representative['stat']
-        config = config_values(configs.get(family))
         variable = 'variable' in weights
         if preview:
             form = Path(representative['name']).suffix[1:].upper()
@@ -175,7 +222,7 @@ def inventory(font_dir, config_dir, *, preview=False, captured=None):
             'familyType': 'variable' if variable else ('static-family' if len(weights) >= 2 else 'single'),
             'file': representative['name'], 'size': size_label(info.st_size), 'bytes': info.st_size,
             'format': form, 'valid': valid, 'warning': '', 'error': error, 'variable': variable,
-            'supportsCjk': config.get('supports_cjk') != 'false',
+            'supportsCjk': boolean_config(config, 'supports_cjk') is not False,
             'date': datetime.fromtimestamp(info.st_mtime).strftime('%Y-%m-%d'),
             'provisional': preview,
         })
@@ -223,6 +270,33 @@ def read_cache(path):
     data = value.get('data')
     if not isinstance(data, dict) or not isinstance(data.get('fonts'), list):
         return None
+    seen = set()
+    for row in data['fonts']:
+        if not isinstance(row, dict) or not isinstance(row.get('id'), str):
+            return None
+        identifier = row['id'].strip()
+        if not identifier or identifier in seen:
+            return None
+        seen.add(identifier)
+    return value
+
+
+def verify_inventory(value, fonts, config, captured):
+    """Bind the response to a second snapshot in this same finite request.
+
+    The App otherwise launches another ARM64 interpreter just to ask for this
+    fingerprint. A changed directory must fail before either cache is written.
+    Cached reads alone never carry current verification authority.
+    """
+    after = snapshot(fonts)
+    if after[2] != captured[2]:
+        raise ValueError('字体目录在扫描期间发生变化，列表尚未核实，请刷新重试')
+    value['data']['current'] = current_font(config)
+    value['data']['verification'] = {
+        'schema': 'font-list-verification-v1',
+        'fingerprint': after[2],
+        'current': value['data']['current'],
+    }
     return value
 
 
@@ -239,34 +313,44 @@ def ensure_storage(public_dir, config_dir, migrate=False):
                     shutil.copyfile(entry.path, target)
 
 
-def execute(action, module_dir, public_dir):
+def execute(action, module_dir, public_dir, *, trace=None):
     config = module_dir / 'config'
     fonts = public_dir / 'fonts'
     cached_path = config / 'native_font_index.json'
     key_path = config / 'native_font_index.key'
     if action == 'cached':
-        return read_cache(cached_path) or {'status': 'error', 'code': 'cache_miss', 'message': 'cache miss'}
+        value = measured(trace, 'cache', read_cache, cached_path)
+        if value is not None:
+            if trace is not None:
+                trace.cache_hit = True
+            # Persisted verification belongs to its old request, never this read.
+            value['data'].pop('verification', None)
+        return value or {'status': 'error', 'code': 'cache_miss', 'message': 'cache miss'}
     if action in ('preview', 'scan', 'refresh'):
-        ensure_storage(public_dir, config, migrate=action != 'preview')
-    captured = snapshot(fonts)
+        measured(trace, 'storage', ensure_storage, public_dir, config, migrate=action != 'preview')
+    captured = measured(trace, 'snapshot', snapshot, fonts)
     if action == 'fingerprint':
         return {'status': 'ok', 'data': {'fingerprint': captured[2], 'current': current_font(config),
                                       'count': sum(map(len, captured[0].values())), 'bytes': captured[3]}}
     if action == 'preview':
-        return inventory(fonts, config, preview=True, captured=captured)
+        return measured(trace, 'build', inventory, fonts, config, preview=True, captured=captured)
     key = 'native-v5-batch|' + current_font(config) + '|' + captured[2]
     if action == 'scan':
         try:
-            saved_key = key_path.read_text().strip()
+            saved_key = measured(trace, 'cache', key_path.read_text).strip()
         except FileNotFoundError:
             saved_key = ''
         if saved_key == key:
-            cached = read_cache(cached_path)
+            cached = measured(trace, 'cache', read_cache, cached_path)
             if cached is not None and cached['data'].get('fingerprint') == captured[2]:
-                return cached
-    value = inventory(fonts, config, captured=captured)
-    atomic_write(cached_path, compact(value))
-    atomic_write(key_path, key + '\n')
+                if trace is not None:
+                    trace.cache_hit = True
+                return measured(trace, 'verify', verify_inventory, cached, fonts, config, captured)
+    value = measured(trace, 'build', inventory, fonts, config, captured=captured)
+    value = measured(trace, 'verify', verify_inventory, value, fonts, config, captured)
+    key = 'native-v5-batch|' + value['data']['current'] + '|' + captured[2]
+    measured(trace, 'write', lambda: atomic_write(cached_path, compact(value)))
+    measured(trace, 'write', atomic_write, key_path, key + '\n')
     return value
 
 
@@ -277,16 +361,18 @@ def main():
     parser.add_argument('--public', default=os.environ.get('LUOSHU_PUBLIC_DIR', '/sdcard/LuoShu'))
     args = parser.parse_args()
     started = time.monotonic()
+    trace = InventoryTrace()
     try:
-        result = execute(args.action, Path(args.module), Path(args.public))
+        result = execute(args.action, Path(args.module), Path(args.public), trace=trace)
         code = 0
     except (OSError, ValueError) as exc:
         result = {'status': 'error', 'code': 'inventory_unavailable', 'message': '字体目录或索引暂不可读：' + str(exc)}
         code = 1
-    print(compact(result), end='', flush=True)
+    trace.measure('output', lambda: print(compact(result), end='', flush=True))
     elapsed = round((time.monotonic() - started) * 1000, 3)
     data = result.get('data', {})
     count = data.get('stats', {}).get('count', data.get('count', 0))
+    print(f'[font-inventory-detail] stage={args.action} {trace.fields()} code={code}', file=sys.stderr, flush=True)
     print(f'[font-inventory] stage={args.action} elapsed_ms={elapsed} count={count} code={code}', file=sys.stderr, flush=True)
     return code
 

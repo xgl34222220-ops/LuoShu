@@ -1,0 +1,70 @@
+{
+  "schema": "luoshu-stock-error-contract-v1",
+  "environment": "ANDROID",
+  "module": "/data/adb/modules/LuoShu",
+  "shell": "/system/bin/sh",
+  "result": "PASS",
+  "cases": [
+    {
+      "name": "chinese-quotes-and-path",
+      "result": "PASS"
+    },
+    {
+      "name": "ascii-unicode-escapes",
+      "result": "PASS"
+    },
+    {
+      "name": "pretty-top-level-message",
+      "result": "PASS"
+    },
+    {
+      "name": "nested-message-lookalike",
+      "result": "PASS"
+    },
+    {
+      "name": "nested-only-fallback",
+      "result": "PASS"
+    },
+    {
+      "name": "last-valid-log-record",
+      "result": "PASS"
+    },
+    {
+      "name": "control-characters",
+      "result": "PASS"
+    },
+    {
+      "name": "plain-log-fallback",
+      "result": "PASS"
+    },
+    {
+      "name": "unavailable-helper-fallback",
+      "result": "PASS"
+    },
+    {
+      "name": "empty-default-error",
+      "result": "PASS"
+    },
+    {
+      "name": "nonstring-message-fallback",
+      "result": "PASS"
+    },
+    {
+      "name": "bounded-log-tail",
+      "result": "PASS"
+    },
+    {
+      "name": "success-stays-success",
+      "result": "PASS"
+    },
+    {
+      "name": "zero-exit-without-inventory-fails",
+      "result": "PASS"
+    }
+  ],
+  "tested_scope": "CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN",
+  "case_count": 14,
+  "helper_sha256": "cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f",
+  "boot_id": "550d4384-8aeb-4a26-8551-d041ae0fe535",
+  "selinux": "Enforcing"
+}

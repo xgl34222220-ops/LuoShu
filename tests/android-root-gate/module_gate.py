@@ -23,6 +23,40 @@ MODULE = '/data/adb/modules/LuoShu'
 FONT_PARTITIONS = 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'.split()
 
 
+def payload_mount_proof(path, canonical, stock_paths, live_digest, payload_hashes, mount_records):
+    """Bind stock aliases to their real target without relaxing bytes/provenance."""
+    if not canonical or stock_paths.get(path) != canonical:
+        raise RuntimeError('Original system font alias changed: ' + path)
+    slots = [p for p, target in stock_paths.items()
+             if target == canonical and p in payload_hashes]
+    if canonical in payload_hashes and canonical not in slots:
+        slots.append(canonical)
+    if not slots or any(payload_hashes[p] != live_digest for p in slots):
+        raise RuntimeError('Live target differs from committed canonical payload: ' + path)
+    # Prefer the canonical slot, then the requested partition spelling. Any
+    # other original alias must have identical bytes, rather than concealing a
+    # conflicting per-alias payload which the actual system link cannot load.
+    slot = canonical if canonical in slots else path if path in slots else sorted(slots)[0]
+    expected_source = MODULE.removeprefix('/data') + '/.luoshu-payload' + slot
+    matching = []
+    for row in mount_records:
+        if len(row) <= 5:
+            continue
+        destination = row[4].rstrip('/')
+        if canonical == destination:
+            source = row[3]
+        elif canonical.startswith(destination + '/'):
+            source = row[3].rstrip('/') + canonical[len(destination):]
+        else:
+            continue
+        if source in (expected_source, '/data' + expected_source):
+            matching.append(row)
+    if not matching:
+        raise RuntimeError('Changed font lacks exact canonical module-payload mount provenance: ' + path)
+    return {'canonical': canonical, 'stock_canonical': stock_paths[path],
+            'payload_path': slot, 'payload_sha256': live_digest, 'mount_records': matching}
+
+
 def resolve_authorized_uid(packages):
     rows = re.findall(r'package:(\S+) uid:(\d+)', packages)
     uids = {int(uid) for package, uid in rows if package == PACKAGE}
@@ -61,19 +95,10 @@ def run_gate(adb, magisk, baseline, candidate, output):
         return shell(shlex.quote(magisk) + ' su -mm -c ' + shlex.quote(text), timeout, required)
     def boot():
         before = shell('cat /proc/sys/kernel/random/boot_id')
-        command(['reboot']); command(['wait-for-device'], timeout=180)
-        end = time.monotonic() + 240
-        while time.monotonic() < end:
-            if shell('getprop sys.boot_completed') == '1':
-                break
-            time.sleep(2)
-        else:
-            raise RuntimeError('Module reboot did not complete')
-        ensure_root([adb, '-s', 'emulator-5554'], report['steps'])
-        after = shell('cat /proc/sys/kernel/random/boot_id')
-        if before == after or shell('getenforce') != 'Enforcing':
-            raise RuntimeError('Boot identity/SELinux invariant failed')
-        return {'before': before, 'after': after}
+        from boot_evidence import wait_for_reboot
+        return wait_for_reboot(command,
+            lambda: ensure_root([adb, '-s', 'emulator-5554'], report['steps']),
+            before, output, report)
     def bridge(*args, prefix=""):
         text = root(prefix + 'sh ' + MODULE + '/common/app_bridge.sh ' + shlex.join(args), timeout=240)
         for line in reversed(text.splitlines()):
@@ -127,26 +152,41 @@ def run_gate(adb, magisk, baseline, candidate, output):
         payload = root('find -L ' + payload_prefix + r' -type f \( -iname "*.ttf" -o -iname "*.otf" -o -iname "*.ttc" \) -exec sha256sum {} \;')
         payload_hashes = {line.split(None, 1)[1].removeprefix(payload_prefix): line.split()[0]
                           for line in payload.splitlines() if re.match(r'^[0-9a-f]{64}  ', line)}
-        for path in changed:
-            if payload_hashes.get(path) != live[path]:
-                raise RuntimeError('Live target differs from committed payload: ' + path)
         mounts = root('cat /proc/1/mountinfo')
         mount_records = [line.split() for line in mounts.splitlines() if ' - ' in line]
         proofs = {}
         for path in changed:
             canonical = root('readlink -f ' + shlex.quote(path))
-            matching = [row for row in mount_records if len(row) > 5 and
-                        (row[4] == canonical or canonical.startswith(row[4].rstrip('/') + '/')) and
-                        '/adb/modules/LuoShu/.luoshu-payload/' in row[3]]
-            if not matching:
-                raise RuntimeError('Changed font lacks exact module-payload mount provenance: ' + path)
-            proofs[path] = {'canonical': canonical, 'mount_records': matching}
+            proofs[path] = payload_mount_proof(path, canonical, original_paths,
+                                              live[path], payload_hashes, mount_records)
         return live, {'font': active, 'changed': changed, 'payload_hashes': payload_hashes, 'mount_proofs': proofs, 'mountinfo': mounts}
     try:
         if shell('getprop ro.kernel.qemu') != '1' or shell('getenforce') != 'Enforcing':
             raise RuntimeError('Only authorized Enforcing disposable AVD is supported')
         report['font_directories'] = root('for d in ' + ' '.join('/' + part + '/fonts' for part in FONT_PARTITIONS) + '; do if [ -d "$d" ]; then echo PRESENT:$d; else echo ABSENT:$d; fi; done')
         original_fonts = font_hashes()
+        paths_text = root('for p in ' + shlex.join(sorted(original_fonts)) +
+                          '; do c=$(readlink -f "$p") || exit 1; '
+                          'printf "%s\\t%s\\n" "$p" "$c"; done')
+        original_paths = {}
+        for line in paths_text.splitlines():
+            path, separator, canonical = line.partition('\t')
+            if not separator or not canonical.startswith('/') or path in original_paths:
+                raise RuntimeError('Incomplete or duplicated original font path identity')
+            original_paths[path] = canonical
+        if set(original_paths) != set(original_fonts):
+            raise RuntimeError('Original font alias identity set differs from stock hashes')
+        report['stock_font_canonical_paths'] = original_paths
+        # Keep the actual untouched AOSP collection for reproducible compiler
+        # diagnostics. Never pull a mounted candidate or modify the stock font.
+        stock_collection = '/system/fonts/NotoSansCJK-Regular.ttc'
+        stock_copy = output / 'stock-NotoSansCJK-Regular.ttc'
+        command(['pull', stock_collection, str(stock_copy)])
+        copied_hash = hashlib.sha256(stock_copy.read_bytes()).hexdigest()
+        if copied_hash != original_fonts.get(stock_collection):
+            raise RuntimeError('Diagnostic collection is not the original system font')
+        report['stock_collection_source'] = {'path': stock_collection, 'sha256': copied_hash,
+                                             'bytes': stock_copy.stat().st_size}
         archives = [('candidate', candidate)] if diagnostic_only else [('baseline', baseline), ('candidate', candidate)]
         for label, archive in archives:
             cycle = {'label': label, 'result': 'FAIL', 'zip_sha256': hashlib.sha256(Path(archive).read_bytes()).hexdigest()}
@@ -278,6 +318,107 @@ def run_gate(adb, magisk, baseline, candidate, output):
             report['magisk_request_scope'] = json.loads(root('cat /data/local/tmp/luoshu-request-scope.json'))
             if report['magisk_request_scope'].get('result') != 'PASS':
                 raise RuntimeError('Installed synchronous request lease cleanup failed under Magisk')
+            # Run exactly the new host contract cases under original ARM64
+            # Python + Android mksh/toybox in this disposable Magisk context.
+            handoff_script = Path(__file__).resolve().parents[2] / 'scripts/mix_handoff_contract_test.py'
+            command(['push', str(handoff_script), '/data/local/tmp/luoshu-mix-handoff.py'])
+            handoff_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-mix-handoff.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-mix-handoff.json', timeout=240)
+            report['magisk_mix_handoff'] = json.loads(root('cat /data/local/tmp/luoshu-mix-handoff.json'))
+            handoff = report['magisk_mix_handoff']
+            handoff['boot_id'] = root('cat /proc/sys/kernel/random/boot_id').strip()
+            handoff['selinux'] = root('getenforce').strip()
+            if handoff['boot_id'] != handoff_boot or handoff['selinux'] != 'Enforcing':
+                raise RuntimeError('Android context changed during composite handoff verification')
+            if (handoff.get('result') != 'PASS' or handoff.get('environment') != 'ANDROID'
+                    or handoff.get('case_count') != 32 or len(handoff.get('cases', [])) != 32
+                    or any(case.get('result') != 'PASS' for case in handoff['cases'])):
+                raise RuntimeError('Installed composite handoff/UTF-8 message contract failed under Android')
+            preview_script = Path(__file__).resolve().parents[2] / 'scripts/preview_source_contract_test.py'
+            command(['push', str(preview_script), '/data/local/tmp/luoshu-preview-source-contract.py'])
+            preview_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-preview-source-contract.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-preview-source-contract.json', timeout=240)
+            report['magisk_preview_source'] = json.loads(root('cat /data/local/tmp/luoshu-preview-source-contract.json'))
+            preview = report['magisk_preview_source']
+            preview['boot_id'] = root('cat /proc/sys/kernel/random/boot_id').strip()
+            preview['selinux'] = root('getenforce').strip()
+            if preview['boot_id'] != preview_boot:
+                raise RuntimeError('Android boot changed during preview source selection verification')
+            from verdict import preview_source_blockers
+            preview_errors = preview_source_blockers(preview)
+            if preview_errors:
+                raise RuntimeError('; '.join(preview_errors))
+            error_script = Path(__file__).resolve().parents[2] / 'scripts/composite_error_contract_test.py'
+            command(['push', str(error_script), '/data/local/tmp/luoshu-composite-error-contract.py'])
+            error_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-composite-error-contract.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-composite-error-contract.json', timeout=240)
+            report['magisk_composite_error'] = json.loads(root('cat /data/local/tmp/luoshu-composite-error-contract.json'))
+            engine_error = report['magisk_composite_error']
+            engine_error['boot_id'] = root('cat /proc/sys/kernel/random/boot_id').strip()
+            engine_error['selinux'] = root('getenforce').strip()
+            if engine_error['boot_id'] != error_boot:
+                raise RuntimeError('Android boot changed during composite error function verification')
+            from verdict import composite_error_blockers
+            error_failures = composite_error_blockers(engine_error)
+            if error_failures:
+                raise RuntimeError('; '.join(error_failures))
+            stock_error_script = Path(__file__).resolve().parents[2] / 'scripts/stock_error_contract_test.py'
+            command(['push', str(stock_error_script), '/data/local/tmp/luoshu-stock-error-contract.py'])
+            stock_error_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-stock-error-contract.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-stock-error-contract.json', timeout=240)
+            report['magisk_stock_error'] = json.loads(root('cat /data/local/tmp/luoshu-stock-error-contract.json'))
+            stock_error = report['magisk_stock_error']
+            stock_error['boot_id'] = root('cat /proc/sys/kernel/random/boot_id').strip()
+            stock_error['selinux'] = root('getenforce').strip()
+            installed_helper = root(f'sha256sum {MODULE}/common/task_scope.py').split()[0]
+            if stock_error['boot_id'] != stock_error_boot or stock_error['helper_sha256'] != installed_helper:
+                raise RuntimeError('Android stock-error boot or installed helper identity changed')
+            from verdict import stock_error_blockers
+            stock_errors = stock_error_blockers(stock_error)
+            if stock_errors:
+                raise RuntimeError('; '.join(stock_errors))
+            output_script = Path(__file__).resolve().parents[2] / 'scripts/inventory_output_contract_test.py'
+            command(['push', str(output_script), '/data/local/tmp/luoshu-inventory-output-contract.py'])
+            output_boot = root('cat /proc/sys/kernel/random/boot_id').strip()
+            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-inventory-output-contract.py '
+                 f'--module {MODULE} --shell /system/bin/sh --output /data/local/tmp/luoshu-inventory-output-contract.json', timeout=240)
+            report['magisk_inventory_output'] = json.loads(root('cat /data/local/tmp/luoshu-inventory-output-contract.json'))
+            output_transport = report['magisk_inventory_output']
+            output_transport.update(module=MODULE, shell='/system/bin/sh',
+                          boot_id=root('cat /proc/sys/kernel/random/boot_id').strip(), selinux=root('getenforce').strip())
+            installed_router = root(f'sha256sum {MODULE}/common/font_manager.sh').split()[0]
+            if (output_transport['boot_id'] != output_boot or output_boot != stock_error_boot or
+                    output_transport['router_sha256'] != installed_router):
+                raise RuntimeError('Android inventory-output boot or installed router identity changed')
+            from verdict import inventory_output_blockers
+            output_errors = inventory_output_blockers(output_transport)
+            if output_errors:
+                raise RuntimeError('; '.join(output_errors))
+            report['axis_metadata'] = json.loads(root(
+                f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
+                f'{runtime}/bin/luoshu-python {MODULE}/common/font_axis_info.py {stock_collection}', timeout=60))
+            axis_metadata = report['axis_metadata']
+            weight_axis = axis_metadata.get('weight') or {}
+            if (axis_metadata.get('status') != 'ok' or not axis_metadata.get('variable')
+                    or not axis_metadata.get('hasWeight') or weight_axis.get('tag') != 'wght'
+                    or (weight_axis.get('min'), weight_axis.get('default'), weight_axis.get('max')) != (400, 400, 900)
+                    or not weight_axis.get('name') or weight_axis.get('hidden') is not False):
+                raise RuntimeError('Actual Android CFF2 collection axis/name metadata differs from stock contract')
         with zipfile.ZipFile(candidate) as archive:
             apk_bytes = archive.read('bundled/LuoShu-App.apk')
             expected_apk = hashlib.sha256(apk_bytes).hexdigest()
@@ -315,6 +456,59 @@ def run_gate(adb, magisk, baseline, candidate, output):
         report['root_policy'] = {'package': PACKAGE, 'uid': uid, 'expires': until,
                                 'note': 'Policy grant is not yet proof of actual App execution'}
         report['app_root'] = 'GRANTED_NOT_PROVEN'
+        if not diagnostic_only:
+            # Only our original disposable fixture enters the picker. Selecting
+            # it must display real names/hidden-axis semantics without applying.
+            axis_fixture = '/sdcard/LuoShu/fonts/LuoShuAxisGate.ttf'
+            axis_config = '/sdcard/LuoShu/fonts/LuoShuAxisGate.conf'
+            intake = f'/data/user/0/{PACKAGE}/cache/native_import/luoshu-axis-gate'
+            runtime = MODULE + '/common/python'
+            # Use the same trusted intake and importer as the native picker.
+            # Raw public-directory copies intentionally have no fvar metadata;
+            # do not fabricate an inventory cache or is_variable configuration.
+            root(f'test ! -e {axis_fixture} && test ! -e {axis_config} && '
+                 f'mkdir -p {intake.rsplit("/", 1)[0]} && mkdir {intake}')
+            try:
+                root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+                     f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
+                     f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-synthetic-fonts.py '
+                     f'--output {intake} --axis-fixture', timeout=90)
+                source_sha256 = root(f'sha256sum {intake}/LuoShuAxisGate.ttf').split()[0]
+                imported = bridge('import_file', intake + '/LuoShuAxisGate.ttf', 'LuoShuAxisGate.ttf')
+                imported_data = imported.get('data', {})
+                if (imported.get('status') != 'ok' or imported_data.get('kind') != 'font'
+                        or imported_data.get('id') != 'LuoShuAxisGate'
+                        or imported_data.get('supportsCjk') is not True or imported_data.get('duplicate') is not False):
+                    raise RuntimeError('Original axis fixture did not pass the actual native import path: ' + json.dumps(imported))
+                if root('sha256sum ' + axis_fixture).split()[0] != source_sha256:
+                    raise RuntimeError('Native import changed original axis fixture bytes')
+                inventory = bridge('fonts', 'refresh')
+                fonts = inventory.get('data', {}).get('fonts', [])
+                selected = [font for font in fonts if font.get('id') == 'LuoShuAxisGate']
+                if len(selected) != 1 or selected[0].get('valid') is not True or selected[0].get('variable') is not True:
+                    raise RuntimeError('Original variable-axis fixture is not visible in actual root inventory')
+                from app_axis_gate import qualify as qualify_axes
+                try:
+                    report['app_axes'] = qualify_axes(adb, output / 'app-axes', selected[0]['name'],
+                                                      [font['name'] for font in fonts])
+                except Exception:
+                    # Keep the real FAIL and its import provenance in the top-level
+                    # report too. Missing success fields must still block verdict.
+                    failure_report = output / 'app-axes' / 'report.json'
+                    if failure_report.is_file():
+                        report['app_axes'] = json.loads(failure_report.read_text())
+                    raise
+                finally:
+                    if 'app_axes' in report:
+                        report['app_axes'].update(source_sha256=source_sha256, import_result=imported,
+                                                  font_id=selected[0]['id'])
+                        report['app_axes']['imported_sha256'] = root('sha256sum ' + axis_fixture).split()[0]
+                report['app_axes']['stock_hashes_unchanged'] = font_hashes() == original_fonts
+                if not report['app_axes']['stock_hashes_unchanged']:
+                    raise RuntimeError('Read-only App axis inspection changed live system font bytes')
+            finally:
+                root(f'rm -f {axis_fixture} {axis_config} {intake}/LuoShuAxisGate.ttf {intake}/LICENSE.txt && rmdir {intake}')
+                bridge('fonts', 'refresh')
         from app_library_gate import measure
         report['library_timings'] = []
         report['fixture_inventory'] = []
@@ -417,6 +611,17 @@ def run_gate(adb, magisk, baseline, candidate, output):
         if font_hashes() != original_fonts:
             raise RuntimeError('Final actual-App apply rollback did not restore stock font bytes')
         report['app_apply']['restore_hashes_equal_stock'] = True
+        if not diagnostic_only:
+            from app_composite_gate import qualify as qualify_app_composite
+            actual_inventory = bridge('fonts', 'scan')
+            if actual_inventory.get('status') != 'ok':
+                raise RuntimeError('Actual inventory unavailable for App composite selection')
+            report['app_composite'] = {}
+            qualify_app_composite(report['app_composite'], adb, MODULE, root, command, boot,
+                                  font_hashes, assert_mounted, switch, original_fonts,
+                                  ['LuoShuSyntheticGate0000', 'LuoShuSyntheticGate0001', 'LuoShuSyntheticGate0002'],
+                                  actual_inventory.get('data', {}).get('fonts', []),
+                                  output / 'app-composite')
         final_ui = measure(adb, output / 'final-ui', 1000, repetitions=1)
         report['final_ui'] = {'result': final_ui['result'], 'target_fatal': False, 'anr': False,
                               'note': 'Fresh actual App cold/warm verified library after restore reboot', 'observations': final_ui}
@@ -429,6 +634,11 @@ def run_gate(adb, magisk, baseline, candidate, output):
                                    'App timings are candidate-only on nativebridge x86_64 AVD, not native ARM64 or OEM-ROM validation.')
     except Exception as error:
         report['error'] = str(error)
+        if granted_uid is not None:
+            # Capture the owned App's threads before slower UI/CLI diagnostics
+            # or force-stop/teardown can replace the useful failure evidence.
+            from app_anr import capture_owned_anr
+            report['app_anr_diagnostic'] = capture_owned_anr(adb, magisk, output / 'app-anr', 'failure')
         if 'app_apply' in report:
             from app_library_gate import capture_apply_evidence
             report['app_apply']['final_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'final-failure')
@@ -450,6 +660,20 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 report['app_apply']['diagnostic_manager_trace'] = {'scope': 'DIAGNOSTIC direct manager ONLY', 'error': str(trace_error), 'command_evidence': report['steps'][-1]}
             report['app_apply']['post_diagnostic_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'after-cli-diagnostic')
     finally:
+        # Native crashes in finite composite children can be hidden by their
+        # shell callers. Capture the active rooted guest before teardown, also
+        # when generation fails before a reboot is attempted.
+        for filename, query in (
+                ('module-final-crash-log.txt', 'logcat -b crash -d -t 2000'),
+                ('module-final-system-log.txt', 'logcat -b all -d -t 4000'),
+                ('module-final-dmesg.txt', 'dmesg | tail -n 1200'),
+                ('module-final-tombstones.txt', 'for f in /data/tombstones/tombstone_*; do '
+                 'case "$f" in *.pb) continue;; esac; [ -f "$f" ] || continue; '
+                 'echo "GATE_TOMBSTONE:$f"; head -c 262144 "$f"; done')):
+            try:
+                (output / filename).write_text(root(query, timeout=45, required=False) + '\n')
+            except Exception as error:
+                report.setdefault('native_diagnostic_errors', {})[filename] = str(error)
         if granted_uid is not None:
             try:
                 shell('am force-stop ' + PACKAGE)

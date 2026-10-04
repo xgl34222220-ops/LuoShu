@@ -1,0 +1,10 @@
+{
+  "argv": [
+    "shell",
+    "/debug_ramdisk/magisk su -mm -c 'sh /data/adb/modules/LuoShu/common/app_bridge.sh fonts scan'"
+  ],
+  "exit": 0,
+  "elapsed_seconds": 13.473720207000042,
+  "stdout": "",
+  "stderr": "[font-inventory-detail] stage=scan storage_ms=41.016 snapshot_ms=1360.722 cache_ms=2.485 build_ms=6784.336 verify_ms=223.422 write_ms=40.47 output_ms=25.002 cache_hit=0 snapshot_count=2 build_count=1 write_count=2 code=0\n[font-inventory] stage=scan elapsed_ms=8485.1 count=1000 code=0\n/data/adb/modules/LuoShu/common/font_manager.sh[194]: /system/bin/printf: Argument list too long\n"
+}

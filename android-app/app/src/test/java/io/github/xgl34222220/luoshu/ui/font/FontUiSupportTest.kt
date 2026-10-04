@@ -52,6 +52,18 @@ class FontUiSupportTest {
         assertEquals(400, fontPreviewWeight(font))
     }
 
+    @Test
+    fun variableCapabilityDoesNotPromiseAWeightAxis() {
+        assertEquals("可变字体", fontCapabilityLabel(font(listOf("variable")).copy(variable = true)))
+    }
+
+    @Test
+    fun customAxesUseTheirNamesWhileKnownAxesKeepChineseLabels() {
+        assertEquals("细节纹理", fontAxisDisplayName("XTRA", "细节纹理"))
+        assertEquals("字重", fontAxisDisplayName("wght", "Weight"))
+        assertEquals("设计轴", fontAxisDisplayName("XTRA"))
+    }
+
     private fun font(weights: List<String>, supportsCjk: Boolean = true) = FontItem(
         id = "SuperHualunwan",
         name = "超级花轮丸",

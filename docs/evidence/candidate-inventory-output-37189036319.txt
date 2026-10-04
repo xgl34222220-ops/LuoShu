@@ -1,0 +1,173 @@
+2026-10-04T08:31:47.3533069Z {"schema":"luoshu-stock-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"/bin/sh","result":"PASS","cases":[{"name":"chinese-quotes-and-path","result":"PASS"},{"name":"ascii-unicode-escapes","result":"PASS"},{"name":"pretty-top-level-message","result":"PASS"},{"name":"nested-message-lookalike","result":"PASS"},{"name":"nested-only-fallback","result":"PASS"},{"name":"last-valid-log-record","result":"PASS"},{"name":"control-characters","result":"PASS"},{"name":"plain-log-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"empty-default-error","result":"PASS"},{"name":"nonstring-message-fallback","result":"PASS"},{"name":"bounded-log-tail","result":"PASS"},{"name":"success-stays-success","result":"PASS"},{"name":"zero-exit-without-inventory-fails","result":"PASS"}],"tested_scope":"CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN","case_count":14,"helper_sha256":"cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f"}
+2026-10-04T08:31:47.3539910Z {
+2026-10-04T08:31:47.3540693Z   "schema": "luoshu-inventory-output-contract-v1",
+2026-10-04T08:31:47.3541688Z   "environment": "HOST_ONLY",
+2026-10-04T08:31:47.3542775Z   "tested_scope": "CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS",
+2026-10-04T08:31:47.3543741Z   "result": "PASS",
+2026-10-04T08:31:47.3544361Z   "cases": [
+2026-10-04T08:31:47.3545042Z     {
+2026-10-04T08:31:47.3545836Z       "name": "small-list",
+2026-10-04T08:31:47.3546493Z       "result": "PASS",
+2026-10-04T08:31:47.3547194Z       "input_bytes": 389,
+2026-10-04T08:31:47.3547947Z       "output_bytes": 389,
+2026-10-04T08:31:47.3548677Z       "code": 0
+2026-10-04T08:31:47.3549259Z     },
+2026-10-04T08:31:47.3549775Z     {
+2026-10-04T08:31:47.3550384Z       "name": "thousand-row-list",
+2026-10-04T08:31:47.3551226Z       "result": "PASS",
+2026-10-04T08:31:47.3551854Z       "input_bytes": 332948,
+2026-10-04T08:31:47.3552567Z       "output_bytes": 332948,
+2026-10-04T08:31:47.3553195Z       "code": 0
+2026-10-04T08:31:47.3553825Z     },
+2026-10-04T08:31:47.3554276Z     {
+2026-10-04T08:31:47.3555280Z       "name": "large-backend-error",
+2026-10-04T08:31:47.3556068Z       "result": "PASS",
+2026-10-04T08:31:47.3556841Z       "input_bytes": 307262,
+2026-10-04T08:31:47.3557530Z       "output_bytes": 307262,
+2026-10-04T08:31:47.3558192Z       "code": 7
+2026-10-04T08:31:47.3558798Z     },
+2026-10-04T08:31:47.3559357Z     {
+2026-10-04T08:31:47.3560129Z       "name": "unavailable-scanner-direct-output",
+2026-10-04T08:31:47.3560948Z       "result": "PASS",
+2026-10-04T08:31:47.3561612Z       "input_bytes": 332948,
+2026-10-04T08:31:47.3562419Z       "output_bytes": 332948,
+2026-10-04T08:31:47.3563072Z       "code": 0
+2026-10-04T08:31:47.3563645Z     },
+2026-10-04T08:31:47.3564123Z     {
+2026-10-04T08:31:47.3564795Z       "name": "empty-backend-failure",
+2026-10-04T08:31:47.3565798Z       "result": "PASS",
+2026-10-04T08:31:47.3566304Z       "input_bytes": 0,
+2026-10-04T08:31:47.3566777Z       "output_bytes": 1,
+2026-10-04T08:31:47.3567225Z       "code": 7
+2026-10-04T08:31:47.3567627Z     }
+2026-10-04T08:31:47.3567976Z   ],
+2026-10-04T08:31:47.3568389Z   "case_count": 5,
+2026-10-04T08:31:47.3569092Z   "router_sha256": "8433e4a402af8b6bb479c9f256bf8f479c7ef99cbb9ee5665ded3faeb7a7a759"
+2026-10-04T08:31:47.3569740Z }
+2026-10-04T08:31:47.3940951Z Stock inventory scan is serialized and a waiting App reuses the completed boot scan.
+2026-10-04T08:31:47.3941408Z LuoShu App-only source checks passed.
+2026-10-04T08:31:47.3942076Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T08:31:47.3942734Z .....
+2026-10-04T08:31:47.3943303Z ----------------------------------------------------------------------
+2026-10-04T08:31:47.3943890Z Ran 5 tests in 0.055s
+2026-10-04T08:31:47.3944147Z 
+2026-10-04T08:31:47.3944668Z ....................
+2026-10-04T08:31:47.3945310Z ----------------------------------------------------------------------
+2026-10-04T08:31:47.3945892Z Ran 20 tests in 24.011s
+2026-10-04T08:31:47.3946174Z 
+2026-10-04T08:31:47.3946355Z OK
+2026-10-04T08:31:47.3946661Z .............
+2026-10-04T08:31:47.3947225Z ----------------------------------------------------------------------
+2026-10-04T08:31:47.3984549Z 
+2026-10-04T08:31:47.3985329Z ----------------------------------------------------------------------
+2026-10-04T08:31:47.3986693Z Ran 23 tests in 0.431s
+2026-10-04T08:31:47.3987225Z 
+2026-10-04T08:31:47.3987510Z OK
+2026-10-04T08:31:47.3988532Z HOST batch inventory 1000 files: 0.0464s (not Android latency)
+2026-10-04T08:31:47.3991802Z test_alias_creation_failure_does_not_remove_an_existing_destination (__main__.CollectionContractTests.test_alias_creation_failure_does_not_remove_an_existing_destination) ... [MIX] 无法把单字体写入字体集合目标：/tmp/tmpfy99k33_/.luoshu-mix-stage/system/fonts/existing.ttc
+2026-10-04T08:31:47.4035515Z 
+2026-10-04T08:31:47.4036077Z ----------------------------------------------------------------------
+2026-10-04T08:31:47.4036908Z Ran 5 tests in 9.361s
+2026-10-04T08:31:47.4037241Z 
+2026-10-04T08:31:47.4037746Z OK
+2026-10-04T08:31:47.4038580Z SYNC_SCOPE disconnect: code=130 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T08:31:47.4039681Z SYNC_SCOPE cancel: code=143 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T08:31:47.4048804Z ................................................................................................................................
+2026-10-04T08:31:47.4049810Z ----------------------------------------------------------------------
+2026-10-04T08:31:47.4050553Z Ran 128 tests in 0.334s
+2026-10-04T08:31:47.4051038Z 
+2026-10-04T08:31:47.4051173Z OK
+2026-10-04T08:31:47.4091308Z ##[group]Run set -euo pipefail
+2026-10-04T08:31:47.4091692Z [36;1mset -euo pipefail[0m
+2026-10-04T08:37:24.9597385Z {"schema":"luoshu-stock-error-contract-v1","environment":"HOST_ONLY","module":"/home/runner/work/LuoShu/LuoShu","shell":"/bin/sh","result":"PASS","cases":[{"name":"chinese-quotes-and-path","result":"PASS"},{"name":"ascii-unicode-escapes","result":"PASS"},{"name":"pretty-top-level-message","result":"PASS"},{"name":"nested-message-lookalike","result":"PASS"},{"name":"nested-only-fallback","result":"PASS"},{"name":"last-valid-log-record","result":"PASS"},{"name":"control-characters","result":"PASS"},{"name":"plain-log-fallback","result":"PASS"},{"name":"unavailable-helper-fallback","result":"PASS"},{"name":"empty-default-error","result":"PASS"},{"name":"nonstring-message-fallback","result":"PASS"},{"name":"bounded-log-tail","result":"PASS"},{"name":"success-stays-success","result":"PASS"},{"name":"zero-exit-without-inventory-fails","result":"PASS"}],"tested_scope":"CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN","case_count":14,"helper_sha256":"cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f"}
+2026-10-04T08:37:25.0223327Z {
+2026-10-04T08:37:25.0223917Z   "schema": "luoshu-inventory-output-contract-v1",
+2026-10-04T08:37:25.0224318Z   "environment": "HOST_ONLY",
+2026-10-04T08:37:25.0224777Z   "tested_scope": "CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS",
+2026-10-04T08:37:25.0225355Z   "result": "PASS",
+2026-10-04T08:37:25.0225600Z   "cases": [
+2026-10-04T08:37:25.0225817Z     {
+2026-10-04T08:37:25.0226064Z       "name": "small-list",
+2026-10-04T08:37:25.0226353Z       "result": "PASS",
+2026-10-04T08:37:25.0226648Z       "input_bytes": 389,
+2026-10-04T08:37:25.0227119Z       "output_bytes": 389,
+2026-10-04T08:37:25.0227373Z       "code": 0
+2026-10-04T08:37:25.0227595Z     },
+2026-10-04T08:37:25.0227792Z     {
+2026-10-04T08:37:25.0228040Z       "name": "thousand-row-list",
+2026-10-04T08:37:25.0228330Z       "result": "PASS",
+2026-10-04T08:37:25.0228605Z       "input_bytes": 332948,
+2026-10-04T08:37:25.0228883Z       "output_bytes": 332948,
+2026-10-04T08:37:25.0229134Z       "code": 0
+2026-10-04T08:37:25.0229340Z     },
+2026-10-04T08:37:25.0229533Z     {
+2026-10-04T08:37:25.0229788Z       "name": "large-backend-error",
+2026-10-04T08:37:25.0230107Z       "result": "PASS",
+2026-10-04T08:37:25.0230382Z       "input_bytes": 307262,
+2026-10-04T08:37:25.0230661Z       "output_bytes": 307262,
+2026-10-04T08:37:25.0230920Z       "code": 7
+2026-10-04T08:37:25.0231129Z     },
+2026-10-04T08:37:25.0231321Z     {
+2026-10-04T08:37:25.0231605Z       "name": "unavailable-scanner-direct-output",
+2026-10-04T08:37:25.0231930Z       "result": "PASS",
+2026-10-04T08:37:25.0232188Z       "input_bytes": 332948,
+2026-10-04T08:37:25.0232458Z       "output_bytes": 332948,
+2026-10-04T08:37:25.0232703Z       "code": 0
+2026-10-04T08:37:25.0232911Z     },
+2026-10-04T08:37:25.0233113Z     {
+2026-10-04T08:37:25.0233361Z       "name": "empty-backend-failure",
+2026-10-04T08:37:25.0233654Z       "result": "PASS",
+2026-10-04T08:37:25.0233906Z       "input_bytes": 0,
+2026-10-04T08:37:25.0234166Z       "output_bytes": 1,
+2026-10-04T08:37:25.0234406Z       "code": 7
+2026-10-04T08:37:25.0234608Z     }
+2026-10-04T08:37:25.0234796Z   ],
+2026-10-04T08:37:25.0235368Z   "case_count": 5,
+2026-10-04T08:37:25.0235910Z   "router_sha256": "8433e4a402af8b6bb479c9f256bf8f479c7ef99cbb9ee5665ded3faeb7a7a759"
+2026-10-04T08:37:25.0236306Z }
+2026-10-04T08:39:08.4398316Z Stock inventory scan is serialized and a waiting App reuses the completed boot scan.
+2026-10-04T08:39:08.4406784Z LuoShu App-only source checks passed.
+2026-10-04T08:39:08.4642838Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T08:39:08.5576430Z .....
+2026-10-04T08:39:08.5577146Z ----------------------------------------------------------------------
+2026-10-04T08:39:08.5577764Z Ran 5 tests in 0.054s
+2026-10-04T08:39:08.5578023Z 
+2026-10-04T08:39:32.5527892Z ....................
+2026-10-04T08:39:32.5528618Z ----------------------------------------------------------------------
+2026-10-04T08:39:32.5529537Z Ran 20 tests in 23.928s
+2026-10-04T08:39:32.5529884Z 
+2026-10-04T08:39:32.5530009Z OK
+2026-10-04T08:39:33.0490452Z .............
+2026-10-04T08:39:33.0491009Z ----------------------------------------------------------------------
+2026-10-04T08:39:39.7228920Z 
+2026-10-04T08:39:39.7229232Z ----------------------------------------------------------------------
+2026-10-04T08:39:39.7229979Z Ran 23 tests in 0.428s
+2026-10-04T08:39:39.7230278Z 
+2026-10-04T08:39:39.7230472Z OK
+2026-10-04T08:39:39.7231218Z HOST batch inventory 1000 files: 0.0465s (not Android latency)
+2026-10-04T08:39:39.8333106Z test_alias_creation_failure_does_not_remove_an_existing_destination (__main__.CollectionContractTests.test_alias_creation_failure_does_not_remove_an_existing_destination) ... [MIX] 无法把单字体写入字体集合目标：/tmp/tmpz7hcu1pj/.luoshu-mix-stage/system/fonts/existing.ttc
+2026-10-04T08:39:51.0586868Z 
+2026-10-04T08:39:51.0587244Z ----------------------------------------------------------------------
+2026-10-04T08:39:51.0587666Z Ran 5 tests in 9.361s
+2026-10-04T08:39:51.0587839Z 
+2026-10-04T08:39:51.0587960Z OK
+2026-10-04T08:39:51.0595966Z SYNC_SCOPE disconnect: code=130 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T08:39:51.0615739Z SYNC_SCOPE cancel: code=143 owned=3 all_reaped=true sentinel_alive=true
+2026-10-04T08:39:53.1914770Z ................................................................................................................................
+2026-10-04T08:39:53.1916251Z ----------------------------------------------------------------------
+2026-10-04T08:39:53.1917028Z Ran 128 tests in 0.327s
+2026-10-04T08:39:53.1917338Z 
+2026-10-04T08:39:53.1917522Z OK
+2026-10-04T08:39:57.5081564Z Built: /home/runner/work/LuoShu/LuoShu/dist/LuoShu-v1.1.1.zip
+2026-10-04T08:39:57.5082415Z Bundled App: /home/runner/work/LuoShu/LuoShu/dist/LuoShu/bundled/LuoShu-App.apk (io.github.xgl34222220.luoshu.stabletest)
+2026-10-04T08:39:57.7953341Z ++ basename dist/LuoShu-v1.1.1.zip
+2026-10-04T08:39:57.7962724Z + sha256sum -c LuoShu-v1.1.1.zip.sha256
+2026-10-04T08:39:57.8049924Z LuoShu-v1.1.1.zip: OK
+2026-10-04T08:39:57.8054672Z + cd dist
+2026-10-04T08:39:57.8058368Z ++ basename dist/LuoShu-App-v1.1.1-Debug.apk
+2026-10-04T08:39:57.8065962Z + sha256sum -c LuoShu-App-v1.1.1-Debug.apk.sha256
+2026-10-04T08:39:57.8103231Z LuoShu-App-v1.1.1-Debug.apk: OK
+2026-10-04T08:39:57.8109211Z ++ unzip -p dist/LuoShu-v1.1.1.zip module.prop
+2026-10-04T08:39:57.8109910Z ++ sed -n 's/^version=//p'
+2026-10-04T08:39:57.8123118Z + test v1.1.1 = v1.1.1
+2026-10-04T08:39:57.8127518Z ++ unzip -p dist/LuoShu-v1.1.1.zip module.prop

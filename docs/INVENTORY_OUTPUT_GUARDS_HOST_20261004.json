@@ -1,0 +1,15 @@
+{
+  "environment": "HOST_SYNTHETIC_HARNESS_TESTS",
+  "result": "PASS",
+  "total_tests": 131,
+  "new_methods": 3,
+  "runtime_candidate": "a70b19c89a0c8daf21d724d10201915fda7eafc8",
+  "runtime_changes": false,
+  "guards": [
+    "Missing, duplicate, failed or malformed cases and changed byte counts/backend codes reject delivery",
+    "Host, wrong module/shell/scope, invalid source hash or non-Enforcing boot cannot satisfy Android gate",
+    "Actual stdout and exact command must match report, reviewed router source and current boot"
+  ],
+  "android_acceptance": "NOT_YET_EXECUTED",
+  "raw_log": "evidence/inventory-output-harness-host-20261004.txt"
+}
