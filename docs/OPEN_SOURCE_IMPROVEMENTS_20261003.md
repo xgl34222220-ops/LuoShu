@@ -247,3 +247,11 @@ App 隔离诊断版仅导出固定数值字段，单行不超过 2048 字符，�
 宿主 fixture 现在强制调用真实 `/usr/bin/printf`，不伪造 E2BIG；Android 保留原 shell。[改前宿主复现](STOCK_ERROR_ARGV_BEFORE_HOST_20261004.json) 在同一 `bounded-log-tail` 失败；[改后 14 个函数用例](STOCK_ERROR_EXTERNAL_PRINTF_HOST_20261004.json) PASS，保留 300 KiB 长度，并增强 `$()`/变量/反引号与同名 delimiter 的字面数据检查。原厂扫描锁/等待复用、17 文件边界重新 PASS，宿主 harness 118 个于 0.640 秒 PASS；不把这些当 Android 成功。
 
 独立 Root verifier 对已知早期失败、尚无后续 App 文件的 artifact 现在写出 FAIL/缺失范围及已独立检查的部分证据，仍拒绝不完整验收。实际第九批重放保持 FAIL；第八批固定 `93b4075d` 历史重放仍 PASS，不能替本批新 Android 结果。新的候选 CI 和完整 Root 修复验收尚待执行。
+
+修正提交 [`57aa02ed`](https://github.com/xgl34222220-ops/LuoShu/commit/57aa02ed950a50d054cb1596021a51df0349d0d8) 的 [新候选 CI 37183661227](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37183661227) 已完整 PASS。[当前原始 CI 节选](evidence/candidate-stock-argv-37183661227.txt) 记录真实外部 printf 模式的 14 个函数用例、当前库存 23 个（0.662 秒）、正常 Linux 真实进程 20 个（24.689 秒）、有限请求 5 个（9.552 秒）及新 harness 118 个（0.455 秒）通过。强制构建前进程与有限请求再次通过；App lint/JVM/构建和原厂 CFF2 夹具也通过，不编造未读取的 JVM 总数。
+
+artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_37183661227.json) PASS：外层 ZIP `5cd8d606bab34ed41a93d97c781b24b2263a612ad4a6e29e4246f3a0e05b3cac`，模块 `3da0ffbdc27b550d9c4468a5157a2f07257e9e3927288d94c5bce37b0cf62004`，APK `73ba5a1bf845fa8efa99a4e123490a522fa47b75829728b8e8e2c27a2d1015bf`。11 个运行源码、来源、内外 APK、17 个冻结文件和旧冻结引擎一致。新 Root workflow 只绑定这个实际修正包，仍要求全部既定门禁。
+
+先前已运行的 [第十次 Root 37182379231](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37182379231) 于 06:58 UTC 结束 FAIL。固定旧包 `5194e3c4` 的 300 KiB 用例再次报同一外部 printf 错误，保留 [新原始 stderr](evidence/root-stock-error-37182379231.txt) 和 [独立失败证明](ROOT_ANDROID_FAILURE_37182379231.json)。本次实际 12 个内核重启、16 条规范挂载证明/2 别名、5 面 CFF2/CLI 组合及 32/18/15 函数用例完成，后续 Root App 和内部阶段采样没有到达；初次无 Root App 因 System UI ANR 为 BLOCKED。两个 AVD 已回收、KVM 元数据未变，不能把缺失阶段或最终工作空间检查填 PASS。
+
+同时补齐独立 verifier 的 32 交接报告与原 ARM64 命令 stdout 完整对照，沿用第七批保留原始证据的原则。[已知篡改夹具](HANDOFF_STDOUT_GUARD_HOST_20261004.json) 仅把报告 elapsed_seconds 加 1、实际 stdout 不动；旧 verifier 错误接受，新 guard 明确拒绝。未改第八批 artifact 固定判定器重放仍 PASS。这是宿主证据校验器负例，不是新 Android 执行。第十一批完整 Android 修复与七阶段采样仍待新任务实际完成。

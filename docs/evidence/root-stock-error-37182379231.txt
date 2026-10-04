@@ -1,0 +1,11 @@
+Fresh Root run 37182379231, source 5194e3c4, harness e1b2748f
+{
+  "argv": [
+    "shell",
+    "/debug_ramdisk/magisk su -mm -c 'PYTHONHOME=/data/adb/modules/LuoShu/common/python PYTHONPATH=/data/adb/modules/LuoShu/common/python/lib/python3.14:/data/adb/modules/LuoShu/common/python/lib/python3.14/site-packages LD_LIBRARY_PATH=/data/adb/modules/LuoShu/common/python/lib:/data/adb/modules/LuoShu/common/python/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp /data/adb/modules/LuoShu/common/python/bin/luoshu-python /data/local/tmp/luoshu-stock-error-contract.py --module /data/adb/modules/LuoShu --shell /system/bin/sh --output /data/local/tmp/luoshu-stock-error-contract.json'"
+  ],
+  "exit": 1,
+  "elapsed_seconds": 12.381910310999956,
+  "stdout": "",
+  "stderr": "Traceback (most recent call last):\n  File \"/data/local/tmp/luoshu-stock-error-contract.py\", line 99, in <module>\n    value = json.dumps(run(args.module.resolve(), args.shell), ensure_ascii=False, separators=(',', ':')) + '\\n'\n                       ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/data/local/tmp/luoshu-stock-error-contract.py\", line 86, in run\n    raise RuntimeError(f'{name}: exit={result.returncode} output={value!r} stderr={result.stderr!r}; expected={expected!r}')\nRuntimeError: bounded-log-tail: exit=1 output={'status': 'error', 'message': ''} stderr='/data/local/tmp/luoshu-stock-error-0n4wvvv7/error-function.sh[75]: /system/bin/printf: Argument list too long\\n/data/local/tmp/luoshu-stock-error-0n4wvvv7/error-function.sh[75]: /system/bin/printf: Argument list too long\\n/data/local/tmp/luoshu-stock-error-0n4wvvv7/error-function.sh[75]: /system/bin/printf: Argument list too long\\n'; expected='末条错误'\n"
+}

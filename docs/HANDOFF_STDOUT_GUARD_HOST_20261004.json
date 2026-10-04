@@ -1,0 +1,14 @@
+{
+  "result": "EXPECTED_REJECTION_AFTER_GUARD",
+  "environment": "HOST_ARTIFACT_MUTATION_TEST",
+  "scope": "Exact raw stdout binding, not Android execution",
+  "original_run": 37178617912,
+  "original_artifact_sha256": "b393f36810e29cbbef8f290c3dc28c5d2bcc1c0c965c26cac8dae618ed1d3f46",
+  "mutation": "reported mix-handoff elapsed_seconds +1 without changing actual command stdout",
+  "old_verifier": "57aa02ed950a50d054cb1596021a51df0349d0d8",
+  "old_exit": 0,
+  "new_exit": 1,
+  "new_blockers": [
+    "mix-handoff report differs from actual ARM64 command stdout"
+  ]
+}

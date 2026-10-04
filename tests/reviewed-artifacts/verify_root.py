@@ -61,6 +61,14 @@ with zipfile.ZipFile(path) as z:
         errors.append('runtime module identity changed')
     if m.get('candidate_apk_sha256') != apk_sha or c.get('candidate_apk_sha256') != apk_sha:
         errors.append('candidate APK identity changed')
+    handoff = m.get('magisk_mix_handoff')
+    if isinstance(handoff, dict) and handoff:
+        handoff_steps = [step for step in m.get('steps', [])
+                         if any('luoshu-mix-handoff.py --module ' in str(arg) for arg in step.get('argv', []))]
+        if len(handoff_steps) != 1 or handoff_steps[0].get('exit') != 0:
+            errors.append('actual Android mix-handoff command missing or failed')
+        elif {k:v for k,v in handoff.items() if k not in ('boot_id', 'selinux')} != json.loads(handoff_steps[0].get('stdout', '')):
+            errors.append('mix-handoff report differs from actual ARM64 command stdout')
     preview = m.get('magisk_preview_source', {})
     preview_steps = [step for step in m.get('steps', [])
                      if any('luoshu-preview-source-contract.py --module ' in str(arg)
