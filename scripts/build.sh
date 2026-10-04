@@ -14,8 +14,10 @@ EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
 # Phase 1-9 adds the production Universal Font Engine while keeping the legacy
 # fail-safe path. The direct new runtime code is ~90 KiB compressed; keep a tight
 # 10.75 MiB ceiling instead of weakening Python/FontTools coverage to stay at the
-# old 10.50 MiB budget.
-MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11272192}"
+# old 10.50 MiB budget. +64 KiB for the engine diagnostic bundle and the
+# keep-stock re-plan (Phase 11); deleting the retired legacy engine will
+# reclaim far more than that.
+MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11337728}"
 
 sh "$ROOT/scripts/check.sh"
 [ -n "$APP_APK" ] || {
