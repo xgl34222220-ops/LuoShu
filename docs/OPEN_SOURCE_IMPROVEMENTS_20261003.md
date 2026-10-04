@@ -317,3 +317,11 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 只读审阅提交 [`59ad9cbd`](https://github.com/xgl34222220-ops/LuoShu/commit/59ad9cbd80b7820f43d56e92f28ec06191d9a981) 的 [新审阅 CI 37190849813](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37190849813) 完成。候选与原始 Root ZIP 的 API 来源/摘要及固定 harness 独立一致，[第十三轮失败 proof](ROOT_ANDROID_FAILURE_37187408273.json) 保持 FAIL：12 个实际内核重启、16 条规范挂载证明、5 面真实 CFF2/CLI 组合完成，无意外候选 native tombstone，两个 AVD 已回收。初次无 Root App 为 BLOCKED；后续完整 App/最终性能与最终任务空间独立证据未到达，不能填 PASS。
 
 [新轴超时记录](AXIS_METADATA_FAILURE_37187408273.json) 显示准备库冷/暖两请求已 PASS，PID 11869 一致，选字体对话框也实际打开并返回 CJK 卡；失败换为明确的 `字体轴读取失败：命令执行超时`。实际 frame-06 保留 `source_start 334.42`、`source_ready 334.71`、`metadata_start 334.76`，未见 metadata_end。它证明外部数据查找已经结束，不能仅据这三个点区分解释器启动、导入、表读取或竞争，也不宣称已定位永久根因。保持原 25 秒轴读取与 20 秒选择器预算，继续取原始日志；现有新包 Android 仍跟进。只读审阅成功不是新 Android 执行，所有数量来自该固定失败轮，不替代新包验收。
+
+## 第十七批：让已打开的轴控件接收其他调用方的成功重试
+
+补取原始 `app-axes/runtime.log`，同一 PID 11869 实际先记录 `25135 ms / code 124 / stdout 0`，随后记录 `6579 ms / code 0 / stdout 328`。来源/metadata 标记分别为 334.42/334.71/334.76，以及 340.75/340.78/340.78/342.33。没有 XML 的精确捕获时间，不能单靠日志宣称最后一帧一定晚于第二次成功，更不能把 UI 缓存缺口说成 25 秒执行超时的根因；该超时来源继续未验证。
+
+代码检查发现独立的具体缺口：`rememberWeightAxisInfo` 只在 revision 初次进入时取缓存，之后仅依赖同一 revision/variable 的 produceState；选择器或其他控件后来的真实成功不会主动通知已经显示错误的控件。参考 [AndroidX FontFamilyResolver 的异步结果状态与缓存完成通知](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/compose/ui/ui-text/src/commonMain/kotlin/androidx/compose/ui/text/font/FontFamilyResolver.kt)/[Apache-2.0](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt)，采用理由是同一来源的异步完成应能更新已有观察者；独立实现，没有复制上游代码或增加依赖。
+
+共享轴仓库继续 single-flight、只缓存真实成功、按完整 sourceRevision 和 LRU 64 上限。成功时发布不可变 StateFlow 快照，已有 Compose 控件优先采用其中对应来源的成功，不再永久保留其他调用方已经修复的旧失败；失败、取消、换源不冒充默认成功。25 秒命令与 20 秒选择器预算、Root 入口、Python/库存/冻结挂载/旧引擎、界面方向均不变，没有自动重试或新权限。新增并发观察者失败后收到真实成功，以及快照不被后续 LRU 写入污染/越界的两项 JVM 测试。当前本地执行服务离线，测试与 Android 证据必须由本轮新候选 CI 和后续完整门禁取得；不引用旧 JVM 或 Android PASS 作为本批结果。

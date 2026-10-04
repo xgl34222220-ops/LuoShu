@@ -1,6 +1,8 @@
 package io.github.xgl34222220.luoshu
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -11,6 +13,34 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FontAxisRepositoryTest {
+    @Test
+    fun existingObserverReceivesSuccessfulRetryWithoutPublishingFailure() = runBlocking {
+        val repository = FontAxisRepository()
+        val observed = async(start = CoroutineStart.UNDISPATCHED) {
+            repository.successes.first { "source" in it }.getValue("source")
+        }
+        repository.resolve("source") { WeightAxisInfo(loading = false, error = "命令执行超时") }
+        assertTrue(repository.successes.value.isEmpty())
+        assertTrue(!observed.isCompleted)
+        val ready = repository.resolve("source") { info(600f) }
+        assertEquals(ready, observed.await())
+        assertEquals(ready, repository.successes.value["source"])
+    }
+
+    @Test
+    fun publishedSnapshotsRemainImmutableAndFollowActualLruBound() = runBlocking {
+        val repository = FontAxisRepository(maxEntries = 2)
+        repository.resolve("a") { info(450f) }
+        repository.resolve("b") { info(500f) }
+        val prior = repository.successes.value
+        repository.cached("a")
+        repository.resolve("c") { info(600f) }
+        assertEquals(setOf("a", "b"), prior.keys)
+        assertEquals(setOf("a", "c"), repository.successes.value.keys)
+        assertNull(repository.cached("b"))
+        assertEquals(600f, repository.successes.value.getValue("c").axes.single().default)
+    }
+
     private fun info(default: Float = 450f) = WeightAxisInfo(
         loading = false, hasWeight = true,
         axes = listOf(VariableAxisInfo("wght", 100f, default, 900f)),

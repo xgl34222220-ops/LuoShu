@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.widget.TextView
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -112,7 +113,8 @@ private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchroni
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
     val revision = font?.sourceRevision
-    val cached = remember(revision) { revision?.let(fontAxisRepository::cached) }
+    val successfulEntries by fontAxisRepository.successes.collectAsState()
+    val cached = revision?.let(successfulEntries::get)
     val info by produceState(
         initialValue = cached ?: WeightAxisInfo(loading = font?.variable == true),
         key1 = revision,
@@ -126,7 +128,9 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
             else -> resolveFontAxisInfo(font)
         }
     }
-    return info
+    // A picker or another control may finish a retry after this control failed.
+    // Prefer that real success without another read or a deadline extension.
+    return cached ?: info
 }
 
 private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
