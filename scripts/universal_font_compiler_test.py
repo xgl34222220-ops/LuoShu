@@ -549,6 +549,39 @@ def main() -> int:
                 assert font.find("axis").get("stylevalue") == font.get("weight")
         assert len(list((payload / "system/fonts").glob("LuoShu-UF-*"))) == 2
 
+        # 11) A variable CJK-style stock whose default instance is Thin (100)
+        #     no longer blocks a 200-900 source when its XML nodes use 400/700.
+        thin_stock = temp / "StockThinDefault.ttf"
+        narrow_group_source = temp / "UserNarrowGroup.ttf"
+        make_font(thin_stock, family="Stock Thin", weight=100, variable=True,
+                  y_min=-100, y_max=720)
+        make_font(narrow_group_source, family="User Narrow", variable=True,
+                  axis_min=200, y_min=-100, y_max=720)
+        thin_xml = temp / "thin.xml"
+        thin_xml.write_text(
+            '<familyset><family name="sans-serif">'
+            + "".join(
+                f'<font weight="{w}" style="normal">StockThinDefault.ttf'
+                f'<axis tag="wght" stylevalue="{w}"/></font>'
+                for w in (400, 700)
+            )
+            + '</family></familyset>',
+            encoding="utf-8",
+        )
+        thin_logical = "/system/fonts/StockThinDefault.ttf"
+        thin_slot = slot_from_stock(
+            thin_logical, thin_stock, family="sans-serif",
+            source_xml="/system/etc/thin.xml", declared="StockThinDefault.ttf",
+        )
+        thin_slot["xmlRefs"] = [dict(thin_slot["xmlRefs"][0], weight=w) for w in (400, 700)]
+        thin_plan, thin_route = build_plans(narrow_group_source, thin_slot, "latin", thin_xml)
+        assert "source-weight-axis-out-of-range" in thin_plan["targets"][thin_logical]["risks"]
+        thin_manifest = compiler.compile_all(
+            thin_plan, thin_route, {thin_logical: thin_stock}, temp / "out-thin", False
+        )
+        assert_ready(thin_manifest)
+        assert thin_manifest["artifacts"][0]["mode"] == "source-variable-preserve"
+
         # 10) A second compile into the same directory reuses ready artifacts
         #     byte-for-byte, yields the same manifestId and prunes stale files.
         cache_dir = temp / "out-cache"

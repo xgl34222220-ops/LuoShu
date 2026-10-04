@@ -1604,6 +1604,14 @@ def _compile_unit(
         if str(target.get("status") or "") == "blocked":
             raise CompilerError("FontPlan 目标已经 blocked")
         for risk in target.get("risks") or []:
+            if (
+                risk == "source-weight-axis-out-of-range"
+                and artifact.get("variableGroup") is True
+            ):
+                # The slot-level risk compares against the stock default
+                # instance weight; a variable group is checked against the
+                # weights its XML nodes actually use.
+                continue
             if risk in {
                 "static-weight-fallback",
                 "italic-style-mismatch",
