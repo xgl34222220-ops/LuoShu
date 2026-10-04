@@ -50,6 +50,21 @@ _uc_python() {
         "$PYBIN" "$@"
 }
 
+# Universal may use at most this share of the switch timeout; the remainder is
+# reserved for the legacy switcher if Universal does not finish in time.
+_uc_budget_seconds() {
+    _ucb_value="${LUOSHU_UNIVERSAL_BUDGET_SECONDS:-}"
+    case "$_ucb_value" in
+        ''|*[!0-9]*)
+            _ucb_total="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-360}"
+            case "$_ucb_total" in ''|*[!0-9]*) _ucb_total=360 ;; esac
+            _ucb_value=$((_ucb_total / 2))
+            ;;
+    esac
+    [ "$_ucb_value" -ge 15 ] 2>/dev/null || _ucb_value=15
+    printf '%s\n' "$_ucb_value"
+}
+
 _uc_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
@@ -160,10 +175,17 @@ _uc_switch() {
 
     _uc_write_state preparing "$_uc_font" universal preparing
     _uc_progress 8 "通用引擎正在分析设备字体拓扑"
-    _uc_log "universal prepare start font=$_uc_font"
+    _uc_budget=$(_uc_budget_seconds)
+    _uc_started=$(date +%s 2>/dev/null || echo 0)
+    _uc_log "universal prepare start font=$_uc_font budget=${_uc_budget}s"
+    # The compiler stops before starting a unit past this deadline so the
+    # legacy fallback still has the rest of the switch timeout to finish.
     _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
-        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
+        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
+        LUOSHU_UNIVERSAL_DEADLINE=$((_uc_started + _uc_budget)) \
+        sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
     _uc_prepare_rc=$?
+    _uc_log "universal prepare finished font=$_uc_font rc=$_uc_prepare_rc elapsed=$(( $(date +%s 2>/dev/null || echo 0) - _uc_started ))s"
     if [ "$_uc_prepare_rc" -ne 0 ]; then
         _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
         _uc_legacy "$_uc_font" universal-prepare-failed

@@ -1681,6 +1681,12 @@ def _manifest_id(
     return f"sha256:{_canonical_hash(_manifest_semantic(font_plan_id, route_id, artifacts, deferred))}"
 
 
+def _deadline() -> float:
+    """Absolute epoch deadline set by the cutover controller (0 = none)."""
+    value = _float(os.environ.get("LUOSHU_UNIVERSAL_DEADLINE"), 0.0) or 0.0
+    return value if value > 0 else 0.0
+
+
 def compile_all(
     font_plan: dict[str, Any],
     route_plan: dict[str, Any],
@@ -1697,10 +1703,16 @@ def compile_all(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     units = _collect_units(font_plan, route_plan)
-    artifacts = [
-        _compile_unit(unit, stock_paths, output_dir, allow_live_stock)
-        for unit in units
-    ]
+    deadline = _deadline()
+    artifacts = []
+    for index, unit in enumerate(units):
+        if deadline and time.time() >= deadline:
+            # Leave the remaining switch budget to the legacy engine instead of
+            # finishing a payload the task supervisor would kill anyway.
+            raise CompilerError(
+                f"通用引擎超出时间预算：已编译 {index}/{len(units)} 个字体单元"
+            )
+        artifacts.append(_compile_unit(unit, stock_paths, output_dir, allow_live_stock))
     ready = sum(item["status"] == "ready" for item in artifacts)
     blocked = sum(item["status"] == "blocked" for item in artifacts)
     deferred = list(route_plan.get("deferredDynamicTargets") or [])

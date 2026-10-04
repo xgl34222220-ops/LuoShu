@@ -28,6 +28,7 @@ cat > "$MOD/common/universal_font_deployment.sh" <<'SH'
 #!/bin/sh
 case "$1" in
   prepare)
+    printf '%s %s\n' "${LUOSHU_UNIVERSAL_DEADLINE:-}" "$(date +%s)" > "$MODDIR/config/prepare-deadline"
     [ "${FAKE_PREPARE:-ok}" = ok ] || { echo '{"status":"error","message":"fake prepare failed"}'; exit 1; }
     mkdir -p "$MODDIR/config/prepared-payload"
     printf '{}\n' > "$MODDIR/config/plan.json"
@@ -114,6 +115,23 @@ printf '%s' "$OUT" | grep -q '"pipeline":"universal"'
 [ ! -f "$MOD/config/legacy-called" ]
 grep -q '^state=staged$' "$MOD/config/universal-font-cutover.conf"
 grep -q '^font=DemoFont$' "$MOD/config/universal-font-next.conf"
+
+# Universal gets half of the switch timeout by default; the compiler stops at
+# this deadline so the legacy fallback keeps the other half.
+read -r deadline now < "$MOD/config/prepare-deadline"
+[ $((deadline - now)) -ge 175 ] && [ $((deadline - now)) -le 180 ]
+grep -q 'universal prepare start font=DemoFont budget=180s' "$MOD/logs/fontswitch.log"
+cp -a "$MOD/config" "$TMP/config-after-first-switch"
+MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_GATE=pass \
+  LUOSHU_SWITCH_TIMEOUT_SECONDS=100 sh "$ROOT/common/universal_font_cutover.sh" switch DemoFont >/dev/null
+read -r deadline now < "$MOD/config/prepare-deadline"
+[ $((deadline - now)) -ge 45 ] && [ $((deadline - now)) -le 50 ]
+MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON="$TMP/fake-python" FAKE_GATE=pass \
+  LUOSHU_UNIVERSAL_BUDGET_SECONDS=bogus sh "$ROOT/common/universal_font_cutover.sh" switch DemoFont >/dev/null
+read -r deadline now < "$MOD/config/prepare-deadline"
+[ $((deadline - now)) -ge 175 ] && [ $((deadline - now)) -le 180 ]
+rm -rf "$MOD/config"
+mv "$TMP/config-after-first-switch" "$MOD/config"
 
 # Superseding a queued Universal request with a legacy fallback must preserve
 # the font actually running in this boot as the legacy rollback source.

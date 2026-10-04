@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -454,6 +456,21 @@ def main() -> int:
             assert built["glyf"][replaced].numberOfContours == 1
             assert len(built["glyf"][replaced].coordinates) == 3
             assert not built["gvar"].variations.get(replaced)
+
+        # 8) Past the cutover deadline the compiler stops before starting a unit
+        #    so the legacy fallback keeps the rest of the switch timeout.
+        os.environ["LUOSHU_UNIVERSAL_DEADLINE"] = str(int(time.time()) - 1)
+        try:
+            compiler.compile_all(
+                font_plan, route_plan, {logical: stock}, temp / "out-late", False
+            )
+        except compiler.CompilerError as error:
+            assert "时间预算" in str(error) and "0/" in str(error), error
+        else:
+            raise AssertionError("compile_all ignored an expired deadline")
+        finally:
+            os.environ.pop("LUOSHU_UNIVERSAL_DEADLINE", None)
+        assert not any((temp / "out-late").glob("*.ttf"))
 
         # Manifest validation checks actual artifact hashes.
         manifest_path = temp / "manifest.json"
