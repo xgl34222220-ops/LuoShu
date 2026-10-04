@@ -245,6 +245,8 @@ def delivery_blockers(report):
             errors.append('candidate error path has missing/native-crash evidence')
     from composite_gate import composite_blockers
     errors.extend(composite_blockers(report.get('legacy_composite')))
+    from app_composite_gate import app_composite_blockers
+    errors.extend(app_composite_blockers(report.get('app_composite')))
     errors.extend(scope_blockers(report.get('magisk_task_scope'), OLD_CASES))
     errors.extend(scope_blockers(report.get('magisk_request_scope'), REQUEST_CASES, True))
     errors.extend(mix_handoff_blockers(report.get('magisk_mix_handoff')))

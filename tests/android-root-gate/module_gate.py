@@ -592,6 +592,17 @@ def run_gate(adb, magisk, baseline, candidate, output):
         if font_hashes() != original_fonts:
             raise RuntimeError('Final actual-App apply rollback did not restore stock font bytes')
         report['app_apply']['restore_hashes_equal_stock'] = True
+        if not diagnostic_only:
+            from app_composite_gate import qualify as qualify_app_composite
+            actual_inventory = bridge('fonts', 'scan')
+            if actual_inventory.get('status') != 'ok':
+                raise RuntimeError('Actual inventory unavailable for App composite selection')
+            report['app_composite'] = {}
+            qualify_app_composite(report['app_composite'], adb, MODULE, root, command, boot,
+                                  font_hashes, assert_mounted, switch, original_fonts,
+                                  ['LuoShuSyntheticGate0000', 'LuoShuSyntheticGate0001', 'LuoShuSyntheticGate0002'],
+                                  actual_inventory.get('data', {}).get('fonts', []),
+                                  output / 'app-composite')
         final_ui = measure(adb, output / 'final-ui', 1000, repetitions=1)
         report['final_ui'] = {'result': final_ui['result'], 'target_fatal': False, 'anr': False,
                               'note': 'Fresh actual App cold/warm verified library after restore reboot', 'observations': final_ui}

@@ -29,7 +29,8 @@ def scope(expected, request=False):
 
 
 def valid_delivery():
-    report = {'legacy_composite': valid_composite(), 'run_scope': 'FULL_GATE', 'cycles': [], 'magisk_task_scope': scope(OLD_CASES),
+    from test_app_composite_gate import valid_app_composite
+    report = {'legacy_composite': valid_composite(), 'app_composite': valid_app_composite(), 'run_scope': 'FULL_GATE', 'cycles': [], 'magisk_task_scope': scope(OLD_CASES),
               'magisk_request_scope': scope(REQUEST_CASES, True),
               'app_root': 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY', 'library_timings': [],
               'candidate_apk_sha256': 'b'*64, 'fixture_inventory': [{'files':n,'unique_content_hashes':['c'*64,'d'*64]} for n in (100,1000)],

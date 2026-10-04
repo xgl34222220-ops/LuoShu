@@ -18,6 +18,9 @@ sys.path.insert(0, str(gate_root))
 from verdict import delivery_blockers, qualification_blockers, preflight_blockers
 from module_gate import payload_mount_proof
 from app_axis_gate import detail_headings
+requires_app_composite = (gate_root / 'app_composite_gate.py').is_file()
+if requires_app_composite:
+    from app_composite_gate import verify_ui_artifact
 
 candidate = json.loads(Path(candidate_proof).read_text())
 assert candidate['result'] == 'PASS' and candidate['frozen_files_verified'] == 17
@@ -33,7 +36,7 @@ with zipfile.ZipFile(path) as z:
     # Inspect preserved owned-stage observations, rather than trusting only a
     # boolean in module-gate.json. Initial unrooted stock-App checks are a
     # separate scope and remain explicitly BLOCKED when their own gate failed.
-    owned_stages = ('app-axes/', 'library-100/', 'library-1000/', 'app-apply/', 'final-ui/')
+    owned_stages = ('app-axes/', 'library-100/', 'library-1000/', 'app-apply/', 'app-composite/', 'final-ui/')
     target_anr_files = []
     blocking_dialog_files = []
     for name in z.namelist():
@@ -119,8 +122,9 @@ with zipfile.ZipFile(path) as z:
     if runner.get('kvm_before') != runner.get('kvm_after'):
         errors.append('KVM metadata changed')
     attempts = m.get('boot_attempts', [])
-    if len(attempts) < 14 or any(v.get('result') != 'PASS' or not v.get('after') or v.get('before') == v.get('after') for v in attempts):
-        errors.append('all fourteen module/composite/App kernel reboots unproven')
+    required_boots = 16 if requires_app_composite else 14
+    if len(attempts) < required_boots or any(v.get('result') != 'PASS' or not v.get('after') or v.get('before') == v.get('after') for v in attempts):
+        errors.append('all ' + str(required_boots) + ' module/composite/App kernel reboots unproven')
     after_ids = [v.get('after') for v in attempts]
     if (len(set(after_ids)) != len(after_ids) or any(
             not isinstance(value, str) or not re.fullmatch('[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', value)
@@ -134,9 +138,30 @@ with zipfile.ZipFile(path) as z:
     if build.get('stockFaces') != 5 or len(faces) != 5 or any(
             f.get('mode') != 'compiled' or f.get('outline') != 'CFF2' or f.get('retainedVariationAxes') is not True for f in faces):
         errors.append('five original variable CFF2 faces unproven')
+    if requires_app_composite:
+        app_composite = m.get('app_composite', {})
+        try:
+            if report('app-composite/report.json') != app_composite:
+                errors.append('App composite report differs from original stage evidence')
+            errors.extend(verify_ui_artifact(app_composite, lambda name: z.read('app-composite/' + name)))
+            admitted = app_composite['ui']['admitted_state']
+            observations = [step for step in m.get('steps', []) if
+                            any('cat /data/adb/modules/LuoShu/config/axes_task.conf' in str(arg)
+                                for arg in step.get('argv', [])) and step.get('exit') == 0]
+            from composite_gate import fields
+            if not any(fields(step.get('stdout', '')) == admitted for step in observations):
+                errors.append('App composite admission report differs from actual persisted-state stdout')
+            app_faces = app_composite['collection_build']['faces']
+            if len(app_faces) != 5 or any(f.get('mode') != 'compiled' or f.get('outline') != 'CFF2'
+                                        or f.get('retainedVariationAxes') is not True for f in app_faces):
+                errors.append('actual App composite did not compile all five original CFF2 faces')
+        except (KeyError, TypeError, ValueError) as error:
+            errors.append('mandatory actual App composite evidence absent or malformed: ' + str(error))
     stock_paths = m.get('stock_font_canonical_paths', {})
     mounted = [v.get(k, {}) for v in m.get('cycles', []) for k in ('mounted_a', 'mounted_b')]
     mounted += [g.get('mounted', {}), m.get('app_apply', {}).get('mounted', {})]
+    if requires_app_composite:
+        mounted.append(m.get('app_composite', {}).get('mounted', {}))
     proofs_checked = 0
     for view in mounted:
         for p in view.get('changed', []):
@@ -150,7 +175,7 @@ with zipfile.ZipFile(path) as z:
                 proofs_checked += 1
             except Exception as error:
                 errors.append('canonical mount proof: ' + p + ': ' + str(error))
-    if not stock_paths or len(mounted) != 6 or not proofs_checked:
+    if not stock_paths or len(mounted) != (7 if requires_app_composite else 6) or not proofs_checked:
         errors.append('stock aliases or complete actual mount proof set missing')
     if m.get('native_diagnostic_errors'):
         errors.append('native diagnostics incomplete')
@@ -261,6 +286,7 @@ with zipfile.ZipFile(path) as z:
         generation_runtime=g.get('generation_runtime'), canonical_mount_proofs=proofs_checked,
         alias_count=sum(p != target for p, target in stock_paths.items()),
         composite_result=g.get('result'), app_apply_result=m.get('app_apply', {}).get('result'),
+        actual_app_composite=m.get('app_composite') if requires_app_composite else None,
         library_timings=m.get('library_timings'), final_workspace=m.get('final_workspace'),
         root_policy_revoked=m.get('root_policy_revoked'), runner_result=runner.get('result'),
         baseline_native_commands=known_baseline, unexpected_native_commands=unexpected_native,

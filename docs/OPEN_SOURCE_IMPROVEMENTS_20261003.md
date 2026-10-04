@@ -255,3 +255,17 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 先前已运行的 [第十次 Root 37182379231](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37182379231) 于 06:58 UTC 结束 FAIL。固定旧包 `5194e3c4` 的 300 KiB 用例再次报同一外部 printf 错误，保留 [新原始 stderr](evidence/root-stock-error-37182379231.txt) 和 [独立失败证明](ROOT_ANDROID_FAILURE_37182379231.json)。本次实际 12 个内核重启、16 条规范挂载证明/2 别名、5 面 CFF2/CLI 组合及 32/18/15 函数用例完成，后续 Root App 和内部阶段采样没有到达；初次无 Root App 因 System UI ANR 为 BLOCKED。两个 AVD 已回收、KVM 元数据未变，不能把缺失阶段或最终工作空间检查填 PASS。
 
 同时补齐独立 verifier 的 32 交接报告与原 ARM64 命令 stdout 完整对照，沿用第七批保留原始证据的原则。[已知篡改夹具](HANDOFF_STDOUT_GUARD_HOST_20261004.json) 仅把报告 elapsed_seconds 加 1、实际 stdout 不动；旧 verifier 错误接受，新 guard 明确拒绝。未改第八批 artifact 固定判定器重放仍 PASS。这是宿主证据校验器负例，不是新 Android 执行。第十一批完整 Android 修复与七阶段采样仍待新任务实际完成。
+
+验收提交 [`f7917b7c`](https://github.com/xgl34222220-ops/LuoShu/commit/f7917b7c7818b63d7147e215a9979d4e01eca009) 已触发 [第十一轮完整 Root 37184908266](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37184908266)，固定修正源码 `57aa02ed` 和验真包，原任务没有取消。该提交前新宿主 harness 118 个于 0.663 秒 PASS；这不是正在运行的 Android 结果。
+
+## 第十二批：补齐 App 实际组合生成、重启挂载和恢复入口
+
+具体差距：已有完整门禁验证了 CLI 组合生成和 App 单字体应用，App 组合界面只完成了只读轴检查，没有通过真实“生成并应用”入口创建组合。不能据此称 App 全部组合功能已验收。参考 [AndroidX UI Automator 源码](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java)、同提交的 [Apache-2.0 许可证](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt) 及 [Android 官方 UI 测试文档](https://developer.android.com/training/testing/other-components/ui-automator)，采用真实 package/槽位/文字身份、条件等待和原始截图/层次证据。没有复制实现、升级库、接入 instrumentation 或增加权限；继续使用已有 ADB/UI Automator 与隔离 AVD。
+
+新门禁从原始合成字体的实际库存选择中文、英文、数字三个槽位，选择不同的中文与英文字体以确保进入组合路径，点击真实“生成并应用”。只读轮询必须取得不同于旧任务、来源匹配且属于当前内核启动的新父任务；App 点击失败没有 CLI 启动兜底。随后共享原来那一份组合门禁，继续检验后台 monitor 完成、5 面真实可变 CFF2 集合、实际 fd 锁与并发幂等提交、工作区/sidecar 回收、未重启前 live 字节不变、实际重启挂载和系统默认恢复。还要求 App 的当前 PID 显示对应成功消息/100% 并保存实际截图，再进入重启。旧 CLI 入口判定不放宽，没有新生成引擎。
+
+本批 App 数字槽选择第三个实际夹具 ID，区别于前面 CLI 的组合方案，避免把合法的旧方案复用误当成本次新生成；原方案复用语义没有修改。所有文件仍只有此前两种原始合成字体内容，不扩大为真实字体库覆盖。
+
+独立 verifier 新增实际选择/操作/完成 XML、截图摘要、ADB PID stdout 和新任务原始 cat stdout 的对照；完整新门禁至少要求 16 个不同内核重启与 7 组实际挂载视图。历史固定 harness 仍用其自身 14 次/6 组契约，不能把历史结果写成新 App 组合结果。Miuix/Material 产品代码、候选 `57aa02ed`、17 冻结文件、hook/权限边界全未改；第十一轮仍用其固定验收提交继续运行，本批另在同一原分支排队。
+
+[当前宿主证明](APP_COMPOSITE_GUARDS_HOST_20261004.json) 与 [原始测试输出](evidence/app-composite-harness-host-20261004.txt) 标记 HOST_SYNTHETIC_HARNESS_TESTS：新增 8 个方法后总 126 个 PASS，覆盖错误 package/重复或禁用控件、槽位外同名字体、直接应用/CLI 替代、旧任务/错来源/换启动或 PID、错误成功文字、伪造原始帧及失败后 CLI 兜底等拒绝条件。原始第八批用固定 `93b4075d` 重放仍 PASS，仅证明历史判定兼容。新 App 完整组合的 Android 结果尚未取得；截图与像素几何、原生 ARM64/OEM 真机、备份恢复 API 和不同真实字体库的未验证项保留。

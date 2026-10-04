@@ -78,13 +78,13 @@ def collection_blockers(report):
     return []
 
 
-def composite_blockers(report):
+def composite_blockers(report, expected_entry='common/font_mix_controller.sh start'):
     if not isinstance(report, dict):
         return ['legacy composite evidence absent']
     errors = []
     errors.extend(collection_blockers(report))
     try:
-        if report.get('result') != 'PASS' or report.get('entry') != 'common/font_mix_controller.sh start':
+        if report.get('result') != 'PASS' or report.get('entry') != expected_entry:
             errors.append('actual legacy composite entry did not pass')
         probe = report.get('commit_lock_probe', {})
         if (probe.get('result') != 'PASS' or probe.get('environment') != 'ACTUAL_ANDROID_QEMU_ROOT_ENFORCING' or
@@ -157,9 +157,11 @@ def composite_blockers(report):
     return errors
 
 
-def run(report, module, root, command, boot, font_hashes, assert_mounted, switch, stock, ids, output):
-    report.update(result='FAIL', entry='common/font_mix_controller.sh start',
-                  scope='Candidate legacy CLI composite on disposable AOSP x86_64/nativebridge; not App composite UI or ColorOS validation')
+def run(report, module, root, command, boot, font_hashes, assert_mounted, switch, stock, ids, output,
+        app_admit=None, app_prepared=None):
+    entry_kind = 'ACTUAL_APP_GENERATE_AND_APPLY' if app_admit else 'common/font_mix_controller.sh start'
+    report.update(result='FAIL', entry=entry_kind,
+                  scope='Actual App composite' if app_admit else 'Candidate legacy CLI composite; not App composite UI')
     probe = Path(__file__).with_name('commit_lock_device.py')
     remote_probe = '/data/local/tmp/luoshu-commit-lock-device.py'
     remote_report = '/data/local/tmp/luoshu-commit-lock-device-' + uuid.uuid4().hex + '.json'
@@ -186,10 +188,11 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
         raise RuntimeError('Actual Android commit-lock transport failed; see errno evidence')
     before = font_hashes()
     root('test ! -e ' + module + '/.luoshu-payload-next && test ! -e ' + module + '/config/font-payload-next.conf')
-    sources = dict(cjk=ids[0], latin=ids[1], digit=ids[1])
+    sources = dict(cjk=ids[0], latin=ids[1], digit=ids[2] if len(ids) > 2 else ids[1])
     report['sources'] = sources
     entry = 'sh ' + module + '/common/font_mix_controller.sh '
-    report['start'] = last_json(root(entry + shlex.join(['start', *sources.values(), 'wght=400', 'wght=400', 'wght=400']), timeout=180))
+    report['start'] = (app_admit(sources) if app_admit else
+                       last_json(root(entry + shlex.join(['start', *sources.values(), 'wght=400', 'wght=400', 'wght=400']), timeout=180)))
     task = report['start'].get('data', {}).get('task')
     if report['start'].get('status') != 'ok' or not task:
         raise RuntimeError('Actual legacy composite entry did not admit a task')
@@ -284,6 +287,8 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
         fields(root('cat ' + module + '/config/font-payload-next.conf')) == report['next_state'])
     root('test ! -e ' + module + '/.luoshu-mix-stage && test ! -e ' + module + '/config/mix-stage-next.conf')
     report['stage_cleared_after_replay'] = True
+    if app_prepared:
+        app_prepared()
     report['reboot'] = boot()
     report['activated_state'] = fields(root('cat ' + module + '/config/font-payload-activated.conf'))
     _, report['mounted'] = assert_mounted('mix', stock)
@@ -291,7 +296,7 @@ def run(report, module, root, command, boot, font_hashes, assert_mounted, switch
     report['restore_reboot'] = boot()
     report['restore_hashes_equal_stock'] = font_hashes() == stock
     report['result'] = 'PASS'
-    report['blockers'] = composite_blockers(report)
+    report['blockers'] = composite_blockers(report, entry_kind)
     if report['blockers']:
         report['result'] = 'FAIL'
         raise RuntimeError('Legacy composite evidence incomplete: ' + '; '.join(report['blockers']))

@@ -42,6 +42,15 @@ verify/write/output spans and exact work counts bound to the same completion.
 Their sum must fit inside the worker span; cache reuse cannot claim a rebuild,
 write, or fewer than two live snapshots. Earlier pinned harnesses stay unchanged.
 
+Harnesses containing `app_composite_gate.py` require the actual App composite
+entry in addition to the CLI composite and App single-font entry. The verifier
+recomputes selected-slot, action and completed XML assertions, checks the
+screenshot hash and ADB PID stdout, and binds App admission to the preserved
+matching new parent-task stdout. These harnesses require at least sixteen
+distinct kernel reboots and seven actual mount views. Earlier pinned harnesses
+retain their fourteen/six contract; a historical PASS never acquires App
+composite coverage.
+
 Exit 0 means this artifact passed these checks. Exit 1 with a FAIL JSON means
 preserved evidence blocks acceptance. Invalid inputs or a mismatched digest
 abort before writing a success report. Artifact replay is not a new Android run.
