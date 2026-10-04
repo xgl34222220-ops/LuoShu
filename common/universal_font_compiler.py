@@ -1486,7 +1486,6 @@ def _compile_source_variable_preserve(
 
     source = _open_face(materialized, max(0, _int(source_info.get("faceIndex"), 0)))
     stock_geometry: TTFont | None = None
-    validation_instance: TTFont | None = None
     try:
         compatibility = _validate_source_variable_compat(source, target, artifact)
         if _outline_kind(source) != "glyf":
@@ -1507,34 +1506,9 @@ def _compile_source_variable_preserve(
             scale_upem(source, target_upem)
         _apply_target_line_contract(source, target, stock_profile)
 
-        # Validate natural source geometry at the representative target weight.
-        validation_instance = _instance_for_validation(source, weight, {})
-        if validation_instance is source:
-            source = None
-        source_profile = _profile_from_font(validation_instance)
-        alignment = _probe_alignment(
-            stock_profile,
-            source_profile,
-            str(target.get("role") or ""),
-            variable_natural=True,
-        )
-        if alignment["status"] != "ready":
-            raise CompilerError(
-                "物理 variable 源字体天然几何与原厂槽位不匹配；拒绝静态化或强行偏移："
-                + ",".join(alignment["issues"])
-            )
-
-        variable_font = validation_instance if source is None else source
-        if source is None:
-            # validation_instance is static if instantiateVariableFont returned a
-            # new font, so cannot be the output. Re-open original variable source.
-            validation_instance.close()
-            validation_instance = None
-            source = _open_face(materialized, max(0, _int(source_info.get("faceIndex"), 0)))
-            if int(source["head"].unitsPerEm) != target_upem:
-                scale_upem(source, target_upem)
-            _apply_target_line_contract(source, target, stock_profile)
-            variable_font = source
+        # Natural geometry is checked once, on the written output below; an
+        # extra pre-check instancing of the source would repeat that work.
+        variable_font = source
 
         required_ps = str(artifact.get("requiredPostScriptName") or "")
         if grouped and required_ps:
@@ -1561,13 +1535,11 @@ def _compile_source_variable_preserve(
             "sourceContainer": source_container,
             "stockLocation": stock_location,
             "axisCompatibility": compatibility,
-            "naturalAlignment": alignment,
+            "naturalAlignment": validation["alignment"],
             "conversion": conversion,
             "validation": validation,
         }
     finally:
-        if validation_instance is not None:
-            validation_instance.close()
         if stock_geometry is not None:
             stock_geometry.close()
         if source is not None:
