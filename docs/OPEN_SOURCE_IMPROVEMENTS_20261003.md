@@ -155,3 +155,17 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 原生 ARM64 真机、ColorOS/HyperOS 和真实字体库的体验仍需独立设备证据。
 
 第六批代码提交 [`32674f9f`](https://github.com/xgl34222220-ops/LuoShu/commit/32674f9fd41fcbdec4347a40f4f0e816516d2979)，新候选构建 [37173590158](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37173590158) 已完整 PASS，含 App lint/JVM 单测/构建、新增两组高刷新率回归、原厂 CFF2 夹具和源码/补充门禁。下载 artifact `11292815996`，[独立包核验](TEST_CANDIDATE_VERIFICATION_37173590158.json) 通过：外层 ZIP `647d4944469555f740a50478080078dc3f9a13d4a92cc2b8a3e1196584085cb5`，模块 `fb40c6e54cd4145346e98322540d6fad28addc6293e1b7291fefe4ad8b9d50cf`，APK `a89a9891c91362ec0249c1f5cdfde99e9202481c30507a59811c8c61cc9529d1`；构建来源、内外 APK、9 个运行源码、17 个冻结文件和旧冻结引擎一致。Root workflow 绑定这个新包，使用本轮 105 个宿主 harness 测试及修正后的 ANR 观察；完整 Android 结果仍待新执行。
+
+## 第六批完整 Android 结果与下一批入口
+
+上述待执行状态已由 [完整 Root 37174455395](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37174455395) 的新结果取代：2026-10-04 04:17 UTC 完成，整体 PASS。artifact `11293323251` 外层 SHA-256 为 `c695160bbcaef14e7f83a371ab46833f951caec084617c924e9b23af5a181e73`，用第七批工具独立复算的[验收证明](ROOT_ANDROID_VERIFICATION_37174455395.json) 无 blocker。固定运行代码仍为 `32674f9f`，固定 harness 为 `26261083`；测试和文档提交没有被冒充为新运行包。
+
+- 5 面原厂 CFF2 实际编译，输出 SHA-256 `b8c9cba7c6c48a27f5d5f7a16234dde55910cf35824ee5247411748d73ba6da9`；14 个实际内核启动 ID 唯一且变化，19 条规范路径挂载证明覆盖 2 个别名。
+- 本轮 32 交接、18 来源选择、15 当前错误函数用例在原 ARM64 Python、Android shell、同一启动身份和 Enforcing 下通过；完整组合、App 单字体应用、重启挂载和系统默认恢复另行通过。
+- 实际原生导入哈希一致，9 个真实轴 UI 帧通过，[最后轴 XML](evidence/root-axis-37174455395.xml) 和[原始日志](evidence/root-axis-37174455395.txt) 保留可见字宽/自定义轴和隐藏轴约束。此次只有 1 份新 tombstone，任务 `1791085467-7282` 对应未改基线的提交失败注入；候选无意外原生崩溃。
+- 恢复重启后实际 App 冷/暖检查通过；原始 Root 阶段日志没有目标 App ANR，XML 没有阻断弹窗。无失败发生，因此 Android 的目标线程栈采集路径未实际触发；旧焦点 ANR 根因仍未证明。
+- 临时 Root 政策撤销、任务空间为空、两个 AVD 已回收、KVM 元数据未变。初次无 Root App 阶段仍单独保留 BLOCKED；不改写为通过。
+
+1000 文件库暖进入本轮为 6615/6809/6876 ms，首个真实库存帧为 554/500/525 ms。恢复后的最终冷核验为 **58385 ms**（含真实导航），暖核验为 7628 ms：[冷日志](evidence/root-final-cold-37174455395.txt)、[暖日志](evidence/root-final-warm-37174455395.txt)。冷日志有 `fingerprint duration_ms=12583 code=124`，后续重试为 9571 ms、code 0，刷新为 27256 ms、code 0；不能宣称超时均已消失或性能全部修复。下一批优先拆分这一有限请求的耗时并消除能证明的重复工作，保留现有验证、超时和回收门禁。
+
+本轮通过范围仍为 AOSP API35 x86_64/nativebridge 上的原 ARM64 运行库。原生 ARM64/OEM 真机、App 完整组合创建 UI、像素几何、备份恢复 API、1000 份不同真实字体内容及基线 App 性能未验证。
