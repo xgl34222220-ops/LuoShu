@@ -26,7 +26,7 @@ new mandatory gates may correctly reject an older artifact. A missing gate is
 never greened by an optional parser: the selected verdict remains authoritative.
 
 The candidate tool checks ZIP integrity, external hashes, build provenance,
-inner/outer APK bytes, the 17-file 1.1.1 manifest, ten reviewed runtime files
+inner/outer APK bytes, the 17-file 1.1.1 manifest, eleven reviewed runtime files
 against Git and the unchanged legacy engine. The Root tool checks the selected
 verdict, actual stock CFF2 face compilation, kernel boot identities, canonical
 mount provenance, native-crash task ownership, actual import/axis XML and cleanup.
@@ -37,6 +37,10 @@ For harness versions with inventory timings, all fourteen cold/warm samples
 must also match their preserved App logs and include a completed, successfully
 reaped live request with consistent worker/scope/outer numeric spans. Historical
 harness versions do not acquire new measurements when their artifacts are replayed.
+The subphase harness additionally requires fixed storage/snapshot/cache/build/
+verify/write/output spans and exact work counts bound to the same completion.
+Their sum must fit inside the worker span; cache reuse cannot claim a rebuild,
+write, or fewer than two live snapshots. Earlier pinned harnesses stay unchanged.
 
 Exit 0 means this artifact passed these checks. Exit 1 with a FAIL JSON means
 preserved evidence blocks acceptance. Invalid inputs or a mismatched digest

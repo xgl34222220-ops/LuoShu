@@ -48,7 +48,10 @@ def valid_delivery():
         samples = [{'kind': kind,'repetition': i,'count':count,'verified':True,'pid':'123','target_fatal':False,'anr':False,
                     'first_inventory_frame_ms':1000,'library_open_to_inventory_first_ms':100,
                     'start_ms':1,'request_timings':[{'stage':'fingerprint','completed_at_ms':100,'duration_ms':20,'code':0,
-                        'phases':{'inventory':{'duration_ms':2,'count':count,'code':0},
+                        'phases':{'inventory_detail':{'storage_ms':0,'snapshot_ms':1,'cache_ms':0,'build_ms':0,
+                                                    'verify_ms':0,'write_ms':0,'output_ms':0.5,'cache_hit':0,
+                                                    'snapshot_count':1,'build_count':0,'write_count':0,'code':0},
+                                  'inventory':{'duration_ms':2,'count':count,'code':0},
                                   'scope':{'duration_ms':10,'code':0,'cleaned':True,'reason':'success'}}}]}
                    for kind in ('app_start','library_open') for i in range(3)]
         report['library_timings'].append({'inventory_count':count,'result':'PASS','samples':samples})
@@ -121,6 +124,14 @@ class VerdictTests(unittest.TestCase):
         r=valid_delivery()
         del r['final_ui']['observations']
         self.assertTrue(any('final cold/warm live request' in e for e in delivery_blockers(r)))
+
+    def test_each_library_and_final_observation_requires_same_request_subphases(self):
+        for group in ('100', '1000', 'final'):
+            r=valid_delivery()
+            sample=(r['final_ui']['observations']['samples'][0] if group=='final' else
+                    r['library_timings'][0 if group=='100' else 1]['samples'][0])
+            del sample['request_timings'][0]['phases']['inventory_detail']
+            self.assertTrue(delivery_blockers(r),group)
 
     def test_app_input_chain_requires_exact_order_and_identity(self):
         for mutation in ('order', 'task', 'boot', 'token', 'digest', 'valid', 'rechecked'):

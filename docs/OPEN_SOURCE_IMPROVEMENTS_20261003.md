@@ -227,3 +227,9 @@ artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37
 App 隔离诊断版仅导出固定数值字段，单行不超过 2048 字符，每请求最多三组，拒绝私有尾部、错阶段、过界耗时/次数、非数值和坏退出码；正式版本仍不开 App 诊断日志。新增两项 JVM 回归尚待新 CI。
 
 本轮库存回归 23 个于 0.617 秒 PASS，新增四项覆盖新建/复用且证明相同、失败后二次验证计时完整且旧缓存保留、实际 CLI 数值/路径隐私/阶段总和、失败快照不得伪造成工作成功。17 个冻结文件重新匹配。[当前宿主 1000 文件阶段证据](INVENTORY_SUBPHASE_HOST_20261004.json) 标记 HOST_ONLY 和人工头部夹具；refresh 的两次快照/一次重建/两次写入，与 scan 的两次快照/零重建/零写入分开记录，不能称为 Android 提速或真实字体内容覆盖。新候选 CI 与带阶段证据的 Android 复测仍需实际运行。
+
+提交 [`5194e3c4`](https://github.com/xgl34222220-ops/LuoShu/commit/5194e3c4aac878a19098bb2be10a05940b86260a) 的 [第十批新候选 CI 37181760478](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37181760478) 完整 PASS，App lint/JVM/构建、源码/补充门禁、真实 Android 15 CFF2 夹具和包检查全部成功。[CI 原始节选](evidence/candidate-inventory-subphases-37181760478.txt) 的当前库存 23 个于 0.402 秒通过，真实进程 20 个于 23.821 秒、有限请求 5 个于 9.354 秒通过，强制发布前检查再跑通过。候选 CI 前置仍为旧 113 个 harness 测试，不把工作区新 118 个当成该 CI 结果，也不填未知 JVM 总数。
+
+下载 artifact `11295571904`，[独立核验](TEST_CANDIDATE_VERIFICATION_37181760478.json) PASS：外层 ZIP `32c3dbe10bad56ba94d5fa93700ce89e392c7b6083f69c47b686ccb7397abfc6`、模块 `e271b52d6210b937bae6e9bffcda2a4974414eee8c42bfe1ffe5d2d8c8fc2ff4`、APK `d43941f0a519454c0d64837792e0b826f60351fefecc2f2a6b31b632a1580dce`，11 个运行文件（包括新库存 worker）、17 冻结文件、旧引擎、内外 APK 与来源一致。另用已验真第九批包制作临时已知坏夹具，只改 worker 并更新模块摘要使检查确实进入源码身份比较；[源码负例](INVENTORY_SOURCE_GUARD_HOST_20261004.json) 明确被拒且未写 PASS。这是 HOST_ARTIFACT_MUTATION_TEST，不是 Android 验收。原包逐字节保留。
+
+新 harness 要求全部 14 个当前冷/暖采样取得固定阶段；每条成功的 live fingerprint/scan/refresh 都必须有一致的阶段总和及正确工作次数。指纹成功不能掩盖缺少明细的成功 scan；失败请求原样保留且仍必须随后成功，缓存命中仍须两次快照且零重建/写入。五个新增解析/判定负例方法后本轮宿主 118 个于 0.633 秒 PASS。独立 verifier 继续按实际原始 App 日志重算。新的完整 Root workflow 仅绑定本批新包；第九批任务继续使用其固定旧包及判定器，concurrency 不取消运行任务，本批将按同组队列接续。阶段采样尚不是新 Android 结果。

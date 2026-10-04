@@ -1,0 +1,12 @@
+{
+  "result": "EXPECTED_REJECTION",
+  "environment": "HOST_ARTIFACT_MUTATION_TEST",
+  "scope": "New runtime source guard; not Android execution",
+  "reviewed_source": "634a6d45dae07e59fc73ffb36725b98e2dcee080",
+  "original_artifact_sha256": "5b448894e42c1628c3fe69035fe6088d6bd7e9e69433c59458773de79ce2a0ed",
+  "mutated_path": "common/font_inventory_batch.py",
+  "module_checksum_adjusted_to_reach_source_guard": true,
+  "exit_code": 1,
+  "proof_written": false,
+  "rejection": "AssertionError: common/font_inventory_batch.py"
+}
