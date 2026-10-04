@@ -181,6 +181,19 @@ App evidence requires actual verified library frames for 100/1000 synthetic
 fonts and a new matching switch task following a real UI apply click.
 Pending, unsupported or failed stages must remain blocked.
 
+Actual library readiness also checks both log `ANR in` and Android
+`dumpsys activity lastanr` `Reason:` ownership. Other-process ANRs cannot be
+attributed to the candidate merely because the activity dump mentions it.
+Any target ANR still blocks acceptance after the UI recovers.
+
+On a rooted App-stage failure, `app_anr.py` reads up to four newest `/data/anr`
+text files, each bounded to 4 MiB, before UI/CLI diagnostics or force-stop.
+Only exact `.stabletest` process blocks are saved; raw other-process thread
+dumps are excluded from command reports. Read hashes/limits and incomplete
+blocks are recorded. Missing traces remain explicitly unavailable and never
+satisfy acceptance. This uses the existing authorized Magisk access on
+`emulator-5554`, adds no grant and never dismisses the target ANR dialog.
+
 
 ## Legacy composite commit regression gate
 

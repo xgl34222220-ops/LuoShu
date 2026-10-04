@@ -586,6 +586,11 @@ def run_gate(adb, magisk, baseline, candidate, output):
                                    'App timings are candidate-only on nativebridge x86_64 AVD, not native ARM64 or OEM-ROM validation.')
     except Exception as error:
         report['error'] = str(error)
+        if granted_uid is not None:
+            # Capture the owned App's threads before slower UI/CLI diagnostics
+            # or force-stop/teardown can replace the useful failure evidence.
+            from app_anr import capture_owned_anr
+            report['app_anr_diagnostic'] = capture_owned_anr(adb, magisk, output / 'app-anr', 'failure')
         if 'app_apply' in report:
             from app_library_gate import capture_apply_evidence
             report['app_apply']['final_observation'] = capture_apply_evidence(adb, output / 'app-apply', 'final-failure')
