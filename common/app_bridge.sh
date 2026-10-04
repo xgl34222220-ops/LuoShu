@@ -439,7 +439,7 @@ case "${1:-status}" in
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
     diag_export)
         [ -f "$DIAGNOSTICS" ] || { printf '{"status":"error","message":"诊断包组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$DIAGNOSTICS"
+        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$DIAGNOSTICS" "${2:-}"
         ;;
     logs)
         _lines="${2:-160}"

@@ -15,8 +15,10 @@ import argparse
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -27,8 +29,11 @@ STOCK_TOTAL_LIMIT = 600 * 1024 * 1024
 SOURCE_TOTAL_LIMIT = 400 * 1024 * 1024
 SMALL_PRESERVED_LIMIT = 2 * 1024 * 1024
 CONFIG_FILE_LIMIT = 8 * 1024 * 1024
-LOG_TAIL_BYTES = 2 * 1024 * 1024
+LOG_TAIL_BYTES = 512 * 1024
 RECENT_PROFILES = 3
+# Lite bundles (default) hollow every font: all tables, glyph order, metrics,
+# cmap and variation data stay, but only the glyphs the engine actually
+# inspects or copies (probes, Latin, digits, punctuation) keep outlines.
 SKIPPED_ROLES = {"emoji", "symbol-icon"}
 CONFIG_DIRS = (
     "font-config-source",
@@ -148,6 +153,105 @@ def _recent_sources(config: Path) -> list[dict[str, Any]]:
     return result
 
 
+def _keep_codepoints() -> set[int]:
+    import device_font_template as template
+    import font_coverage
+    import universal_font_compiler as compiler
+    keep = set(range(0x20, 0x7F)) | set(range(0xA0, 0x180))
+    keep.update(compiler.PROBE_CODEPOINTS, compiler.COMPOSITE_LATIN_CODEPOINTS,
+                compiler.COMPOSITE_DIGIT_CODEPOINTS, font_coverage.CJK_COMMON, font_coverage.PUNCTUATION)
+    for points in template.PROBE_GROUPS.values():
+        keep.update(points)
+    return keep
+
+
+def _hollow_face(font: Any, keep_points: set[int]) -> None:
+    from fontTools.ttLib.tables._g_l_y_f import Glyph
+    cmap = font.getBestCmap() or {}
+    keep = {".notdef"} | {name for point, name in cmap.items() if point in keep_points}
+    if "glyf" in font:
+        glyf = font["glyf"]
+        # Keep the glyphs that set the font's extreme bounds, read from each
+        # glyph header without expanding outlines, so bbox checks still match.
+        extremes: dict[int, tuple[int, str]] = {}
+        for name, glyph in glyf.glyphs.items():
+            data = getattr(glyph, "data", None)
+            if data and len(data) >= 10:
+                bounds = struct.unpack(">hhhhh", data[:10])[1:]
+            elif hasattr(glyph, "xMin"):
+                bounds = (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax)
+            else:
+                continue
+            for index, value in enumerate(bounds):
+                key = value if index >= 2 else -value
+                if index not in extremes or key > extremes[index][0]:
+                    extremes[index] = (key, name)
+        keep.update(name for _, name in extremes.values())
+        pending = list(keep)
+        while pending:
+            name = pending.pop()
+            if name in glyf.glyphs and glyf[name].isComposite():
+                for component in glyf[name].getComponentNames(glyf):
+                    if component not in keep:
+                        keep.add(component)
+                        pending.append(component)
+        for name in font.getGlyphOrder():
+            if name not in keep:
+                glyf.glyphs[name] = Glyph()
+        if "gvar" in font:
+            variations = font["gvar"].variations
+            for name in font.getGlyphOrder():
+                if name not in keep and name in variations:
+                    variations[name] = []
+    for tag in ("CFF ", "CFF2"):
+        if tag not in font:
+            continue
+        top = font[tag].cff.topDictIndex[0]
+        strings = top.CharStrings
+        for name in font.getGlyphOrder():
+            if name in keep or name not in strings:
+                continue
+            charstring = strings[name]
+            charstring.decompile()
+            charstring.program = [] if tag == "CFF2" else ["endchar"]
+
+
+def _hollow(source: Path, target: Path, keep_points: set[int]) -> None:
+    from fontTools.ttLib import TTCollection, TTFont
+    with source.open("rb") as handle:
+        collection = handle.read(4) == b"ttcf"
+    if collection:
+        fonts = TTCollection(str(source), lazy=True, recalcBBoxes=False, recalcTimestamp=False)
+        for face in fonts.fonts:
+            _hollow_face(face, keep_points)
+        fonts.save(str(target))
+        fonts.close()
+        return
+    font = TTFont(str(source), lazy=True, recalcBBoxes=False, recalcTimestamp=False)
+    try:
+        _hollow_face(font, keep_points)
+        font.save(str(target))
+    finally:
+        font.close()
+
+
+def _add_font(bundle: zipfile.ZipFile, actual: Path, name: str, scratch: Path | None,
+              keep_points: set[int] | None) -> bool:
+    """Writes the font, hollowed in lite mode; returns whether it was hollowed."""
+    if scratch is None or keep_points is None:
+        bundle.write(actual, name)
+        return False
+    target = scratch / "font"
+    try:
+        _hollow(actual, target, keep_points)
+    except Exception:  # unusual container: ship it whole rather than drop it
+        bundle.write(actual, name)
+        return False
+    bundle.write(target, name)
+    target.unlink()
+    return True
+
+
 def _write_tail(bundle: zipfile.ZipFile, path: Path, name: str) -> None:
     size = path.stat().st_size
     with path.open("rb") as handle:
@@ -156,14 +260,16 @@ def _write_tail(bundle: zipfile.ZipFile, path: Path, name: str) -> None:
         bundle.writestr(name, handle.read())
 
 
-def export(moddir: Path, output: Path, lower_root: Path) -> dict[str, Any]:
+def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> dict[str, Any]:
     config = moddir / "config"
+    keep_points = None if full else _keep_codepoints()
     active = _active_font(config)
     # The live /system/fonts view is LuoShu's overlay while a font is active.
     live_ok = active in {"", "default"}
     index: dict[str, Any] = {
         "schema": SCHEMA,
         "generatedAt": int(time.time()),
+        "mode": "full" if full else "lite",
         "module": {},
         "device": _props(),
         "activeFont": active,
@@ -180,6 +286,8 @@ def export(moddir: Path, output: Path, lower_root: Path) -> dict[str, Any]:
 
     output.parent.mkdir(parents=True, exist_ok=True)
     temp = output.with_name(output.name + ".part")
+    scratch_dir = None if full else tempfile.TemporaryDirectory(prefix="luoshu-diag-", dir=str(output.parent))
+    scratch = None if scratch_dir is None else Path(scratch_dir.name)
     with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
         for path in sorted(config.iterdir()) if config.is_dir() else []:
             if path.is_file() and path.suffix in {".json", ".conf", ".state"} \
@@ -212,10 +320,10 @@ def export(moddir: Path, output: Path, lower_root: Path) -> dict[str, Any]:
                 continue
             stock_total += size
             name = "stock" + logical
-            bundle.write(actual, name)
+            hollow = _add_font(bundle, actual, name, scratch, keep_points)
             index["stock"][logical] = {
                 "file": name, "origin": origin, "role": role, "action": action,
-                "bytes": size, "sha256": _sha256(actual),
+                "bytes": size, "sha256": _sha256(actual), "hollow": hollow,
             }
 
         source_total = 0
@@ -230,10 +338,14 @@ def export(moddir: Path, output: Path, lower_root: Path) -> dict[str, Any]:
                 continue
             source_total += size
             name = f"sources/{len(index['sources']):02d}-{source.name}"
-            bundle.write(source, name)
-            index["sources"][str(source)] = {"file": name, "profile": item["profile"], "bytes": size}
+            hollow = _add_font(bundle, source, name, scratch, keep_points)
+            index["sources"][str(source)] = {
+                "file": name, "profile": item["profile"], "bytes": size, "hollow": hollow,
+            }
 
         bundle.writestr("index.json", json.dumps(index, ensure_ascii=False, indent=2))
+    if scratch_dir is not None:
+        scratch_dir.cleanup()
     os.replace(temp, output)
     try:
         os.chmod(output, 0o644)
@@ -245,6 +357,7 @@ def export(moddir: Path, output: Path, lower_root: Path) -> dict[str, Any]:
         "stockCount": len(index["stock"]),
         "stockSkipped": len(index["stockSkipped"]),
         "sourceCount": len(index["sources"]),
+        "mode": index["mode"],
     }
 
 
@@ -254,9 +367,10 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--lower-root", type=Path,
                         default=Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount")))
+    parser.add_argument("--full", action="store_true", help="ship fonts whole instead of hollowed")
     args = parser.parse_args()
     try:
-        result = export(args.moddir, args.output, args.lower_root)
+        result = export(args.moddir, args.output, args.lower_root, args.full)
     except (OSError, zipfile.BadZipFile, ValueError) as error:
         print(json.dumps({"status": "error", "message": f"诊断包生成失败：{error}"}, ensure_ascii=False))
         return 1

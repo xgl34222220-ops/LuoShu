@@ -60,6 +60,23 @@ def main() -> int:
         key = hashlib.sha256(b"mix").hexdigest()[:24]
         (config / "source-font-profiles" / f"{key}.json").write_text(json.dumps(profile), encoding="utf-8")
 
+        # Hollowing keeps everything the engine profiles: tables, metrics, cmap, axes.
+        import luoshu_diagnostics
+        hollow = temp / "hollow.ttf"
+        luoshu_diagnostics._hollow(cjk, hollow, luoshu_diagnostics._keep_codepoints())
+
+        def profiled(path: Path) -> dict:
+            info = font_source_profile._inspect_file(path)
+            for key in ("fileUid", "sha256", "sourcePath", "fileName", "bytes"):
+                info.pop(key, None)
+            for face in info["faces"]:
+                for key in ("uid", "fileUid", "sourcePath", "sha256", "fileName"):
+                    face.pop(key, None)
+            return info
+
+        assert profiled(hollow) == profiled(cjk)
+        assert hollow.stat().st_size < cjk.stat().st_size
+
         bundle = temp / "out" / "bundle.zip"
         exported = subprocess.run(
             [sys.executable, str(ROOT / "common" / "luoshu_diagnostics.py"),
@@ -78,8 +95,23 @@ def main() -> int:
         assert "config/font-config-source/system/fonts.xml" in names
         assert "logs/fontswitch.log" in names
         assert index["activeFont"] == "mix"
+        assert index["mode"] == "lite"
+        assert all(entry["hollow"] for entry in [*index["stock"].values(), *index["sources"].values()]), index
         assert {entry["origin"] for entry in index["stock"].values()} == {"lower"}, index["stock"]
         assert all(entry["file"] in names for entry in index["stock"].values())
+
+        # The full bundle ships the fonts byte for byte.
+        full = subprocess.run(
+            [sys.executable, str(ROOT / "common" / "luoshu_diagnostics.py"), "--full",
+             "--moddir", str(moddir), "--output", str(temp / "out" / "full.zip"), "--lower-root", str(lower)],
+            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert full.returncode == 0, full.stdout + full.stderr
+        with zipfile.ZipFile(temp / "out" / "full.zip") as archive:
+            full_index = json.loads(archive.read("index.json"))
+            roboto = full_index["stock"]["/system/fonts/Roboto-Regular.ttf"]
+            assert full_index["mode"] == "full" and roboto["hollow"] is False
+            assert archive.read(roboto["file"]) == stocks["/system/fonts/Roboto-Regular.ttf"].read_bytes()
 
         # A font is active, so the live /system/fonts view (LuoShu's overlay) is never read.
         missing_lower = subprocess.run(

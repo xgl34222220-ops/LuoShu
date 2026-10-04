@@ -24,4 +24,9 @@ _diag_exec() {
 _diag_model=$(getprop ro.product.model 2>/dev/null | tr -c 'A-Za-z0-9._-' '_' | cut -c1-32)
 _diag_stamp=$(date +%Y%m%d-%H%M%S 2>/dev/null || echo now)
 _diag_out="$PUBLIC_DIR/diagnostics/LuoShu-engine-${_diag_model:-device}-$_diag_stamp.zip"
-_diag_exec "$EXPORTER" --moddir "$MODDIR" --output "$_diag_out"
+# Default: lite bundle (fonts hollowed to the glyphs the engine inspects). "full" ships fonts whole.
+if [ "${1:-}" = full ]; then
+    _diag_exec "$EXPORTER" --moddir "$MODDIR" --output "${_diag_out%.zip}-full.zip" --full
+else
+    _diag_exec "$EXPORTER" --moddir "$MODDIR" --output "$_diag_out"
+fi

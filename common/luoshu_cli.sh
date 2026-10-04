@@ -36,7 +36,10 @@ case "${1:-状态}" in
         ;;
     诊断|diagnostics)
         echo "正在生成引擎诊断包，可能需要几分钟…"
-        sh "$BRIDGE" diag_export
+        case "${2:-}" in
+            完整|full) sh "$BRIDGE" diag_export full ;;
+            *) sh "$BRIDGE" diag_export ;;
+        esac
         ;;
     帮助|help|-h|--help)
         help_text

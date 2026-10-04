@@ -121,7 +121,7 @@ def main() -> int:
     index = _load(bundle_root / "index.json")
     config = bundle_root / "config"
     print(f"device: {json.dumps(index.get('device'), ensure_ascii=False)}")
-    print(f"module: {index.get('module')} active={index.get('activeFont')!r}")
+    print(f"module: {index.get('module')} active={index.get('activeFont')!r} mode={index.get('mode', 'full')}")
     print(f"stock files: {len(index.get('stock') or {})} skipped: {len(index.get('stockSkipped') or [])}")
 
     env = dict(os.environ)
