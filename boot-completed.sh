@@ -24,7 +24,10 @@ if [ "$_lfbc_active" != default ]; then
     # manifest. Running the v4 guard here falsely labels every successfully
     # activated composite as an expired payload and leaves the App showing both
     # "confirmed" and "next payload failed" at the same time.
-    if [ ! -f "$MODDIR/config/font_runtime_legacy_v14_4.conf" ]; then
+    # Engine v3 payloads carry no v4 template schema either; they have their
+    # own boot verification (universal_font_runtime_verify.sh).
+    if [ ! -f "$MODDIR/config/font_runtime_legacy_v14_4.conf" ] && \
+        ! grep -q '^state=active$' "$MODDIR/config/universal-font-runtime.conf" 2>/dev/null; then
         type font_config_boot_guard >/dev/null 2>&1 && \
             font_config_boot_guard "$_lfbc_active" >/dev/null 2>&1 || true
     fi
