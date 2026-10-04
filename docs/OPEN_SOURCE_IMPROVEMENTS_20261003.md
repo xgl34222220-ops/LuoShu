@@ -351,3 +351,6 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 
 
 修正提交 [`d12168a8`](https://github.com/xgl34222220-ops/LuoShu/commit/d12168a88a06193b238821c87d0f4bf844a74b96) 的 [本轮候选 CI 37197455936](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37197455936) 已完整 PASS。新快照用例及固定旧源码的真实混读控制通过；App lint/JVM/构建、原厂可变 CJK 和既有门禁均通过，JVM XML 总数未读取。打包前本轮正常 Linux 真实进程 20（24.313 秒）、库存 23（0.522 秒）、有限请求 5（9.358 秒）、harness 131（0.439 秒）重新通过，17 冻结文件匹配。新 artifact 11302085754/外层 `e8e29d6d71b92d6ba983741afcfad00c25bb8835c2ba3af7951ac2af17871e87` 已保存；正在独立核验此新包，不把上一轮 Android 的部分通过填为本批结果。
+
+
+[新候选只读审阅 37198329194](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37198329194) 已完成。[独立候选 proof](TEST_CANDIDATE_VERIFICATION_37197455936.json) PASS：模块 `95b07019ffb7ee401aaab4b92362cec1e52116f1749713bc676e38656efef2c9`、APK `f37c7e4e8ad4868b2c9aa0c4e8165cb7c9ee9af7ac3e7de5e02ea5023b48cea8`，12 个运行源码、内外 APK/来源、17 冻结文件及旧引擎一致。[本次快照 HOST 证明](MIX_SNAPSHOT_CONTRACT_HOST_20261004.json)/[原始 CI 节选](evidence/candidate-mix-snapshot-37197455936.txt) 保留新 8 用例 0.163 秒及打包前 0.148 秒、固定旧源码真实混读控制。完整 Root pin 只更新此审阅候选；16 次重启/7 组挂载、实际 App 成功完成帧/截图及后续恢复、14 个当前性能采样和另外 2 个轴准备要求全部保留。本批新 Android 结果须由接续任务取得，之前失败不改为 PASS。

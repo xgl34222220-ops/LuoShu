@@ -1,0 +1,42 @@
+2026-10-04T11:07:28.3774459Z OK
+2026-10-04T11:07:28.3775216Z {"scope": "HOST_REAL_SHELL_APP_ROUTER_NOT_ANDROID_OR_MOUNTS", "source": "/home/runner/work/LuoShu/LuoShu/common/legacy_v14_4/mix_router.sh", "old_torn_control": false}
+2026-10-04T11:07:28.3775880Z ........
+2026-10-04T11:07:28.3776243Z ----------------------------------------------------------------------
+2026-10-04T11:07:28.3776626Z Ran 8 tests in 0.163s
+2026-10-04T11:07:28.3776780Z 
+2026-10-04T11:07:28.3776876Z OK
+2026-10-04T11:07:28.3777311Z ......
+2026-10-04T11:07:28.3777671Z ----------------------------------------------------------------------
+2026-10-04T11:07:28.3778061Z Ran 6 tests in 0.143s
+2026-10-04T11:07:29.0544974Z  * branch            9487ca4dbce5684c6391dbadd3a12311de9fc10c -> FETCH_HEAD
+2026-10-04T11:07:29.0546206Z {"scope": "HOST_REAL_SHELL_APP_ROUTER_NOT_ANDROID_OR_MOUNTS", "source": "/home/runner/work/_temp/luoshu-old-mix-router.sh", "old_torn_control": true}
+2026-10-04T11:07:29.0892697Z .
+2026-10-04T11:07:29.0893384Z ----------------------------------------------------------------------
+2026-10-04T11:07:29.0893824Z Ran 1 test in 0.034s
+2026-10-04T11:07:29.0894001Z 
+2026-10-04T11:07:29.0894105Z OK
+2026-10-04T11:07:29.1001026Z ##[group]Run set -euo pipefail
+2026-10-04T11:07:29.1001384Z [36;1mset -euo pipefail[0m
+2026-10-04T11:07:29.1001753Z [36;1mlog="$RUNNER_TEMP/luoshu-supplemental-check.log"[0m
+2026-10-04T11:14:54.9508756Z OK
+2026-10-04T11:14:55.0038264Z {"scope": "HOST_REAL_SHELL_APP_ROUTER_NOT_ANDROID_OR_MOUNTS", "source": "/home/runner/work/LuoShu/LuoShu/common/legacy_v14_4/mix_router.sh", "old_torn_control": false}
+2026-10-04T11:14:55.1527931Z ........
+2026-10-04T11:14:55.1528632Z ----------------------------------------------------------------------
+2026-10-04T11:14:55.1529075Z Ran 8 tests in 0.148s
+2026-10-04T11:14:55.1529253Z 
+2026-10-04T11:14:55.1529355Z OK
+2026-10-04T11:14:55.4001027Z ......
+2026-10-04T11:14:55.4002222Z ----------------------------------------------------------------------
+2026-10-04T11:14:55.4003455Z Ran 6 tests in 0.150s
+2026-10-04T11:07:28.3767841Z Ran 23 tests in 1.701s
+2026-10-04T11:07:28.3863026Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T11:07:28.3865513Z Ran 20 tests in 24.180s
+2026-10-04T11:07:28.3895709Z Ran 23 tests in 0.498s
+2026-10-04T11:07:28.3919641Z Ran 5 tests in 9.404s
+2026-10-04T11:07:28.3925906Z Ran 131 tests in 0.433s
+2026-10-04T11:14:50.2043354Z Ran 23 tests in 1.786s
+2026-10-04T11:16:15.2958882Z Stable mount boundary: 17 files match refactor-v1.1.1 (be39f598bfb921526851c5c4a2e92905dacf4ea7).
+2026-10-04T11:16:39.8033116Z Ran 20 tests in 24.313s
+2026-10-04T11:16:47.4073392Z Ran 23 tests in 0.522s
+2026-10-04T11:16:59.2125833Z Ran 5 tests in 9.358s
+2026-10-04T11:17:01.7271580Z Ran 131 tests in 0.439s
