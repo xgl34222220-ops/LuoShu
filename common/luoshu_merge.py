@@ -1,0 +1,213 @@
+#!/usr/bin/env python3
+"""Copy Latin and digit glyphs into a CJK base font (engine v3 composite).
+
+Ported from the legacy composite builder that shipped on devices: the CJK font
+stays the complete base, Latin and digit outlines are drawn into glyph slots
+that already exist in the base, scaled to the base cap height and moved onto
+the baseline. The output keeps one complete cmap.
+"""
+from __future__ import annotations
+
+import math
+import statistics
+from typing import Iterable
+
+from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.cu2quPen import Cu2QuPen
+from fontTools.pens.qu2cuPen import Qu2CuPen
+from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.t2CharStringPen import T2CharStringPen
+from fontTools.pens.transformPen import TransformPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
+
+DIGIT_CODEPOINTS = frozenset(
+    set(range(0x0030, 0x003A))
+    | set(range(0xFF10, 0xFF1A))
+    | {0x00B2, 0x00B3, 0x00B9}
+    | set(range(0x2070, 0x207A))
+    | set(range(0x2080, 0x208A))
+)
+LATIN_CODEPOINTS = frozenset((
+    set(range(0x0020, 0x0030))
+    | set(range(0x003A, 0x007F))
+    | set(range(0x00A0, 0x0250))
+    | set(range(0x0300, 0x0370))
+    | set(range(0x1E00, 0x1F00))
+    | set(range(0x2000, 0x2070))
+    | set(range(0x20A0, 0x20D0))
+    | set(range(0x2100, 0x2150))
+) - DIGIT_CODEPOINTS)
+REQUIRED = {
+    "latin": frozenset(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")),
+    "digit": frozenset(map(ord, "0123456789")),
+}
+# Flat-bottom probes: O/0/8/9 overshoot the baseline and would bias the shift.
+FLAT_BOTTOM_PROBES = {"latin": "HIEX", "digit": "147"}
+BASELINE_SHIFT_LIMIT_RATIO = 0.25
+
+
+class MergeError(RuntimeError):
+    pass
+
+
+def outline_kind(font: TTFont) -> str:
+    for tag, kind in (("glyf", "glyf"), ("CFF ", "cff"), ("CFF2", "cff2")):
+        if tag in font:
+            return kind
+    raise MergeError("字体不包含受支持的 glyf、CFF 或 CFF2 轮廓")
+
+
+def _bounds(font: TTFont, glyph_set, codepoint: int):
+    name = (font.getBestCmap() or {}).get(codepoint)
+    if not name or name not in glyph_set:
+        return None
+    pen = BoundsPen(glyph_set)
+    glyph_set[name].draw(pen)
+    return None if pen.bounds is None else tuple(float(value) for value in pen.bounds)
+
+
+def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
+    base_glyph_set = base.getGlyphSet()
+    upem_scale = base["head"].unitsPerEm / src["head"].unitsPerEm
+    ratios = []
+    for codepoint in map(ord, "AHIOXEx" if role == "latin" else "0189"):
+        base_box = _bounds(base, base_glyph_set, codepoint)
+        src_box = _bounds(src, src_glyph_set, codepoint)
+        if base_box and src_box and src_box[3] > src_box[1] and base_box[3] > base_box[1]:
+            ratios.append((base_box[3] - base_box[1]) / ((src_box[3] - src_box[1]) * upem_scale))
+    if not ratios:
+        return upem_scale, 0.0
+    scale = upem_scale * max(0.82, min(1.18, float(statistics.median(ratios))))
+    bottoms = [box[1] for box in (
+        _bounds(src, src_glyph_set, codepoint) for codepoint in map(ord, FLAT_BOTTOM_PROBES[role])
+    ) if box]
+    if not bottoms:
+        return scale, 0.0
+    # The baseline is y=0; only correct a genuine source displacement.
+    shift = -float(statistics.median(bottoms)) * scale
+    limit = base["head"].unitsPerEm * BASELINE_SHIFT_LIMIT_RATIO
+    return scale, max(-limit, min(limit, shift))
+
+
+def _enclose_bounds(font: TTFont, bounds) -> None:
+    if bounds is None:
+        return
+    box = (math.floor(bounds[0]), math.floor(bounds[1]), math.ceil(bounds[2]), math.ceil(bounds[3]))
+    head = font["head"]
+    head.xMin = min(head.xMin, box[0]); head.yMin = min(head.yMin, box[1])
+    head.xMax = max(head.xMax, box[2]); head.yMax = max(head.yMax, box[3])
+    for tag in ("CFF ", "CFF2"):
+        if tag in font:
+            top = font[tag].cff.topDictIndex[0]
+            if hasattr(top, "FontBBox"):
+                prior = top.FontBBox
+                top.FontBBox = [min(prior[0], box[0]), min(prior[1], box[1]),
+                                max(prior[2], box[2]), max(prior[3], box[3])]
+
+
+def _clear_metric_variations(font: TTFont, glyph_name: str) -> None:
+    """An imported static glyph must not inherit the old glyph's HVAR/VVAR deltas."""
+    if "HVAR" not in font and "VVAR" not in font:
+        return
+    from fontTools.ttLib.tables.otTables import NO_VARIATION_INDEX
+    from fontTools.varLib.builder import buildVarIdxMap
+    for tag, fields in (("HVAR", ("AdvWidthMap", "LsbMap", "RsbMap")),
+                        ("VVAR", ("AdvHeightMap", "TsbMap", "BsbMap", "VOrgMap"))):
+        if tag not in font:
+            continue
+        table = font[tag].table
+        for field in fields:
+            mapping = getattr(table, field, None)
+            if mapping is None:
+                if field != fields[0]:
+                    continue
+                order = font.getGlyphOrder()
+                mapping = buildVarIdxMap(range(len(order)), order)
+                setattr(table, field, mapping)
+            mapping.mapping[glyph_name] = NO_VARIATION_INDEX
+
+
+def _draw(glyph_set, name: str, pen, scale: float, shift: float) -> None:
+    recorder = DecomposingRecordingPen(glyph_set)
+    glyph_set[name].draw(recorder)
+    recorder.replay(TransformPen(pen, (scale, 0, 0, scale, 0, shift)))
+
+
+def _replace_glyf(base: TTFont, src_kind: str, glyph_set, base_name: str, src_name: str,
+                  scale: float, shift: float) -> None:
+    pen = TTGlyphPen(None)
+    _draw(glyph_set, src_name, Cu2QuPen(pen, max_err=max(0.5, base["head"].unitsPerEm / 2000),
+                                        reverse_direction=src_kind in {"cff", "cff2"}), scale, shift)
+    glyph = pen.glyph()
+    base["glyf"][base_name] = glyph
+    glyph.recalcBounds(base["glyf"])
+    if not hasattr(glyph, "xMin"):
+        glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
+    _enclose_bounds(base, (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax))
+    if "gvar" in base:
+        base["gvar"].variations.pop(base_name, None)
+
+
+def _replace_cff(base: TTFont, src_kind: str, glyph_set, base_name: str, src_name: str,
+                 scale: float, shift: float, width: int) -> None:
+    tag = "CFF " if "CFF " in base else "CFF2"
+    cff = base[tag].cff
+    top = cff.topDictIndex[0]
+    _old, selector = top.CharStrings.getItemAndSelector(base_name)
+    private = top.FDArray[selector or 0].Private if hasattr(top, "FDArray") else top.Private
+    is_cff2 = tag == "CFF2"
+    pen = T2CharStringPen(None if is_cff2 else width, None, CFF2=is_cff2)
+    _draw(glyph_set, src_name, Qu2CuPen(pen, max_err=max(0.5, base["head"].unitsPerEm / 2000),
+                                        all_cubic=True, reverse_direction=src_kind == "glyf"), scale, shift)
+    charstring = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
+    if selector is not None:
+        charstring.fdSelectIndex = selector
+    top.CharStrings[base_name] = charstring
+    _enclose_bounds(base, charstring.calcBounds(top.CharStrings))
+
+
+def import_glyphs(base: TTFont, src: TTFont, role: str, location: dict[str, float] | None = None) -> int:
+    """Draws the role's glyphs from ``src`` into ``base``; returns the count."""
+    codepoints: Iterable[int] = LATIN_CODEPOINTS if role == "latin" else DIGIT_CODEPOINTS
+    required = REQUIRED[role]
+    base_cmap = base.getBestCmap() or {}
+    src_cmap = src.getBestCmap() or {}
+    glyph_set = src.getGlyphSet(location=location) if location else src.getGlyphSet()
+    base_kind, src_kind = outline_kind(base), outline_kind(src)
+    scale, shift = _role_transform(base, src, glyph_set, role)
+    replaced = 0
+    done: set[tuple[str, str]] = set()
+    for codepoint in sorted(codepoints):
+        base_name, src_name = base_cmap.get(codepoint), src_cmap.get(codepoint)
+        if not base_name or not src_name:
+            if codepoint in required:
+                raise MergeError(f"源字体或中文基底缺少必要字符 U+{codepoint:04X}")
+            continue
+        if (base_name, src_name) in done:
+            continue
+        done.add((base_name, src_name))
+        try:
+            advance, lsb = src["hmtx"].metrics[src_name]
+            width = getattr(glyph_set[src_name], "width", None)
+            if isinstance(width, (int, float)):
+                advance = width
+        except (KeyError, TypeError):
+            continue
+        advance = int(round(float(advance) * scale))
+        lsb = int(round(float(lsb) * scale))
+        try:
+            if base_kind == "glyf":
+                _replace_glyf(base, src_kind, glyph_set, base_name, src_name, scale, shift)
+            else:
+                _replace_cff(base, src_kind, glyph_set, base_name, src_name, scale, shift, advance)
+        except Exception as error:
+            if codepoint in required:
+                raise MergeError(f"必要字符 U+{codepoint:04X} 的字形转换失败：{error}") from error
+            continue
+        base["hmtx"].metrics[base_name] = (advance, lsb)
+        _clear_metric_variations(base, base_name)
+        replaced += 1
+    if replaced < len(required):
+        raise MergeError(f"{'英文' if role == 'latin' else '数字'}替换数量异常（仅 {replaced} 个）")
+    return replaced
