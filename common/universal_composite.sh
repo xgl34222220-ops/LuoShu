@@ -53,7 +53,7 @@ safe_weight() {
     printf '%s' "$_sw"
 }
 
-resolve_mode() {
+ucm_resolve_mode() {
     case "$1" in
         auto|fixed) printf '%s\n' "$1" ;;
         *)
@@ -91,7 +91,7 @@ update_task() {
         "$(read_value "$TASK_FILE" started)" "$5" "$4"
 }
 
-precheck_mix() {
+ucm_precheck_mix() {
     [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] || return 1
     [ -f "$ROLE_CHECK" ] || return 0
     MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || return 2
@@ -99,7 +99,7 @@ precheck_mix() {
     MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || return 4
 }
 
-save_mix_config() {
+ucm_save_mix_config() {
     # cjk latin digit cjkAxes latinAxes digitAxes cjkMode latinMode digitMode
     _sm_tmp="$MIX_CONF.tmp.$$"
     {
@@ -119,11 +119,11 @@ start_mix() {
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
     [ -n "$_latin_axes" ] || _latin_axes='wght=400'
     [ -n "$_digit_axes" ] || _digit_axes='wght=400'
-    _cjk_mode=$(resolve_mode "$7" "$_cjk" "$_cjk_axes")
-    _latin_mode=$(resolve_mode "$8" "$_latin" "$_latin_axes")
-    _digit_mode=$(resolve_mode "$9" "$_digit" "$_digit_axes")
+    _cjk_mode=$(ucm_resolve_mode "$7" "$_cjk" "$_cjk_axes")
+    _latin_mode=$(ucm_resolve_mode "$8" "$_latin" "$_latin_axes")
+    _digit_mode=$(ucm_resolve_mode "$9" "$_digit" "$_digit_axes")
 
-    precheck_mix "$_cjk" "$_latin" "$_digit"
+    ucm_precheck_mix "$_cjk" "$_latin" "$_digit"
     case "$?" in
         1) printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'; return ;;
         2) printf '{"status":"error","message":"中文基底缺少必要字形"}\n'; return ;;
@@ -197,7 +197,7 @@ worker() {
         update_task "$_wanted" failed "${_message:-通用引擎无法生成该组合，当前字体未改变}" 100 "$(date +%s)"
         exit 1
     fi
-    save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
+    ucm_save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
         "$_cjk_mode" "$_latin_mode" "$_digit_mode" || {
         update_task "$_wanted" failed '组合配置保存失败' 100 "$(date +%s)"
         exit 1
@@ -240,9 +240,9 @@ config_json() {
     [ -n "$_cjk_axes" ] || _cjk_axes="wght=$(read_value "$_source" cjkWeight)"
     [ -n "$_latin_axes" ] || _latin_axes="wght=$(read_value "$_source" latinWeight)"
     [ -n "$_digit_axes" ] || _digit_axes="wght=$(read_value "$_source" digitWeight)"
-    _cjk_mode=$(resolve_mode "$(read_value "$_source" cjkMode)" "$_cjk" "$_cjk_axes")
-    _latin_mode=$(resolve_mode "$(read_value "$_source" latinMode)" "$_latin" "$_latin_axes")
-    _digit_mode=$(resolve_mode "$(read_value "$_source" digitMode)" "$_digit" "$_digit_axes")
+    _cjk_mode=$(ucm_resolve_mode "$(read_value "$_source" cjkMode)" "$_cjk" "$_cjk_axes")
+    _latin_mode=$(ucm_resolve_mode "$(read_value "$_source" latinMode)" "$_latin" "$_latin_axes")
+    _digit_mode=$(ucm_resolve_mode "$(read_value "$_source" digitMode)" "$_digit" "$_digit_axes")
     _enabled=false
     [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] && _enabled=true
     printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s"}}\n' \
