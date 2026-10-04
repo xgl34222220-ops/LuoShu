@@ -5,6 +5,13 @@ import android.util.Log
 
 /** Local, debug-build timing markers for adb acceptance tests. No names, paths or telemetry. */
 internal object FontLoadDiagnostics {
+    fun inventoryStages(stage: String, result: ShellResult) {
+        if (!BuildConfig.STARTUP_DIAGNOSTICS) return
+        inventoryTimingFields(stage, result.stderr).forEach {
+            Log.i("LuoShuStartup", "event=font_request_phase stage=$stage $it")
+        }
+    }
+
     fun axisRequest(durationMs: Long, result: ShellResult) {
         if (!BuildConfig.STARTUP_DIAGNOSTICS) return
         Log.i("LuoShuAxis", "event=axis_request duration_ms=$durationMs code=${result.code} stdout_bytes=${result.stdout.toByteArray(Charsets.UTF_8).size}")

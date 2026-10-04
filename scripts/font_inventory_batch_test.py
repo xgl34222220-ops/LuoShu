@@ -229,6 +229,42 @@ class InventoryTest(unittest.TestCase):
                              data['verification'])
         self.assertNotIn('verification', self.action('cached')['data'])
 
+    def test_matching_thousand_font_index_reuses_rows_but_checks_two_live_snapshots(self):
+        for i in range(1000):
+            self.font(f'Font{i:04d}.ttf')
+        original = self.action('refresh')['data']
+        cache = self.config / 'native_font_index.json'
+        key = self.config / 'native_font_index.key'
+        before = (cache.read_bytes(), key.read_bytes(), cache.stat().st_mtime_ns)
+        with patch.object(batch, 'inventory', side_effect=AssertionError('unnecessary header reads')), \
+             patch.object(batch, 'atomic_write', side_effect=AssertionError('unnecessary cache rewrite')), \
+             patch.object(batch, 'snapshot', wraps=batch.snapshot) as snapshots:
+            result = self.action('scan')['data']
+        self.assertEqual(2, snapshots.call_count)
+        self.assertEqual(original['fonts'], result['fonts'])
+        self.assertEqual(result['fingerprint'], result['verification']['fingerprint'])
+        self.assertEqual(before, (cache.read_bytes(), key.read_bytes(), cache.stat().st_mtime_ns))
+
+    def test_reused_index_cannot_bless_a_change_between_live_snapshots(self):
+        self.font('Alpha.ttf')
+        self.action('refresh')
+        cache = self.config / 'native_font_index.json'
+        key = self.config / 'native_font_index.key'
+        before = (cache.read_bytes(), key.read_bytes())
+        snapshot = batch.snapshot
+        calls = 0
+        def change_before_second(path):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                self.font('Beta.ttf')
+            return snapshot(path)
+        with patch.object(batch, 'snapshot', side_effect=change_before_second), \
+             patch.object(batch, 'inventory', side_effect=AssertionError('cache should match initially')):
+            with self.assertRaisesRegex(ValueError, '扫描期间'):
+                self.action('scan')
+        self.assertEqual(before, (cache.read_bytes(), key.read_bytes()))
+
     def test_mid_scan_change_preserves_previous_cache_and_key(self):
         self.font('Alpha.ttf')
         self.action('refresh')

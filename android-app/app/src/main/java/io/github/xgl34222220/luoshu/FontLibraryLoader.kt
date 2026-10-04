@@ -43,7 +43,10 @@ internal suspend fun loadFontLibrary(
     // First-run cache misses scan before checking: the scan initializes public storage.
     // A matching new module rechecks in the same request; older modules need a
     // separate fingerprint call before these rows become actionable.
-    val scan = source.scanForVerification(refresh = force || initial != null)
+    // A stale App list does not imply a stale module index. A normal scan checks
+    // the live directory and can reuse the module's matching index, then binds
+    // a second snapshot to this request. Only explicit refresh bypasses it.
+    val scan = source.scanForVerification(refresh = force)
     val scanned = scan.index.withSourceRevision()
     // Preserve a known list until this replacement is confirmed. In particular, a failed
     // post-scan permission check must not replace known rows with an unconfirmed empty scan.
@@ -67,13 +70,17 @@ internal fun fontLibraryContains(verified: Boolean, fonts: List<FontItem>, fontI
 
 internal class RootFontLibrarySource(
     private val diagnostics: (String, Long, Int) -> Unit = { _, _, _ -> },
+    private val phaseDiagnostics: (String, ShellResult) -> Unit = { _, _ -> },
     private val execute: suspend (String, Long) -> ShellResult = RootShell::fontInventory,
 ) : FontLibrarySource {
     private suspend fun request(action: String, timeoutMs: Long): ShellResult {
         val started = System.nanoTime()
         var code = -1
         try {
-            return execute(action, timeoutMs).also { code = it.code }
+            return execute(action, timeoutMs).also {
+                code = it.code
+                phaseDiagnostics(action, it)
+            }
         } finally {
             diagnostics(action, (System.nanoTime() - started) / 1_000_000L, code)
         }

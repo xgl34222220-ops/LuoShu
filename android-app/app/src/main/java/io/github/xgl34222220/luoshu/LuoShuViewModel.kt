@@ -139,7 +139,10 @@ internal data class MixState(
 
 internal class LuoShuViewModel(application: Application) : AndroidViewModel(application) {
     private val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
-    private val fontLibrarySource = RootFontLibrarySource(diagnostics = FontLoadDiagnostics::request)
+    private val fontLibrarySource = RootFontLibrarySource(
+        diagnostics = FontLoadDiagnostics::request,
+        phaseDiagnostics = FontLoadDiagnostics::inventoryStages,
+    )
     private val fontIndexStore = FontIndexStore(application)
     private var watchedTaskId: String = ""
     private var cachedFingerprint: String = ""

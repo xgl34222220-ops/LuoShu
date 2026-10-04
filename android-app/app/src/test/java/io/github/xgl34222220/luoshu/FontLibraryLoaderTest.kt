@@ -91,7 +91,7 @@ class FontLibraryLoaderTest {
         val source = Source(null, index("font-list-v5:b", listOf("B", "C")))
         val imported = loadFontLibrary(old, false, source) { _, _ -> }
         assertEquals(listOf("B", "C"), imported.fonts.map { it.id })
-        assertTrue(source.forced)
+        assertFalse(source.forced)
         source.fresh = index("font-list-v5:empty", emptyList())
         source.currentFingerprint = source.fresh.fingerprint
         val deleted = loadFontLibrary(imported, false, source) { _, _ -> }
@@ -263,6 +263,26 @@ class FontLibraryLoaderTest {
         assertEquals(listOf(false, true), states)
         assertEquals("B", loaded.fonts.single().id)
         assertEquals("A", loaded.currentFont)
+    }
+
+    @Test
+    fun staleLocalListUsesVerifiedModuleScanWithoutForcingHeaderReads() = runBlocking {
+        val actions = mutableListOf<Pair<String, Long>>()
+        val source = RootFontLibrarySource { action, timeout ->
+            actions += action to timeout
+            when (action) {
+                "fingerprint" -> ShellResult(0, """{"status":"ok","data":{"fingerprint":"font-list-v5:new","current":"B"}}""", "")
+                "scan" -> ShellResult(0, """{"status":"ok","data":{"fonts":[{"id":"B","valid":true}],"fingerprint":"font-list-v5:new","current":"B","verification":{"schema":"font-list-verification-v1","fingerprint":"font-list-v5:new","current":"B"}}}""", "")
+                else -> error("Unexpected request: $action")
+            }
+        }
+        val states = mutableListOf<Pair<CachedFontIndex, Boolean>>()
+        val loaded = loadFontLibrary(index(), false, source) { rows, ready -> states += rows to ready }
+        assertEquals(listOf("fingerprint" to 8_000L, "scan" to 60_000L), actions)
+        assertEquals(listOf(false, true), states.map { it.second })
+        assertEquals("A", states.first().first.fonts.single().id)
+        assertEquals("B", loaded.fonts.single().id)
+        assertEquals("font-list-v5:new", loaded.fonts.single().revision)
     }
 
     @Test
@@ -452,8 +472,13 @@ class FontLibraryLoaderTest {
     @Test
     fun requestStagesIncludeExitCodeAndCancellationWithoutHidingTheError() = runBlocking {
         val stages = mutableListOf<Triple<String, Long, Int>>()
-        val source = RootFontLibrarySource(diagnostics = { action, duration, code -> stages += Triple(action, duration, code) }) { action, _ ->
-            if (action == "cached") ShellResult(0, """{"status":"error","code":"cache_miss"}""", "")
+        val phaseResults = mutableListOf<Pair<String, ShellResult>>()
+        val cached = ShellResult(0, """{"status":"error","code":"cache_miss"}""", "[font-request] private protocol")
+        val source = RootFontLibrarySource(
+            diagnostics = { action, duration, code -> stages += Triple(action, duration, code) },
+            phaseDiagnostics = { action, result -> phaseResults += action to result },
+        ) { action, _ ->
+            if (action == "cached") cached
             else throw CancellationException("stopped")
         }
         assertNull(source.cached())
@@ -461,6 +486,7 @@ class FontLibraryLoaderTest {
         assertEquals(listOf("cached", "preview"), stages.map { it.first })
         assertEquals(listOf(0, -1), stages.map { it.third })
         assertTrue(stages.all { it.second >= 0 })
+        assertEquals(listOf("cached" to cached), phaseResults)
     }
 
 }

@@ -169,3 +169,15 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 1000 文件库暖进入本轮为 6615/6809/6876 ms，首个真实库存帧为 554/500/525 ms。恢复后的最终冷核验为 **58385 ms**（含真实导航），暖核验为 7628 ms：[冷日志](evidence/root-final-cold-37174455395.txt)、[暖日志](evidence/root-final-warm-37174455395.txt)。冷日志有 `fingerprint duration_ms=12583 code=124`，后续重试为 9571 ms、code 0，刷新为 27256 ms、code 0；不能宣称超时均已消失或性能全部修复。下一批优先拆分这一有限请求的耗时并消除能证明的重复工作，保留现有验证、超时和回收门禁。
 
 本轮通过范围仍为 AOSP API35 x86_64/nativebridge 上的原 ARM64 运行库。原生 ARM64/OEM 真机、App 完整组合创建 UI、像素几何、备份恢复 API、1000 份不同真实字体内容及基线 App 性能未验证。
+
+## 第八批：普通库复核复用已核查模块索引与有限请求耗时
+
+参考 [AndroidX 字体请求缓存源码](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/compose/ui/ui-text/src/commonMain/kotlin/androidx/compose/ui/text/font/FontFamilyResolver.kt) 及其 [Apache-2.0 许可证](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt)：复用与真实来源身份匹配的成功结果，避免重复加载。这里只借鉴原则，模块索引的当前目录指纹、双快照证明及 App 就绪判定仍是洛书独立契约，没有复制代码。另核对 [Python DirEntry 文档](https://docs.python.org/3/library/os.html#os.DirEntry.stat)，其 stat 结果有内部缓存；没有把源码中的两个 stat 调用猜成两次真实系统调用，也没有移除任何指纹身份字段。
+
+具体差距：App 旧列表与当前指纹不同时，普通前台复核也传入 `refresh=true`，无条件重读字体头并写回索引，即便模块已通过其他操作取得同一当前索引。改为普通检查调用既有 `scan`；模块照常捕获当前目录、核对协议/版本/当前字体/指纹键，命中后仍用第二次实时快照核实。目录变化、权限丢失、无效缓存及不匹配的证明照常拒绝或重建；手动刷新继续强制 `refresh`，8 秒/60 秒命令预算和请求回收契约不变。
+
+本轮新本地库存回归为 19 个、0.360 秒 PASS，含两项新增：1000 行命中不调用索引重建/缓存写回且确实取两次实时快照，以及两次快照之间变化必须拒绝且保留旧缓存。另有新 JVM 交叉层用例要求旧 App 列表只发 `fingerprint` 和 `scan`，消费同请求的新证明，并保持未核实状态直到成功；尚待本批 CI。
+
+[本轮宿主操作比较](INVENTORY_CACHE_REUSE_HOST_20261004.json) 明确标注 `HOST_ONLY`：同一已有效的 1000 字体模块索引，5 次强制 refresh 调用重建 5 次/缓存写回 10 次，5 次 scan 均为 0/0；两者每请求均保留 2 次实时快照。中位数 52.754→32.576 ms 只证明宿主已有两条路径的工作差异，不能算作 Android 冷启动改善，更不能承诺消除第六轮超时。
+
+依据 [Android 官方 ANR 诊断](https://developer.android.com/topic/performance/anrs/diagnose-and-fix-anrs) 对系统/应用工作区分的要求，隔离诊断版现在从既有 stderr 提取库存函数和有限请求总耗时，与 App 外层计时一起保留；最多两个固定阶段，数值/状态有界，绝不记录路径、字体 ID、token、PID 或任意错误消息。新增 3 个 JVM 回归覆盖带私人字段的实际协议、超时/未清理状态以及畸形/过长/非数值/错阶段输入；正式版仍关闭日志。尚无本批新 Android 数据，不把推测当成底层根因。
