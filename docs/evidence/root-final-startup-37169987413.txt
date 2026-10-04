@@ -1,0 +1,6 @@
+--------- beginning of main
+10-04 02:45:11.574  3461  3461 I LuoShuStartup: event=app_start elapsed_ms=46238
+10-04 02:45:19.602  3461  3461 I LuoShuStartup: event=font_index_visible elapsed_ms=54265 count=1000 verified=false
+10-04 02:45:19.602  3461  3461 I LuoShuStartup: event=font_index_visible elapsed_ms=54266 count=1000 verified=false
+10-04 02:45:35.484  3461  3461 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=70148 duration_ms=15870 code=124
+10-04 02:45:37.166  3461  3461 I LuoShuStartup: event=font_index_visible elapsed_ms=71830 count=1000 verified=false

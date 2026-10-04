@@ -63,7 +63,7 @@ class DisplayPerformanceControllerTest {
         assertFalse(
             shouldRequestHighRefresh(
                 enabled = false,
-                powerSaveMode = false,
+                powerSaveMode = { false },
                 resumed = true,
                 focused = true,
                 pictureInPicture = false,
@@ -73,7 +73,7 @@ class DisplayPerformanceControllerTest {
         assertFalse(
             shouldRequestHighRefresh(
                 enabled = true,
-                powerSaveMode = true,
+                powerSaveMode = { true },
                 resumed = true,
                 focused = true,
                 pictureInPicture = false,
@@ -83,12 +83,50 @@ class DisplayPerformanceControllerTest {
         assertTrue(
             shouldRequestHighRefresh(
                 enabled = true,
-                powerSaveMode = false,
+                powerSaveMode = { false },
                 resumed = true,
                 focused = true,
                 pictureInPicture = false,
                 finishing = false,
             ),
         )
+    }
+
+    @Test
+    fun inactiveWindowsNeverQuerySystemPowerState() {
+        val states = listOf(
+            listOf(false, true, true, false, false),
+            listOf(true, false, true, false, false),
+            listOf(true, true, false, false, false),
+            listOf(true, true, true, true, false),
+            listOf(true, true, true, false, true),
+        )
+        states.forEach { (enabled, resumed, focused, pip, finishing) ->
+            assertFalse(shouldRequestHighRefresh(
+                enabled = enabled,
+                powerSaveMode = { error("Inactive window queried system power state") },
+                resumed = resumed,
+                focused = focused,
+                pictureInPicture = pip,
+                finishing = finishing,
+            ))
+        }
+    }
+
+    @Test
+    fun eligibleWindowQueriesPowerStateOnceAndKeepsSaverPriority() {
+        listOf(false, true).forEach { saver ->
+            var queries = 0
+            val requested = shouldRequestHighRefresh(
+                enabled = true,
+                powerSaveMode = { queries += 1; saver },
+                resumed = true,
+                focused = true,
+                pictureInPicture = false,
+                finishing = false,
+            )
+            assertEquals(!saver, requested)
+            assertEquals(1, queries)
+        }
     }
 }

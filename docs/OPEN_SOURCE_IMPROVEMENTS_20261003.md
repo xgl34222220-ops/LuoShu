@@ -114,7 +114,7 @@ Root workflow 只绑定上述已通过、已下载验真的候选包。新增门
 
 第四批提交 [`dc497301`](https://github.com/xgl34222220-ops/LuoShu/commit/dc4973016c242d6ee71083644652083480f6ea4d) 的 [完整候选 CI 37169144226](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37169144226) 已通过，含上述新选择门禁、实际 Android 15 原厂集合夹具回归、App lint/单测/构建及包检查。下载 artifact `11290754515`，[独立包校验](TEST_CANDIDATE_VERIFICATION_37169144226.json) 通过：外层 ZIP `b14141399032168362254c3c153cdfb004cc8a9b2b3847357ec40896499909ee`，模块 `67aa350efb3b1fd6f0606b92d28f75419cb21428232a435099c01fccc149e2ae`，APK `e6819a7592efb1edb5909c60cffc9c5c898091f06ab928c0c90216c3bc345b53`。17 个冻结文件、8 个运行源码、内外 APK 和构建来源逐一一致。
 
-Root workflow 改绑这个新验真的候选，并增加实际安装模块下的 18 个预览来源选择用例，要求同一启动身份、原 ARM64 Python、Android shell 和 Enforcing。门禁拒绝宿主、错模块/解释器、缺失/重复/失败用例；本轮宿主 harness 92 个测试通过，仅证明验收脚本逻辑。第四批完整 Android 复测仍待实际运行，不把前一轮 Root 结果当成本批验收。
+Root workflow 改绑这个新验真的候选，并增加实际安装模块下的 18 个预览来源选择用例，要求同一启动身份、原 ARM64 Python、Android shell 和 Enforcing。门禁拒绝宿主、错模块/解释器、缺失/重复/失败用例；本轮宿主 harness 92 个测试通过，仅证明验收脚本逻辑。[第四批完整 Android 37169987413](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37169987413) 已结束，整体 BLOCKED，具体新证据见下节。
 
 ## 第五批：当前复合字体引擎的结构化错误回退
 
@@ -126,7 +126,19 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 
 第五批提交 [`aec481e1`](https://github.com/xgl34222220-ops/LuoShu/commit/aec481e10a7796078232b41e4ea0a9043bc93b40) 的 [新候选 CI 37170909720](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37170909720) 完整通过：源码/补充门禁、15 个错误函数用例、上述既有集成测试、原厂 CFF2 夹具的宿主编译/FreeType 检查、App lint/单测/构建及包检查。下载 artifact `11291328122`，[独立核验](TEST_CANDIDATE_VERIFICATION_37170909720.json) 外层 `8c77f7eeed850518f8076771470893f12e050c3b8dbdf9f89cccbc5f61e133c0`，模块 `698ca4099970d5c56057e4eae9f0e16945821db8a4e809d21979e0ee9ccb312e`，APK `a45a47b74d4b9a9bf4e15bfb8f9925192a3ecb5e82021c57b998527089da3097`，17 个冻结文件及 9 个运行源码、来源/内外 APK 一致。额外核对旧冻结引擎与本轮起点 `1a329a1c` 的字节一致。
 
-新的 Root 门禁绑定该包，分别记录 32 个交接、18 个来源选择及 15 个当前错误函数用例，不以错误函数测试代替完整 CLI 组合。新增判定器要求实际 Android、正确模块/解释器、同一启动身份、Enforcing 和完整唯一用例。本轮宿主 harness 94 个测试通过，完整 Android 仍待新执行；第四批原任务保持运行，队列不会取消它。
+新的 Root 门禁绑定该包，分别记录 32 个交接、18 个来源选择及 15 个当前错误函数用例，不以错误函数测试代替完整 CLI 组合。新增判定器要求实际 Android、正确模块/解释器、同一启动身份、Enforcing 和完整唯一用例。本轮宿主 harness 94 个测试通过，[第五批完整 Android 37171895602](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37171895602) 正在运行，未预填通过；原任务完成后按队列接续，没有取消已有任务。
+
+## 第四批复测阻断与第六批：冷启动系统查询和 ANR 证据
+
+下载并验真第四批 Root artifact `11292160094`，外层 SHA-256 `c09fb94f958654594200538ae3db3e1e9f897e5271648ea7471423b38d3d7620`；使用该运行固定的 `fe06c319` 判定器重新计算。[失败证明](ROOT_ANDROID_FAILURE_37169987413.json) 保留整体 FAIL/BLOCKED、5 面真实 CFF2 编译、14 次实际启动 ID、19 条挂载证明、32 个交接/18 个来源选择用例和 9 个实际轴 UI 帧。2 份新 tombstone 均绑定未改基线的失败注入任务；候选无意外原生崩溃。
+
+1000 文件库重新进入核验为 8064/7002/7095 ms，库采样没有指纹超时；实际 App 应用、重启挂载及默认恢复重启均完成。随后最终冷启动抓到目标 App PID 3461 的焦点 ANR：`FocusEvent(hasFocus=true)` 等待 5014 ms，整体仍 BLOCKED。保存[原始 lastanr](evidence/root-final-anr-37169987413.txt)、[实际 ANR 界面 XML](evidence/root-final-anr-37169987413.xml)、[本次启动日志](evidence/root-final-startup-37169987413.txt)和[原始系统诊断节选](evidence/root-final-anr-runtime-37169987413.txt)。此次冷启动还出现一次 15870 ms、code 124 的指纹超时；不能把库采样的改善写成所有超时均消失。现有 harness 没有保留 `/data/anr` 线程栈，因此具体主线程阻塞点尚未证明。临时 Root 政策已撤销、任务空间为空，两个 AVD 已回收。
+
+本批参考 [AOSP Android 15 PowerManager 源码](https://github.com/aosp-mirror/platform_frameworks_base/blob/android-15.0.0_r1/core/java/android/os/PowerManager.java)（Apache-2.0，源码头许可证已核对）及 [Android 官方 ANR 诊断文档](https://developer.android.com/topic/performance/anrs/diagnose-and-fix-anrs)。源码显示 `isPowerSaveMode()` 使用属性缓存，缓存未命中时同步查询系统服务；不能宣称每次调用都有 Binder。
+
+独立源码核对发现本 App 默认关闭高刷新率时，`onStart`/`onResume`/焦点回调仍先取省电状态，再检查是否需要请求模式。本批只将系统查询延迟到已启用、已恢复、已获焦点且非画中画/关闭中的窗口，保留省电优先、同分辨率及默认系统刷新率行为。新增两个 JVM 回归方法检查 5 种不合格窗口绝不调用系统查询，以及合格窗口只查询一次并尊重省电值；尚待本批新 CI，未把旧结果当作通过。这是可证明的无用启动工作，尚不能认定为上述 ANR 根因；没有复制上游源码。
+
+后续验收将补齐 `lastanr` 的精确 `Reason:` 识别与失败时的目标线程栈保存；不点击 ANR 的“等待”、不扩大期限、不跳过最后实际 App 检查。
 
 ## 不可越过的边界
 
