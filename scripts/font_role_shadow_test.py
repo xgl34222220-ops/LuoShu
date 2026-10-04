@@ -132,6 +132,25 @@ def main() -> int:
                 "MitypeVF.ttf", ["mitype"], latin=True, digits=True,
                 replaceable=False,
             ),
+            # Generic design families and script-only fallbacks stay stock.
+            "/system/fonts/ComingSoon.ttf": slot(
+                "ComingSoon.ttf", ["casual"], latin=True, digits=True, replaceable=False,
+            ),
+            "/system/fonts/DancingScript-Regular.ttf": slot(
+                "DancingScript-Regular.ttf", ["cursive"], latin=True, digits=True, replaceable=False,
+            ),
+            "/system/fonts/NotoSansMiao-Regular.otf": slot(
+                "NotoSansMiao-Regular.otf", [], latin=True, digits=True,
+                replaceable=False, xml_lang="und-Plrd",
+            ),
+            "/system/fonts/NotoSansOldItalic-Regular.ttf": slot(
+                "NotoSansOldItalic-Regular.ttf", [], latin=True, replaceable=False,
+                xml_lang="und-Ital",
+            ),
+            "/system/fonts/LatinUnd.ttf": slot(
+                "LatinUnd.ttf", ["fallback"], latin=True, digits=True,
+                replaceable=False, xml_lang="und-Latn",
+            ),
         }
 
         topology.write_text(
@@ -229,6 +248,16 @@ def main() -> int:
             assert role(oem_ui) == "ui-sans", (oem_ui, role_map["slots"][oem_ui])
             assert action(oem_ui) == "replace", oem_ui
 
+        for protected in (
+            "/system/fonts/ComingSoon.ttf",
+            "/system/fonts/DancingScript-Regular.ttf",
+            "/system/fonts/NotoSansMiao-Regular.otf",
+            "/system/fonts/NotoSansOldItalic-Regular.ttf",
+        ):
+            assert role(protected) == "special-fallback", (protected, role_map["slots"][protected])
+            assert action(protected) == "preserve", protected
+        assert role("/system/fonts/LatinUnd.ttf") == "latin"
+
         # HyperOS Mitype drives lock-screen/status-bar digits: exact-width path.
         assert role("/system/fonts/MitypeVF.ttf") == "clock"
         assert action("/system/fonts/MitypeVF.ttf") == "specialized"
@@ -242,9 +271,9 @@ def main() -> int:
             if item["role"] == "unknown-protected":
                 assert item["action"] == "review"
 
-        assert shadow["summary"]["actionCounts"]["preserve"] == 6
+        assert shadow["summary"]["actionCounts"]["preserve"] == 10
         assert shadow["summary"]["actionCounts"]["specialized"] == 3
-        assert shadow["summary"]["actionCounts"]["conditional"] == 2
+        assert shadow["summary"]["actionCounts"]["conditional"] == 3
         assert shadow["summary"]["actionCounts"]["replace"] == 4
         assert shadow["summary"]["actionCounts"]["review"] == 1
 

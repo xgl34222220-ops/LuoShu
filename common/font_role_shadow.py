@@ -20,7 +20,8 @@ from font_config_overlay import is_safe_family as _overlay_is_safe_family
 ROLE_SCHEMA = "device-font-roles-v1"
 PLAN_SCHEMA = "device-font-shadow-plan-v1"
 # Revision 2: OEM UI families (mipro, sysfont, oplus-sans ...) and Mitype clocks.
-ROLE_REVISION = 2
+# Revision 3: decorative families and und-<Script> fallbacks stay protected.
+ROLE_REVISION = 3
 PLAN_REVISION = 1
 
 PROTECTED_ROLES = {"emoji", "symbol-icon", "serif", "monospace", "special-fallback"}
@@ -45,6 +46,10 @@ MONO_FAMILIES = (
     "droid-sans-mono", "courier", "monaco",
 )
 UI_FAMILIES = ("sans-serif", "system-ui", "ui-sans", "sans")
+# Android generic families that request a specific design, not UI text.
+DECORATIVE_FAMILIES = ("casual", "cursive", "fantasy")
+# ISO 15924 scripts a CJK/Latin user font legitimately replaces.
+TEXT_SCRIPTS = {"latn", "hani", "hans", "hant", "zsye", "zsym", "zyyy", "zinh"}
 CJK_TOKENS = (
     "hans", "hant", "zh-cn", "zh-tw", "zh-hk", "zh-hans", "zh-hant",
     "cjk-sc", "cjk-tc", "notosanssc", "notosanstc", "sourcehansans",
@@ -151,7 +156,20 @@ def _xml_semantics(slot: dict[str, Any]) -> dict[str, list[str]]:
     return result
 
 
+def _undetermined_script(values: list[str]) -> bool:
+    """lang="und-Rohg" style families exist only to cover a script."""
+    for value in values:
+        for item in re.split(r"[,;\s]+", value.strip()):
+            parts = item.replace("_", "-").split("-")
+            if len(parts) >= 2 and parts[0].lower() == "und" and len(parts[1]) == 4:
+                if parts[1].lower() not in TEXT_SCRIPTS:
+                    return True
+    return False
+
+
 def _language_kind(values: list[str]) -> str:
+    if _undetermined_script(values):
+        return "special"
     tokens: list[str] = []
     for value in values:
         normalized = normalize(value)
@@ -308,6 +326,10 @@ def _classification(
         role = "monospace"
         confidence = 100
         reasons.append("explicit-monospace-family")
+    elif any(normalize(family) in DECORATIVE_FAMILIES for family in families):
+        role = "special-fallback"
+        confidence = 100
+        reasons.append("decorative-family")
     elif _contains_phrase(text, EMOJI_TOKENS):
         role = "emoji"
         confidence = 100
