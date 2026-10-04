@@ -94,6 +94,8 @@ common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
+common/luoshu_diagnostics.py
+common/luoshu_diagnostics.sh
 common/mix_task_handoff.sh
 common/mix_weight_mode.sh
 common/module_status.sh

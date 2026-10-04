@@ -80,6 +80,12 @@ internal fun LogsRoute(
             style = style,
             state = diagnosticState,
             onDismiss = { diagnosticState = DiagnosticExportState() },
+            onEngineBundle = {
+                diagnosticState = DiagnosticExportState(busy = true)
+                scope.launch {
+                    diagnosticState = exportEngineBundle()
+                }
+            },
         )
     }
 }

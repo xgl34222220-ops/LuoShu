@@ -22,6 +22,7 @@ MINIMAL_XML_ROUTER="$MODDIR/common/minimal_xml_router.sh"
 UNIVERSAL_COMPILER="$MODDIR/common/universal_font_compiler.sh"
 UNIVERSAL_DEPLOYMENT="$MODDIR/common/universal_font_deployment.sh"
 UNIVERSAL_VERIFY="$MODDIR/common/universal_font_runtime_verify.sh"
+DIAGNOSTICS="$MODDIR/common/luoshu_diagnostics.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
@@ -436,6 +437,10 @@ case "${1:-status}" in
     mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
+    diag_export)
+        [ -f "$DIAGNOSTICS" ] || { printf '{"status":"error","message":"诊断包组件不可用"}\n'; exit 1; }
+        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$DIAGNOSTICS"
+        ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac

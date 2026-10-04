@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Engine diagnostic bundle: device-side export and host-side replay round trip."""
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "common"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import font_role_shadow
+import font_source_profile
+import universal_composite_test as composite
+import universal_font_compiler_test as fixture
+
+
+def main() -> int:
+    with tempfile.TemporaryDirectory(prefix="luoshu-diag-") as raw:
+        temp = Path(raw)
+        topology, _roles, stocks, xml_map = composite.build_device(temp / "device")
+        moddir = temp / "module"
+        config = moddir / "config"
+        (config / "font-config-source" / "system").mkdir(parents=True)
+        (config / "source-font-profiles").mkdir()
+        (moddir / "logs").mkdir()
+        (moddir / "module.prop").write_text("id=LuoShu\nversion=test\nversionCode=1\n", encoding="utf-8")
+        (moddir / "logs" / "fontswitch.log").write_text("universal prepare start font=mix\n", encoding="utf-8")
+        (config / "active_font.conf").write_text("mix\n", encoding="utf-8")
+        shutil.copy(xml_map["/system/etc/fonts.xml"], config / "font-config-source" / "system" / "fonts.xml")
+        roles, shadow = font_role_shadow.build(topology)
+        for name, value in (("device_font_topology.json", topology), ("device_font_roles.json", roles),
+                            ("device_font_shadow_plan.json", shadow)):
+            (config / name).write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+        # Stock bytes live in the pre-mount lower snapshot, as on a device with a font active.
+        lower = temp / "self-mount"
+        for logical, stock in stocks.items():
+            target = lower / "lower" / "system-fonts" / Path(logical).name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(stock, target)
+
+        public = temp / "sdcard" / "fonts"
+        public.mkdir(parents=True)
+        cjk, latin, digit = public / "UserCJK.ttf", public / "UserLatin.ttf", public / "UserDigit.ttf"
+        composite.make_cjk_font(cjk, family="User CJK", variable=True, pentagon=True)
+        fixture.make_font(latin, family="User Latin", variable=True, triangle=True)
+        fixture.make_font(digit, family="User Digit", advance=560)
+        profile = font_source_profile.build(
+            [], {"cjk": [cjk], "latin": [latin], "digit": [digit]},
+            {"cjk": "auto", "latin": "auto", "digit": "fixed"},
+            {"cjk": "", "latin": "", "digit": "wght=500"},
+        )
+        key = hashlib.sha256(b"mix").hexdigest()[:24]
+        (config / "source-font-profiles" / f"{key}.json").write_text(json.dumps(profile), encoding="utf-8")
+
+        bundle = temp / "out" / "bundle.zip"
+        exported = subprocess.run(
+            [sys.executable, str(ROOT / "common" / "luoshu_diagnostics.py"),
+             "--moddir", str(moddir), "--output", str(bundle), "--lower-root", str(lower)],
+            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert exported.returncode == 0, exported.stdout + exported.stderr
+        result = json.loads(exported.stdout)
+        assert result["status"] == "ok", result
+        assert result["data"]["stockCount"] == len(stocks), result
+        assert result["data"]["sourceCount"] == 3, result
+
+        with zipfile.ZipFile(bundle) as archive:
+            names = set(archive.namelist())
+            index = json.loads(archive.read("index.json"))
+        assert "config/font-config-source/system/fonts.xml" in names
+        assert "logs/fontswitch.log" in names
+        assert index["activeFont"] == "mix"
+        assert {entry["origin"] for entry in index["stock"].values()} == {"lower"}, index["stock"]
+        assert all(entry["file"] in names for entry in index["stock"].values())
+
+        # A font is active, so the live /system/fonts view (LuoShu's overlay) is never read.
+        missing_lower = subprocess.run(
+            [sys.executable, str(ROOT / "common" / "luoshu_diagnostics.py"),
+             "--moddir", str(moddir), "--output", str(temp / "out" / "nolower.zip"),
+             "--lower-root", str(temp / "absent")],
+            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert missing_lower.returncode == 0, missing_lower.stdout + missing_lower.stderr
+        assert json.loads(missing_lower.stdout)["data"]["stockCount"] == 0
+
+        replay = subprocess.run(
+            [sys.executable, str(ROOT / "tools" / "replay_diagnostics.py"), str(bundle),
+             "--work", str(temp / "replay")],
+            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert replay.returncode == 0, replay.stdout + replay.stderr
+        assert "RESULT: PASS" in replay.stdout, replay.stdout
+        assert "blocked=0" in replay.stdout, replay.stdout
+
+    print("luoshu_diagnostics_test: PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
