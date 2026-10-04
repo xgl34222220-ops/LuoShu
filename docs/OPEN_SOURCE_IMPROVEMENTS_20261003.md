@@ -333,3 +333,18 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 [当前只读双制品审阅 37192614153](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37192614153) 完成，两份独立报告保留各自范围。[最新候选核验](TEST_CANDIDATE_VERIFICATION_37191606515.json) PASS：模块 `3349e944e76b813b68de8229931725c79222860f533750151de3a9be18992790`、APK `3ef021c72725b371ce9b29e0cd4de1bfb2c434185e4c47ea5c03ae2220a192e5`，与 9487ca4d、内外 APK、11 个运行源码、17 冻结文件和旧引擎一致。后续完整 Root 只绑定这份包。
 
 [第十四轮新失败 proof](ROOT_ANDROID_FAILURE_37189814352.json) 保持 FAIL：本轮 12 个实际内核重启、16 条规范挂载证明、5 面真实 CFF2/CLI 组合完成，无意外候选 native tombstone。新的 [5 个传输函数](evidence/root-inventory-output-37189814352.json) 在原 ARM64/Android shell、同一 Enforcing boot 0631a88d-5937-4641-9f39-6f8fa21231a0 上实际 PASS，字节数/错误码、命令原始 stdout 和安装路由 8433e4a4…与审阅源码一致；不是宿主用例或完整扫描成功。本轮失败仍为 CJK 轴控件，实际 [原始日志](evidence/root-axis-runtime-37189814352.txt) 显示同 PID 7850 先 `25163 ms / code 124 / stdout 0`，后 `5538 ms / code 0 / stdout 328`，最后保存的卡片仍为轴错误。这个序列再次支持修复成功通知缺口；没有 XML 精确时间，不能宣称已证明超时根因。完整 App/1000 库/最终采样未到达，新的响应式 App 修正尚不在该固定旧 APK 中。
+
+
+## 第十八批：闭合实际 App 组合回执与一致的状态快照
+
+第十五轮 [完整 Android 37192969348](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37192969348) 于 10:33 UTC 主步骤结束 FAIL。固定运行源码 9487ca4d/harness f46d9ca4，原 artifact 11301520220/外层 `95dfbbe3db0ceb02c751dcad53cf2f0509b12ebb645671f4f4c8f6246db3b237`。[本轮独立失败证明](ROOT_ANDROID_FAILURE_37192969348.json) 取得 14 次实际模块内核重启、19 条规范挂载证明、5 面 CFF2/CLI 组合、8 个实际轴帧、2 个轴准备请求、100/1000 各 6 个原始七阶段性能采样，以及 App 单字体应用/重启/默认恢复通过；候选无意外 native tombstone。轴请求这次 4812 ms/code 0，没有复现失败后成功的 Android 通知路径，不以本次正常成功冒充那个分支覆盖。初次无 Root App 为 BLOCKED。
+
+[新的真实 App 组合失败记录](APP_COMPOSITE_COMPLETION_FAILURE_37192969348.json) 证明三槽已实际分别选择 0000/0001/0002，点击“生成并应用”后只采用新持久化任务；原父/子任务、后台 finalize、五面可变 CFF2 集合编译和契约、并发 finalize 重放均已成功。App 完成界面仍未出现，最后八帧全有“命令执行超时”，整体保持 FAIL。其组合后重启/挂载/恢复与最终两个采样未到达。Root 临时政策已撤销；最终工作区留下此次已准备的 next payload/state 两项，不能填写空闲 PASS。实际截图 [轴控件](evidence/root-axis-ui-37192969348.png) 摘要 62aa912a…，仅是本次 Miuix 夹具界面，不证明真实字形几何或 Material 运行效果。
+
+只读审阅 51ab4a2a/2a4deead/87c95189/0c69ce71 扩充原始截图、XML 可见节点和阶段记录。日志回读对原 XML 的敏感属性名作遮盖，导致 JSON 不完整；改为只输出白名单可见节点，并核对原 XML SHA。原始 ZIP/XML 及独立验真完整保留，不改变任何 Android 判定。[当前审阅 37196286997](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37196286997) 成功完成读取，Android 仍为 FAIL。
+
+代码显示 App start 的 20 秒等待包含同步隔离负载复制、兼容运行时准备和后台启动；这次选择前后的原始帧归档时间及新父任务时间符合准备耗时超过该窗口，但没有 App 请求精确日志，不宣称已证明是哪段永久超时原因。前台提交回执改为已有 Android 提交门禁的 75 秒窗口；该门禁自身、15 秒状态请求、720 秒生成任务、25 秒轴读取、20 秒选择器均不改。测试构建新增 admission/status 数值耗时，以及 entry/stage/runtime/child 分段 uptime，正式构建不输出字体名、路径、任务 ID 或遥测。仍由原有限监督器、原组合核心执行，不自动重提任务。
+
+状态与配置读者过去分别打开同一文件多次，可能跨过原子替换混合不同任务的 ID/来源/进度，也产生重复进程。改为一次打开 inode、shell 内建逐行读取白名单字段，保留首个同名字段、CRLF、JSON 转义、默认轴/字重、任务匹配、原 finalize success 门禁；worker/PID/boot 对账不变。参考 [Linux v6.6 的 pathname/rename 源码](https://github.com/torvalds/linux/blob/v6.6/fs/namei.c)/[GPL-2.0](https://github.com/torvalds/linux/blob/v6.6/COPYING)、[项目 rename(2) 手册](https://man7.org/linux/man-pages/man2/rename.2.html) 关于已打开描述符与原子替换的契约，以及既有 [AndroidX UI Automator 条件完成源码](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java)/[Apache-2.0](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt)。采用这些一致快照/条件完成原则，独立实现，没有复制上游代码。
+
+新增 8 个实际宿主 shell 路由用例覆盖字段/默认/失败/任务身份及读取首字段后真正 mv 替换任务文件。候选 CI 另固定 9487ca4d 的旧源码验证同一控制实际得到跨代字段；新源码必须保持完整旧快照。它们只覆盖路由，不能冒充 Android 挂载或 UI。独立候选核验增加当前 mix_router 源码为第 12 项。代码、测试与本轮新候选结果尚待 CI，17 冻结文件及冻结旧引擎继续强制要求，未用旧数字回填。

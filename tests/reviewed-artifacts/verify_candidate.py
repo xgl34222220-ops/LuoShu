@@ -31,7 +31,7 @@ with zipfile.ZipFile(path) as archive:
         sources = ['common/mix_task_handoff.sh', 'common/weighted_mix_task.sh',
                    'common/legacy_v14_4/v142_weighted_mix.sh', 'common/font_axis_info.py',
                    'common/font_metadata.py', 'common/task_scope.py', 'common/app_bridge.sh',
-                   'common/util_functions_core.sh', 'common/font_mix.sh', 'common/font_manager.sh', 'common/font_inventory_batch.py']
+                   'common/util_functions_core.sh', 'common/font_mix.sh', 'common/font_manager.sh', 'common/font_inventory_batch.py', 'common/legacy_v14_4/mix_router.sh']
         for name in sources:
             expected = subprocess.check_output(['git', 'show', source + ':' + name], cwd=repo)
             assert module.read(name) == expected, name

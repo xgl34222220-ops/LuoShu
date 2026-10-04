@@ -22,6 +22,14 @@ internal object FontLoadDiagnostics {
         }.take(4).forEach { Log.i("LuoShuAxis", it) }
     }
 
+    fun mixRequest(stage: String, durationMs: Long, result: ShellResult) {
+        if (!BuildConfig.STARTUP_DIAGNOSTICS) return
+        Log.i("LuoShuStartup", "event=mix_request stage=$stage duration_ms=$durationMs code=${result.code} stdout_bytes=${result.stdout.toByteArray(Charsets.UTF_8).size}")
+        result.stderr.lineSequence().filter {
+            it.matches(Regex("mix_stage=(entry|stage_start|stage_ready|runtime_start|runtime_ready|child_start|child_reply|status_snapshot|status_reply) uptime=[0-9]+[.][0-9]+"))
+        }.take(9).forEach { Log.i("LuoShuStartup", it) }
+    }
+
     fun applyRequest(stage: String, durationMs: Long, code: Int) {
         if (!BuildConfig.STARTUP_DIAGNOSTICS) return
         Log.i("LuoShuStartup", "event=font_apply_request stage=$stage elapsed_ms=${SystemClock.elapsedRealtime()} duration_ms=$durationMs code=$code")

@@ -32,6 +32,46 @@ read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+
+# Read one open inode: a concurrent atomic task/config replacement cannot mix
+# the task ID from one generation with sources or progress from another.
+mix_read_snapshot() {
+    _task=''; _state=''; _message=''; _percent=''
+    _cjk=''; _latin=''; _digit=''
+    _cjk_axes=''; _latin_axes=''; _digit_axes=''
+    _cjk_weight=''; _latin_weight=''; _digit_weight=''
+    _mrs_seen='|'
+    _mrs_cr=$(printf '\r')
+    while IFS= read -r _mrs_line || [ -n "$_mrs_line" ]; do
+        case "$_mrs_line" in *=*) ;; *) continue ;; esac
+        _mrs_key=${_mrs_line%%=*}
+        case "$_mrs_key" in
+            task|state|message|percent|cjk|latin|digit|cjkAxes|latinAxes|digitAxes|cjkWeight|latinWeight|digitWeight) ;;
+            *) continue ;;
+        esac
+        case "$_mrs_seen" in *"|$_mrs_key|"*) continue ;; esac
+        _mrs_seen="$_mrs_seen$_mrs_key|"
+        _mrs_value=${_mrs_line#*=}
+        case "$_mrs_value" in
+            *"$_mrs_cr"*) _mrs_value=$(printf '%s' "$_mrs_value" | tr -d '\r') ;;
+        esac
+        case "$_mrs_key" in
+            task) _task=$_mrs_value ;; state) _state=$_mrs_value ;;
+            message) _message=$_mrs_value ;; percent) _percent=$_mrs_value ;;
+            cjk) _cjk=$_mrs_value ;; latin) _latin=$_mrs_value ;; digit) _digit=$_mrs_value ;;
+            cjkAxes) _cjk_axes=$_mrs_value ;; latinAxes) _latin_axes=$_mrs_value ;; digitAxes) _digit_axes=$_mrs_value ;;
+            cjkWeight) _cjk_weight=$_mrs_value ;; latinWeight) _latin_weight=$_mrs_value ;; digitWeight) _digit_weight=$_mrs_value ;;
+        esac
+    done 2>/dev/null < "$1"
+}
+
+# Test-build numeric markers only. Never print paths, font names or task IDs.
+mix_diagnostic() {
+    [ "${LUOSHU_MIX_DIAGNOSTICS:-0}" = 1 ] || return 0
+    IFS=' ' read -r _md_uptime _md_unused < /proc/uptime || return 0
+    printf 'mix_stage=%s uptime=%s\n' "$1" "$_md_uptime" >&2
+}
+
 json_escape_router() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
@@ -44,18 +84,10 @@ json_escape_router() {
 mix_config_json_fast() {
     _source="$REALMOD/config/axes_mix.conf"
     [ -s "$_source" ] || _source="$REALMOD/config/font_mix.conf"
-    _cjk=$(read_value "$_source" cjk)
-    _latin=$(read_value "$_source" latin)
-    _digit=$(read_value "$_source" digit)
-    _cjk_weight=$(read_value "$_source" cjkWeight)
-    _latin_weight=$(read_value "$_source" latinWeight)
-    _digit_weight=$(read_value "$_source" digitWeight)
+    mix_read_snapshot "$_source"
     case "$_cjk_weight" in ''|*[!0-9]*) _cjk_weight=400 ;; esac
     case "$_latin_weight" in ''|*[!0-9]*) _latin_weight=400 ;; esac
     case "$_digit_weight" in ''|*[!0-9]*) _digit_weight=400 ;; esac
-    _cjk_axes=$(read_value "$_source" cjkAxes)
-    _latin_axes=$(read_value "$_source" latinAxes)
-    _digit_axes=$(read_value "$_source" digitAxes)
     [ -n "$_cjk_axes" ] || _cjk_axes="wght=$_cjk_weight"
     [ -n "$_latin_axes" ] || _latin_axes="wght=$_latin_weight"
     [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
@@ -137,14 +169,12 @@ mix_status_json_fast() {
         printf '{"status":"error","message":"暂无字体组合任务"}\n'
         return 0
     }
-    _task=$(read_value "$_task_file" task)
+    mix_read_snapshot "$_task_file"
+    mix_diagnostic status_snapshot
     if [ -n "$_wanted" ] && [ "$_wanted" != "$_task" ]; then
         printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'
         return 0
     fi
-    _state=$(read_value "$_task_file" state)
-    _message=$(read_value "$_task_file" message)
-    _percent=$(read_value "$_task_file" percent)
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
 
     if [ "$_state" = success ]; then
@@ -166,12 +196,10 @@ mix_status_json_fast() {
         fi
     fi
 
-    _cjk=$(read_value "$_task_file" cjk)
-    _latin=$(read_value "$_task_file" latin)
-    _digit=$(read_value "$_task_file" digit)
-    _cjk_axes=$(read_value "$_task_file" cjkAxes); [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
-    _latin_axes=$(read_value "$_task_file" latinAxes); [ -n "$_latin_axes" ] || _latin_axes=wght=400
-    _digit_axes=$(read_value "$_task_file" digitAxes); [ -n "$_digit_axes" ] || _digit_axes=wght=400
+    [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
+    [ -n "$_latin_axes" ] || _latin_axes=wght=400
+    [ -n "$_digit_axes" ] || _digit_axes=wght=400
+    mix_diagnostic status_reply
     printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape_router "$_task")" "$(json_escape_router "$_state")" "$(json_escape_router "$_message")" \
         "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
@@ -538,6 +566,7 @@ mark_mix_mode_if_success() {
 }
 
 _cmd="${1:-config}"
+if [ "$_cmd" = start ]; then mix_diagnostic entry; fi
 if [ "$_cmd" = reconcile ]; then
     # Reconcile task ownership without rebuilding compatibility runtime links.
     mix_reconcile_fast
@@ -558,10 +587,12 @@ if [ "$_cmd" = status ]; then
 fi
 case "$_cmd" in
     start)
+        mix_diagnostic stage_start
         prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'
             exit 1
         }
+        mix_diagnostic stage_ready
         _payload="$MIX_STAGE"
         ;;
     status|config|recover|reconcile)
@@ -572,11 +603,13 @@ case "$_cmd" in
         ;;
 esac
 
+[ "$_cmd" != start ] || mix_diagnostic runtime_start
 setup_runtime "$_payload" || {
     printf '{"status":"error","message":"无法准备 v14.4 复合字体兼容运行时"}\n'
     [ "$_cmd" != start ] || { rm -rf "$MIX_STAGE" 2>/dev/null || true; rm -f "$MIX_STAGE_STATE" 2>/dev/null || true; }
     exit 1
 }
+[ "$_cmd" != start ] || mix_diagnostic runtime_ready
 export LUOSHU_REAL_MODDIR="$REALMOD"
 export LUOSHU_MIX_REQUEST_ID="$(read_value "$MIX_STAGE_STATE" requestId)"
 export LUOSHU_MIX_MANIFEST="$MIX_MANIFEST"
@@ -601,8 +634,10 @@ case "$_cmd" in
         exit "$_rc"
         ;;
     start)
+        mix_diagnostic child_start
         _out="$(sh "$RUNTIME/common/v14_mix.sh" "$@" 2>&1)"
         _rc=$?
+        mix_diagnostic child_reply
         printf '%s\n' "$_out"
         if [ "$_rc" -ne 0 ] || ! printf '%s\n' "$_out" | grep -q '"status":"ok"'; then
             rm -rf "$MIX_STAGE" 2>/dev/null || true

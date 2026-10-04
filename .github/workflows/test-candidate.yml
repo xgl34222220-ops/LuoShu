@@ -79,6 +79,12 @@ jobs:
           fi
           cat "$log"
 
+      - name: Verify the original torn-snapshot control
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin 9487ca4dbce5684c6391dbadd3a12311de9fc10c
+          git show 9487ca4dbce5684c6391dbadd3a12311de9fc10c:common/legacy_v14_4/mix_router.sh > "$RUNNER_TEMP/luoshu-old-mix-router.sh"
+          python3 scripts/mix_snapshot_contract_test.py --old-source "$RUNNER_TEMP/luoshu-old-mix-router.sh"
       - name: Run supplemental candidate gates
         shell: bash
         run: |

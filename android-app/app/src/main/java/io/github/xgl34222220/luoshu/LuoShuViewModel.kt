@@ -488,6 +488,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         viewModelScope.launch {
             try {
                 val command = buildString {
+                    if (BuildConfig.STARTUP_DIAGNOSTICS) append("LUOSHU_MIX_DIAGNOSTICS=1 ")
                     append("sh ${RootShell.quote(bridge)} mix_start ")
                     append(RootShell.quote(cjk)).append(' ')
                     append(RootShell.quote(latin)).append(' ')
@@ -496,7 +497,11 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     append(RootShell.quote(latinAxes)).append(' ')
                     append(RootShell.quote(digitAxes))
                 }
-                val start = RootShell.exec(command, timeoutMs = 20_000L)
+                val admissionStartedAt = System.nanoTime()
+                // Admission includes isolated payload and compatibility-runtime preparation.
+                // Match the existing Android admission gate; generation keeps its own budget.
+                val start = RootShell.exec(command, timeoutMs = 75_000L)
+                FontLoadDiagnostics.mixRequest("admission", (System.nanoTime() - admissionStartedAt) / 1_000_000L, start)
                 if (start.code != 0) error(start.stderr.ifBlank { "无法启动复合字体任务" })
                 val root = firstJson(start.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "无法启动复合字体任务"))
@@ -773,10 +778,13 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             awaitForeground(budget)
             val remainingMs = budget.remainingMs
             if (remainingMs <= 0L) break
+            val pollStartedAt = System.nanoTime()
+            val diagnosticPrefix = if (command == "mix_status" && BuildConfig.STARTUP_DIAGNOSTICS) "LUOSHU_MIX_DIAGNOSTICS=1 " else ""
             val status = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} $command ${RootShell.quote(taskId)}",
+                "${diagnosticPrefix}sh ${RootShell.quote(bridge)} $command ${RootShell.quote(taskId)}",
                 timeoutMs = minOf(15_000L, remainingMs),
             )
+            if (command == "mix_status") FontLoadDiagnostics.mixRequest("status", (System.nanoTime() - pollStartedAt) / 1_000_000L, status)
             if (status.code != 0) {
                 failures += 1
                 if (failures >= 8) error(status.stderr.ifBlank { "连续无法读取任务状态" })
