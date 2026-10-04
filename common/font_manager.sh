@@ -187,7 +187,9 @@ case "${1:-}:${2:-}" in
         if stock_scan_available; then
             _manager_out=$(sh "$CURRENT_MANAGER" "$@")
             _manager_rc=$?
-            printf '%s\n' "$_manager_out" | sed 's/"nativeAvailable":false/"nativeAvailable":true/g'
+            sed 's/"nativeAvailable":false/"nativeAvailable":true/g' <<LUOSHU_MANAGER_OUTPUT
+$_manager_out
+LUOSHU_MANAGER_OUTPUT
             exit "$_manager_rc"
         fi
         ;;

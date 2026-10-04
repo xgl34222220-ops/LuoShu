@@ -281,3 +281,15 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 采用理由：上批 [AndroidX UI Automator 源码](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java)/[Apache-2.0](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt) 的条件等待，以及 [官方文档](https://developer.android.com/training/testing/other-components/ui-automator) 对“稳定层次并不代表后台任务完成”的区分，适用于这个真实失败。脚本先复用已有实际 App 库门禁，要求当前导入夹具的冷/暖实时核查、正确数量、完整数值阶段和请求回收；保持同一已就绪 App 进程进入组合页面，不再重新冷启到占位状态。没有把固定睡眠、CLI 校验或旧缓存当作 UI 就绪，也不增加预算、改产品界面或授予新权限。
 
 独立 verifier 对新增的 2 个轴准备采样按原始日志重算，并与实际阶段 JSON 和轴 App PID 一致；原来 14 个 100/1000/最终采样继续独立要求，不能合并成新的性能样本数。新 [宿主负例证明](AXIS_PREFLIGHT_GUARDS_HOST_20261004.json) 和 [原始输出](evidence/axis-preflight-harness-host-20261004.txt) 标记 HOST_SYNTHETIC_AND_RAW_XML_REPLAY：2 个新增方法后总 128 个 PASS，覆盖这次真实 XML 的旧坐标失效，以及未核实、失败、过期、换 PID、缺少内部阶段的准备请求不得通过。17 冻结文件匹配。第十二轮仍用其固定旧脚本运行；本批将接续同一原分支和验真候选进行完整门禁，Android 结果尚待实际执行。
+
+修正提交 [`6afbb02a`](https://github.com/xgl34222220-ops/LuoShu/commit/6afbb02a38e4cbbf630d451e7496e301b0801486) 的 [第十三轮 Root 37187408273](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37187408273) 已于第十二轮结束后接续进入完整 Android 步骤，仍固定候选 `57aa02ed`。当前任务继续运行，下一批库存输出修正尚不在此固定包中。
+
+## 第十四批：按实际大库存失败修复兼容列表的 stdout 传递
+
+第十二轮于 08:14 UTC 结束 **FAIL**。下载 artifact `11297922610` 并独立核验外层 `6f29a22dbe939f7278a2990e2aacbad164209eae8f8fa6f11714ffd97dc31cf2`，[新失败证明](ROOT_ANDROID_FAILURE_37185796564.json) 记录本次 14 个实际内核重启、5 面真实 CFF2/CLI 组合、9 个实际轴帧、100/1000 库各 6 个当前采样，以及 App 单字体应用/重启/默认恢复完成。12 个性能采样及原始七阶段日志独立一致；尚无最终冷/暖两项，App 完整组合未进入，整体不能填 PASS。
+
+新的 [真实失败命令](evidence/root-inventory-output-37185796564.json) 为 `app_bridge.sh fonts scan`：原 ARM64 worker 成功生成 1000 行，函数耗时 8485.100 ms，snapshot/verify 合计约 1584.144 ms、build 6784.336 ms、write 40.470 ms、output 25.002 ms，尝试计数为 2/1/2。随后 `font_manager.sh` 的兼容 list 路由把全部 JSON 放进外部 printf 的一个参数，报 `Argument list too long`；stdout 为空而后端原退出码仍为 0。它不是扫描失败或缺少权限。前面的 App 有限库存调用走已有直接 worker 路径，不能替这个兼容路由通过。上述只有本次失败命令的阶段观察，不是全门禁成功或跨轮提速结论。
+
+参考第十一批已核对的 [Linux exec 参数定义](https://github.com/torvalds/linux/blob/v6.6/include/uapi/linux/binfmts.h)、[COPYING / GPL-2.0 WITH Linux-syscall-note](https://github.com/torvalds/linux/blob/v6.6/COPYING) 和 [execve 项目手册](https://man7.org/linux/man-pages/man2/execve.2.html)，同样采用 stdin 数据通道，独立实现并不复制上游代码。仅把既有 nativeAvailable 的固定替换器改为 here-document stdin，保留后端内容、该布尔转换和返回码；没有改库存格式/双快照/扫描次数/预算、监督器、界面或核心委托。
+
+[改前真实外部 printf 宿主复现](INVENTORY_OUTPUT_BEFORE_HOST_20261004.json) 绑定 `57aa02ed`，实际 1000 行用例复现空 stdout/E2BIG。[改后 5 个函数传输用例](INVENTORY_OUTPUT_CONTRACT_HOST_20261004.json) PASS：332948 字节、1000 行含中文/引号/shell-looking 字面数据的列表完整，307262 字节后端错误仍退出 7，组件不可用时仍直接委托，空后端失败保留其既有状态。明确仅测试原 list 路由，不能冒充完整扫描/挂载。新 CI 会用同样真实外部 printf 模式重跑。当前库存 23 个于 0.686 秒 PASS，原扫描错误 14 个、扫描锁/等待复用、17 冻结文件重新通过；实际 Android 的 5 个传输用例和完整 App 组合须用新候选另跑，不取消仍在运行的第十三轮。

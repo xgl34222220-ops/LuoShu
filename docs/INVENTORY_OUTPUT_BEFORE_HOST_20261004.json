@@ -1,0 +1,7 @@
+{
+  "environment": "HOST_REAL_EXTERNAL_PRINTF",
+  "source": "57aa02ed950a50d054cb1596021a51df0349d0d8",
+  "result": "EXPECTED_FAILURE_REPRODUCED",
+  "exit": 1,
+  "stderr": "Traceback (most recent call last):\n  File \"/workspace/scratch/cd05cdc27a9a/luoshu/scripts/inventory_output_contract_test.py\", line 56, in <module>\n    args=parser.parse_args();result=run(args.module.resolve(),args.shell)\n                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/workspace/scratch/cd05cdc27a9a/luoshu/scripts/inventory_output_contract_test.py\", line 45, in run\n    raise RuntimeError(f'{name}: code={p.returncode}, bytes={len(p.stdout.encode())}, expected_code={code}, expected_bytes={len(expected.encode())}, stderr={p.stderr!r}')\nRuntimeError: thousand-row-list: code=0, bytes=0, expected_code=0, expected_bytes=332948, stderr='/tmp/luoshu-inventory-output-cyvtinpr/actual-router.sh: 3: /usr/bin/printf: Argument list too long\\n'\n"
+}

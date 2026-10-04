@@ -1,0 +1,1900 @@
+{
+  "result": "FAIL",
+  "blockers": [
+    "execution recorded an error",
+    "legacy composite evidence absent",
+    "malformed actual App composite UI evidence",
+    "fresh final App crash/ANR observation absent or failed",
+    "final cold/warm live request phase timings incomplete or inconsistent",
+    "runner or complete module gate did not pass",
+    "all 16 module/composite/App kernel reboots unproven",
+    "mandatory actual App composite evidence absent or malformed: \"There is no item named 'app-composite/report.json' in the archive\"",
+    "All fourteen fresh cold/warm request timing samples are not proven"
+  ],
+  "artifact_sha256": "6f29a22dbe939f7278a2990e2aacbad164209eae8f8fa6f11714ffd97dc31cf2",
+  "runtime_source": "57aa02ed950a50d054cb1596021a51df0349d0d8",
+  "module_sha256": "3da0ffbdc27b550d9c4468a5157a2f07257e9e3927288d94c5bce37b0cf62004",
+  "apk_sha256": "73ba5a1bf845fa8efa99a4e123490a522fa47b75829728b8e8e2c27a2d1015bf",
+  "verified_module_reboots": 14,
+  "collection_faces": 5,
+  "collection_output_sha256": "b8c9cba7c6c48a27f5d5f7a16234dde55910cf35824ee5247411748d73ba6da9",
+  "generation_runtime": {
+    "result": "PASS",
+    "task": "mix-1791100842-8063",
+    "crashLines": [],
+    "logSha256": "d27bfe0aa5d253bce4d933ccb65c7662a134a3f3640b8cd6b0be6a301fb4db49"
+  },
+  "canonical_mount_proofs": 19,
+  "alias_count": 2,
+  "composite_result": "PASS",
+  "app_apply_result": "PASS",
+  "actual_app_composite": null,
+  "library_timings": [
+    {
+      "result": "PASS",
+      "inventory_count": 100,
+      "samples": [
+        {
+          "pid": "12907",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 3,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 222226,
+          "first_inventory_frame_elapsed_ms": 14504,
+          "library_open_to_inventory_first_ms": 2510,
+          "first_frame_ms": 220240,
+          "first_frame_elapsed_ms": 12518,
+          "library_open_to_verified_ms": 2510,
+          "library_open_to_first_ms": 524,
+          "kind": "app_start",
+          "count": 100,
+          "verified": true,
+          "start_ms": 207722,
+          "frame_ms": 222226,
+          "elapsed_ms": 14504,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 217911,
+              "duration_ms": 5982,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 94.064,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 15.032,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 111.524,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3202.701,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            },
+            {
+              "stage": "scan",
+              "completed_at_ms": 221869,
+              "duration_ms": 3956,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 1.236,
+                  "snapshot_ms": 34.107,
+                  "cache_ms": 0.404,
+                  "build_ms": 61.294,
+                  "verify_ms": 18.943,
+                  "write_ms": 22.396,
+                  "output_ms": 3.164,
+                  "cache_hit": 0,
+                  "snapshot_count": 2,
+                  "build_count": 1,
+                  "write_count": 2,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 144.244,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 1562.144,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 0,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "12907",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 231761,
+          "first_inventory_frame_elapsed_ms": 391,
+          "library_open_to_inventory_first_ms": 391,
+          "first_frame_ms": 231761,
+          "first_frame_elapsed_ms": 391,
+          "library_open_to_verified_ms": 4202,
+          "library_open_to_first_ms": 391,
+          "kind": "library_open",
+          "count": 100,
+          "verified": true,
+          "start_ms": 231370,
+          "frame_ms": 235572,
+          "elapsed_ms": 4202,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 235226,
+              "duration_ms": 3855,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 215.65,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 1.083,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 222.294,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 2422.842,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 0
+        },
+        {
+          "pid": "13948",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 249443,
+          "first_inventory_frame_elapsed_ms": 10763,
+          "library_open_to_inventory_first_ms": 973,
+          "first_frame_ms": 249443,
+          "first_frame_elapsed_ms": 10763,
+          "library_open_to_verified_ms": 4799,
+          "library_open_to_first_ms": 973,
+          "kind": "app_start",
+          "count": 100,
+          "verified": true,
+          "start_ms": 238680,
+          "frame_ms": 253269,
+          "elapsed_ms": 14589,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 248470,
+              "duration_ms": 5826,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 141.529,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.89,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 153.631,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3197.656,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            },
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 253027,
+              "duration_ms": 3903,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 66.443,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.873,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 69.36,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 1875.215,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 1,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "13948",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 262638,
+          "first_inventory_frame_elapsed_ms": 351,
+          "library_open_to_inventory_first_ms": 351,
+          "first_frame_ms": 262638,
+          "first_frame_elapsed_ms": 351,
+          "library_open_to_verified_ms": 3897,
+          "library_open_to_first_ms": 351,
+          "kind": "library_open",
+          "count": 100,
+          "verified": true,
+          "start_ms": 262287,
+          "frame_ms": 266184,
+          "elapsed_ms": 3897,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 265848,
+              "duration_ms": 3556,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 149.244,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.982,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 153.188,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 1777.381,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 1
+        },
+        {
+          "pid": "14614",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 280208,
+          "first_inventory_frame_elapsed_ms": 11110,
+          "library_open_to_inventory_first_ms": 542,
+          "first_frame_ms": 280208,
+          "first_frame_elapsed_ms": 11110,
+          "library_open_to_verified_ms": 3712,
+          "library_open_to_first_ms": 542,
+          "kind": "app_start",
+          "count": 100,
+          "verified": true,
+          "start_ms": 269098,
+          "frame_ms": 283378,
+          "elapsed_ms": 14280,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 278346,
+              "duration_ms": 5610,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 130.409,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.831,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 133.847,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3142.349,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            },
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 283124,
+              "duration_ms": 3868,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 30.548,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.773,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 33.532,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 2248.946,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 2,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "14614",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 292722,
+          "first_inventory_frame_elapsed_ms": 349,
+          "library_open_to_inventory_first_ms": 349,
+          "first_frame_ms": 292722,
+          "first_frame_elapsed_ms": 349,
+          "library_open_to_verified_ms": 4006,
+          "library_open_to_first_ms": 349,
+          "kind": "library_open",
+          "count": 100,
+          "verified": true,
+          "start_ms": 292373,
+          "frame_ms": 296379,
+          "elapsed_ms": 4006,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 296037,
+              "duration_ms": 3661,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 28.557,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 3.864,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 35.614,
+                  "count": 100,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 2061.037,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 2
+        }
+      ],
+      "app_start": {
+        "median_ms": 14504,
+        "p95_ms": 14589,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      },
+      "library_open": {
+        "median_ms": 4006,
+        "p95_ms": 4202,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      }
+    },
+    {
+      "result": "PASS",
+      "inventory_count": 1000,
+      "samples": [
+        {
+          "pid": "15367",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 100,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 316680,
+          "first_inventory_frame_elapsed_ms": 15791,
+          "library_open_to_inventory_first_ms": 5437,
+          "first_frame_ms": 311700,
+          "first_frame_elapsed_ms": 10811,
+          "library_open_to_verified_ms": 5437,
+          "library_open_to_first_ms": 457,
+          "kind": "app_start",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 300889,
+          "frame_ms": 316680,
+          "elapsed_ms": 15791,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 310233,
+              "duration_ms": 5596,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 426.776,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.958,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 439.007,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3119.617,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            },
+            {
+              "stage": "scan",
+              "completed_at_ms": 316200,
+              "duration_ms": 5841,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 7.106,
+                  "snapshot_ms": 272.963,
+                  "cache_ms": 0.603,
+                  "build_ms": 674.36,
+                  "verify_ms": 166.722,
+                  "write_ms": 134.104,
+                  "output_ms": 56.525,
+                  "cache_hit": 0,
+                  "snapshot_count": 2,
+                  "build_count": 1,
+                  "write_count": 2,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 1317.096,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3632.228,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 0,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "15367",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 325998,
+          "first_inventory_frame_elapsed_ms": 357,
+          "library_open_to_inventory_first_ms": 357,
+          "first_frame_ms": 325998,
+          "first_frame_elapsed_ms": 357,
+          "library_open_to_verified_ms": 4938,
+          "library_open_to_first_ms": 357,
+          "kind": "library_open",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 325641,
+          "frame_ms": 330579,
+          "elapsed_ms": 4938,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 330249,
+              "duration_ms": 4604,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 291.585,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 7.039,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 308.032,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 2162.239,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 0
+        },
+        {
+          "pid": "16382",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 346105,
+          "first_inventory_frame_elapsed_ms": 12682,
+          "library_open_to_inventory_first_ms": 509,
+          "first_frame_ms": 346105,
+          "first_frame_elapsed_ms": 12682,
+          "library_open_to_verified_ms": 1724,
+          "library_open_to_first_ms": 509,
+          "kind": "app_start",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 333423,
+          "frame_ms": 347320,
+          "elapsed_ms": 13897,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 343149,
+              "duration_ms": 5880,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 346.41,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 5.183,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 365.457,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3098.354,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            },
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 346963,
+              "duration_ms": 2673,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 190.86,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 1.07,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 197.815,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 1301.803,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 1,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "16382",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 356552,
+          "first_inventory_frame_elapsed_ms": 398,
+          "library_open_to_inventory_first_ms": 398,
+          "first_frame_ms": 356552,
+          "first_frame_elapsed_ms": 398,
+          "library_open_to_verified_ms": 4124,
+          "library_open_to_first_ms": 398,
+          "kind": "library_open",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 356154,
+          "frame_ms": 360278,
+          "elapsed_ms": 4124,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 359922,
+              "duration_ms": 3767,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 308.82,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.942,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 314.356,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 1799.585,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 1
+        },
+        {
+          "pid": "17078",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 373166,
+          "first_inventory_frame_elapsed_ms": 10060,
+          "library_open_to_inventory_first_ms": 694,
+          "first_frame_ms": 373166,
+          "first_frame_elapsed_ms": 10060,
+          "library_open_to_verified_ms": 4751,
+          "library_open_to_first_ms": 694,
+          "kind": "app_start",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 363106,
+          "frame_ms": 377223,
+          "elapsed_ms": 14117,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 371885,
+              "duration_ms": 5024,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 474.913,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 66.579,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 552.306,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 3104.273,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            },
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 376996,
+              "duration_ms": 4521,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 310.13,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.973,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 342.729,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 2397.077,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 2,
+          "note": "Includes real scripted navigation from initial App screen to library"
+        },
+        {
+          "pid": "17078",
+          "target_fatal": false,
+          "anr": false,
+          "first_frame_count": 1000,
+          "first_frame_verified": false,
+          "first_inventory_frame_ms": 386494,
+          "first_inventory_frame_elapsed_ms": 366,
+          "library_open_to_inventory_first_ms": 366,
+          "first_frame_ms": 386494,
+          "first_frame_elapsed_ms": 366,
+          "library_open_to_verified_ms": 4252,
+          "library_open_to_first_ms": 366,
+          "kind": "library_open",
+          "count": 1000,
+          "verified": true,
+          "start_ms": 386128,
+          "frame_ms": 390380,
+          "elapsed_ms": 4252,
+          "request_timings": [
+            {
+              "stage": "fingerprint",
+              "completed_at_ms": 390045,
+              "duration_ms": 3916,
+              "code": 0,
+              "phases": {
+                "inventory_detail": {
+                  "storage_ms": 0.0,
+                  "snapshot_ms": 418.246,
+                  "cache_ms": 0.0,
+                  "build_ms": 0.0,
+                  "verify_ms": 0.0,
+                  "write_ms": 0.0,
+                  "output_ms": 0.854,
+                  "cache_hit": 0,
+                  "snapshot_count": 1,
+                  "build_count": 0,
+                  "write_count": 0,
+                  "code": 0
+                },
+                "inventory": {
+                  "duration_ms": 424.706,
+                  "count": 1000,
+                  "code": 0
+                },
+                "scope": {
+                  "duration_ms": 2171.793,
+                  "code": 0,
+                  "cleaned": true,
+                  "reason": "success"
+                }
+              }
+            }
+          ],
+          "repetition": 2
+        }
+      ],
+      "app_start": {
+        "median_ms": 14117,
+        "p95_ms": 15791,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      },
+      "library_open": {
+        "median_ms": 4252,
+        "p95_ms": 4938,
+        "samples": 3,
+        "p95_method": "nearest rank; 3 samples"
+      }
+    }
+  ],
+  "final_workspace": {
+    "result": "PASS",
+    "entries": [],
+    "delayed_recheck_seconds": 1
+  },
+  "root_policy_revoked": true,
+  "runner_result": "FAIL",
+  "baseline_native_commands": [
+    "sed -n s/.*\"message\":\"\\([^\"]*\\)\".*/\\1/p /data/adb/modules/LuoShu/config/switch_task.conf.output.1791100248-4570"
+  ],
+  "unexpected_native_commands": [],
+  "actual_android_mix_handoff": {
+    "schema": "luoshu-mix-handoff-contract-v1",
+    "result": "PASS",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "cases": [
+      {
+        "name": "silent-start",
+        "result": "PASS"
+      },
+      {
+        "name": "conflicting-output",
+        "result": "PASS"
+      },
+      {
+        "name": "truncated-output",
+        "result": "PASS"
+      },
+      {
+        "name": "logged-task-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "queued-task",
+        "result": "PASS"
+      },
+      {
+        "name": "completed-task",
+        "result": "PASS"
+      },
+      {
+        "name": "failed-task",
+        "result": "PASS"
+      },
+      {
+        "name": "stale-task-with-fresh-output",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-cjk",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-latin",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-digit",
+        "result": "PASS"
+      },
+      {
+        "name": "unknown-state",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-state",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-task",
+        "result": "PASS"
+      },
+      {
+        "name": "chinese-native-regex-regression",
+        "result": "PASS"
+      },
+      {
+        "name": "escaped-quote-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-json",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-unicode-escapes",
+        "result": "PASS"
+      },
+      {
+        "name": "task-field-injection",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-message-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-nested-message",
+        "result": "PASS"
+      },
+      {
+        "name": "truncated-json",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-message-type",
+        "result": "PASS"
+      },
+      {
+        "name": "last-valid-log-record",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-long-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-chinese-native-regression",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-escaped-quote-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-control-escape",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-truncated-message",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-invalid-string-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-unsupported-unicode-escape",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-oversized-message",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 32,
+    "elapsed_seconds": 7.207,
+    "boot_id": "6a4e6ed9-4197-4a6b-b64a-d858bcf11daa",
+    "selinux": "Enforcing"
+  },
+  "actual_android_preview_source": {
+    "schema": "luoshu-preview-source-contract-v1",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "result": "PASS",
+    "cases": [
+      {
+        "name": "static-nearest",
+        "result": "PASS"
+      },
+      {
+        "name": "exact-static",
+        "result": "PASS"
+      },
+      {
+        "name": "invalid-weight-default",
+        "result": "PASS"
+      },
+      {
+        "name": "static-tie-order",
+        "result": "PASS"
+      },
+      {
+        "name": "cross-format-tie-order",
+        "result": "PASS"
+      },
+      {
+        "name": "later-variable-wins-over-exact-static",
+        "result": "PASS"
+      },
+      {
+        "name": "first-variable-order",
+        "result": "PASS"
+      },
+      {
+        "name": "uppercase-extension",
+        "result": "PASS"
+      },
+      {
+        "name": "chinese-space-family",
+        "result": "PASS"
+      },
+      {
+        "name": "literal-backslash-family",
+        "result": "PASS"
+      },
+      {
+        "name": "leading-echo-option-family",
+        "result": "PASS"
+      },
+      {
+        "name": "single-pass-suffixes",
+        "result": "PASS"
+      },
+      {
+        "name": "trailing-name-separators",
+        "result": "PASS"
+      },
+      {
+        "name": "matching-directory-rejected",
+        "result": "PASS"
+      },
+      {
+        "name": "different-family-rejected",
+        "result": "PASS"
+      },
+      {
+        "name": "empty-library",
+        "result": "PASS"
+      },
+      {
+        "name": "large-independent-library",
+        "result": "PASS"
+      },
+      {
+        "name": "quiet-and-stdout-parser-agree",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 18,
+    "boot_id": "6a4e6ed9-4197-4a6b-b64a-d858bcf11daa",
+    "selinux": "Enforcing"
+  },
+  "actual_android_composite_error": {
+    "schema": "luoshu-composite-error-contract-v1",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "result": "PASS",
+    "cases": [
+      {
+        "name": "chinese-native-error",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-escaped-error",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-top-level-error",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-lookalike-error",
+        "result": "PASS"
+      },
+      {
+        "name": "plain-text-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "unavailable-helper-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-valid-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "timeout-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "oom-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "signal-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "no-execute-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "runtime-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-runtime-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-abi-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "empty-default-error",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 15,
+    "boot_id": "6a4e6ed9-4197-4a6b-b64a-d858bcf11daa",
+    "selinux": "Enforcing"
+  },
+  "actual_android_stock_error": {
+    "schema": "luoshu-stock-error-contract-v1",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "result": "PASS",
+    "cases": [
+      {
+        "name": "chinese-quotes-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-unicode-escapes",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-top-level-message",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-message-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-only-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "last-valid-log-record",
+        "result": "PASS"
+      },
+      {
+        "name": "control-characters",
+        "result": "PASS"
+      },
+      {
+        "name": "plain-log-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "unavailable-helper-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "empty-default-error",
+        "result": "PASS"
+      },
+      {
+        "name": "nonstring-message-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "success-stays-success",
+        "result": "PASS"
+      },
+      {
+        "name": "zero-exit-without-inventory-fails",
+        "result": "PASS"
+      }
+    ],
+    "tested_scope": "CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN",
+    "case_count": 14,
+    "helper_sha256": "cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f",
+    "boot_id": "6a4e6ed9-4197-4a6b-b64a-d858bcf11daa",
+    "selinux": "Enforcing"
+  },
+  "preview_selection_command_seconds": 23.321990957000025,
+  "actual_cff2_axis_metadata": {
+    "status": "ok",
+    "variable": true,
+    "hasWeight": true,
+    "weight": {
+      "tag": "wght",
+      "name": "Weight",
+      "min": 400.0,
+      "default": 400.0,
+      "max": 900.0,
+      "hidden": false
+    },
+    "axes": [
+      {
+        "tag": "wght",
+        "name": "Weight",
+        "min": 400.0,
+        "default": 400.0,
+        "max": 900.0,
+        "hidden": false
+      }
+    ]
+  },
+  "actual_app_axes": {
+    "result": "PASS",
+    "font_name": "LuoShuAxisGate",
+    "package": "io.github.xgl34222220.luoshu.stabletest",
+    "expected_labels": [
+      "字宽",
+      "纹理细节",
+      "XTRA"
+    ],
+    "hidden_labels": [
+      "内置参数",
+      "HIDN"
+    ],
+    "frames": [
+      {
+        "path": "frame-00.xml",
+        "app_texts": []
+      },
+      {
+        "path": "frame-01.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "洛书",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "正在连接",
+          "检测中…",
+          "当前字体",
+          "系统默认字体",
+          "字里行间，自有风格。",
+          "Aa Bb  ·  0123456789",
+          "",
+          "重新检查",
+          "",
+          "我的字体",
+          "从挑选到组合，让每一处文字更合心意",
+          "",
+          "",
+          "字体库",
+          "导入 · 预览 · 应用",
+          "",
+          "",
+          "字体组合",
+          "中文 · 英文 · 数字",
+          "",
+          "",
+          "",
+          "",
+          "恢复系统字体",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "首页",
+          "",
+          "",
+          "字体库",
+          "",
+          "",
+          "",
+          "组合",
+          "",
+          "",
+          "",
+          "设置",
+          ""
+        ]
+      },
+      {
+        "path": "frame-02.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "字体组合",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "组合你的专属字体",
+          "中文、英文、数字，分别挑选喜欢的样子。",
+          "",
+          "中",
+          "中文基底",
+          "LuoShuAxisGate",
+          "",
+          "Aa",
+          "英文字形",
+          "LuoShuSyntheticGate0000",
+          "",
+          "123",
+          "数字字形",
+          "LuoShuSyntheticGate0001",
+          "",
+          "",
+          "",
+          "中",
+          "中文基底",
+          "完整中文、符号与系统回退基底",
+          "",
+          "可变字体",
+          "",
+          "LuoShuAxisGate",
+          "TTF",
+          "",
+          "",
+          "洛书中文 Aa 0123",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "首页",
+          "",
+          "",
+          "字体库",
+          "",
+          "",
+          "",
+          "组合",
+          "",
+          "",
+          "",
+          "设置",
+          ""
+        ]
+      },
+      {
+        "path": "frame-03.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "FONT SOURCE",
+          "选择中文字体",
+          "3 个",
+          "",
+          "",
+          "",
+          "",
+          "搜索字体",
+          "",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuAxisGate",
+          "TTF · 可变字体",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuSyntheticGate0000",
+          "TTF · 常规",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuSyntheticGate0001",
+          "TTF · 常规",
+          "",
+          "关闭",
+          ""
+        ]
+      },
+      {
+        "path": "frame-04.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "FONT SOURCE",
+          "选择中文字体",
+          "3 个",
+          "",
+          "",
+          "",
+          "",
+          "搜索字体",
+          "",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuAxisGate",
+          "TTF · 可变字体",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuSyntheticGate0000",
+          "TTF · 常规",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuSyntheticGate0001",
+          "TTF · 常规",
+          "",
+          "关闭",
+          ""
+        ]
+      },
+      {
+        "path": "frame-05.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "FONT SOURCE",
+          "选择中文字体",
+          "3 个",
+          "",
+          "",
+          "",
+          "",
+          "搜索字体",
+          "",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuAxisGate",
+          "TTF · 可变字体",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuSyntheticGate0000",
+          "TTF · 常规",
+          "",
+          "",
+          "",
+          "中",
+          "LuoShuSyntheticGate0001",
+          "TTF · 常规",
+          "",
+          "关闭",
+          ""
+        ]
+      },
+      {
+        "path": "frame-06.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "字体组合",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "组合你的专属字体",
+          "中文、英文、数字，分别挑选喜欢的样子。",
+          "",
+          "中",
+          "中文基底",
+          "LuoShuAxisGate",
+          "",
+          "Aa",
+          "英文字形",
+          "LuoShuSyntheticGate0001",
+          "",
+          "123",
+          "数字字形",
+          "LuoShuSyntheticGate0001",
+          "",
+          "",
+          "中",
+          "中文基底",
+          "完整中文、符号与系统回退基底",
+          "",
+          "可变字体",
+          "",
+          "LuoShuAxisGate",
+          "TTF",
+          "",
+          "",
+          "洛书中文 Aa 0123",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "首页",
+          "",
+          "",
+          "字体库",
+          "",
+          "",
+          "",
+          "组合",
+          "",
+          "",
+          "",
+          "设置",
+          ""
+        ]
+      },
+      {
+        "path": "frame-07.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "中",
+          "中文基底",
+          "LuoShuAxisGate",
+          "",
+          "Aa",
+          "英文字形",
+          "LuoShuSyntheticGate0001",
+          "",
+          "123",
+          "数字字形",
+          "LuoShuSyntheticGate0001",
+          "",
+          "",
+          "中",
+          "中文基底",
+          "完整中文、符号与系统回退基底",
+          "",
+          "可变字体",
+          "",
+          "LuoShuAxisGate",
+          "TTF",
+          "",
+          "",
+          "洛书中文 Aa 0123",
+          "",
+          "字宽",
+          "wdth",
+          "",
+          "100",
+          "",
+          "",
+          "75",
+          "默认 100",
+          "125",
+          "",
+          "纹理细节",
+          "XTRA",
+          "",
+          "1.5",
+          "",
+          ""
+        ]
+      },
+      {
+        "path": "frame-08.xml",
+        "app_texts": [
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "中",
+          "中文基底",
+          "完整中文、符号与系统回退基底",
+          "",
+          "可变字体",
+          "",
+          "LuoShuAxisGate",
+          "TTF",
+          "",
+          "",
+          "洛书中文 Aa 0123",
+          "",
+          "字宽",
+          "wdth",
+          "",
+          "100",
+          "",
+          "",
+          "75",
+          "默认 100",
+          "125",
+          "",
+          "纹理细节",
+          "XTRA",
+          "",
+          "1.5",
+          "",
+          "",
+          "0",
+          "默认 1.5",
+          "3",
+          "",
+          "",
+          "Aa",
+          "英文字形",
+          "替换拉丁字母与英文标点轮廓"
+        ]
+      }
+    ],
+    "navigation_stage": "complete-cjk-axis-card",
+    "next_slot_detail_bounds": "[243,1847][431,1916]",
+    "cjk_card_scanned_to_next_slot": true,
+    "hidden_axis_visible": false,
+    "target_fatal": false,
+    "anr": false,
+    "observed_labels": [
+      "",
+      "0",
+      "1.5",
+      "100",
+      "123",
+      "125",
+      "3",
+      "75",
+      "Aa",
+      "LuoShuAxisGate",
+      "LuoShuSyntheticGate0001",
+      "TTF",
+      "XTRA",
+      "wdth",
+      "中",
+      "中文、英文、数字，分别挑选喜欢的样子。",
+      "中文基底",
+      "可变字体",
+      "字体库",
+      "字体组合",
+      "字宽",
+      "完整中文、符号与系统回退基底",
+      "数字字形",
+      "替换拉丁字母与英文标点轮廓",
+      "洛书中文 Aa 0123",
+      "纹理细节",
+      "组合",
+      "组合你的专属字体",
+      "英文字形",
+      "设置",
+      "首页",
+      "默认 1.5",
+      "默认 100"
+    ],
+    "actual_app_pid": "10604",
+    "source_sha256": "4875686dc16a0baac6d266b34cf9ed396cd9f48cd5d4fff4c6e85204aa0fe622",
+    "import_result": {
+      "status": "ok",
+      "data": {
+        "kind": "font",
+        "id": "LuoShuAxisGate",
+        "name": "LuoShuAxisGate",
+        "format": "TTF",
+        "supportsCjk": true,
+        "duplicate": false,
+        "message": "字体已导入"
+      }
+    },
+    "font_id": "LuoShuAxisGate",
+    "imported_sha256": "4875686dc16a0baac6d266b34cf9ed396cd9f48cd5d4fff4c6e85204aa0fe622",
+    "stock_hashes_unchanged": true
+  },
+  "app_axis_screenshot_sha256": "17e0473a13f021fbd88b0f0e53bf46f79193653a19ca3ff44a962c295b4a15fe",
+  "actual_app_axis_frames_verified": 9,
+  "actual_axis_preflight_samples_verified": 0,
+  "raw_target_anr_files": [],
+  "raw_blocking_dialog_files": [],
+  "actual_request_timing_samples_verified": 12,
+  "initial_unrooted_app_smoke": {
+    "result": "PASS",
+    "note": "App launch only; not Root access or usable font-library performance",
+    "am_start_output": "Starting: Intent { cmp=io.github.xgl34222220.luoshu.stabletest/io.github.xgl34222220.luoshu.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity\nTotalTime: 1707\nWaitTime: 1748\nComplete\n"
+  },
+  "final_ui": null,
+  "scope_limits": null,
+  "run_id": 37185796564,
+  "artifact_id": 11297922610,
+  "harness_commit": "e2dd5b16eb53380536dc926b98994760f115ef2b"
+}
