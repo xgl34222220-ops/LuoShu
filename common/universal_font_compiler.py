@@ -432,9 +432,12 @@ def _stock_geometry_font(
     weight: int,
     axes: dict[str, float],
 ) -> tuple[TTFont, dict[str, float]]:
-    original = _open_face(stock, face_index)
+    # Only the probe profile and outline kind are read from this font, so it
+    # is pruned to the probe glyphs before the (otherwise whole-font) instancing.
+    original = _open_face(stock, face_index, lazy=True)
     if "fvar" not in original:
         return original, {}
+    _prune_font(original, PROBE_CODEPOINTS)
     known = {str(axis.axisTag): axis for axis in original["fvar"].axes}
     location: dict[str, float] = {}
     for tag, axis in known.items():
@@ -1221,9 +1224,12 @@ def _validate_output_face(
     *,
     variable_natural: bool = False,
 ) -> dict[str, Any]:
-    raw = _open_face(output, face_index)
+    raw = _open_face(output, face_index, lazy=True)
     instance: TTFont | None = None
     try:
+        if "fvar" in raw:
+            # Profile, names and probe geometry only; see _prune_font.
+            _prune_font(raw, PROBE_CODEPOINTS)
         instance = _instance_for_validation(
             raw,
             _int(artifact.get("requiredWeight"), _int(target.get("targetContract", {}).get("weight"), 400)),
@@ -1364,6 +1370,46 @@ def _compile_source_as_base(
             source_original.close()
 
 
+PRUNE_DROP_TABLES = [
+    "GSUB", "GPOS", "GDEF", "BASE", "JSTF", "MATH", "kern", "morx", "feat",
+    "vhea", "vmtx", "VORG", "VVAR", "DSIG", "meta",
+]
+PROBE_CODEPOINTS = frozenset(
+    point for points in template_engine.PROBE_GROUPS.values() for point in points
+)
+
+
+def _prune_font(font: TTFont, codepoints: Iterable[int]) -> None:
+    """Subset ``font`` in place to ``codepoints`` without touching kept glyphs.
+
+    Used only on fonts read for outlines, advances, cmap and global metrics:
+    layout tables are dropped, every other table (fvar/avar/MVAR/HVAR/OS/2/
+    hhea/head/name ...) is kept, and no bounds or ranges are recomputed.
+    """
+    cmap = font.getBestCmap() or {}
+    options = ft_subset.Options()
+    options.glyph_names = True
+    options.notdef_outline = True
+    options.notdef_glyph = True
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.name_legacy = True
+    options.layout_features = []
+    options.legacy_kern = False
+    options.hinting = True
+    options.passthrough_tables = True
+    options.drop_tables = list(PRUNE_DROP_TABLES)
+    options.recalc_bounds = False
+    options.recalc_timestamp = False
+    options.prune_unicode_ranges = False
+    options.prune_codepage_ranges = False
+    options.recalc_average_width = False
+    options.recalc_max_context = False
+    subsetter = ft_subset.Subsetter(options)
+    subsetter.populate(unicodes=sorted(set(codepoints).intersection(cmap)))
+    subsetter.subset(font)
+
+
 def _subset_variable_source_for_stock(source: TTFont, stock: Path, face_index: int) -> int:
     """Shrink a variable source to the codepoints a stock-shell can use.
 
@@ -1381,39 +1427,13 @@ def _subset_variable_source_for_stock(source: TTFont, stock: Path, face_index: i
         wanted = set(stock_font.getBestCmap() or {})
     finally:
         stock_font.close()
-    for points in template_engine.PROBE_GROUPS.values():
-        wanted.update(points)
+    wanted.update(PROBE_CODEPOINTS)
     wanted.update(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
     source_cmap = source.getBestCmap() or {}
     keep = wanted.intersection(source_cmap)
     if len(keep) * 2 >= len(source_cmap):
         return 0
-    options = ft_subset.Options()
-    options.glyph_names = True
-    options.notdef_outline = True
-    options.notdef_glyph = True
-    options.name_IDs = ["*"]
-    options.name_languages = ["*"]
-    options.name_legacy = True
-    # Only outlines, advances and cmap are read from the source; its layout
-    # tables never reach the stock-shell output and are costly to instance.
-    options.layout_features = []
-    options.legacy_kern = False
-    options.hinting = True
-    options.passthrough_tables = False
-    options.drop_tables = [
-        "GSUB", "GPOS", "GDEF", "BASE", "JSTF", "MATH", "kern", "morx", "feat",
-        "vhea", "vmtx", "VORG", "VVAR", "DSIG", "meta",
-    ]
-    options.recalc_bounds = False
-    options.recalc_timestamp = False
-    options.prune_unicode_ranges = False
-    options.prune_codepage_ranges = False
-    options.recalc_average_width = False
-    options.recalc_max_context = False
-    subsetter = ft_subset.Subsetter(options)
-    subsetter.populate(unicodes=sorted(keep))
-    subsetter.subset(source)
+    _prune_font(source, keep)
     return len(source.getGlyphOrder())
 
 
