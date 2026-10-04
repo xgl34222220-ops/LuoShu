@@ -39,8 +39,9 @@ class BackgroundTreeTest(unittest.TestCase):
                     "LUOSHU_TASK_HELPER": str(ROOT / "common/task_scope.py")}
 
     def spawn(self, command, **kwargs):
-        process = subprocess.Popen(command, start_new_session=True,
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)
+        kwargs.setdefault('stdout', subprocess.DEVNULL)
+        kwargs.setdefault('stderr', subprocess.DEVNULL)
+        process = subprocess.Popen(command, start_new_session=True, **kwargs)
 
         def cleanup():
             try:
@@ -123,11 +124,47 @@ class BackgroundTreeTest(unittest.TestCase):
         module = self.root / "module"
         (module / "common").mkdir(parents=True)
         (module / "config").mkdir()
-        (module / "common/background_task.sh").symlink_to(ROOT / "common/background_task.sh")
+        for name in ('background_task.sh', 'font_switch_input.sh', 'font_switch_input.py',
+                     'font_inventory_batch.py', 'font_coverage_fields.py'):
+            (module / 'common' / name).symlink_to(ROOT / 'common' / name)
+        # Directly exercise the worker's signal handler with the same owned
+        # input workspace that its production supervisor supplies. The input
+        # gate must complete before the nested switch generator starts.
+        token = 'signal-task-scope'
+        workspace = module / 'cache' / 'tasks' / token
+        workspace.mkdir(parents=True)
+        (workspace / '.luoshu-task-owner').write_text(token)
+        public = self.root / 'public'
+        (public / 'fonts').mkdir(parents=True)
+        font = public / 'fonts' / 'custom-font.ttf'
+        font.write_bytes(b'\0\1\0\0' + b'x' * 4096)
+        dispatch = self.root / 'font-manager.sh'
+        dispatch.write_text('#!/bin/sh\n[ "$1" = action ] || exit 2\n'
+                            'case "$2" in\nvalidate)\n'
+                            f'printf "%s\\n" "$LUOSHU_PUBLIC_DIR" > "{self.root / "validated-input"}"\n'
+                            'printf \'%s\\n\' \'{"status":"ok","data":{"valid":true,"cached":false}}\'\n'
+                            ';;\nswitch)\n'
+                            f'printf "%s\\n" "$LUOSHU_PUBLIC_DIR" > "{self.root / "generator-input"}"\n'
+                            f'exec sh "{manager}"\n;;\n*) exit 2;;\nesac\n')
+        worker_log = self.root / 'switch-worker.log'
+        output = worker_log.open('w')
+        self.addCleanup(output.close)
         worker = self.spawn(["sh", str(ROOT / "common/font_switch_task.sh"),
                              "run", "signal-task", "custom-font", "1"],
-                            env={**self.env, "MODDIR": str(module), "LUOSHU_FONT_MANAGER": str(manager)})
+                            env={**self.env, 'MODDIR': str(module), 'LUOSHU_FONT_MANAGER': str(dispatch),
+                                 'LUOSHU_PUBLIC_DIR': str(public), 'LUOSHU_TASK_SCOPE': token,
+                                 'LUOSHU_TASK_WORK_DIR': str(workspace)},
+                            stdout=output, stderr=subprocess.STDOUT)
+        self.wait_for(lambda: (self.root / 'leaf.json').exists() or worker.poll() is not None)
+        task_output = module / 'config' / 'switch_task.conf.output.signal-task'
+        self.assertIsNone(worker.poll(), worker_log.read_text() +
+                          (task_output.read_text() if task_output.exists() else ''))
         leaf, _, proc_id = self.snapshot()
+        private = workspace / 'font-input'
+        self.assertEqual((private / 'fonts' / font.name).read_bytes(), font.read_bytes())
+        for name in ('validated-input', 'generator-input'):
+            self.assertEqual((self.root / name).read_text().strip(), str(private))
+        self.assertIn('"event":"core_entry"', task_output.read_text())
         worker.terminate()
         self.assertEqual(worker.wait(timeout=5), 143)
         self.wait_for(lambda: not alive(leaf, proc_id))

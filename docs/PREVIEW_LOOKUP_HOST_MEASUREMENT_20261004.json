@@ -1,0 +1,42 @@
+{
+  "environment": "HOST_ONLY",
+  "before": {
+    "label": "before",
+    "environment": "HOST_ONLY",
+    "independent_files": 1000,
+    "source_hashes": {
+      "common/app_bridge.sh": "cdbc63739fe18801920920777e7c8b16c98170d2247325e602d2af9f3c1cc8fd",
+      "common/util_functions.sh": "662e211163bc5f6540268c2bb1ed0f4ce72b6a9f0a464e8fdae5ca82aa4894c6",
+      "common/util_functions_core.sh": "e0da4f84e9487bf82ddb8144d95e08638684de49367aefa3066958edf8a39e93"
+    },
+    "preview_file": "Selected-Regular.ttf",
+    "samples_ms": [
+      2099.244,
+      2093.295,
+      2106.841
+    ],
+    "median_ms": 2099.244,
+    "basename_external_invocations": 1003,
+    "note": "Selection-only fixtures; no font rendering or Android/native ARM64 performance claim."
+  },
+  "after": {
+    "label": "after",
+    "environment": "HOST_ONLY",
+    "independent_files": 1000,
+    "source_hashes": {
+      "common/app_bridge.sh": "871259b8790d89687895a977e9854d7befbb3f894ec463df7ce7fafd0d80b2f2",
+      "common/util_functions.sh": "662e211163bc5f6540268c2bb1ed0f4ce72b6a9f0a464e8fdae5ca82aa4894c6",
+      "common/util_functions_core.sh": "1828e763e887435f9ba2b0c42806f8d77f8c8073ecf500f34b9ec39d4a96aeb1"
+    },
+    "preview_file": "Selected-Regular.ttf",
+    "samples_ms": [
+      53.136,
+      55.939,
+      53.272
+    ],
+    "median_ms": 53.272,
+    "basename_external_invocations": 2,
+    "note": "Selection-only fixtures; no font rendering or Android/native ARM64 performance claim."
+  },
+  "scope": "Three selection-only host timings and exact external basename call count. No native ARM64/Android speedup or explanation of earlier fingerprint timeout is established."
+}

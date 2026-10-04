@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from composite_gate import composite_blockers, fields, last_json, run
+from composite_gate import COLLECTION_TARGET, collection_blockers, composite_blockers, fields, last_json, run, runtime_log_evidence
 from commit_lock_device import fd_observation
 
 
@@ -24,9 +24,20 @@ def valid_composite():
         task=dict(status='ok', data=dict(sources, task='axes-1', state='success')),
         axes_task=dict(sources, task='axes-1', childTask='mix-1', state='success'),
         engine_task=dict(task='mix-1', state='success'),
+        generation_runtime=dict(result='PASS', task='mix-1', crashLines=[], logSha256='a' * 64),
         background_finalize=dict(requestId='mix-request-123', state='success'),
         generation_manifest=generation, next_state=dict(generation, state='prepared', font='mix'),
-        next_payload_hashes={'/next/font.otf': 'e' * 64},
+        next_payload_hashes={'/next/font.otf': 'e' * 64,
+            '/module/.luoshu-payload-next' + COLLECTION_TARGET: 'd' * 64},
+        collection_output_path='/module/.luoshu-payload-next' + COLLECTION_TARGET,
+        collection_stock_sha256='f' * 64,
+        collection_build=dict(schema='composite-collection-build-v1', result='PASS',
+            requestId=generation['requestId'], target=COLLECTION_TARGET, sourceSha256='e' * 64,
+            stockSha256='f' * 64, outputSha256='d' * 64, stockFaces=2,
+            faces=[dict(index=0, mode='compiled'), dict(index=1, mode='retained-specialized')]),
+        collection_finalization=dict(schema='composite-collection-contract-v1', result='PASS',
+            requestId=generation['requestId'], collections=[dict(path=COLLECTION_TARGET.lstrip('/'),
+            faces=2, stockFaces=2, generatedContractVerified=True)]),
         background_monitor_committed=True, live_unchanged_before_reboot=True,
         concurrent_finalize=[dict(exit=0, response=dict(status='ok')) for _ in range(3)],
         concurrent_finalize_unchanged=True, stage_cleared=True, worker_sidecars_cleared=True, worker_sidecars=[], stage_cleared_after_replay=True,
@@ -50,6 +61,29 @@ class CompositeVerdictTests(unittest.TestCase):
         report['background_finalize']['state'] = 'failed'
         report['task']['data']['state'] = 'running'
         self.assertTrue(composite_blockers(report))
+
+    def test_successful_engine_does_not_hide_native_crashes_in_this_task(self):
+        log = '[time] mix start: cjk=a latin=b digit=b task=mix-1\nSegmentation fault \n'
+        evidence = runtime_log_evidence(log, 'mix-1')
+        self.assertEqual('FAIL', evidence['result'])
+        report = valid_composite(); report['generation_runtime'] = evidence
+        self.assertTrue(composite_blockers(report))
+        with self.subTest('missing complete task log'):
+            self.assertEqual('FAIL', runtime_log_evidence('commit succeeded', 'mix-1')['result'])
+        log = ('[time] mix start: cjk=a task=prior\nSegmentation fault \n'
+               '[time] mix start: cjk=a task=mix-1\nactual generation completed\n')
+        self.assertEqual('PASS', runtime_log_evidence(log, 'mix-1')['result'])
+
+    def test_stale_collection_or_structural_only_proof_cannot_pass(self):
+        for key in ('requestId', 'sourceSha256', 'stockSha256', 'outputSha256', 'target', 'stockFaces'):
+            report = valid_composite(); report['collection_build'][key] = 'stale'
+            self.assertTrue(collection_blockers(report), key)
+        for value in (False, None):
+            report = valid_composite()
+            report['collection_finalization']['collections'][0]['generatedContractVerified'] = value
+            self.assertTrue(collection_blockers(report))
+        report = valid_composite(); report['collection_build']['faces'][1]['index'] = 0
+        self.assertTrue(collection_blockers(report))
 
     def test_stale_task_request_digest_or_sources_block(self):
         for where, key in (('axes_task','task'), ('axes_task','childTask'),
@@ -166,6 +200,7 @@ class CompositeVerdictTests(unittest.TestCase):
                     if command.startswith('tail -n 240 '):
                         marker_reads += 1
                         return ('monitor finishing' if marker_reads == 1 else
+                                '[time] mix start: cjk=a latin=b digit=b task=mix-1\n'
                                 'legacy-v14 composite task committed for next boot: mix-1')
                     if 'font_mix_controller.sh status' in command:
                         return json.dumps(expected['task'])
@@ -174,7 +209,11 @@ class CompositeVerdictTests(unittest.TestCase):
                     if command == 'cat /module/.luoshu-payload-next/.luoshu-mix-generation.conf':
                         return conf(expected['generation_manifest'])
                     if command.startswith('find /module/.luoshu-payload-next '):
-                        return 'e' * 64 + '  /next/font.otf'
+                        return '\n'.join(digest + '  ' + path for path, digest in expected['next_payload_hashes'].items())
+                    if command == 'cat /module/.luoshu-payload-next' + COLLECTION_TARGET + '.luoshu-collection.json':
+                        return json.dumps(expected['collection_build'])
+                    if command == 'cat /module/config/composite-font-contract.json':
+                        return json.dumps(expected['collection_finalization'])
                     if command.startswith('test ! -e /module/.luoshu-mix-stage'):
                         if leftover_stage:
                             raise RuntimeError('background monitor left stage or state')
@@ -197,9 +236,9 @@ class CompositeVerdictTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as output, patch('composite_gate.time.sleep'):
                     def invoke():
                         run(report, '/module', root, lambda *a: None,
-                            lambda: expected['reboot'], lambda: {'font':'stock'},
+                            lambda: expected['reboot'], lambda: {COLLECTION_TARGET:'f' * 64},
                             lambda *a: ({}, expected['mounted']), lambda *a: expected['restore'],
-                            {'font':'stock'}, ['synthetic-a','synthetic-b'], output)
+                            {COLLECTION_TARGET:'f' * 64}, ['synthetic-a','synthetic-b'], output)
                     if leftover_stage:
                         with self.assertRaisesRegex(RuntimeError, 'left stage or state'):
                             invoke()

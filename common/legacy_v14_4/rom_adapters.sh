@@ -52,9 +52,47 @@ _font_anchor() {
     echo "$anchor"
 }
 
+_font_collection_count() (
+    # Read only the four-byte big-endian face count. No interpreter startup is
+    # needed for the pre-config guard in the frozen engine's alias helper.
+    set -- $(od -An -t u1 -j 8 -N 4 "$1" 2>/dev/null)
+    [ "$#" -eq 4 ] && [ "$1" -eq 0 ] && [ "$2" -eq 0 ] || return 1
+    _fcc_count=$(($3 * 256 + $4))
+    [ "$_fcc_count" -ge 1 ] && [ "$_fcc_count" -le 256 ] || return 1
+    printf '%s\n' "$_fcc_count"
+)
+
 _font_alias() {
     anchor="$1"
     dest="$2"
+    # A filename cannot turn a single SFNT into a collection. Refuse before
+    # the frozen engine commits its selection/configuration or payload.
+    case "$dest" in
+        *.[tT][tT][cC]|*.[oO][tT][cC])
+            _fac_builder="${LUOSHU_REAL_MODDIR:-${MODDIR:-}}/common/composite_collection_build.sh"
+            if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ -f "$_fac_builder" ]; then
+                sh "$_fac_builder" "$anchor" "/system/fonts/${dest##*/}" "$dest"
+                return $?
+            fi
+            if [ "$(head -c 4 "$anchor" 2>/dev/null)" != ttcf ]; then
+                printf '[MIX] 无法把单字体写入字体集合目标：%s\n' "$dest" >&2
+                return 1
+            fi
+            _fac_count=$(_font_collection_count "$anchor") || return 1
+            # The collection alias emitted by this adapter is in system/fonts;
+            # partition-aware finalization also checks each exact target path.
+            _fac_stock="${LUOSHU_COLLECTION_STOCK_ROOT:-/}/system/fonts/${dest##*/}"
+            if [ -e "$_fac_stock" ] || [ -L "$_fac_stock" ]; then
+                [ "$(head -c 4 "$_fac_stock" 2>/dev/null)" = ttcf ] || return 1
+                _fac_required=$(_font_collection_count "$_fac_stock") || return 1
+                if [ "$_fac_count" -lt "$_fac_required" ]; then
+                    printf '[MIX] 字体集合缺少本机字体面：%s（生成 %s，原目标 %s）\n' \
+                        "$dest" "$_fac_count" "$_fac_required" >&2
+                    return 1
+                fi
+            fi
+            ;;
+    esac
     rm -f "$dest" 2>/dev/null || true
     ln "$anchor" "$dest" 2>/dev/null || cp -f "$anchor" "$dest" 2>/dev/null || return 1
     chmod 644 "$dest" 2>/dev/null || true

@@ -376,7 +376,15 @@ detect_font_family() {
     while true; do
         case "$result" in " ") result="" ;; *[[:space:]]) result="${result%?}" ;; *-) result="${result%-}" ;; *_) result="${result%_}" ;; *) break ;; esac
     done
-    echo "$result"
+    LUOSHU_DETECTED_FONT_FAMILY="$result"
+    [ "${2:-}" = --quiet ] || printf '%s\n' "$result"
+    return 0
+}
+
+# In-process form for inventory-sized loops. Keep the existing single-pass
+# suffix rules above as the only parser; older callers retain stdout behavior.
+detect_font_family_value() {
+    detect_font_family "$1" --quiet
 }
 
 # ============================================================

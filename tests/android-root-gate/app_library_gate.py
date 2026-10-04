@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
 from android_ui_smoke import tab_target, center
 from adb_ui import dump_ui
+from app_anr import target_anr
 
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 EVENT = re.compile(r'event=(\w+) elapsed_ms=(\d+)(?: count=(\d+) verified=(true|false))?')
@@ -94,7 +95,7 @@ def measure(adb, output, count, repetitions=3):
                         raise RuntimeError('Verified frame log exists but actual library UI is not visible')
                     last_anr = run('shell', 'dumpsys', 'activity', 'lastanr')
                     (output / (label + '-last-anr.txt')).write_text(last_anr)
-                    if re.search(r'ANR in ' + re.escape(PACKAGE) + r'(?:[\s:/]|$)', last_anr):
+                    if target_anr(last_anr):
                         raise RuntimeError('Target App ANR recorded during actual library observation')
                     alive = run('shell', 'pidof', PACKAGE).strip()
                     if alive.strip() != pid:

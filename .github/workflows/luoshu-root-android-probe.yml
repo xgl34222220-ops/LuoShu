@@ -2,7 +2,7 @@ name: Root Android ARM64 qualification
 on:
   workflow_dispatch:
   push:
-    branches: [feat/stable-runtime-cleanup-20261002]
+    branches: [feat/stable-runtime-cleanup-20261002, fix/stable-composite-contract-20261003]
     paths:
       - .github/workflows/luoshu-root-android-probe.yml
       - tests/android-root-gate/**
@@ -30,18 +30,18 @@ jobs:
             https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip
           echo "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  $RUNNER_TEMP/LuoShu-v1.1.1.zip" | sha256sum -c -
           python3 -m unittest discover -s tests/android-root-gate -p 'test_*.py'
-      - name: Download exact exploratory candidate artifact
+      - name: Download exact reviewed collection candidate artifact
         uses: actions/download-artifact@v4
         with:
           name: LuoShu-Test-Candidate
-          run-id: 37080258821
+          run-id: 37173590158
           github-token: ${{ github.token }}
           path: candidate-artifact
-      - name: Verify exploratory candidate identity
+      - name: Verify reviewed collection candidate identity
         shell: bash
         run: |
-          echo '3d7e8830cf91a2590195d5c1539b63ab7692b5fab9273db85f653c118c7c9d18  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
-          echo 'Exploratory candidate commit: 9576301d20c03c7ee60b3b18410122d3374375da' | tee root-gate-output/candidate-source.txt
+          echo 'fb40c6e54cd4145346e98322540d6fad28addc6293e1b7291fefe4ad8b9d50cf  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
+          echo 'Collection candidate commit: 32674f9fd41fcbdec4347a40f4f0e816516d2979' | tee root-gate-output/candidate-source.txt
       - name: Fetch authorized official Magisk for this disposable AVD
         shell: bash
         run: |

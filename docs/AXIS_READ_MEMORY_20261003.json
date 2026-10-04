@@ -1,0 +1,20 @@
+{
+  "schema": "luoshu-axis-read-memory-v1",
+  "environment": "HOST_ONLY",
+  "fixture": "original generated SFNT with 64 MiB trailing region",
+  "font_bytes": 67108864,
+  "samples": [
+    {
+      "reader": "before",
+      "exit": 0,
+      "peak_python_bytes": 67114265,
+      "axes": 2
+    },
+    {
+      "reader": "after",
+      "exit": 0,
+      "peak_python_bytes": 16938,
+      "axes": 2
+    }
+  ]
+}

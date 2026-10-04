@@ -1,0 +1,14 @@
+--------- beginning of system
+10-04 04:05:49.518  1158  1204 I ActivityManager: Start proc 7785:io.github.xgl34222220.luoshu.stabletest/u0a209 for next-top-activity {io.github.xgl34222220.luoshu.stabletest/io.github.xgl34222220.luoshu.MainActivity}
+--------- beginning of main
+10-04 04:05:50.115  7785  7785 I LuoShuStartup: event=app_start elapsed_ms=215798
+10-04 04:05:57.121  1158  1204 I ActivityManager: Start proc 7902:com.topjohnwu.magisk/u0a210 for content provider {com.topjohnwu.magisk/com.topjohnwu.magisk.core.Provider}
+10-04 04:06:05.994  7785  7785 I LuoShuStartup: event=font_request stage=cached elapsed_ms=231677 duration_ms=9800 code=0
+10-04 04:06:06.517  7785  7785 I LuoShuStartup: event=font_index_visible elapsed_ms=232200 count=3 verified=false
+10-04 04:06:21.145  7785  7785 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=246828 duration_ms=14621 code=124
+10-04 04:06:27.971  7785  7785 I LuoShuAxis: event=axis_request duration_ms=6304 code=0 stdout_bytes=328
+10-04 04:06:27.972  7785  7785 I LuoShuAxis: axis_stage=source_start uptime=252.20
+10-04 04:06:27.972  7785  7785 I LuoShuAxis: axis_stage=source_ready uptime=252.23
+10-04 04:06:27.972  7785  7785 I LuoShuAxis: axis_stage=metadata_start uptime=252.24
+10-04 04:06:27.972  7785  7785 I LuoShuAxis: axis_stage=metadata_end uptime=253.63
+10-04 04:06:34.670  7785  7785 I LuoShuStartup: event=font_index_visible elapsed_ms=260353 count=3 verified=false

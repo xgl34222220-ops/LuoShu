@@ -1,0 +1,29 @@
+{
+  "scope": "HOST_ARTIFACT_REPLAY; no new Android execution",
+  "candidate6_identity": "PASS",
+  "wrong_source_rejected": true,
+  "wrong_artifact_digest_rejected": true,
+  "root4": {
+    "result": "FAIL",
+    "target_anr_files": [
+      "app-apply/after-cli-diagnostic-lastanr.txt",
+      "app-apply/after-cli-diagnostic-runtime.log",
+      "app-apply/final-failure-lastanr.txt",
+      "app-apply/final-failure-runtime.log"
+    ],
+    "blocking_dialog_files": [
+      "app-apply/after-cli-diagnostic.xml",
+      "app-apply/final-failure.xml",
+      "final-ui/last-ui.xml"
+    ]
+  },
+  "root5": {
+    "result": "FAIL",
+    "target_anr_files": [],
+    "blocking_dialog_files": [
+      "app-apply/after-cli-diagnostic.xml",
+      "app-apply/final-failure.xml",
+      "final-ui/last-ui.xml"
+    ]
+  }
+}

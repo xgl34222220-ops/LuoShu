@@ -15,7 +15,7 @@ internal fun fontStaticWeights(font: FontItem): List<Int> = font.weights
 internal fun fontFixedWeight(font: FontItem): Int = fontStaticWeights(font).firstOrNull() ?: 400
 
 internal fun fontNormalizedWeight(font: FontItem, current: Int): Int =
-    cachedFontDefaultWeight(font.id) ?: when {
+    cachedFontDefaultWeight(font) ?: when {
         font.variable -> 400
         400 in fontStaticWeights(font) -> 400
         fontStaticWeights(font).size >= 2 -> fontStaticWeights(font).minByOrNull { abs(it - 400) } ?: 400
@@ -38,7 +38,7 @@ internal fun fontPreviewWeight(font: FontItem): Int {
 internal fun fontCapabilityLabel(font: FontItem): String {
     val weights = fontStaticWeights(font)
     val capability = when {
-        font.variable -> "可变字重"
+        font.variable -> "可变字体"
         weights.size >= 2 -> "多字重 · ${weights.size} 档"
         else -> "固定 · ${fontWeightName(fontFixedWeight(font))}"
     }
@@ -84,14 +84,14 @@ internal fun fontWeightName(weight: Int): String = when (weight) {
     else -> weight.toString()
 }
 
-internal fun fontAxisDisplayName(tag: String): String = when (tag) {
+internal fun fontAxisDisplayName(tag: String, fontName: String = ""): String = when (tag) {
     "wght" -> "字重"
     "wdth" -> "字宽"
     "opsz" -> "光学尺寸"
     "slnt" -> "倾斜"
     "ital" -> "斜体"
     "GRAD" -> "笔画等级"
-    else -> "设计轴"
+    else -> fontName.ifBlank { "设计轴" }
 }
 
 internal fun fontAxisValueLabel(value: Float): String =

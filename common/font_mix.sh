@@ -322,7 +322,9 @@ set_mix_error() {
 extract_composite_error() {
     _ef="$1"; _rc="$2"; _msg=""
     if [ -s "$_ef" ]; then
-        _msg=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_ef" 2>/dev/null | tail -n1)
+        if type luoshu_task_helper >/dev/null 2>&1; then
+            _msg=$(luoshu_task_helper error-message "$_ef" 2>/dev/null || true)
+        fi
         [ -n "$_msg" ] || _msg=$(tail -n1 "$_ef" 2>/dev/null | tr -d '\r')
     fi
     case "$_rc" in

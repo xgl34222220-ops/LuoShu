@@ -1,0 +1,31 @@
+{
+  "result": "PASS",
+  "run_id": 37173590158,
+  "artifact_id": 11292815996,
+  "artifact_sha256": "647d4944469555f740a50478080078dc3f9a13d4a92cc2b8a3e1196584085cb5",
+  "runtime_source": "32674f9fd41fcbdec4347a40f4f0e816516d2979",
+  "module_sha256": "fb40c6e54cd4145346e98322540d6fad28addc6293e1b7291fefe4ad8b9d50cf",
+  "apk_sha256": "a89a9891c91362ec0249c1f5cdfde99e9202481c30507a59811c8c61cc9529d1",
+  "frozen_files_verified": 17,
+  "source_files_verified": [
+    "common/mix_task_handoff.sh",
+    "common/weighted_mix_task.sh",
+    "common/legacy_v14_4/v142_weighted_mix.sh",
+    "common/font_axis_info.py",
+    "common/font_metadata.py",
+    "common/task_scope.py",
+    "common/app_bridge.sh",
+    "common/util_functions_core.sh",
+    "common/font_mix.sh"
+  ],
+  "provenance": {
+    "sourceCommit": "32674f9fd41fcbdec4347a40f4f0e816516d2979",
+    "package": "io.github.xgl34222220.luoshu.stabletest",
+    "apkSha256": "a89a9891c91362ec0249c1f5cdfde99e9202481c30507a59811c8c61cc9529d1"
+  },
+  "legacy_frozen_engine": {
+    "source_commit": "1a329a1c",
+    "sha256": "f71280c692253f70397edb275c483fad677de337bd3dfcba73bd511dfd4bcbd6",
+    "unchanged": true
+  }
+}

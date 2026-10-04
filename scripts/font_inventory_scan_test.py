@@ -28,6 +28,9 @@ def main() -> int:
     sys.path.insert(0, str(common))
     embedded_fonttools = common / "python/lib/python3.14/site-packages"
     if embedded_fonttools.is_dir():
+        # This test imports the scanner itself as well as starting subprocesses.
+        # PYTHONPATH alone only configures the latter after Python has started.
+        sys.path.insert(0, str(embedded_fonttools))
         previous = os.environ.get("PYTHONPATH", "")
         os.environ["PYTHONPATH"] = str(embedded_fonttools) + (os.pathsep + previous if previous else "")
     script = common / "font_inventory_scan.py"

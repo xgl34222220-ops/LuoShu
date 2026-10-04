@@ -1,0 +1,9 @@
+--------- beginning of main
+10-04 01:18:32.683 10997 10997 I LuoShuStartup: event=library_open elapsed_ms=369304
+10-04 01:18:32.683 10997 10997 I LuoShuStartup: event=font_index_visible elapsed_ms=369304 count=1000 verified=false
+10-04 01:18:33.249 10997 10997 I LuoShuStartup: event=library_frame elapsed_ms=369870 count=1000 verified=false
+10-04 01:18:47.230 10997 10997 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=383852 duration_ms=14546 code=124
+10-04 01:19:02.694 10997 10997 I LuoShuStartup: event=font_index_visible elapsed_ms=399316 count=1000 verified=false
+10-04 01:19:09.854 10997 10997 I LuoShuStartup: event=font_request stage=fingerprint elapsed_ms=406475 duration_ms=7159 code=0
+10-04 01:19:10.009 10997 10997 I LuoShuStartup: event=font_index_verified elapsed_ms=406631 count=1000 verified=true
+10-04 01:19:10.322 10997 10997 I LuoShuStartup: event=library_frame elapsed_ms=406943 count=1000 verified=true

@@ -1,0 +1,39 @@
+{
+  "evidence_kind": "HOST_ONLY_MODULE_ACTION_COMPARISON",
+  "font_files": 1000,
+  "repetitions": 5,
+  "results": [
+    {
+      "action": "refresh",
+      "samples_ms": [
+        53.99,
+        50.368,
+        50.413,
+        59.454,
+        52.754
+      ],
+      "median_ms": 52.754,
+      "inventory_build_calls": 5,
+      "cache_writes": 10,
+      "snapshots_per_request": 2
+    },
+    {
+      "action": "scan",
+      "samples_ms": [
+        34.409,
+        32.576,
+        32.726,
+        31.226,
+        31.567
+      ],
+      "median_ms": 32.576,
+      "inventory_build_calls": 0,
+      "cache_writes": 0,
+      "snapshots_per_request": 2
+    }
+  ],
+  "limits": [
+    "Not Android latency; compares existing forced refresh with existing verified scan after an already-current module cache",
+    "No change to fingerprint identity, request timeout, scope ownership or application validation"
+  ]
+}
