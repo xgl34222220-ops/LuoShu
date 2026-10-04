@@ -1,0 +1,49 @@
+{
+  "schema": "luoshu-inventory-output-contract-v1",
+  "environment": "ANDROID",
+  "tested_scope": "CURRENT_LEGACY_LIST_ROUTER_NOT_FULL_INVENTORY_OR_MOUNTS",
+  "result": "PASS",
+  "cases": [
+    {
+      "name": "small-list",
+      "result": "PASS",
+      "input_bytes": 389,
+      "output_bytes": 389,
+      "code": 0
+    },
+    {
+      "name": "thousand-row-list",
+      "result": "PASS",
+      "input_bytes": 332948,
+      "output_bytes": 332948,
+      "code": 0
+    },
+    {
+      "name": "large-backend-error",
+      "result": "PASS",
+      "input_bytes": 307262,
+      "output_bytes": 307262,
+      "code": 7
+    },
+    {
+      "name": "unavailable-scanner-direct-output",
+      "result": "PASS",
+      "input_bytes": 332948,
+      "output_bytes": 332948,
+      "code": 0
+    },
+    {
+      "name": "empty-backend-failure",
+      "result": "PASS",
+      "input_bytes": 0,
+      "output_bytes": 1,
+      "code": 7
+    }
+  ],
+  "case_count": 5,
+  "router_sha256": "8433e4a402af8b6bb479c9f256bf8f479c7ef99cbb9ee5665ded3faeb7a7a759",
+  "module": "/data/adb/modules/LuoShu",
+  "shell": "/system/bin/sh",
+  "boot_id": "0631a88d-5937-4641-9f39-6f8fa21231a0",
+  "selinux": "Enforcing"
+}
