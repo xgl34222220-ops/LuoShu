@@ -96,8 +96,10 @@ private class PreviewTextView(context: Context) : TextView(context) {
 private val previewMemoryCache = object : LruCache<String, PreviewMemoryEntry>(PREVIEW_MEMORY_MAX_ENTRIES) {}
 private val previewLocks = ConcurrentHashMap<String, Mutex>()
 private val previewExportSemaphore = Semaphore(PREVIEW_EXPORT_CONCURRENCY)
-private val axisInfoCache = ConcurrentHashMap<String, WeightAxisInfo>()
-private val axisInfoLocks = ConcurrentHashMap<String, Mutex>()
+internal val fontAxisRepository = FontAxisRepository()
+
+internal suspend fun resolveFontAxisInfo(font: FontItem): WeightAxisInfo =
+    fontAxisRepository.resolve(font.sourceRevision) { loadWeightAxisInfo(font) }
 
 private fun previewMemoryGet(key: String): PreviewMemoryEntry? = synchronized(previewMemoryCache) {
     previewMemoryCache.get(key)
@@ -110,7 +112,7 @@ private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchroni
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
     val revision = font?.sourceRevision
-    val cached = remember(revision) { revision?.let(axisInfoCache::get) }
+    val cached = remember(revision) { revision?.let(fontAxisRepository::cached) }
     val info by produceState(
         initialValue = cached ?: WeightAxisInfo(loading = font?.variable == true),
         key1 = revision,
@@ -121,22 +123,18 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
             font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
             !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
             cached != null -> cached
-            else -> {
-                val lock = axisInfoLocks.computeIfAbsent(font.sourceRevision) { Mutex() }
-                lock.withLock {
-                    axisInfoCache[font.sourceRevision] ?: loadWeightAxisInfo(font).also { loaded ->
-                        if (loaded.error.isBlank()) axisInfoCache[font.sourceRevision] = loaded
-                    }
-                }
-            }
+            else -> resolveFontAxisInfo(font)
         }
     }
     return info
 }
 
 private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
-    val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
+    val diagnostics = if (BuildConfig.STARTUP_DIAGNOSTICS) "LUOSHU_AXIS_DIAGNOSTICS=1 " else ""
+    val command = "${diagnostics}sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
+    val startedAt = System.nanoTime()
     val result = RootShell.exec(command, timeoutMs = 25_000L)
+    FontLoadDiagnostics.axisRequest((System.nanoTime() - startedAt) / 1_000_000L, result)
     if (result.code != 0) {
         error(result.stderr.ifBlank { bridgeError(result.stdout, "字体轴读取失败") })
     }

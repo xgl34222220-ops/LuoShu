@@ -289,15 +289,27 @@ preview_export() {
         "$(json_escape "$_dest")" "$(json_escape "$(basename "$_src")")" "$(json_escape "$_sha")"
 }
 
+axis_diagnostic() {
+    [ "${LUOSHU_AXIS_DIAGNOSTICS:-0}" = 1 ] || return 0
+    IFS=' ' read -r _axis_uptime _axis_idle < /proc/uptime
+    printf 'axis_stage=%s uptime=%s\n' "$1" "$_axis_uptime" >&2
+}
+
 weight_axis_info() {
     _family="$1"
+    axis_diagnostic source_start
     _src="$(find_preview_source "$_family")"
+    axis_diagnostic source_ready
     [ -f "$_src" ] || { printf '{"status":"error","message":"找不到字体轴来源"}\n'; return 1; }
     [ -f "$AXIS_INFO" ] && [ -x "$PYBIN" ] || { printf '{"status":"error","message":"字体轴分析器不可用"}\n'; return 1; }
     export PYTHONHOME="$PYROOT"
     export PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"
     export LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    axis_diagnostic metadata_start
     "$PYBIN" "$AXIS_INFO" "$_src"
+    _axis_result=$?
+    axis_diagnostic metadata_end
+    return "$_axis_result"
 }
 
 case "${1:-status}" in

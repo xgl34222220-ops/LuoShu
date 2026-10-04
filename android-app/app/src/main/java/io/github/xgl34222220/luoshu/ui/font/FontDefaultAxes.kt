@@ -1,39 +1,19 @@
 package io.github.xgl34222220.luoshu.ui.font
 
 import io.github.xgl34222220.luoshu.FontItem
-import io.github.xgl34222220.luoshu.RootShell
-import org.json.JSONObject
+import io.github.xgl34222220.luoshu.fontAxisRepository
+import io.github.xgl34222220.luoshu.resolveFontAxisInfo
+import io.github.xgl34222220.luoshu.sourceRevision
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
-private val defaultAxisCache = mutableMapOf<String, Map<String, Float>>()
-private val defaultAxisLock = Any()
-
-internal fun cacheFontDefaultAxes(fontId: String, axes: Map<String, Float>) {
-    if (fontId.isBlank()) return
-    val clean = axes.filter { (tag, value) -> tag.length == 4 && value.isFinite() }
-        .ifEmpty { mapOf("wght" to 400f) }
-    synchronized(defaultAxisLock) {
-        defaultAxisCache[fontId] = clean
-    }
-}
-
-internal fun cachedFontDefaultAxes(fontId: String): Map<String, Float>? = synchronized(defaultAxisLock) {
-    defaultAxisCache[fontId]
-}
-
-internal fun cachedFontDefaultWeight(fontId: String): Int? = cachedFontDefaultAxes(fontId)
-    ?.get("wght")
+internal fun cachedFontDefaultWeight(font: FontItem): Int? = fontAxisRepository.cached(font.sourceRevision)
+    ?.axes?.firstOrNull { it.tag == "wght" }?.default
     ?.takeIf { it.isFinite() }
     ?.roundToInt()
     ?.coerceIn(1, 1000)
 
 internal suspend fun resolveAndCacheFontDefaultAxes(font: FontItem): Map<String, Float> {
-    val cached = cachedFontDefaultAxes(font.id)
-    if (cached != null) return cached
-    return resolveFontDefaultAxes(font).also { cacheFontDefaultAxes(font.id, it) }
-}
-
-internal suspend fun resolveFontDefaultAxes(font: FontItem): Map<String, Float> {
     if (!font.variable) {
         val weights = fontStaticWeights(font)
         val weight = when {
@@ -43,27 +23,10 @@ internal suspend fun resolveFontDefaultAxes(font: FontItem): Map<String, Float> 
         }
         return mapOf("wght" to weight.toFloat())
     }
-    val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
-    val result = RootShell.exec(
-        "sh ${RootShell.quote(bridge)} weight_axis ${RootShell.quote(font.id)}",
-        timeoutMs = 20_000L,
-    )
-    if (result.code != 0) return mapOf("wght" to 400f)
-    return runCatching {
-        val line = result.stdout.lineSequence().first { it.trimStart().startsWith("{") }
-        val root = JSONObject(line.trim())
-        if (root.optString("status") != "ok") return@runCatching mapOf("wght" to 400f)
-        val axes = linkedMapOf<String, Float>()
-        val array = root.optJSONArray("axes")
-        if (array != null) {
-            for (index in 0 until array.length()) {
-                val axis = array.optJSONObject(index) ?: continue
-                val tag = axis.optString("tag")
-                val value = axis.optDouble("default", Double.NaN).toFloat()
-                if (tag.length == 4 && value.isFinite()) axes[tag] = value
-            }
-        }
-        if ("wght" !in axes) axes["wght"] = 400f
-        axes.toMap()
-    }.getOrElse { mapOf("wght" to 400f) }
+    // Keep the picker's existing 20 s total budget, including waiting for an
+    // axis control already reading this revision. Never cache an error fallback.
+    val info = withTimeoutOrNull(20_000L) { resolveFontAxisInfo(font) }
+    return if (info != null && !info.loading && info.error.isBlank()) {
+        info.axes.associate { it.tag to it.default }
+    } else mapOf("wght" to 400f)
 }

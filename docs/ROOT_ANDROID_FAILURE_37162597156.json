@@ -1,0 +1,80 @@
+{
+  "result": "BLOCKED",
+  "run_id": 37162597156,
+  "run_url": "https://github.com/xgl34222220-ops/LuoShu/actions/runs/37162597156",
+  "harness_source": "fea48e2a23bf852bc9d4d5da43ae8fd0522d897e",
+  "runtime_source": "17783f2229e8ecb946bbd280a7c6343292e296da",
+  "artifact_id": 11289125987,
+  "artifact_sha256": "95e91cbc1f644641b8d0883ee3c9dd4d26f2ee2b585e232aa50eb3f07289f46f",
+  "error": "Actual App axis metadata could not be read",
+  "blockers": [
+    "execution recorded an error",
+    "actual synthetic file inventory/hashes incomplete",
+    "actual App font-declared axis UI/read-only evidence incomplete or failed",
+    "actual App root not proven",
+    "100/1000 real libraries not both measured",
+    "actual App apply task not proven",
+    "App task/boot/selected font identity binding missing",
+    "ordered snapshot/full validation/core entry evidence missing",
+    "App-applied font exact restoration evidence missing",
+    "actual App apply/reboot/restore mount proof missing",
+    "App-applied font restore did not succeed",
+    "fresh final App crash/ANR observation absent or failed"
+  ],
+  "module_cycles": [
+    {
+      "label": "baseline",
+      "result": "PASS"
+    },
+    {
+      "label": "candidate",
+      "result": "PASS"
+    }
+  ],
+  "module_reboots": 12,
+  "composite_result": "PASS",
+  "actual_android_handoff": {
+    "result": "PASS",
+    "case_count": 32,
+    "elapsed_seconds": 12.618,
+    "boot_id": "6e87a346-146c-4753-baa7-2910f3235700",
+    "selinux": "Enforcing"
+  },
+  "actual_axis_ui": {
+    "result": "FAIL",
+    "navigation_stage": "complete-cjk-axis-card",
+    "error": "Actual App axis metadata could not be read",
+    "frames": 13,
+    "last_frame_sha256": "77ce9d92bd1f51ffe5b0fa6c76586d25866a4b87928bd65901694b1ac871f960",
+    "failure_screenshot_sha256": "56df2e68aa1628d9048f2fd69793d6f7e55edb16de4844129450bef818e1720d",
+    "observed_error": "字体轴读取失败：命令执行超时",
+    "selected_original_variable_fixture": true,
+    "custom_axis_labels": "NOT_PROVEN"
+  },
+  "root_cause": "Not established. Actual App weight_axis request timed out; new diagnostics must distinguish source resolution, Python analysis and root request lifecycle. Separate default-axis and control readers were found in code, but are not yet proven to explain the observed timeout.",
+  "library_timings": "NOT_RUN",
+  "actual_app_apply_restore": "NOT_RUN",
+  "root_policy_revoked": true,
+  "final_workspace": {
+    "result": "PASS",
+    "entries": [],
+    "delayed_recheck_seconds": 1
+  },
+  "scope": "Disposable CI emulator only. Passing completed stages cannot substitute for full gate.",
+  "native_crash_classification": {
+    "tombstone_count": 1,
+    "cmdline": "sed -n s/.*\"message\":\"\\([^\" ]*\\)\".*/\\1/p (full cmdline retained in artifact)",
+    "task_id": "1791071529-7129",
+    "matching_stage": "baseline commit_failure.data.task",
+    "backtrace": [
+      "libc.so mstep",
+      "libc.so mwalk",
+      "libc.so regexec",
+      "toybox sed_line"
+    ],
+    "rule": "Observed tombstone is bound to the official baseline fault-injection task by exact task ID. This does not prove final candidate App/native crash acceptance, which was not reached."
+  },
+  "launcher_reaped": true,
+  "magisk_launcher_reaped": true,
+  "kvm_metadata_unchanged": true
+}

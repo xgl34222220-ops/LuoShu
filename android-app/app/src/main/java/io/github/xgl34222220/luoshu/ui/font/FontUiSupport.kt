@@ -15,7 +15,7 @@ internal fun fontStaticWeights(font: FontItem): List<Int> = font.weights
 internal fun fontFixedWeight(font: FontItem): Int = fontStaticWeights(font).firstOrNull() ?: 400
 
 internal fun fontNormalizedWeight(font: FontItem, current: Int): Int =
-    cachedFontDefaultWeight(font.id) ?: when {
+    cachedFontDefaultWeight(font) ?: when {
         font.variable -> 400
         400 in fontStaticWeights(font) -> 400
         fontStaticWeights(font).size >= 2 -> fontStaticWeights(font).minByOrNull { abs(it - 400) } ?: 400
