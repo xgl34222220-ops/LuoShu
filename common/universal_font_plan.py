@@ -574,6 +574,7 @@ def _select_composite_face(
         target_weight = int(round(float(axes["wght"])))
     target_italic = _target_italic(slot)
     ranked = []
+    compatible: list[dict[str, Any]] = []
     rejected: dict[str, int] = {}
     for face in faces:
         if composite_role not in (face.get("assignedRoles") or []):
@@ -582,6 +583,7 @@ def _select_composite_face(
         if not ok:
             rejected[reason] = rejected.get(reason, 0) + 1
             continue
+        compatible.append(face)
         italic_penalty = 0.0 if (_face_style(face).get("italic") is True) == target_italic else 10000.0
         distance, mode = _weight_distance(face, target_weight)
         ranked.append(((italic_penalty, distance, str(face.get("uid") or ""), _int(face.get("faceIndex"), 0) or 0),
@@ -597,6 +599,9 @@ def _select_composite_face(
         return None, selection
     ranked.sort(key=lambda item: item[0])
     _score, face, weight_mode, reason = ranked[0]
+    selection["candidates"] = [_candidate_ref(item) for item in sorted(
+        compatible, key=lambda item: (str(item.get("uid") or ""), _int(item.get("faceIndex"), 0) or 0)
+    )]
     selection.update(
         candidateCount=len(ranked),
         weightMode=weight_mode,
@@ -606,6 +611,15 @@ def _select_composite_face(
     )
     return face, selection
 
+
+
+def _candidate_ref(face: dict[str, Any]) -> dict[str, Any]:
+    """Minimal per-face reference the compiler uses to pick a weight per node."""
+    full = _source_ref(face)
+    return {key: full[key] for key in (
+        "uid", "fileUid", "sourcePath", "sourceContainer", "format", "faceIndex",
+        "weight", "italic", "variable", "axes",
+    )}
 
 
 def _composite_identity(ref: dict[str, Any]) -> tuple[Any, ...]:
@@ -703,6 +717,7 @@ def _plan_slot(
                 selection = dict(picked_selection, compositeNeeds=needs)
                 break
             composite_sources[composite_role] = _composite_source_ref(picked, spec)
+            composite_sources[composite_role]["candidates"] = picked_selection.pop("candidates")
             if face is None:
                 # Primary source: CJK when the slot shows Han, otherwise Latin
                 # (or the digit source for clock/numeric slots).

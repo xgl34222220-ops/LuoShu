@@ -19,12 +19,15 @@ import font_role_shadow
 import font_source_profile
 import minimal_xml_router
 import universal_font_plan
+import universal_font_compiler as compiler
 import universal_font_compiler_test as fixture
+from fontTools.ttLib import TTFont
 
 ASCII_POINTS = tuple(range(0x20, 0x7F))
 
 
-def make_cjk_font(path: Path, *, family: str, variable: bool = False, y_max: int = 820) -> None:
+def make_cjk_font(path: Path, *, family: str, variable: bool = False, y_max: int = 820,
+                  pentagon: bool = False) -> None:
     """A CJK base with >= MIN_CORE_HAN Han glyphs, the CJK probes and ASCII."""
     han = list(range(0x4E00, 0x4E00 + font_coverage.MIN_CORE_HAN + 64))
     points = sorted(set(han) | set(template_engine.PROBE_GROUPS["cjk"])
@@ -42,6 +45,8 @@ def make_cjk_font(path: Path, *, family: str, variable: bool = False, y_max: int
             pen.moveTo((60, -110))
             pen.lineTo((940, -110))
             pen.lineTo((940, y_max))
+            if pentagon:
+                pen.lineTo((500, y_max))
             pen.lineTo((60, y_max))
             pen.closePath()
         glyphs[name] = pen.glyph()
@@ -73,8 +78,8 @@ def test_profile(temp: Path) -> dict[str, Path]:
     cjk = temp / "UserCJK.ttf"
     latin = temp / "UserLatin.ttf"
     digit = temp / "UserDigit.ttf"
-    make_cjk_font(cjk, family="User CJK", variable=True)
-    fixture.make_font(latin, family="User Latin", variable=True)
+    make_cjk_font(cjk, family="User CJK", variable=True, pentagon=True)
+    fixture.make_font(latin, family="User Latin", variable=True, triangle=True)
     fixture.make_font(digit, family="User Digit", advance=560)
 
     roles = {"cjk": [cjk], "latin": [latin], "digit": [digit]}
@@ -118,6 +123,7 @@ def test_profile(temp: Path) -> dict[str, Path]:
 
 def build_device(temp: Path) -> tuple[dict, dict, dict[str, Path], dict[str, Path]]:
     """Stock slots: Latin UI, CJK fallback, OEM broad UI (Han+Latin), clock."""
+    temp.mkdir(parents=True, exist_ok=True)
     stocks = {
         "/system/fonts/Roboto-Regular.ttf": temp / "Roboto-Regular.ttf",
         "/system/fonts/NotoSansCJK-Regular.ttf": temp / "NotoSansCJK-Regular.ttf",
@@ -127,7 +133,7 @@ def build_device(temp: Path) -> tuple[dict, dict, dict[str, Path], dict[str, Pat
     fixture.make_font(stocks["/system/fonts/Roboto-Regular.ttf"], family="Stock Roboto", variable=True)
     make_cjk_font(stocks["/system/fonts/NotoSansCJK-Regular.ttf"], family="Stock CJK", variable=True)
     make_cjk_font(stocks["/system/fonts/MiSansVF.ttf"], family="Stock MiSans", variable=True)
-    fixture.make_font(stocks["/system/fonts/AndroidClock.ttf"], family="Stock Clock", advance=760)
+    fixture.make_font(stocks["/system/fonts/AndroidClock.ttf"], family="Stock Clock", advance=640)
     weights = (400, 700)
     families = {
         "/system/fonts/Roboto-Regular.ttf": ("sans-serif", {}),
@@ -248,11 +254,82 @@ def test_plan(temp: Path, fonts: dict[str, Path]) -> None:
     assert swapped_ids.isdisjoint(per_target["/system/fonts/Roboto-Regular.ttf"])
 
 
+def test_compile(temp: Path, fonts: dict[str, Path]) -> None:
+    sys.path.insert(0, str(ROOT / "common" / "legacy_v14_4"))
+    import composite_font as legacy_composite
+    assert compiler.COMPOSITE_LATIN_CODEPOINTS == frozenset(legacy_composite.LATIN_CODEPOINTS)
+    assert compiler.COMPOSITE_DIGIT_CODEPOINTS == frozenset(legacy_composite.DIGIT_CODEPOINTS)
+
+    topology, roles, stocks, xml_map = build_device(temp / "device")
+    profile = font_source_profile.build(
+        [], {"cjk": [fonts["cjk"]], "latin": [fonts["latin"]], "digit": [fonts["digit"]]},
+        {"cjk": "auto", "latin": "auto", "digit": "fixed"},
+        {"cjk": "", "latin": "", "digit": "wght=500"},
+    )
+    plan = universal_font_plan.build_plan(topology, roles, profile)
+    route = minimal_xml_router.build_route_plan(plan, xml_map, None, False)
+    manifest = compiler.compile_all(plan, route, stocks, temp / "out", False)
+    reasons = [(a["targetPath"], a["reason"]) for a in manifest["artifacts"] if a["status"] != "ready"]
+    assert manifest["summary"]["blockedCount"] == 0, reasons
+    compiler.validate_manifest(manifest, plan, route)
+    by_target: dict[str, list[dict]] = {}
+    for item in manifest["artifacts"]:
+        by_target.setdefault(item["targetPath"], []).append(item)
+    modes = {path: sorted({a["mode"] for a in items}) for path, items in by_target.items()}
+    assert modes == {
+        "/system/fonts/NotoSansCJK-Regular.ttf": ["source-variable-preserve"],
+        "/system/fonts/Roboto-Regular.ttf": ["composite-shell"],
+        "/system/fonts/MiSansVF.ttf": ["composite-shell"],
+        "/system/fonts/AndroidClock.ttf": ["composite-shell"],
+    }, modes
+
+    def glyph(font: TTFont, char: str):
+        name = font.getBestCmap()[ord(char)]
+        return font["glyf"][name], font["hmtx"].metrics[name][0]
+
+    for item in by_target["/system/fonts/Roboto-Regular.ttf"]:
+        with TTFont(item["output"]) as built:
+            letter, _ = glyph(built, "A")
+            digit, advance = glyph(built, "0")
+            assert len(letter.coordinates) == 3, "Latin must come from the Latin font"
+            assert len(digit.coordinates) == 4 and advance == 560, "digits must come from the digit font"
+            assert set(item["report"]["composite"]) == {"latin", "digit"}
+            assert item["report"]["composite"]["digit"]["selection"] == "fixed"
+
+    for item in by_target["/system/fonts/MiSansVF.ttf"]:
+        with TTFont(item["output"]) as built:
+            han, _ = glyph(built, "\u4e00")
+            letter, _ = glyph(built, "A")
+            digit, advance = glyph(built, "0")
+            assert len(han.coordinates) == 5, "Han must come from the CJK base"
+            assert len(letter.coordinates) == 3 and len(digit.coordinates) == 4 and advance == 560
+            assert item["report"]["composite"]["cjk"]["selection"] == "variable"
+            weight = item["contract"]["requiredWeight"]
+            assert item["report"]["composite"]["cjk"]["location"] == {"wght": float(weight)}
+
+    clock = by_target["/system/fonts/AndroidClock.ttf"][0]
+    with TTFont(clock["output"]) as built, TTFont(stocks["/system/fonts/AndroidClock.ttf"]) as stock:
+        for char in "0123456789":
+            name = built.getBestCmap()[ord(char)]
+            stock_name = stock.getBestCmap()[ord(char)]
+            assert built["hmtx"].metrics[name][0] == stock["hmtx"].metrics[stock_name][0] == 640
+
+    # The composite artifacts pass the same deployment and cutover gate chain.
+    import universal_font_cutover_gate as gate
+    import universal_font_deployment as deployment
+    payload = temp / "payload"
+    deployed = deployment.build_deployment(plan, route, manifest, payload)
+    deployment.validate_deployment(deployed, plan, route, manifest, payload)
+    verdict = gate.evaluate(plan, route, manifest, deployed, payload)
+    assert verdict["eligible"] is True, verdict
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-composite-") as raw:
         temp = Path(raw)
         fonts = test_profile(temp)
         test_plan(temp, fonts)
+        test_compile(temp, fonts)
     print("universal_composite_test: PASS")
     return 0
 

@@ -647,6 +647,9 @@ def _replace_role_glyphs(
     source: TTFont,
     role: str,
     geometry: dict[str, Any],
+    *,
+    only: set[int] | None = None,
+    required_override: set[int] | None = None,
 ) -> dict[str, Any]:
     base_cmap = base.getBestCmap() or {}
     source_cmap = source.getBestCmap() or {}
@@ -666,7 +669,9 @@ def _replace_role_glyphs(
     exact_mismatches = 0
 
     required: set[int]
-    if role in SPECIALIZED_ROLES:
+    if required_override is not None:
+        required = set(required_override)
+    elif role in SPECIALIZED_ROLES:
         required = set(map(ord, "0123456789"))
     elif role == "latin":
         required = set(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
@@ -678,6 +683,8 @@ def _replace_role_glyphs(
             required.update(template_engine.PROBE_GROUPS["cjk"])
 
     for cp in sorted(set(base_cmap).intersection(source_cmap)):
+        if only is not None and cp not in only:
+            continue
         if not _eligible_codepoint(role, cp):
             continue
         base_name = base_cmap[cp]
@@ -1626,6 +1633,196 @@ def _compile_source_variable_preserve(
             source.close()
 
 
+# Composite glyph classes. Must stay identical to the legacy composite engine
+# (legacy_v14_4/composite_font.py) so a composite looks the same on both;
+# scripts/universal_composite_test.py asserts the equality.
+COMPOSITE_DIGIT_CODEPOINTS = frozenset(
+    set(range(0x0030, 0x003A))
+    | set(range(0xFF10, 0xFF1A))
+    | {0x00B2, 0x00B3, 0x00B9}
+    | set(range(0x2070, 0x207A))
+    | set(range(0x2080, 0x208A))
+)
+COMPOSITE_LATIN_CODEPOINTS = frozenset((
+    set(range(0x0020, 0x0030))
+    | set(range(0x003A, 0x007F))
+    | set(range(0x00A0, 0x0250))
+    | set(range(0x0300, 0x0370))
+    | set(range(0x1E00, 0x1F00))
+    | set(range(0x2000, 0x2070))
+    | set(range(0x20A0, 0x20D0))
+    | set(range(0x2100, 0x2150))
+) - COMPOSITE_DIGIT_CODEPOINTS)
+
+
+def _composite_class(codepoint: int) -> str:
+    if codepoint in COMPOSITE_DIGIT_CODEPOINTS:
+        return "digit"
+    if codepoint in COMPOSITE_LATIN_CODEPOINTS:
+        return "latin"
+    # Everything else follows the CJK base, as in the legacy composite.
+    return "cjk"
+
+
+def _composite_required(composite_role: str, base_cmap: dict[int, str]) -> set[int]:
+    if composite_role == "digit":
+        return set(map(ord, "0123456789"))
+    if composite_role == "latin":
+        return set(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
+    return {cp for cp in template_engine.PROBE_GROUPS["cjk"] if cp in base_cmap}
+
+
+def _composite_pick(ref: dict[str, Any], weight: int) -> tuple[dict[str, Any], str]:
+    """Face for one node: the user's fixed instance, or the assigned face whose
+    weight axis reaches the node weight, else the nearest static weight."""
+    if ref.get("compositeMode") == "fixed":
+        return ref, "fixed"
+    italic = ref.get("italic") is True
+    best: tuple[tuple[int, float, str], dict[str, Any], str] | None = None
+    for candidate in ref.get("candidates") or [ref]:
+        if (candidate.get("italic") is True) != italic:
+            continue
+        axis = next((a for a in candidate.get("axes") or []
+                     if isinstance(a, dict) and a.get("tag") == "wght"), None)
+        if candidate.get("variable") is True and axis is not None and \
+                float(axis["min"]) <= weight <= float(axis["max"]):
+            key, how = (0, 0.0, str(candidate.get("uid") or "")), "variable"
+        else:
+            distance = float(abs((_int(candidate.get("weight"), 400) or 400) - weight))
+            key, how = (1, distance, str(candidate.get("uid") or "")), "nearest-static"
+        if best is None or key < best[0]:
+            best = (key, candidate, how)
+    if best is None:
+        raise CompilerError("组合字体没有与目标样式匹配的字体面")
+    return best[1], best[2]
+
+
+def _composite_instance(
+    candidate: dict[str, Any],
+    how: str,
+    ref: dict[str, Any],
+    weight: int,
+    route_axes: dict[str, float],
+    keep: set[int],
+    temp_root: Path,
+) -> tuple[TTFont, dict[str, Any]]:
+    raw = Path(str(candidate.get("sourcePath") or ""))
+    if not raw.is_file():
+        raise CompilerError(f"组合源字体不存在：{raw}")
+    _file_uid_matches(candidate, raw)
+    container = _font_container(raw)
+    materialized = raw
+    if container in {"WOFF", "WOFF2"}:
+        materialized = Path(str(font_web_convert.convert(raw, temp_root / "web")["outputPath"]))
+    font = _open_face(materialized, max(0, _int(candidate.get("faceIndex"), 0)), lazy=True)
+    try:
+        location: dict[str, float] = {}
+        if "fvar" in font:
+            _prune_font(font, keep | PROBE_CODEPOINTS)
+            known = {str(axis.axisTag): axis for axis in font["fvar"].axes}
+            if how == "fixed":
+                requested = {tag: float(value) for tag, value in (ref.get("compositeAxes") or {}).items()
+                             if tag in known}
+                fixed_weight = int(round(requested.get("wght", float(known["wght"].defaultValue)
+                                                       if "wght" in known else weight)))
+                instance, location = _instantiate(font, fixed_weight, requested)
+            else:
+                # wght follows the node; other XML axes (e.g. condensed wdth)
+                # are honoured within the user's font range.
+                requested = {
+                    tag: max(float(known[tag].minValue), min(float(known[tag].maxValue), float(value)))
+                    for tag, value in route_axes.items() if tag in known and tag != "wght"
+                }
+                if "wght" in known:
+                    requested["wght"] = float(weight)
+                instance, location = _instantiate(font, weight, requested)
+            if instance is not font:
+                font.close()
+                font = instance
+        return font, {
+            "uid": str(candidate.get("uid") or ""),
+            "selection": how,
+            "sourceWeight": _int(candidate.get("weight"), 400),
+            "location": location,
+        }
+    except Exception:
+        font.close()
+        raise
+
+
+def _compile_composite_shell(
+    target: dict[str, Any],
+    artifact: dict[str, Any],
+    stock: Path,
+    output: Path,
+    temp_root: Path,
+) -> dict[str, Any]:
+    """Stock shell whose glyph classes come from the user's assigned fonts."""
+    role = str(target.get("role") or "")
+    weight = _int(artifact.get("requiredWeight"), _int(target.get("targetContract", {}).get("weight"), 400))
+    route_axes = _axis_values(artifact.get("requiredAxes"))
+    face_index = max(0, _int(artifact.get("requiredFaceIndex"), 0))
+    sources = target.get("compositeSources") if isinstance(target.get("compositeSources"), dict) else {}
+    stock_geometry, stock_location = _stock_geometry_font(stock, face_index, weight, route_axes)
+    instances: list[TTFont] = []
+    base: TTFont | None = None
+    collection: TTCollection | None = None
+    try:
+        stock_profile = _profile_from_font(stock_geometry)
+        base, collection = _open_stock_container(stock, face_index)
+        base_cmap = base.getBestCmap() or {}
+        classes: dict[str, set[int]] = {}
+        for codepoint in base_cmap:
+            classes.setdefault(_composite_class(codepoint), set()).add(codepoint)
+        reports: dict[str, Any] = {}
+        for composite_role in ("cjk", "latin", "digit"):
+            ref = sources.get(composite_role)
+            wanted = classes.get(composite_role, set())
+            if not isinstance(ref, dict) or not wanted:
+                continue
+            candidate, how = _composite_pick(ref, weight)
+            instance, info = _composite_instance(candidate, how, ref, weight, route_axes, wanted, temp_root)
+            instances.append(instance)
+            geometry = _geometry_plan(target, stock_profile, _profile_from_font(instance), weight)
+            replaced = _replace_role_glyphs(
+                base, instance, role, geometry,
+                only=wanted,
+                required_override=_composite_required(composite_role, base_cmap) & wanted,
+            )
+            reports[composite_role] = dict(info, replaced=replaced, geometry=geometry)
+        if not reports:
+            raise CompilerError("组合目标没有可替换的字形类别")
+        _drop_stale_tables(base)
+        required_ps = str(artifact.get("requiredPostScriptName") or "")
+        if required_ps and required_ps not in template_engine.font_names(base):
+            raise CompilerError(f"原厂目标 face 不包含 required PostScriptName：{required_ps}")
+        if collection is None:
+            _save_font(base, output)
+        else:
+            _save_collection(collection, output)
+        validation = _validate_output_face(output, face_index, target, artifact, stock_profile, route_axes, role)
+        return {
+            "mode": "composite-shell",
+            "stockLocation": stock_location,
+            "composite": reports,
+            "validation": validation,
+        }
+    finally:
+        for instance in instances:
+            try:
+                instance.close()
+            except Exception:
+                pass
+        if collection is not None:
+            try:
+                collection.close()
+            except Exception:
+                pass
+        elif base is not None:
+            base.close()
+        stock_geometry.close()
+
+
 def _choose_mode(
     target: dict[str, Any],
     artifact: dict[str, Any],
@@ -1637,6 +1834,24 @@ def _choose_mode(
     target_variable = contract.get("variable") is True
     is_collection = _magic(stock) == COLLECTION_MAGIC
     fixed_axes = bool(_axis_values(artifact.get("requiredAxes")))
+    composite = target.get("compositeSources")
+    if isinstance(composite, dict) and composite:
+        if artifact.get("variableGroup") is True and role not in SPECIALIZED_ROLES:
+            return "source-variable-preserve"
+        identities = {
+            (str(ref.get("uid") or ""), str(ref.get("compositeMode") or "auto"),
+             json.dumps(ref.get("compositeAxes") or {}, sort_keys=True))
+            for ref in composite.values() if isinstance(ref, dict)
+        }
+        source = target.get("source") if isinstance(target.get("source"), dict) else {}
+        if (
+            len(identities) == 1 and next(iter(identities))[1] == "auto"
+            and source.get("variable") is True and target_variable
+            and deployment_kinds == ["physical-slot"] and not is_collection
+            and role not in SPECIALIZED_ROLES
+        ):
+            return "source-variable-preserve"
+        return "composite-shell"
     if artifact.get("variableGroup") is True and role not in SPECIALIZED_ROLES:
         # Several XML weights share one variable artifact (see the router).
         return "source-variable-preserve"
@@ -1684,13 +1899,12 @@ def _compile_unit(
         if str(target.get("status") or "") == "blocked":
             raise CompilerError("FontPlan 目标已经 blocked")
         for risk in target.get("risks") or []:
-            if (
-                risk == "source-weight-axis-out-of-range"
-                and artifact.get("variableGroup") is True
+            if risk in {"source-weight-axis-out-of-range", "static-weight-fallback"} and (
+                artifact.get("variableGroup") is True or target.get("compositeSources")
             ):
-                # The slot-level risk compares against the stock default
-                # instance weight; a variable group is checked against the
-                # weights its XML nodes actually use.
+                # Slot-level weight risks compare against the stock default
+                # instance; variable groups and composites resolve the source
+                # per XML node weight instead.
                 continue
             if risk in {
                 "static-weight-fallback",
@@ -1711,7 +1925,9 @@ def _compile_unit(
         temp_root = output_dir / ".tmp" / artifact_id.replace(":", "-")
         temp_root.mkdir(parents=True, exist_ok=True)
 
-        if mode == "source-as-base":
+        if mode == "composite-shell":
+            report = _compile_composite_shell(target, artifact, stock, output, temp_root)
+        elif mode == "source-as-base":
             report = _compile_source_as_base(target, artifact, stock, output, temp_root)
         elif mode == "source-variable-preserve":
             report = _compile_source_variable_preserve(target, artifact, stock, output, temp_root)
