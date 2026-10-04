@@ -1,10 +1,10 @@
 {
   "schema": "luoshu-reviewed-root-artifact-v1",
   "review_scope": "CANDIDATE_ONLY",
-  "candidate_run": 37191606515,
-  "runtime_source": "9487ca4dbce5684c6391dbadd3a12311de9fc10c",
+  "candidate_run": 37197455936,
+  "runtime_source": "d12168a88a06193b238821c87d0f4bf844a74b96",
   "candidate_artifact": {
-    "id": 11298744896,
-    "sha256": "bb72661fe7c476b4d56aedd309cf36443ea028d1f3da5b2dbd2d7a733febf8f9"
+    "id": 11302085754,
+    "sha256": "e8e29d6d71b92d6ba983741afcfad00c25bb8835c2ba3af7951ac2af17871e87"
   }
 }
