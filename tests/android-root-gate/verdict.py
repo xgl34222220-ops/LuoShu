@@ -1,5 +1,6 @@
 """Fail-closed structured verdicts. A printed PASS or green job is not evidence."""
 import re
+from inventory_timings import verified_timing
 
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 OLD_CASES = {'success': 0, 'failure': 7, 'timeout': 124, 'cancel': 143}
@@ -261,6 +262,8 @@ def delivery_blockers(report):
                 errors.append(f'{count}: verified App identity/count missing')
             if not isinstance(sample.get('first_inventory_frame_ms'), int) or not isinstance(sample.get('library_open_to_inventory_first_ms'), int) or sample['library_open_to_inventory_first_ms'] < 0:
                 errors.append(f'{count}: target-count first frame absent; empty frames do not count')
+            if not verified_timing(sample.get('request_timings'), sample.get('start_ms', 0), count):
+                errors.append(f'{count}: current live request phase timings incomplete or inconsistent')
     app = report.get('app_apply', {})
     if app.get('result') != 'PASS' or app.get('task', {}).get('data', {}).get('state') != 'success' or app.get('task', {}).get('data', {}).get('font') != app.get('font_id'):
         errors.append('actual App apply task not proven')
@@ -279,6 +282,10 @@ def delivery_blockers(report):
         errors.append('upgrade preservation not proven')
     if report.get('final_ui', {}).get('result') != 'PASS' or report.get('final_ui', {}).get('target_fatal') is not False or report.get('final_ui', {}).get('anr') is not False:
         errors.append('fresh final App crash/ANR observation absent or failed')
+    final_samples = report.get('final_ui', {}).get('observations', {}).get('samples', [])
+    if (len(final_samples) != 2 or {sample.get('kind') for sample in final_samples} != {'app_start', 'library_open'} or
+            any(not verified_timing(sample.get('request_timings'), sample.get('start_ms', 0), 1000) for sample in final_samples)):
+        errors.append('final cold/warm live request phase timings incomplete or inconsistent')
     workspace = report.get('final_workspace', {})
     if workspace.get('result') != 'PASS' or workspace.get('entries') != []:
         errors.append('final owned transient workspace not proven empty')

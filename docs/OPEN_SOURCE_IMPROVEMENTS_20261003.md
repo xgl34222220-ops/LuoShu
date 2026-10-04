@@ -181,3 +181,11 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 [本轮宿主操作比较](INVENTORY_CACHE_REUSE_HOST_20261004.json) 明确标注 `HOST_ONLY`：同一已有效的 1000 字体模块索引，5 次强制 refresh 调用重建 5 次/缓存写回 10 次，5 次 scan 均为 0/0；两者每请求均保留 2 次实时快照。中位数 52.754→32.576 ms 只证明宿主已有两条路径的工作差异，不能算作 Android 冷启动改善，更不能承诺消除第六轮超时。
 
 依据 [Android 官方 ANR 诊断](https://developer.android.com/topic/performance/anrs/diagnose-and-fix-anrs) 对系统/应用工作区分的要求，隔离诊断版现在从既有 stderr 提取库存函数和有限请求总耗时，与 App 外层计时一起保留；最多两个固定阶段，数值/状态有界，绝不记录路径、字体 ID、token、PID 或任意错误消息。新增 3 个 JVM 回归覆盖带私人字段的实际协议、超时/未清理状态以及畸形/过长/非数值/错阶段输入；正式版仍关闭日志。尚无本批新 Android 数据，不把推测当成底层根因。
+
+代码提交 [`cb321a66`](https://github.com/xgl34222220-ops/LuoShu/commit/cb321a6635733d09d726a35b66b7838813d85ce8)。`scope` 数字沿用现有监督器计时，包含 publish/worker/回收，不含其自身导入、参数解析和旧请求恢复；外层与 scope 的差值不能直接归因于单独某一层。库存函数计时也不包含 worker 的 Python 导入。没有新增解释器、修改回收器或把这些诊断当作目录/界面通过的替代品。
+
+新 harness 增加 6 个数值证据负例方法，本轮 111 个宿主测试于 0.766 秒通过，后续最终状态检查重跑于 0.609 秒通过。新门禁要求 100/1000 库和恢复后的最终冷/暖共 14 个采样有当前、完整、成功回收的有限请求及一致计时；独立包复核再对照原始 App 日志。缺失、错阶段、旧采样、未完成、未清理、失败码和不可能的数值均不能充当通过证据。第六轮原始 artifact 用固定 `26261083` 重放仍为 PASS、初次无 Root 也为 PASS，新阶段采样为 0，明确只是历史重放而不是这批新 Android 结果。
+
+[第八批新候选 CI 37177845100](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37177845100) 完整 PASS：App lint/JVM 单测/构建、源码/补充门禁和真实 Android 15 CFF2 夹具均通过。[CI 原始库存日志](evidence/candidate-inventory-37177845100.txt) 记录本批 19 个用例于 0.489 秒通过；该候选 CI 的旧版 harness 前置仍为 105 个，不能写成新 Root harness 的 111 个。未读取到完整 JVM 结果 XML，不编造总单测数。
+
+artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37177845100.json) PASS：外层 ZIP `239cfa8dd4428f557c1ac444234e004587c84f015a73a183f83dc08a34828485`，模块 `50024470b5758bc76282fe970545752ed0564c849e2691ceec3c6acb2a50bb1c`，APK `07d2951dd0d858aa1d43fdcff3e35683e9413395e62f527ee188a9c4ab47a9c8`。确切 Git 源码、内外 APK、9 个运行文件、17 冻结文件及旧冻结引擎一致。新 Root workflow 现在只绑定这个新包；Android 阶段仍待实际执行。

@@ -1,0 +1,26 @@
+2026-10-04T04:47:12.9384662Z test_abnormal_cache_and_config_reads_are_bounded (__main__.InventoryTest.test_abnormal_cache_and_config_reads_are_bounded) ... ok
+2026-10-04T04:47:12.9385918Z test_add_delete_replace_permission_and_empty_invalidation (__main__.InventoryTest.test_add_delete_replace_permission_and_empty_invalidation) ... ok
+2026-10-04T04:47:12.9386949Z test_cache_hit_and_corruption_recovery (__main__.InventoryTest.test_cache_hit_and_corruption_recovery) ... ok
+2026-10-04T04:47:12.9388032Z test_config_is_data_and_metadata_edits_invalidate_fingerprint (__main__.InventoryTest.test_config_is_data_and_metadata_edits_invalidate_fingerprint) ... ok
+2026-10-04T04:47:12.9389219Z test_family_and_weight_match_existing_shell_single_pass (__main__.InventoryTest.test_family_and_weight_match_existing_shell_single_pass) ... ok
+2026-10-04T04:47:12.9390338Z test_formats_size_errors_and_exclusions (__main__.InventoryTest.test_formats_size_errors_and_exclusions) ... ok
+2026-10-04T04:47:12.9391378Z test_fresh_and_reused_scan_bind_same_request_verification (__main__.InventoryTest.test_fresh_and_reused_scan_bind_same_request_verification) ... ok
+2026-10-04T04:47:12.9392659Z test_grouping_variants_and_representative_preserve_order (__main__.InventoryTest.test_grouping_variants_and_representative_preserve_order) ... ok
+2026-10-04T04:47:12.9393824Z test_imported_variable_probe_wins_over_single_file_name (__main__.InventoryTest.test_imported_variable_probe_wins_over_single_file_name) ... ok
+2026-10-04T04:47:12.9395083Z test_invalid_or_duplicate_cached_rows_are_rebuilt_without_a_retry_loop (__main__.InventoryTest.test_invalid_or_duplicate_cached_rows_are_rebuilt_without_a_retry_loop) ... ok
+2026-10-04T04:47:12.9396320Z test_large_library_uses_single_batch_and_returns_all_rows (__main__.InventoryTest.test_large_library_uses_single_batch_and_returns_all_rows) ... ok
+2026-10-04T04:47:12.9397634Z test_matching_thousand_font_index_reuses_rows_but_checks_two_live_snapshots (__main__.InventoryTest.test_matching_thousand_font_index_reuses_rows_but_checks_two_live_snapshots) ... ok
+2026-10-04T04:47:12.9398887Z test_mid_scan_change_preserves_previous_cache_and_key (__main__.InventoryTest.test_mid_scan_change_preserves_previous_cache_and_key) ... ok
+2026-10-04T04:47:12.9400074Z test_permission_loss_during_scan_cannot_publish_verified_cache (__main__.InventoryTest.test_permission_loss_during_scan_cannot_publish_verified_cache) ... ok
+2026-10-04T04:47:12.9401226Z test_preview_real_rows_are_never_valid_or_persisted (__main__.InventoryTest.test_preview_real_rows_are_never_valid_or_persisted) ... ok
+2026-10-04T04:47:12.9402550Z test_reused_index_cannot_bless_a_change_between_live_snapshots (__main__.InventoryTest.test_reused_index_cannot_bless_a_change_between_live_snapshots) ... ok
+2026-10-04T04:47:12.9403797Z test_scanner_revision_invalidates_persisted_semantic_cache (__main__.InventoryTest.test_scanner_revision_invalidates_persisted_semantic_cache) ... ok
+2026-10-04T04:47:12.9405046Z test_shared_metadata_does_not_reclassify_every_multiweight_file (__main__.InventoryTest.test_shared_metadata_does_not_reclassify_every_multiweight_file) ... ok
+2026-10-04T04:47:12.9406245Z test_symlink_lstat_size_and_target_replacement_identity (__main__.InventoryTest.test_symlink_lstat_size_and_target_replacement_identity) ... ok
+2026-10-04T04:47:12.9406800Z 
+2026-10-04T04:47:12.9407049Z ----------------------------------------------------------------------
+2026-10-04T04:47:12.9407451Z Ran 19 tests in 0.489s
+2026-10-04T04:47:12.9407609Z 
+2026-10-04T04:47:12.9407706Z OK
+2026-10-04T04:47:12.9408067Z HOST batch inventory 1000 files: 0.0770s (not Android latency)
+2026-10-04T04:47:12.9409677Z test_alias_creation_failure_does_not_remove_an_existing_destination (__main__.CollectionContractTests.test_alias_creation_failure_does_not_remove_an_existing_destination) ... [MIX] 无法把单字体写入字体集合目标：/tmp/tmphlpcgyqw/.luoshu-mix-stage/system/fonts/existing.ttc

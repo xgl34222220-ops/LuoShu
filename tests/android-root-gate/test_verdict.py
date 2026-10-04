@@ -46,9 +46,13 @@ def valid_delivery():
             'commit_failure': {'data': {'state': 'failed'}, 'injection_hit': 'exact synthetic marker', 'reboot': copy.deepcopy(BOOT), 'crash_buffer': ''}})
     for count in (100,1000):
         samples = [{'kind': kind,'repetition': i,'count':count,'verified':True,'pid':'123','target_fatal':False,'anr':False,
-                    'first_inventory_frame_ms':1000,'library_open_to_inventory_first_ms':100}
+                    'first_inventory_frame_ms':1000,'library_open_to_inventory_first_ms':100,
+                    'start_ms':1,'request_timings':[{'stage':'fingerprint','completed_at_ms':100,'duration_ms':20,'code':0,
+                        'phases':{'inventory':{'duration_ms':2,'count':count,'code':0},
+                                  'scope':{'duration_ms':10,'code':0,'cleaned':True,'reason':'success'}}}]}
                    for kind in ('app_start','library_open') for i in range(3)]
         report['library_timings'].append({'inventory_count':count,'result':'PASS','samples':samples})
+    report['final_ui']['observations']={'samples':copy.deepcopy([s for s in samples if s['repetition']==0])}
     report['app_apply'] = {'result':'PASS','font_id':'synthetic','task':{'data':{'state':'success','font':'synthetic','task':'new-task','bootId':BOOT['before']}},
                           'reboot':copy.deepcopy(BOOT),'restore_reboot':copy.deepcopy(BOOT),
                           'restore_hashes_equal_stock':True,'mounted':{'font':'synthetic','mount_proofs':{'/system/fonts/a.ttf':{}}},'restore':{'data':{'state':'success'}}}
@@ -88,6 +92,14 @@ def valid_delivery():
 
 
 class VerdictTests(unittest.TestCase):
+    def test_inventory_timing_presence_cannot_be_claimed_by_a_boolean(self):
+        r=valid_delivery()
+        r['library_timings'][0]['samples'][0]['request_timings']=True
+        self.assertTrue(any('request phase timings' in e for e in delivery_blockers(r)))
+        r=valid_delivery()
+        del r['final_ui']['observations']
+        self.assertTrue(any('final cold/warm live request' in e for e in delivery_blockers(r)))
+
     def test_app_input_chain_requires_exact_order_and_identity(self):
         for mutation in ('order', 'task', 'boot', 'token', 'digest', 'valid', 'rechecked'):
             report = valid_delivery()

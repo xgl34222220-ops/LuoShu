@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
 from android_ui_smoke import tab_target, center
 from adb_ui import dump_ui
 from app_anr import target_anr
+from inventory_timings import request_timings, verified_timing
 
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 EVENT = re.compile(r'event=(\w+) elapsed_ms=(\d+)(?: count=(\d+) verified=(true|false))?')
@@ -104,12 +105,15 @@ def measure(adb, output, count, repetitions=3):
                     first_event = next((int(ms), int(n or 0), verified == 'true') for event, ms, n, verified in events if event == 'library_frame' and int(ms) >= start)
                     inventory_frames = [int(ms) for event, ms, n, verified in events if event == 'library_frame' and n is not None and int(n) == count and int(ms) >= start]
                     opened = [int(ms) for event, ms, _, _ in events if event == 'library_open' and int(ms) >= start]
+                    requests = request_timings(logs, start)
+                    if not verified_timing(requests, start, count):
+                        raise RuntimeError('Current live inventory request phase timings missing or inconsistent')
                     return {'pid': pid, 'target_fatal': False, 'anr': False, 'first_frame_count': first_event[1], 'first_frame_verified': first_event[2],
                             'first_inventory_frame_ms': min(inventory_frames), 'first_inventory_frame_elapsed_ms': min(inventory_frames) - start,
                             'library_open_to_inventory_first_ms': min(inventory_frames) - opened[-1] if opened else None, 'first_frame_ms': min(frames), 'first_frame_elapsed_ms': min(frames) - start,
                             'library_open_to_verified_ms': frame - opened[-1] if opened else None,
                             'library_open_to_first_ms': min(frames) - opened[-1] if opened else None, 'kind': start_event, 'count': actual, 'verified': True,
-                            'start_ms': start, 'frame_ms': frame, 'elapsed_ms': frame - start}
+                            'start_ms': start, 'frame_ms': frame, 'elapsed_ms': frame - start, 'request_timings': requests}
             time.sleep(.5)
         raise RuntimeError('No real verified library frame for expected inventory ' + str(count))
     for repetition in range(repetitions):

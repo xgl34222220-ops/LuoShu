@@ -33,6 +33,10 @@ mount provenance, native-crash task ownership, actual import/axis XML and cleanu
 It also independently checks preserved rooted-App-stage logs and XML for target
 ANRs and unresolved dialogs, rather than trusting a reported `anr:false`.
 Initial unrooted stock-App checks remain a separately reported scope.
+For harness versions with inventory timings, all fourteen cold/warm samples
+must also match their preserved App logs and include a completed, successfully
+reaped live request with consistent worker/scope/outer numeric spans. Historical
+harness versions do not acquire new measurements when their artifacts are replayed.
 
 Exit 0 means this artifact passed these checks. Exit 1 with a FAIL JSON means
 preserved evidence blocks acceptance. Invalid inputs or a mismatched digest

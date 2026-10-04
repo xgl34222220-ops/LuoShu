@@ -1,5 +1,6 @@
 """Check the downloaded current Root artifact against reviewed source/package."""
 from hashlib import sha256
+import importlib.util
 import json
 from pathlib import Path
 import re
@@ -181,6 +182,25 @@ with zipfile.ZipFile(path) as z:
                   if line.strip().startswith('{')]
         if not parsed or parsed[-1] != axes.get('import_result'):
             errors.append('Native import result differs from actual command stdout')
+    timing_parser = gate_root / 'inventory_timings.py'
+    actual_request_samples = 0
+    if timing_parser.is_file():
+        spec = importlib.util.spec_from_file_location('reviewed_inventory_timings', timing_parser)
+        timing_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(timing_module)
+        groups = [(f"library-{value.get('inventory_count')}", value) for value in m.get('library_timings', [])]
+        groups.append(('final-ui', m.get('final_ui', {}).get('observations', {})))
+        for prefix, timing in groups:
+            for sample in timing.get('samples', []):
+                label = 'cold' if sample.get('kind') == 'app_start' else 'warm'
+                name = f"{prefix}/{label}-{sample.get('repetition')}.log"
+                actual = timing_module.request_timings(read(name), sample.get('start_ms', 0))
+                if actual != sample.get('request_timings') or not timing_module.verified_timing(actual, sample.get('start_ms', 0), sample.get('count')):
+                    errors.append('Reported numeric timings lack consistent raw App log evidence: ' + name)
+                else:
+                    actual_request_samples += 1
+        if actual_request_samples != 14:
+            errors.append('All fourteen fresh cold/warm request timing samples are not proven')
     result = dict(result='FAIL' if errors else 'PASS', blockers=errors,
         artifact_sha256=sha256(raw).hexdigest(), runtime_source=source,
         module_sha256=module_sha, apk_sha256=apk_sha, verified_module_reboots=len(attempts),
@@ -199,6 +219,9 @@ with zipfile.ZipFile(path) as z:
         app_axis_screenshot_sha256=sha256(screenshot).hexdigest(),
         actual_app_axis_frames_verified=len(ui.get('frames', [])),
         raw_target_anr_files=target_anr_files, raw_blocking_dialog_files=blocking_dialog_files,
+        actual_request_timing_samples_verified=actual_request_samples,
+        initial_unrooted_app_smoke=runner.get('stock_app_ui'),
+        final_ui=m.get('final_ui', {}).get('observations'),
         scope_limits=m.get('scope_limits'))
 Path(output).write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
 print(json.dumps({k:v for k,v in result.items() if k != 'library_timings'}, ensure_ascii=False, indent=2))
