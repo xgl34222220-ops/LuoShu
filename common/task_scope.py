@@ -620,6 +620,9 @@ def lock_fd(args):
             return 1
 
 
+ERROR_MESSAGE_READ_LIMIT = 256 * 1024
+
+
 def error_message_from_file(path):
     """Read a bounded manager-output tail without Android libc regex calls.
 
@@ -627,7 +630,7 @@ def error_message_from_file(path):
     Preserve the last valid top-level string message, never a nested lookalike
     or a malformed JSON fragment. The persisted task format is one key per line.
     """
-    limit = 256 * 1024
+    limit = ERROR_MESSAGE_READ_LIMIT
     try:
         if not Path(path).is_file():
             return ''
@@ -643,6 +646,12 @@ def error_message_from_file(path):
         text = raw.decode('utf-8', errors='replace')
     except OSError:
         return ''
+
+    return error_message_from_text(text)
+
+
+def error_message_from_text(text):
+    """Shared top-level JSON decoding for file tails and captured scanner pipes."""
 
     def extract(candidate):
         if not candidate.lstrip().startswith('{'):
@@ -688,6 +697,35 @@ def error_message(args):
     return 0
 
 
+def error_message_stdin(_args):
+    """Read a finite captured-output pipe with the same bounded tail semantics.
+
+    This command is separate from the request owner's open stdin lease. Callers
+    pipe an already completed scanner's captured text; no temporary file or new
+    scope is created, and memory never grows with the entire scanner output.
+    """
+    raw = b''
+    discarded = False
+    try:
+        while True:
+            chunk = sys.stdin.buffer.read(64 * 1024)
+            if not chunk:
+                break
+            raw += chunk
+            if len(raw) > ERROR_MESSAGE_READ_LIMIT:
+                raw = raw[-ERROR_MESSAGE_READ_LIMIT:]
+                discarded = True
+    except OSError:
+        return 1
+    if discarded:
+        raw = raw.partition(b'\n')[2]
+    message = error_message_from_text(raw.decode('utf-8', errors='replace'))
+    if not message:
+        return 1
+    print(message)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest='action', required=True)
@@ -709,6 +747,7 @@ def main():
     mutex.add_argument('fd', type=int); mutex.add_argument('timeout', type=float)
     message = commands.add_parser('error-message')
     message.add_argument('path')
+    commands.add_parser('error-message-stdin')
     args = parser.parse_args()
     if hasattr(args, 'command'):
         if args.command[:1] == ['--']:
@@ -717,7 +756,7 @@ def main():
             parser.error('missing task command')
     return {'launch': launch, 'supervise': supervise, 'stop': stop, 'reconcile': reconcile,
             'submit': submit, 'tree': terminate_tree, 'lock-fd': lock_fd,
-            'error-message': error_message}[args.action](args)
+            'error-message': error_message, 'error-message-stdin': error_message_stdin}[args.action](args)
 
 
 if __name__ == '__main__':

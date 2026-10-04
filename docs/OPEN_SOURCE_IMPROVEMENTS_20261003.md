@@ -189,3 +189,19 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 [第八批新候选 CI 37177845100](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37177845100) 完整 PASS：App lint/JVM 单测/构建、源码/补充门禁和真实 Android 15 CFF2 夹具均通过。[CI 原始库存日志](evidence/candidate-inventory-37177845100.txt) 记录本批 19 个用例于 0.489 秒通过；该候选 CI 的旧版 harness 前置仍为 105 个，不能写成新 Root harness 的 111 个。未读取到完整 JVM 结果 XML，不编造总单测数。
 
 artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37177845100.json) PASS：外层 ZIP `239cfa8dd4428f557c1ac444234e004587c84f015a73a183f83dc08a34828485`，模块 `50024470b5758bc76282fe970545752ed0564c849e2691ceec3c6acb2a50bb1c`，APK `07d2951dd0d858aa1d43fdcff3e35683e9413395e62f527ee188a9c4ab47a9c8`。确切 Git 源码、内外 APK、9 个运行文件、17 冻结文件及旧冻结引擎一致。新 Root workflow 现在只绑定这个新包；Android 阶段仍待实际执行。
+
+验收提交 [`93b4075d`](https://github.com/xgl34222220-ops/LuoShu/commit/93b4075dcb24919579ca2af64ff6f96ad40fee48) 的[第八批完整 Root 37178617912](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37178617912) 已启动；前置、候选身份和一次性 AVD 准备通过，完整 Android 长步骤仍在执行。后续提交不会改变它固定的包或 harness；没有取消或重复启动该任务。
+
+## 第九批：原厂扫描错误消息复用现有有界 JSON 解码
+
+参考 [Font Manager JSON 源码及函数文档](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/lib/json/font-manager-json.c)、[项目文档](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/README.md) 和 [GPL-3.0 许可证](https://github.com/FontManager/font-manager/blob/ff593362d69a893ce59897b0e01952d1f57654d5/COPYING)。其结构化读取不会把转义引号当作字符串终点；洛书这个剩余路由仍用贪婪正则提取最后一行。只借鉴结构化读取原则，复用本项目既有解码器，没有复制 GPL 实现或引入字体资源。
+
+[改前独立宿主复现](STOCK_ERROR_BEFORE_HOST_20261004.json) 绑定 `93b4075d`：实际 `stock_scan_json` 遇到带引号、反斜杠及中文的错误消息时只返回开头片段，退出 1。修复提取完整已捕获的扫描输出，用新的 `error-message-stdin` 入口调用同一解码逻辑。每次读 64 KiB，保留最多 256 KiB 尾部，消息仍上限 4096 字符并清理控制字符；不创建临时文件、任务或新的 stdin 租约。原 `error-message PATH` 含字面文件名 `-` 的调用保持有效，进程身份、发布、发现、回收等实现逐字节未变。成功路径、扫描锁、手动强制扫描、纯文本/缺失组件回退及切换核心路由保持既有行为。
+
+本轮新宿主证据：
+
+- [14 个当前错误函数用例](STOCK_ERROR_CONTRACT_HOST_20261004.json) PASS，包括引号/Unicode、嵌套与非字符串、控制字符、日志尾部、组件不可用、空错误，以及成功和缺失库存两种退出边界。明确是函数契约，不能代替完整原厂扫描或挂载验收。
+- 新增 4 个管道回归后，完整消息/切换错误测试 14 个于 0.604 秒 PASS；实际 CLI 覆盖字面文件名兼容，2 MiB 噪声读取使用固定块且尾部/消息有界。共享解码器的当前组合错误 15 个重新 PASS；原厂扫描序列化/等待复用测试 PASS，17 个冻结文件匹配。
+- 当前宿主真实进程回归仍 FAIL：[原始限制记录](STOCK_ERROR_HOST_PROCESS_LIMIT_20261004.json) 保留 task_scope 20 个中 12 失败/2 错误及有限请求 5 失败。只读比较发现 `os.getpid()` 与 `/proc/self` 指向不同 PID，未改版本和工作版读取到同样错误视图；不能通过降低身份检查或跳过门禁“修复”这一宿主环境。正常新 CI 与隔离 Android 的进程门禁仍必须重新通过。
+
+新源检查把 14 个当前扫描错误函数与完整消息/切换错误测试作为必跑项；本批新 CI 和新 Android 结果尚待执行。第八批 Android 仍按其固定 `cb321a66`/`93b4075d` 跟进，不拿它为这批新 helper 背书。

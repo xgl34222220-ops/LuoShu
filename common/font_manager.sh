@@ -118,7 +118,18 @@ stock_scan_json() {
         printf '%s\n' "$_stock_last"
         return 0
     fi
-    _stock_message=$(printf '%s\n' "$_stock_last" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
+    # Reuse the bounded top-level decoder. The scanner has already completed;
+    # this pipe contains captured output, never the caller's request stdin lease.
+    _stock_message=''
+    if [ -f "$MODDIR/common/task_scope.py" ]; then
+        _stock_message=$(
+            printf '%s\n' "$_stock_out" |
+                PYTHONHOME="$PYROOT" \
+                PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+                LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                    "$PYBIN" "$MODDIR/common/task_scope.py" error-message-stdin 2>/dev/null
+        ) || _stock_message=''
+    fi
     [ -n "$_stock_message" ] || _stock_message="$_stock_out"
     [ -n "$_stock_message" ] || _stock_message='原厂字体扫描失败'
     stock_scan_lock_release
