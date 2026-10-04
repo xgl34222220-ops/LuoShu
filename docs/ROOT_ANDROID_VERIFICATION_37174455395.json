@@ -1189,7 +1189,6 @@
     "AOSP API35 x86_64 with original ARM64 runtime via nativebridge; no native ARM64 or OEM-ROM claim",
     "100/1000 independent filenames contain two original synthetic TTF contents",
     "Baseline App performance and backup restore API not tested or counted as PASS",
-    "Initial unrooted App smoke retained as BLOCKED; final owned Root App acceptance passed",
     "Old focus ANR and axis-timeout underlying causes remain unproven; no failure occurred to exercise Android ANR trace capture",
     "Final cold verified frame took 58385 ms including scripted navigation; fingerprint code 124 and later retry remained"
   ],
@@ -1258,5 +1257,9 @@
       "p95_method": "nearest rank; 1 samples"
     }
   },
-  "anr_capture_invoked": false
+  "anr_capture_invoked": false,
+  "initial_unrooted_app_smoke": {
+    "result": "PASS",
+    "evidence": "runner-lifecycle.json:stock_app_ui"
+  }
 }

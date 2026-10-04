@@ -164,7 +164,7 @@ Root workflow 改绑这个新验真的候选，并增加实际安装模块下的
 - 本轮 32 交接、18 来源选择、15 当前错误函数用例在原 ARM64 Python、Android shell、同一启动身份和 Enforcing 下通过；完整组合、App 单字体应用、重启挂载和系统默认恢复另行通过。
 - 实际原生导入哈希一致，9 个真实轴 UI 帧通过，[最后轴 XML](evidence/root-axis-37174455395.xml) 和[原始日志](evidence/root-axis-37174455395.txt) 保留可见字宽/自定义轴和隐藏轴约束。此次只有 1 份新 tombstone，任务 `1791085467-7282` 对应未改基线的提交失败注入；候选无意外原生崩溃。
 - 恢复重启后实际 App 冷/暖检查通过；原始 Root 阶段日志没有目标 App ANR，XML 没有阻断弹窗。无失败发生，因此 Android 的目标线程栈采集路径未实际触发；旧焦点 ANR 根因仍未证明。
-- 临时 Root 政策撤销、任务空间为空、两个 AVD 已回收、KVM 元数据未变。初次无 Root App 阶段仍单独保留 BLOCKED；不改写为通过。
+- 临时 Root 政策撤销、任务空间为空、两个 AVD 已回收、KVM 元数据未变。本轮初次无 Root App 阶段由 `runner-lifecycle.json:stock_app_ui.result` 实际记录 PASS；此前轮次的 BLOCKED 仅留在其各自历史证明。
 
 1000 文件库暖进入本轮为 6615/6809/6876 ms，首个真实库存帧为 554/500/525 ms。恢复后的最终冷核验为 **58385 ms**（含真实导航），暖核验为 7628 ms：[冷日志](evidence/root-final-cold-37174455395.txt)、[暖日志](evidence/root-final-warm-37174455395.txt)。冷日志有 `fingerprint duration_ms=12583 code=124`，后续重试为 9571 ms、code 0，刷新为 27256 ms、code 0；不能宣称超时均已消失或性能全部修复。下一批优先拆分这一有限请求的耗时并消除能证明的重复工作，保留现有验证、超时和回收门禁。
 
