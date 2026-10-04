@@ -52,7 +52,7 @@ def main() -> int:
 
         def run() -> dict[str, str]:
             env = dict(os.environ, MODDIR=str(moddir), LUOSHU_PYTHON=sys.executable,
-                       PYTHONPATH=str(moddir / "common"), LUOSHU_VERIFY_BOOT_COMPLETED="1",
+                       PYTHONPATH=os.pathsep.join(filter(None, [str(moddir / "common"), os.environ.get("PYTHONPATH", "")])), LUOSHU_VERIFY_BOOT_COMPLETED="1",
                        LUOSHU_VERIFY_SETTLE_SECONDS="0", LUOSHU_VERIFY_STATE_ROOT=str(temp / "state"),
                        LUOSHU_VERIFY_FONT_DUMP=str(dump), LUOSHU_VERIFY_VISIBLE_ROOT=str(visible))
             subprocess.run(["sh", str(moddir / "common/universal_font_runtime_verify.sh"), "run"],

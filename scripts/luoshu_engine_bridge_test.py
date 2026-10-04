@@ -21,7 +21,7 @@ import luoshu_payload as payload_format
 
 def sh(moddir: Path, *args: str, env: dict | None = None) -> tuple[int, str]:
     merged = dict(os.environ, MODDIR=str(moddir), LUOSHU_PYTHON=sys.executable,
-                  LUOSHU_PUBLIC_DIR=str(moddir.parent / "sdcard"), PYTHONPATH=str(moddir / "common"),
+                  LUOSHU_PUBLIC_DIR=str(moddir.parent / "sdcard"), PYTHONPATH=os.pathsep.join(filter(None, [str(moddir / "common"), os.environ.get("PYTHONPATH", "")])),
                   **(env or {}))
     done = subprocess.run(["sh", str(moddir / "common/luoshu_engine.sh"), *args], check=False, text=True,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=merged)
