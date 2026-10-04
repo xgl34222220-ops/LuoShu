@@ -147,6 +147,22 @@ def main() -> int:
                 "NotoSansOldItalic-Regular.ttf", [], latin=True, replaceable=False,
                 xml_lang="und-Ital",
             ),
+            # HyperOS 3 (device bundle): clock faces named *Mono, the zh-Hant UI
+            # font tagged "zh-Hant,zh-Bopo", and the ja/ko/zh CJK collection.
+            "/product/fonts/MiClockMono.otf": slot(
+                "MiClockMono.otf", [], latin=True, digits=True, replaceable=False,
+            ),
+            "/product/fonts/MitypeClockMono.otf": slot(
+                "MitypeClockMono.otf", [], digits=True, replaceable=False,
+            ),
+            "/system/fonts/MiSansTCVF.ttf": slot(
+                "MiSansTCVF.ttf", [], han=True, latin=True, digits=True,
+                replaceable=False, xml_lang="zh-Hant,zh-Bopo",
+            ),
+            "/system/fonts/NotoSansCJK-Regular.ttc": slot(
+                "NotoSansCJK-Regular.ttc", [], han=True, latin=True, digits=True,
+                replaceable=False, xml_lang="ja ko zh-Hans",
+            ),
             "/system/fonts/LatinUnd.ttf": slot(
                 "LatinUnd.ttf", ["fallback"], latin=True, digits=True,
                 replaceable=False, xml_lang="und-Latn",
@@ -257,6 +273,11 @@ def main() -> int:
             assert role(protected) == "special-fallback", (protected, role_map["slots"][protected])
             assert action(protected) == "preserve", protected
         assert role("/system/fonts/LatinUnd.ttf") == "latin"
+        assert role("/product/fonts/MiClockMono.otf") == "clock"
+        assert role("/product/fonts/MitypeClockMono.otf") == "clock"
+        assert role("/system/fonts/MiSansTCVF.ttf") == "cjk"
+        # Covers kana/Hangul too: replacing it would drop Japanese and Korean.
+        assert role("/system/fonts/NotoSansCJK-Regular.ttc") == "special-fallback"
 
         # HyperOS Mitype drives lock-screen/status-bar digits: exact-width path.
         assert role("/system/fonts/MitypeVF.ttf") == "clock"
@@ -271,9 +292,9 @@ def main() -> int:
             if item["role"] == "unknown-protected":
                 assert item["action"] == "review"
 
-        assert shadow["summary"]["actionCounts"]["preserve"] == 10
-        assert shadow["summary"]["actionCounts"]["specialized"] == 3
-        assert shadow["summary"]["actionCounts"]["conditional"] == 3
+        assert shadow["summary"]["actionCounts"]["preserve"] == 11
+        assert shadow["summary"]["actionCounts"]["specialized"] == 5
+        assert shadow["summary"]["actionCounts"]["conditional"] == 4
         assert shadow["summary"]["actionCounts"]["replace"] == 4
         assert shadow["summary"]["actionCounts"]["review"] == 1
 

@@ -21,7 +21,7 @@ ROLE_SCHEMA = "device-font-roles-v1"
 PLAN_SCHEMA = "device-font-shadow-plan-v1"
 # Revision 2: OEM UI families (mipro, sysfont, oplus-sans ...) and Mitype clocks.
 # Revision 3: decorative families and und-<Script> fallbacks stay protected.
-ROLE_REVISION = 3
+ROLE_REVISION = 4
 PLAN_REVISION = 1
 
 PROTECTED_ROLES = {"emoji", "symbol-icon", "serif", "monospace", "special-fallback"}
@@ -167,26 +167,35 @@ def _undetermined_script(values: list[str]) -> bool:
     return False
 
 
+LANG_SCRIPTS_CJK = {"hans", "hant", "hani", "bopo"}
+LANG_SCRIPTS_SPECIAL = {"ethi", "deva", "arab", "hebr", "thai", "jpan", "kore", "hira", "kana", "hang"}
+
+
 def _language_kind(values: list[str]) -> str:
+    """Kind of the XML lang values, matched per tag on exact subtags.
+
+    Prefix matching misread zh-Bopo as Tibetan ("bo") and kept the HyperOS
+    Traditional Chinese UI font stock. A slot whose families cover Japanese or
+    Korean as well stays special: replacing it would drop kana/Hangul.
+    """
     if _undetermined_script(values):
         return "special"
-    tokens: list[str] = []
+    kinds: set[str] = set()
     for value in values:
-        normalized = normalize(value)
-        for separator in (",", ";", ":"):
-            normalized = normalized.replace(separator, "-")
-        tokens.extend(item for item in normalized.split("-") if item)
-        if normalized:
-            tokens.append(normalized)
-    for token in tokens:
-        if token.startswith(SPECIAL_LANG_PREFIXES):
-            return "special"
-    for token in tokens:
-        if token.startswith(CJK_LANG_PREFIXES):
-            return "cjk"
-    for token in tokens:
-        if token.startswith(LATIN_LANG_PREFIXES):
-            return "latin"
+        for entry in re.split(r"[\s,;]+", str(value)):
+            parts = [part for part in normalize(entry).split("-") if part]
+            if not parts:
+                continue
+            primary, subtags = parts[0], set(parts[1:])
+            if primary in CJK_LANG_PREFIXES or subtags & LANG_SCRIPTS_CJK:
+                kinds.add("cjk")
+            elif primary in SPECIAL_LANG_PREFIXES or subtags & LANG_SCRIPTS_SPECIAL:
+                kinds.add("special")
+            elif primary in LATIN_LANG_PREFIXES or "latn" in subtags:
+                kinds.add("latin")
+    for kind in ("special", "cjk", "latin"):
+        if kind in kinds:
+            return kind
     return ""
 
 
@@ -223,7 +232,9 @@ def _code_mono_identity(path: str, families: list[str]) -> bool:
     if _explicit_mono_family(families):
         return True
     filename = normalize(Path(path).name)
-    if _contains_phrase(filename, ("mitypemono", "mitype-mono")):
+    # OEM clock faces (MiClockMono, MitypeClockMono) are tabular clock digits,
+    # not code fonts; an explicit XML monospace family still wins above.
+    if _contains_phrase(filename, ("mitypemono", "mitype-mono")) or _contains_phrase(filename, CLOCK_TOKENS):
         return False
     return _contains_phrase(
         filename,
