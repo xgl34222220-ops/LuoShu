@@ -1,5 +1,6 @@
 """Read-only review of a pinned Root artifact; a review job is not Android acceptance."""
 from hashlib import sha256
+import base64
 import json
 import os
 from pathlib import Path
@@ -114,8 +115,21 @@ def main(pin_path, output_path):
         module = json.loads(z.read('module-gate.json'))
         stage = json.loads(z.read('app-axes/report.json')) if 'app-axes/report.json' in z.namelist() else {}
         failed = [s for s in module.get('steps', []) if s.get('exit') != 0][-6:]
+        stage_reports = {name: json.loads(z.read(name)) for name in
+                         ('app-apply/report.json', 'app-composite/report.json',
+                          'library-100/report.json', 'library-1000/report.json', 'final-ui/report.json')
+                         if name in z.namelist()}
+        ui_images = []
+        for name in ('app-axes/actual-axis-ui.png', 'app-composite/completed.png'):
+            if name not in z.namelist():
+                continue
+            data = z.read(name)
+            exported = data.startswith(b'\x89PNG\r\n\x1a\n') and len(data) <= 1000000
+            ui_images.append(dict(path=name, bytes=len(data), sha256=sha256(data).hexdigest(),
+                                  export_status='EXPORTED' if exported else 'NOT_EXPORTED_INVALID_OR_TOO_LARGE',
+                                  base64=base64.b64encode(data).decode('ascii') if exported else None))
         diagnostics = dict(root_run=pin['root_run'], module_error=module.get('error'),
-                           app_axis_stage=stage,
+                           app_axis_stage=stage, owned_stage_reports=stage_reports,
                            raw_axis_runtime_log=z.read('app-axes/runtime.log').decode('utf-8', errors='replace')
                            if 'app-axes/runtime.log' in z.namelist() else None,
                            raw_axis_commands=z.read('app-axes/commands.jsonl').decode('utf-8', errors='replace')
@@ -131,6 +145,8 @@ def main(pin_path, output_path):
                    review_commit=os.environ['GITHUB_SHA'])
     (output / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')
     emit('ROOT_PROOF', proof)
+    if ui_images:
+        emit('UI_IMAGES', dict(scope='ORIGINAL_REVIEWED_ANDROID_ARTIFACT_SCREENSHOTS', images=ui_images))
     emit('DIAGNOSTICS', diagnostics)
     emit('SUMMARY', summary)
 
