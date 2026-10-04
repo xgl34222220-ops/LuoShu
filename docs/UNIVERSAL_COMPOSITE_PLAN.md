@@ -99,3 +99,17 @@ app_bridge.sh mix_start
 2. **固定模式 + 可变原厂**：用户把某角色固定为单一实例时，可变原厂槽位所有字重共用一个静态实例，系统粗体（700）会显示为用户选的字重。这与旧引擎行为一致，但应在 App 中提示。
 3. **源字体缺字**：多源产物中，B 缺少的拉丁扩展字符是保留原厂字形还是交给系统后备。建议保留原厂（与 stock-shell 现有行为一致），需在 B3 中定下来。
 4. **缓存键**：组合的编译缓存按 artifactId 复用，artifactId 已包含 FontPlan（含分工）。切换回之前用过的组合可直接复用，无需额外设计。
+
+## 6. 实现后的测量（HOST_ONLY）
+
+桌面 x86 CPython，非 Android 耗时。中文 Noto Sans SC VF、英文与数字 Roboto VF（同一可变字体，auto）；原厂槽位各 9 个 XML 字重：Roboto（拉丁界面）、Noto Serif SC（`zh-Hans` 回退）、Noto Sans TC 充当 `mipro` OEM 主字体。
+
+| 槽位 | 产物 | 方式 |
+|---|---|---|
+| Roboto | 1 | 单一 auto 来源，共用 `source-variable-preserve` |
+| 中文回退 | 1 | 单一 auto 来源，共用 `source-variable-preserve` |
+| OEM 主字体 | 9 | 三源 `composite-shell`，逐字重 |
+
+首次编译 245 s（11 个产物全部 ready），同一组合再次切换（缓存命中）0.24 s。耗时几乎全部来自 OEM 主字体的 9 次逐字重合成（约 25 s/次）。
+
+**风险**：手机通常慢 2–4 倍；若真机 OEM 主字体同样有 9 个带 `<axis>` 的字重节点，首次组合可能超过 600 s 预算并报错（不会改动当前字体）。候选优化：为多来源的可变 OEM 槽位生成单一可变产物（以中文基底为底，拷入英文/数字字形及其变化数据），需对齐两款字体的轴、换算 gvar/HVAR，待真机耗时数据确认后再做。
