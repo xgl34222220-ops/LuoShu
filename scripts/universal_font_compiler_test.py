@@ -14,6 +14,7 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib.tables.TupleVariation import TupleVariation
 
 import font_inventory
 import font_source_profile
@@ -39,6 +40,8 @@ def make_font(
     variable: bool = False,
     axis_min: int = 100,
     axis_max: int = 900,
+    triangle: bool = False,
+    gvar_deltas: bool = False,
 ) -> None:
     cmap = {cp: f"u{cp:04X}" for cp in ASCII_POINTS}
     order = [".notdef", *cmap.values()]
@@ -55,7 +58,8 @@ def make_font(
         if name != ".notdef":
             pen.moveTo((40, y_min))
             pen.lineTo((advance - 50, y_min))
-            pen.lineTo((advance - 50, y_max))
+            if not triangle:
+                pen.lineTo((advance - 50, y_max))
             pen.lineTo((40, y_max))
             pen.closePath()
         glyphs[name] = pen.getCharString() if cff else pen.glyph()
@@ -89,7 +93,16 @@ def make_font(
         if cff:
             raise ValueError("test fixture variable CFF is not supported")
         builder.setupFvar([("wght", axis_min, 400, axis_max, "Weight")], [])
-        builder.setupGvar({name: [] for name in order})
+        variations = {name: [] for name in order}
+        if gvar_deltas:
+            # Real per-point deltas: decoding them depends on each glyph's
+            # original point count (4 outline points + 4 phantom points).
+            for name in order:
+                if name != ".notdef":
+                    variations[name] = [
+                        TupleVariation({"wght": (0, 1.0, 1.0)}, [(12, 0)] * 8)
+                    ]
+        builder.setupGvar(variations)
 
     builder.save(path)
 
@@ -406,6 +419,41 @@ def main() -> int:
         blocked = narrow_manifest["artifacts"][0]
         assert blocked["status"] == "blocked"
         assert "不能覆盖目标" in blocked["reason"], blocked
+
+        # 7) Variable stock with real gvar deltas routed through an XML <axis>
+        #    child (Android 12+ Roboto) uses stock-shell. Replacing outlines with
+        #    a different point count must not corrupt gvar decoding.
+        tri_source = temp / "UserTriangle.ttf"
+        gvar_stock = temp / "StockGvar.ttf"
+        make_font(tri_source, family="User Triangle", triangle=True, y_min=-100, y_max=720)
+        make_font(gvar_stock, family="Stock Gvar", variable=True, gvar_deltas=True,
+                  y_min=-100, y_max=720)
+        gvar_xml = temp / "gvar.xml"
+        gvar_xml.write_text(
+            '<familyset><family name="sans-serif">'
+            '<font weight="400" style="normal">StockGvar.ttf'
+            '<axis tag="wght" stylevalue="400"/></font>'
+            '</family></familyset>',
+            encoding="utf-8",
+        )
+        gvar_logical = "/system/fonts/StockGvar.ttf"
+        gvar_slot = slot_from_stock(
+            gvar_logical, gvar_stock, family="sans-serif",
+            source_xml="/system/etc/gvar.xml", declared="StockGvar.ttf",
+        )
+        gvar_plan, gvar_route = build_plans(tri_source, gvar_slot, "latin", gvar_xml)
+        gvar_manifest = compiler.compile_all(
+            gvar_plan, gvar_route, {gvar_logical: gvar_stock}, temp / "out-gvar", False
+        )
+        assert_ready(gvar_manifest)
+        gvar_artifact = artifact_by_kind(gvar_manifest, "xml-route")
+        assert gvar_artifact["mode"] == "stock-shell", gvar_artifact
+        with TTFont(gvar_artifact["output"]) as built:
+            built["gvar"].ensureDecompiled()
+            replaced = built.getBestCmap()[ord("A")]
+            assert built["glyf"][replaced].numberOfContours == 1
+            assert len(built["glyf"][replaced].coordinates) == 3
+            assert not built["gvar"].variations.get(replaced)
 
         # Manifest validation checks actual artifact hashes.
         manifest_path = temp / "manifest.json"

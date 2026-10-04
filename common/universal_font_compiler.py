@@ -648,6 +648,10 @@ def _replace_role_glyphs(
     source_cmap = source.getBestCmap() or {}
     source_glyph_set = source.getGlyphSet()
     base_kind = _outline_kind(base)
+    if "gvar" in base:
+        # gvar deltas are decoded against each glyph's original point count, so
+        # they must be fully decoded before any outline below is replaced.
+        base["gvar"].ensureDecompiled()
     source_kind = _outline_kind(source)
     exact = role in SPECIALIZED_ROLES
     replaced = 0
