@@ -130,6 +130,12 @@ def main(pin_path, output_path):
                                   base64=base64.b64encode(data).decode('ascii') if exported else None))
         diagnostics = dict(root_run=pin['root_run'], module_error=module.get('error'),
                            app_axis_stage=stage, owned_stage_reports=stage_reports,
+                           raw_composite_runtime_log=z.read('app-composite/runtime.log').decode('utf-8', errors='replace')
+                           if 'app-composite/runtime.log' in z.namelist() else None,
+                           composite_xml_frames=[dict(path=name, xml=z.read(name).decode('utf-8', errors='replace'))
+                               for name in sorted(n for n in z.namelist() if re.fullmatch(r'app-composite/frame-\d+\.xml', n))[-8:]],
+                           raw_composite_commands=z.read('app-composite/commands.jsonl').decode('utf-8', errors='replace')
+                           if 'app-composite/commands.jsonl' in z.namelist() else None,
                            raw_axis_runtime_log=z.read('app-axes/runtime.log').decode('utf-8', errors='replace')
                            if 'app-axes/runtime.log' in z.namelist() else None,
                            raw_axis_commands=z.read('app-axes/commands.jsonl').decode('utf-8', errors='replace')
