@@ -102,6 +102,16 @@ def test_variable_single(temp: Path) -> None:
     nodes = xml_nodes(payload)
     assert all(axes == {"wght": weight} for _name, weight, axes in nodes), nodes
 
+    # A snapshot captured while the pre-v3 pipeline's XML was mounted names its
+    # generated files (gone now): they map back to the stock file and get replaced.
+    stale = temp / "fonts-stale.xml"
+    stale.write_text(xml_map[FONTS_XML].read_text(encoding="utf-8").replace(
+        ">Roboto-Regular.ttf<", ">LuoShu-Roboto-Regular-100.ttf<"), encoding="utf-8")
+    assert "LuoShu-Roboto-Regular-100.ttf" in stale.read_text(encoding="utf-8")
+    _m, _r, payload = run(temp, "vf-stale", topology, {"mode": "single", "files": [str(user)]}, {FONTS_XML: stale})
+    names = {name for name, *_ in xml_nodes(payload)}
+    assert "Roboto-Regular.ttf" in names and not any(name.startswith("LuoShu-") for name in names), names
+
 
 def test_static_family(temp: Path) -> None:
     topology, stocks, xml_map = device(temp)

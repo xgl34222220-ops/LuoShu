@@ -291,7 +291,10 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
     temp = output.with_name(output.name + ".part")
     scratch_dir = None if full else tempfile.TemporaryDirectory(prefix="luoshu-diag-", dir=str(output.parent))
     scratch = None if scratch_dir is None else Path(scratch_dir.name)
-    with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+    # System files on some ROMs (ColorOS) carry 1970 mtimes, which zip rejects
+    # unless timestamps are clamped.
+    with zipfile.ZipFile(temp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6,
+                         strict_timestamps=False) as bundle:
         for path in sorted(config.iterdir()) if config.is_dir() else []:
             if path.is_file() and path.suffix in {".json", ".conf", ".state"} \
                     and path.stat().st_size <= CONFIG_FILE_LIMIT:
@@ -327,9 +330,13 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
             if stock_total + size > STOCK_TOTAL_LIMIT:
                 index["stockSkipped"].append({"path": logical, "reason": "size-limit", "bytes": size})
                 continue
-            stock_total += size
             name = "stock" + logical
-            hollow = _add_font(bundle, actual, name, scratch, keep_points)
+            try:
+                hollow = _add_font(bundle, actual, name, scratch, keep_points)
+            except (OSError, ValueError) as error:  # one unreadable slot must not lose the bundle
+                index["stockSkipped"].append({"path": logical, "reason": f"error:{type(error).__name__}: {error}"[:200]})
+                continue
+            stock_total += size
             index["stock"][logical] = {
                 "file": name, "origin": origin, "role": role, "action": action,
                 "bytes": size, "sha256": _sha256(actual), "hollow": hollow,
@@ -345,9 +352,13 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
             if source_total + size > SOURCE_TOTAL_LIMIT:
                 index["sourcesSkipped"].append({"path": str(source), "reason": "size-limit", "bytes": size})
                 continue
-            source_total += size
             name = f"sources/{len(index['sources']):02d}-{source.name}"
-            hollow = _add_font(bundle, source, name, scratch, keep_points)
+            try:
+                hollow = _add_font(bundle, source, name, scratch, keep_points)
+            except (OSError, ValueError) as error:
+                index["sourcesSkipped"].append({"path": str(source), "reason": f"error:{type(error).__name__}: {error}"[:200]})
+                continue
+            source_total += size
             index["sources"][str(source)] = {
                 "file": name, "profile": item["profile"], "bytes": size, "hollow": hollow,
             }
@@ -390,7 +401,7 @@ def main() -> int:
         except OSError:
             pass
         message = f"诊断包生成失败：{type(error).__name__}: {error}"[:300]
-        print(json.dumps({"status": "error", "message": message}, ensure_ascii=False))
+        print(json.dumps({"status": "error", "message": message}, ensure_ascii=False, separators=(",", ":")))
         return 1
     print(json.dumps({"status": "ok", "data": result}, ensure_ascii=False, separators=(",", ":")))
     return 0

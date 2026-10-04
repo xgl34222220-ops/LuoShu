@@ -228,4 +228,20 @@ test ! -e "$MOD/product/etc/mi_fonts_customization.xml"
 test ! -e "$MOD/product/etc/hihonor_magic_fonts.xml"
 test ! -e "$MOD/product/etc/ACME_FONT_CONFIG.xml"
 
+# The stock snapshot never records LuoShu's own XML: neither a pre-v3 document
+# naming generated files nor a v3 document (stock names) equal to the payload.
+cp -f "$MOD/config/font-config-source/system/fonts.xml" "$TMP/stock-snapshot.xml"
+real_backup="$TMP/real-fonts.xml"
+cp -f "$SYSTEM_ETC/fonts.xml" "$real_backup"
+sed 's/Roboto-Regular.ttf/LuoShu-Roboto-Regular-100.ttf/' "$real_backup" > "$SYSTEM_ETC/fonts.xml"
+font_config_capture_original
+cmp -s "$TMP/stock-snapshot.xml" "$MOD/config/font-config-source/system/fonts.xml"
+mkdir -p "$MOD/system/etc"
+sed 's/weight="700"/weight="700" index="1"/' "$real_backup" > "$MOD/system/etc/fonts.xml"
+cp -f "$MOD/system/etc/fonts.xml" "$SYSTEM_ETC/fonts.xml"
+font_config_capture_original
+cmp -s "$TMP/stock-snapshot.xml" "$MOD/config/font-config-source/system/fonts.xml"
+cp -f "$real_backup" "$SYSTEM_ETC/fonts.xml"
+rm -f "$MOD/system/etc/fonts.xml"
+
 printf 'Font configuration runtime tests passed.\n'

@@ -568,6 +568,21 @@ class NodeAction:
     variable: bool
 
 
+# Files the pre-v3 universal pipeline added (LuoShu-<stock stem>-<weight>[i].ttf).
+# A snapshot captured while that XML was mounted still names them; they no
+# longer exist, so their families silently vanish unless mapped back.
+_OLD_GENERATED = re.compile(r"^LuoShu-(.+)-[1-9]00i?\.(?:ttf|otf|ttc)$", re.IGNORECASE)
+
+
+def _stock_name(declared: str, source_xml: str, resolve: dict[tuple[str, str], str]) -> str | None:
+    match = _OLD_GENERATED.match(declared)
+    if not match:
+        return None
+    stem = match.group(1).lower()
+    names = sorted(name for xml, name in resolve if xml == source_xml and Path(name).stem.lower() == stem)
+    return names[0] if names else None
+
+
 def _rewrite_xml(
     path: Path,
     source_xml: str,
@@ -582,6 +597,11 @@ def _rewrite_xml(
         declared = (element.text or "").strip()
         if not declared:
             continue
+        stock = _stock_name(declared, source_xml, resolve)
+        if stock is not None:
+            element.text = (element.text or "").replace(declared, stock, 1)
+            declared = stock
+            changed += 1
         logical = resolve.get((source_xml, declared))
         if logical is None:
             continue

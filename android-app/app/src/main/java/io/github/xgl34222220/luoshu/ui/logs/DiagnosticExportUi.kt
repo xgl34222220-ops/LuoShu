@@ -155,11 +155,11 @@ internal suspend fun exportEngineBundle(): DiagnosticExportState {
     val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
     val result = RootShell.exec("sh ${RootShell.quote(bridge)} diag_export", timeoutMs = 900_000L)
     val line = result.stdout.lineSequence().lastOrNull { it.contains("\"status\"") }.orEmpty()
-    val path = Regex("\"path\":\"([^\"]+)\"").find(line)?.groupValues?.get(1).orEmpty()
+    val path = Regex("\"path\"\\s*:\\s*\"([^\"]+)\"").find(line)?.groupValues?.get(1).orEmpty()
     if (result.code != 0 || path.isBlank()) {
-        val message = Regex("\"message\":\"([^\"]+)\"").find(line)?.groupValues?.get(1)
+        val message = Regex("\"message\"\\s*:\\s*\"([^\"]+)\"").find(line)?.groupValues?.get(1)
         return DiagnosticExportState(
-            error = message ?: result.stderr.ifBlank { "引擎诊断包生成失败" },
+            error = message ?: result.stderr.ifBlank { result.stdout.trim().takeLast(300).ifBlank { "引擎诊断包生成失败（代码 ${result.code}）" } },
             engineBundle = true,
         )
     }

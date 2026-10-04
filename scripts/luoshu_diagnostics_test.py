@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -98,7 +99,10 @@ def main() -> int:
         assert {entry["origin"] for entry in index["stock"].values()} == {"lower"}, index["stock"]
         assert all(entry["file"] in names for entry in index["stock"].values())
 
-        # The full bundle ships the fonts byte for byte.
+        # The full bundle ships the fonts byte for byte, including ROM files with
+        # 1970 mtimes (ColorOS), which zip rejects unless timestamps are clamped.
+        for path in (lower / "lower" / "system-fonts").iterdir():
+            os.utime(path, (0, 0))
         full = subprocess.run(
             [sys.executable, str(ROOT / "common" / "luoshu_diagnostics.py"), "--full",
              "--moddir", str(moddir), "--output", str(temp / "out" / "full.zip"), "--lower-root", str(lower)],

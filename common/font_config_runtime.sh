@@ -168,8 +168,13 @@ font_config_capture_original() {
         _lfc_found=$((_lfc_found + 1))
         _lfc_backup="$_lfc_backup_root/$_lfc_key"
         mkdir -p "${_lfc_backup%/*}" 2>/dev/null || continue
-        # Never snapshot our own upper-layer document. Keep a valid previous source when mounted.
-        if grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lfc_real" 2>/dev/null; then
+        # Never snapshot our own upper-layer document. Keep a valid previous source when mounted:
+        # legacy (LuoShu-400.ttf), pre-v3 (LuoShu-<stem>-400.ttf) and v3 (same names as stock,
+        # so compared with the active payload).
+        if grep -Eq 'LuoShu[A-Za-z0-9_.-]*\.(ttf|otf|ttc|TTF|OTF|TTC)' "$_lfc_real" 2>/dev/null; then
+            continue
+        fi
+        if [ -f "$_lfc_overlay" ] && command -v cmp >/dev/null 2>&1 && cmp -s "$_lfc_real" "$_lfc_overlay" 2>/dev/null; then
             continue
         fi
         if [ -s "$_lfc_backup" ]; then
