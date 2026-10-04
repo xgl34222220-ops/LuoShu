@@ -1,16 +1,16 @@
 {
   "schema": "luoshu-reviewed-root-artifact-v1",
-  "root_run": 37192969348,
-  "candidate_run": 37191606515,
-  "runtime_source": "9487ca4dbce5684c6391dbadd3a12311de9fc10c",
-  "harness_commit": "f46d9ca4302cc4da2a2dee2f9aaf386722977b78",
-  "expected_root_result": "FAIL",
+  "root_run": 37198566413,
+  "candidate_run": 37197455936,
+  "runtime_source": "d12168a88a06193b238821c87d0f4bf844a74b96",
+  "harness_commit": "d694f58d072a4ce3c7bb4a0f4fe3b55241ff5404",
+  "expected_root_result": "PASS",
   "root_artifact": {
-    "id": 11301520220,
-    "sha256": "95dfbbe3db0ceb02c751dcad53cf2f0509b12ebb645671f4f4c8f6246db3b237"
+    "id": 11302008315,
+    "sha256": "a1be84f605b2b8df2474da8cb2870fd35faf8341fe09376f89fc9edb8f248b33"
   },
   "candidate_artifact": {
-    "id": 11298744896,
-    "sha256": "bb72661fe7c476b4d56aedd309cf36443ea028d1f3da5b2dbd2d7a733febf8f9"
+    "id": 11302085754,
+    "sha256": "e8e29d6d71b92d6ba983741afcfad00c25bb8835c2ba3af7951ac2af17871e87"
   }
 }
