@@ -112,6 +112,10 @@ Root workflow 只绑定上述已通过、已下载验真的候选包。新增门
 
 新增可在原 ARM64 Python/Android shell 执行的 18 个实际 shell 用例，覆盖变量源优先、静态最近/同距/跨格式、大小写后缀、中文空格、字面反斜杠、`-n`、单次后缀规则、目录/缺失源和 1000 独立文件；进入强制源码门禁。本轮本地 18 个选择用例、库存 17 个回归和冻结 17 文件通过。新候选 CI 和 Android 复测尚未预填通过。
 
+第四批提交 [`dc497301`](https://github.com/xgl34222220-ops/LuoShu/commit/dc4973016c242d6ee71083644652083480f6ea4d) 的 [完整候选 CI 37169144226](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37169144226) 已通过，含上述新选择门禁、实际 Android 15 原厂集合夹具回归、App lint/单测/构建及包检查。下载 artifact `11290754515`，[独立包校验](TEST_CANDIDATE_VERIFICATION_37169144226.json) 通过：外层 ZIP `b14141399032168362254c3c153cdfb004cc8a9b2b3847357ec40896499909ee`，模块 `67aa350efb3b1fd6f0606b92d28f75419cb21428232a435099c01fccc149e2ae`，APK `e6819a7592efb1edb5909c60cffc9c5c898091f06ab928c0c90216c3bc345b53`。17 个冻结文件、8 个运行源码、内外 APK 和构建来源逐一一致。
+
+Root workflow 改绑这个新验真的候选，并增加实际安装模块下的 18 个预览来源选择用例，要求同一启动身份、原 ARM64 Python、Android shell 和 Enforcing。门禁拒绝宿主、错模块/解释器、缺失/重复/失败用例；本轮宿主 harness 92 个测试通过，仅证明验收脚本逻辑。第四批完整 Android 复测仍待实际运行，不把前一轮 Root 结果当成本批验收。
+
 ## 不可越过的边界
 
 不修改 1.1.1 挂载核心及 17 个冻结文件；不引入 hook、字体配置重写或后台常驻监听。

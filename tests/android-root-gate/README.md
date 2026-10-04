@@ -72,6 +72,15 @@ or missing cases, wrong module/shell or changed boot identity cannot pass.
 The installed axis helper must read the pinned actual CFF2 collection's axis
 name, 400/400/900 weight range and non-hidden flag.
 
+The installed preview source selector additionally runs all 18 cases from
+`scripts/preview_source_contract_test.py` under that original ARM64 Python and
+Android shell. Selection-only files cover variable-source priority, nearest/tied
+static weights, format ordering, literal and Chinese names, rejected directories,
+missing sources and a 1000-file inventory. They are not rendering-font fixtures.
+The report binds the exact module, shell, unchanged boot and Enforcing context;
+host results, missing/duplicated/failed cases cannot satisfy this gate. This
+contract does not replace actual App timings, font rendering or mount evidence.
+
 `app_axis_gate.py` inspects an original generated variable TTF with `wdth`,
 named custom `XTRA` and hidden `HIDN`, without applying it. The fixture enters
 through the existing native importer's trusted `.stabletest` cache intake;

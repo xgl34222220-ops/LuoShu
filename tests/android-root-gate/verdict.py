@@ -15,6 +15,30 @@ MIX_HANDOFF_CASES = {
     'progress-truncated-message', 'progress-invalid-string-tail', 'progress-unsupported-unicode-escape',
     'progress-oversized-message',
 }
+PREVIEW_SOURCE_CASES = {
+    'static-nearest', 'exact-static', 'invalid-weight-default', 'static-tie-order',
+    'cross-format-tie-order', 'later-variable-wins-over-exact-static', 'first-variable-order',
+    'uppercase-extension', 'chinese-space-family', 'literal-backslash-family',
+    'leading-echo-option-family', 'single-pass-suffixes', 'trailing-name-separators',
+    'matching-directory-rejected', 'different-family-rejected', 'empty-library',
+    'large-independent-library', 'quiet-and-stdout-parser-agree',
+}
+
+
+def preview_source_blockers(value):
+    if (not isinstance(value, dict) or value.get('result') != 'PASS'
+            or value.get('schema') != 'luoshu-preview-source-contract-v1'
+            or value.get('environment') != 'ANDROID' or value.get('selinux') != 'Enforcing'
+            or not re.fullmatch(r'[0-9a-f-]{36}', str(value.get('boot_id', '')))
+            or value.get('module') != '/data/adb/modules/LuoShu' or value.get('shell') != '/system/bin/sh'):
+        return ['actual Android preview source context missing or failed']
+    cases = value.get('cases')
+    if (not isinstance(cases, list) or value.get('case_count') != len(PREVIEW_SOURCE_CASES)
+            or len(cases) != len(PREVIEW_SOURCE_CASES) or any(not isinstance(case, dict) for case in cases)
+            or {case.get('name') for case in cases} != PREVIEW_SOURCE_CASES
+            or any(case.get('result') != 'PASS' for case in cases)):
+        return ['actual Android preview source selection case set incomplete or failed']
+    return []
 
 
 def mix_handoff_blockers(value):
@@ -174,6 +198,7 @@ def delivery_blockers(report):
     errors.extend(scope_blockers(report.get('magisk_task_scope'), OLD_CASES))
     errors.extend(scope_blockers(report.get('magisk_request_scope'), REQUEST_CASES, True))
     errors.extend(mix_handoff_blockers(report.get('magisk_mix_handoff')))
+    errors.extend(preview_source_blockers(report.get('magisk_preview_source')))
     errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
     axes_ui = report.get('app_axes', {})
     observed = axes_ui.get('observed_labels', [])
