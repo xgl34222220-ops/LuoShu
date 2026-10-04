@@ -222,7 +222,16 @@ def build_deployment(
 
     summary = artifact_manifest.get("summary") if isinstance(artifact_manifest.get("summary"), dict) else {}
     if int(summary.get("blockedCount") or 0) != 0:
-        raise DeploymentError("存在 blocked artifact，拒绝生成部署 payload")
+        blocked = [
+            item for item in artifact_manifest.get("artifacts") or []
+            if isinstance(item, dict) and item.get("status") == "blocked"
+        ]
+        details = "；".join(
+            f"{Path(str(item.get('targetPath') or '?')).name}: {str(item.get('reason') or '未知原因')[:160]}"
+            for item in blocked[:3]
+        )
+        more = f" 等 {len(blocked)} 个" if len(blocked) > 3 else ""
+        raise DeploymentError(f"存在 blocked artifact，拒绝生成部署 payload（{details}{more}）")
     if route_plan.get("summary", {}).get("routingComplete") is not True:
         raise DeploymentError("XML RoutePlan 不完整，拒绝生成部署 payload")
 
