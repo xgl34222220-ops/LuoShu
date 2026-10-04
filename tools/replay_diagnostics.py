@@ -74,7 +74,7 @@ def main() -> int:
     try:
         manifest, report = luoshu_engine.build(
             _load(config / "device_font_topology.json"), spec, work / "payload", work / "cache",
-            xml_root=config / "font-config-source", stock_paths=stock_paths,
+            xml_root=config / "font-config-source", stock_paths=stock_paths, live_root=None,
         )
     except (luoshu_engine.EngineError, luoshu_payload.DeploymentError) as error:
         print(f"RESULT: FAIL {error}")

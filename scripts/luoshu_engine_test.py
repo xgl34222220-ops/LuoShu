@@ -112,6 +112,35 @@ def test_variable_single(temp: Path) -> None:
     names = {name for name, *_ in xml_nodes(payload)}
     assert "Roboto-Regular.ttf" in names and not any(name.startswith("LuoShu-") for name in names), names
 
+    # HyperOS lists MiSansVF_Overlay.ttf (a link to the theme font) first in
+    # sans-serif; those nodes are pointed at the replaced MiSansVF.ttf, with
+    # weights the topology never recorded. OEM copies of the config get the same.
+    overlay_family = ('<family name="sans-serif"><font weight="400">MiSansVF_Overlay.ttf'
+                      '<axis tag="wght" stylevalue="330"/></font>'
+                      '<font weight="350">MiSansVF_Overlay.ttf</font></family>')
+    root = temp / "xml-root"
+    for partition, name in (("system", "fonts.xml"), ("system_ext", "hyper_fonts.xml")):
+        (root / partition).mkdir(parents=True, exist_ok=True)
+        (root / partition / name).write_text(xml_map[FONTS_XML].read_text(encoding="utf-8").replace(
+            "<familyset>", "<familyset>" + overlay_family, 1), encoding="utf-8")
+    (root / "system_ext" / "gone_fonts.xml").write_text(overlay_family.join(("<familyset>", "</familyset>")),
+                                                        encoding="utf-8")
+    live = temp / "live"
+    (live / "system_ext" / "etc").mkdir(parents=True)
+    (live / "system_ext" / "etc" / "hyper_fonts.xml").write_text("<familyset/>", encoding="utf-8")
+    payload = temp / "overlay-payload"
+    manifest, _report = engine.build(topology, {"mode": "single", "files": [str(user)]}, payload,
+                                     temp / "cache", xml_root=root, live_root=live)
+    payload_format.validate_payload_integrity(manifest, payload)
+    written = {item["logicalPath"] for item in manifest["files"] if item["kind"] == "xml"}
+    assert written == {FONTS_XML, "/system_ext/etc/hyper_fonts.xml"}, written
+    for rendered in (payload / "system/etc/fonts.xml", payload / "system_ext/etc/hyper_fonts.xml"):
+        family = ET.parse(rendered).getroot().find("family")
+        fonts = [((font.text or "").strip(), font.get("weight"),
+                  {axis.get("tag"): axis.get("stylevalue") for axis in font.iter("axis")})
+                 for font in family.iter("font")]
+        assert fonts == [("MiSansVF.ttf", "400", {"wght": "400"}), ("MiSansVF.ttf", "350", {"wght": "350"})], fonts
+
 
 def test_static_family(temp: Path) -> None:
     topology, stocks, xml_map = device(temp)

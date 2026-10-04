@@ -572,9 +572,20 @@ class NodeAction:
 # A snapshot captured while that XML was mounted still names them; they no
 # longer exist, so their families silently vanish unless mapped back.
 _OLD_GENERATED = re.compile(r"^LuoShu-(.+)-[1-9]00i?\.(?:ttf|otf|ttc)$", re.IGNORECASE)
+# HyperOS lists <stock>_Overlay.ttf first in sans-serif: a symlink to the theme
+# font under /data (an 8.9 KB Latin/digit stub on HyperOS 3). Left alone it
+# keeps stock Latin and digits in front of the replaced font.
+_THEME_OVERLAY = re.compile(r"^(.+)_Overlay(\.(?:ttf|otf|ttc))$", re.IGNORECASE)
 
 
 def _stock_name(declared: str, source_xml: str, resolve: dict[tuple[str, str], str]) -> str | None:
+    """The stock file an unresolvable XML name stands for, if any."""
+    if (source_xml, declared) in resolve:
+        return None
+    overlay = _THEME_OVERLAY.match(declared)
+    if overlay:
+        base = overlay.group(1) + overlay.group(2)
+        return base if (source_xml, base) in resolve else None
     match = _OLD_GENERATED.match(declared)
     if not match:
         return None
@@ -655,8 +666,13 @@ def build(
     stock_paths: dict[str, Path] | None = None,
     deadline: float | None = None,
     progress=None,
+    live_root: Path | None = Path("/"),
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Returns (deployment manifest, report); writes ``payload_root``."""
+    """Returns (deployment manifest, report); writes ``payload_root``.
+
+    ``live_root`` is where OEM XML copies must still exist to be rewritten (a
+    stale snapshot of a removed file would fail boot verification); None skips
+    the check (host replay)."""
     started = time.monotonic()
     roles, _shadow = font_role_shadow.build(topology)
     sources = Sources.from_spec(spec)
@@ -672,9 +688,63 @@ def build(
         for ref in slot.get("xmlRefs") or [] if isinstance(slot, dict) else []:
             if isinstance(ref, dict) and ref.get("sourceXml") and ref.get("declared"):
                 resolve[(str(ref["sourceXml"]), str(ref["declared"]).strip())] = str(slot_path)
+    documents = sorted({str(ref.get("sourceXml")) for target in targets for ref in target.refs
+                        if ref.get("sourceXml") and not str(ref.get("sourceXml")).startswith("/data/")})
+    snapshots: dict[str, Path] = {}
+    for source_xml in documents:
+        snapshot = _snapshot_xml(source_xml, xml_root, xml_map or {})
+        if snapshot is None:
+            raise EngineError(f"缺少原厂字体配置快照：{source_xml}")
+        snapshots[source_xml] = snapshot
+    # OEM copies of the system config (HyperOS system_ext hyper_fonts.xml,
+    # miui_fonts.xml, ...) name the same files; the framework may load them
+    # instead, so they are rewritten too. Names resolve by file: same partition
+    # first, then /system/fonts.
+    target_paths = {target.path for target in targets}
+    for snapshot in sorted(xml_root.glob("*/*.xml")) if xml_root is not None and xml_root.is_dir() else []:
+        partition = snapshot.parent.name
+        source_xml = f"/{partition}/etc/{snapshot.name}"
+        if source_xml in snapshots or source_xml.startswith("/data/") \
+                or partition not in payload_format.ALLOWED_PARTITIONS:
+            continue
+        if live_root is not None and not (live_root / source_xml.lstrip("/")).is_file():
+            continue
+        try:
+            nodes = list(_parse_xml(snapshot).getroot().iter("font"))
+        except (ET.ParseError, OSError):
+            continue
+        mapped = False
+        for element in nodes:
+            declared = (element.text or "").strip()
+            names = [declared]
+            overlay = _THEME_OVERLAY.match(declared)
+            if overlay:
+                names.append(overlay.group(1) + overlay.group(2))
+            old = _OLD_GENERATED.match(declared)
+            if old:
+                names.extend(sorted(Path(path).name for path in target_paths
+                                    if Path(path).stem.lower() == old.group(1).lower()))
+            found = next((f"{folder}/{name}" for name in names
+                          for folder in (f"/{partition}/fonts", "/system/fonts")
+                          if f"{folder}/{name}" in target_paths), None)
+            if found is not None:
+                resolve[(source_xml, Path(found).name)] = found
+                mapped = True
+        if mapped:
+            snapshots[source_xml] = snapshot
     for target in targets:
-        wanted = {(int(ref.get("weight") or 400), _italic_style(ref.get("style"))) for ref in target.refs}
-        xml_weights[target.path] = wanted
+        xml_weights[target.path] = {(int(ref.get("weight") or 400), _italic_style(ref.get("style")))
+                                    for ref in target.refs}
+    # Every node acts for a target (directly, through a theme overlay or a stale
+    # generated name); the topology keeps one record per unresolved name and
+    # none for OEM copies, so read the weights from the documents.
+    for source_xml, snapshot in snapshots.items():
+        for element in _parse_xml(snapshot).getroot().iter("font"):
+            declared = (element.text or "").strip()
+            stock = _stock_name(declared, source_xml, resolve)
+            logical = resolve.get((source_xml, stock or declared))
+            if logical in xml_weights:
+                xml_weights[logical].add((int(element.get("weight") or 400), _italic_style(element.get("style"))))
 
     payload_root.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix=f".{payload_root.name}.", dir=str(payload_root.parent)))
@@ -738,12 +808,7 @@ def build(
             return per_target.get((weight, italic)) or per_target.get((weight, False))
 
         xml_changes: list[dict[str, Any]] = []
-        documents = sorted({str(ref.get("sourceXml")) for target in targets for ref in target.refs
-                            if ref.get("sourceXml") and not str(ref.get("sourceXml")).startswith("/data/")})
-        for source_xml in documents:
-            snapshot = _snapshot_xml(source_xml, xml_root, xml_map or {})
-            if snapshot is None:
-                raise EngineError(f"缺少原厂字体配置快照：{source_xml}")
+        for source_xml, snapshot in snapshots.items():
             rendered = _rewrite_xml(snapshot, source_xml, resolve, action_for)
             if rendered is None:
                 continue
