@@ -1,14 +1,14 @@
 #!/system/bin/sh
 # Phase 9 controlled production cutover controller.
-# Official single-font switches try Universal first and fall back to the existing
-# production switcher without ever rewriting the current boot's live payload.
+# Every switch (single font, composite, system default) runs on Universal only.
+# The legacy engine is retired: a Universal failure is reported and nothing is
+# staged. The current boot's live payload is never rewritten.
 set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 MODULE_DIR="$MODDIR"
 CONFIG_DIR="${CONFIG_DIR:-$MODDIR/config}"
 PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
-LEGACY_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 DEPLOYMENT="$MODDIR/common/universal_font_deployment.sh"
 PLAN_BRIDGE="$MODDIR/common/universal_font_plan.sh"
 ROUTE_BRIDGE="$MODDIR/common/minimal_xml_router.sh"
@@ -50,15 +50,15 @@ _uc_python() {
         "$PYBIN" "$@"
 }
 
-# Universal may use at most this share of the switch timeout; the remainder is
-# reserved for the legacy switcher if Universal does not finish in time.
+# Universal stops starting new work 30 s before the switch timeout, so it can
+# report a clear failure instead of being killed by the task supervisor.
 _uc_budget_seconds() {
     _ucb_value="${LUOSHU_UNIVERSAL_BUDGET_SECONDS:-}"
     case "$_ucb_value" in
         ''|*[!0-9]*)
             _ucb_total="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-360}"
             case "$_ucb_total" in ''|*[!0-9]*) _ucb_total=360 ;; esac
-            _ucb_value=$((_ucb_total / 2))
+            _ucb_value=$((_ucb_total - 30))
             ;;
     esac
     [ "$_ucb_value" -ge 15 ] 2>/dev/null || _ucb_value=15
@@ -97,34 +97,6 @@ _uc_cleanup_universal_next() {
     rm -f "$CONFIG_DIR/universal-font-next.conf" 2>/dev/null || true
     # A switch request supersedes any previously queued next-boot payload.
     rm -rf "$MODDIR/.luoshu-payload-next" "$MODDIR"/.luoshu-payload-next.stage.* 2>/dev/null || true
-}
-
-_uc_legacy() {
-    _ucl_font="$1"; _ucl_reason="$2"
-    _uc_log "legacy fallback font=$_ucl_font reason=$_ucl_reason"
-    _uc_write_state fallback "$_ucl_font" legacy "$_ucl_reason"
-    _uc_progress 25 "通用引擎未接管，正在使用兼容切换路径"
-
-    # A queued Universal request updates active_font.conf to the user's configured
-    # choice before reboot. If this new request falls back to legacy, restore the
-    # queued request's previousFont first so the legacy switcher records the real
-    # current-boot font as its rollback source.
-    if [ -s "$CONFIG_DIR/universal-font-next.conf" ]; then
-        _ucl_live_font=$(_uc_value "$CONFIG_DIR/universal-font-next.conf" previousFont)
-        if [ -n "$_ucl_live_font" ]; then
-            printf '%s\n' "$_ucl_live_font" > "$CONFIG_DIR/active_font.conf.tmp.$$" 2>/dev/null && \
-                mv -f "$CONFIG_DIR/active_font.conf.tmp.$$" "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
-            chmod 0644 "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
-        fi
-    fi
-
-    _uc_cleanup_universal_next
-    [ -f "$LEGACY_SWITCH" ] || {
-        printf '{"status":"error","message":"缺少兼容字体切换核心"}\n'
-        return 1
-    }
-    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
-        sh "$LEGACY_SWITCH" action switch "$_ucl_font"
 }
 
 _uc_precondition() {
@@ -215,29 +187,85 @@ _uc_universal() {
     return 0
 }
 
+# Reports a Universal failure. Nothing was staged, so the running font and any
+# previously queued request stay as they were; the legacy engine is retired.
+_uc_fail() {
+    _ucf_font="$1"; _ucf_subject="$2"
+    _uc_write_state failed "$_ucf_font" universal "$UC_FAIL"
+    _uc_log "universal failed font=$_ucf_font reason=$UC_FAIL detail=$UC_FAIL_DETAIL"
+    _ucf_message="通用引擎无法应用该${_ucf_subject}，当前字体未改变"
+    [ -z "$UC_FAIL_DETAIL" ] || _ucf_message="$_ucf_message（$UC_FAIL_DETAIL）"
+    printf '{"status":"error","reason":"%s","message":"%s"}\n' "$UC_FAIL" \
+        "$(printf '%s' "$_ucf_message" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    return 1
+}
+
+# Restoring the system font stages an empty next payload; next_boot_payload.sh
+# activates it in default mode and clears Universal runtime state.
+_uc_switch_default() {
+    _ucd_live=$(head -n1 "$CONFIG_DIR/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    # The font running in this boot, not a selection that is only queued.
+    for _ucd_queued in "$CONFIG_DIR/universal-font-next.conf" "$CONFIG_DIR/font-payload-next.conf"; do
+        if [ -s "$_ucd_queued" ]; then
+            _ucd_previous=$(_uc_value "$_ucd_queued" previousFont)
+            [ -z "$_ucd_previous" ] || _ucd_live="$_ucd_previous"
+            break
+        fi
+    done
+    [ -n "$_ucd_live" ] || _ucd_live=default
+    _uc_progress 40 "正在准备恢复系统字体"
+    _uc_prepare_empty_next || {
+        printf '{"status":"error","message":"无法准备系统字体负载，当前字体未改变"}\n'
+        return 1
+    }
+    rm -f "$CONFIG_DIR/universal-font-next.conf" 2>/dev/null || true
+    {
+        printf 'state=prepared\nfont=default\npreviousFont=%s\npreviousLegacy=false\n' "$_ucd_live"
+        printf 'targetMode=default\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$CONFIG_DIR/font-payload-next.conf.tmp.$$" 2>/dev/null && \
+        mv -f "$CONFIG_DIR/font-payload-next.conf.tmp.$$" "$CONFIG_DIR/font-payload-next.conf" 2>/dev/null || {
+            rm -f "$CONFIG_DIR/font-payload-next.conf.tmp.$$" "$CONFIG_DIR/font-payload-next.conf" 2>/dev/null || true
+            rm -rf "$MODDIR/.luoshu-payload-next" 2>/dev/null || true
+            printf '{"status":"error","message":"无法保存系统字体请求，当前字体未改变"}\n'
+            return 1
+        }
+    chmod 0644 "$CONFIG_DIR/font-payload-next.conf" 2>/dev/null || true
+    printf 'default\n' > "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
+    {
+        printf 'font=default\nreason=next-boot-payload-prepared\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$CONFIG_DIR/text_reboot_required.conf" 2>/dev/null || true
+    chmod 0644 "$CONFIG_DIR/active_font.conf" "$CONFIG_DIR/text_reboot_required.conf" 2>/dev/null || true
+    _uc_write_state staged default universal ready-next-boot
+    _uc_progress 96 "系统字体已准备，完整重启后生效"
+    printf '{"status":"ok","data":{"font":"default","rebootRequired":true,"pipeline":"universal-default"}}\n'
+    return 0
+}
+
 _uc_switch() {
     _uc_font="$1"
     [ -n "$_uc_font" ] || { printf '{"status":"error","message":"未指定字体"}\n'; return 1; }
     # A new explicit user choice supersedes any previously staged automatic rollback.
     rm -f "$ROLLBACK_STATE" 2>/dev/null || true
 
-    # System default and composite temporary families stay on the proven legacy
-    # production path during controlled rollout.
     if [ "$_uc_font" = default ]; then
-        _uc_legacy "$_uc_font" default-font
+        _uc_switch_default
         return $?
     fi
+    # Composites have their own entry (universal_composite.sh); the legacy
+    # composite runtime and its temporary families are retired.
     if [ -n "${LUOSHU_REAL_MODDIR:-}" ]; then
-        _uc_legacy "$_uc_font" composite-runtime
-        return $?
+        printf '{"status":"error","message":"旧组合运行时已停用，请在组合页面重新应用"}\n'
+        return 1
     fi
     case "$_uc_font" in
-        mix|LuoShuAutoMix|LuoShuMix*) _uc_legacy "$_uc_font" composite-family; return $? ;;
+        mix|LuoShuAutoMix|LuoShuMix*)
+            printf '{"status":"error","message":"组合字体请在组合页面应用"}\n'
+            return 1
+            ;;
     esac
 
     _uc_universal "$_uc_font" && return 0
-    _uc_legacy "$_uc_font" "$UC_FAIL"
-    return $?
+    _uc_fail "$_uc_font" 字体
 }
 
 # Composite (mix) switch from universal_composite.sh. There is no legacy
@@ -250,13 +278,7 @@ _uc_switch_composite() {
     }
     rm -f "$ROLLBACK_STATE" 2>/dev/null || true
     _uc_universal mix && return 0
-    _uc_write_state failed mix universal "$UC_FAIL"
-    _uc_log "composite failed reason=$UC_FAIL detail=$UC_FAIL_DETAIL"
-    _ucc_message="通用引擎无法应用该组合，当前字体未改变"
-    [ -z "$UC_FAIL_DETAIL" ] || _ucc_message="$_ucc_message（$UC_FAIL_DETAIL）"
-    printf '{"status":"error","reason":"%s","message":"%s"}\n' "$UC_FAIL" \
-        "$(printf '%s' "$_ucc_message" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-    return 1
+    _uc_fail mix 组合
 }
 
 _uc_write_rollback_state() {

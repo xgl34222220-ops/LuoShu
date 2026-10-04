@@ -320,6 +320,16 @@ Cutover readiness gate 必须至少满足：
 - rollback 自身如果再次验证失败，只报告 FAIL 并保留诊断材料，禁止在两个 payload 之间无限来回
 - legacy/default payload 重新接管时必须清除 Universal runtime 状态，避免旧 payload 被 Universal Mount Backend 错误解释
 
+> **2026-10 更新（维护者决定）**：旧引擎自动回退已停用。单字体、组合字体与恢复系统字体全部只走通用引擎；通用引擎无法安全应用时直接报错（附闸门/准备阶段原因），不暂存任何负载，当前字体与已排队请求保持不变。上文第 2、4、8 条及“生产回退要求”中“回退旧引擎”的部分由此取代；Phase 8 验证失败后恢复上一生产负载的回滚机制保留。旧引擎代码暂留在包内但不再被调用，待真机矩阵通过后删除。
+
+### Phase 10 — Role-Assigned Composite
+状态：**已实现，待真机验证**（方案与分步提交见 `docs/UNIVERSAL_COMPOSITE_PLAN.md`）
+
+- App 组合入口 `font_mix_controller.sh` → `universal_composite.sh`，沿用原任务协议，不再进入 `.legacy-v14-runtime`、不再预合成 9 个字重
+- 源字体档案记录中/英/数分工与每个角色的 auto/fixed 模式；FontPlan 只在被指派的字体中选源（`compositeSources`）
+- 编译器 `composite-shell` 按旧组合引擎的 LATIN/DIGIT 码位集合从对应字体取字形，其余跟随中文基底；单一 auto 可变来源的槽位共用 `source-variable-preserve` 产物
+- 组合失败不回退旧引擎
+
 ## 当前迁移策略
 
 旧的 HyperOS / ColorOS / Generic 路由暂时保留，只作为“当前生产实现”。

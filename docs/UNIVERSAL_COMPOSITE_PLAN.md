@@ -1,6 +1,6 @@
 # 组合字体接入通用字体引擎：方案（草案）
 
-状态：**方案，未实现**。前提：单字体切换在 HyperOS 3 / ColorOS 16 真机上已确认新引擎稳定接管（见 `docs/UNIVERSAL_ENGINE_PERF_20261004.md` 的待验证项）。
+状态：**方案 B 已实现（B1–B4），待真机验证**。维护者决定组合与单字体都不再回退旧引擎（见 `docs/UNIVERSAL_FONT_ENGINE_REFACTOR.md` Phase 10）。
 
 所属阶段：Phase 9 之后的扩展，记为 **Phase 10 — Role-Assigned Composite**。按路线图“变更纪律”，实施前先在 `docs/UNIVERSAL_FONT_ENGINE_REFACTOR.md` 登记。
 
