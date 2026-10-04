@@ -2,7 +2,7 @@
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from app_axis_gate import slot_chooser, clickable_text_targets, detail_headings
+from app_axis_gate import slot_chooser, clickable_text_targets, detail_headings, library_preflight_ok
 from app_library_gate import PACKAGE
 
 
@@ -23,6 +23,33 @@ def tree(extra='', enabled='true'):
 
 
 class AppAxisSelectorTest(unittest.TestCase):
+    def test_live_preflight_rejects_missing_stale_failed_or_replaced_session(self):
+        import copy
+        from test_verdict import valid_delivery
+        value=valid_delivery()['app_axes']['library_preflight']
+        self.assertTrue(library_preflight_ok(value,'123'))
+        self.assertFalse(library_preflight_ok({},'123'))
+        for change in ('unverified','failed-request','different-pid','stale-request','missing-detail'):
+            changed=copy.deepcopy(value);sample=changed['samples'][0]
+            if change=='unverified':sample['verified']=False
+            elif change=='failed-request':sample['request_timings'][0]['code']=124
+            elif change=='different-pid':sample['pid']='456'
+            elif change=='stale-request':sample['request_timings'][0]['completed_at_ms']=0
+            else:sample['request_timings'][0]['phases'].pop('inventory_detail')
+            self.assertFalse(library_preflight_ok(changed,'123'),change)
+
+    def test_same_click_moves_outside_actual_fresh_chooser_during_loading(self):
+        import re
+        original=ET.parse(Path(__file__).with_name('fixtures')/'axis-loading-37184908266.xml').getroot()
+        loaded=ET.parse(Path(__file__).with_name('fixtures')/'axis-loaded-37184908266.xml').getroot()
+        initial,_=slot_chooser(original,'中文基底',['LuoShuAxisGate','LuoShuSyntheticGate0000','LuoShuSyntheticGate0001'])
+        final,_=slot_chooser(loaded,'中文基底',['LuoShuAxisGate','LuoShuSyntheticGate0000','LuoShuSyntheticGate0001'])
+        from android_ui_smoke import center
+        x,y=center(initial);left,top,right,bottom=map(int,re.findall(r'\d+',final.get('bounds')))
+        self.assertFalse(left <= x <= right and top <= y <= bottom)
+        self.assertEqual((x,y),(540,1164))
+        self.assertEqual(final.get('bounds'),'[95,1179][985,1359]')
+
     def test_actual_recorded_summary_and_detail_titles_bind_only_to_detail(self):
         # Replay protects selection logic; it is not a new Android execution.
         raw = Path(__file__).with_name('fixtures') / 'axis-navigation-37160499707.xml'

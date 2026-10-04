@@ -1,0 +1,19 @@
+{
+  "environment": "HOST_SYNTHETIC_AND_RAW_XML_REPLAY",
+  "result": "PASS",
+  "total_tests": 128,
+  "new_methods": 2,
+  "source_failure_run": 37184908266,
+  "actual_failure_frames": [
+    "fixtures/axis-loading-37184908266.xml",
+    "fixtures/axis-loaded-37184908266.xml"
+  ],
+  "guards": [
+    "Actual old tap lies outside next loaded chooser bounds",
+    "Missing, unverified, failed, stale, wrong-PID or incomplete-detail preflight cannot pass"
+  ],
+  "runtime_candidate": "57aa02ed950a50d054cb1596021a51df0349d0d8",
+  "runtime_changes": false,
+  "android_acceptance": "NOT_YET_EXECUTED",
+  "raw_log": "evidence/axis-preflight-harness-host-20261004.txt"
+}

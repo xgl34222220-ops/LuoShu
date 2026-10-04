@@ -1,0 +1,93 @@
+{
+  "evidence_kind": "FRESH_ANDROID_FAILURE_WITH_PARTIAL_PASS",
+  "run_id": 37184908266,
+  "error": "Actual App axis navigation failed at original-axis-fixture-row: One exact fixture row is required",
+  "stock_error": {
+    "schema": "luoshu-stock-error-contract-v1",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "result": "PASS",
+    "cases": [
+      {
+        "name": "chinese-quotes-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-unicode-escapes",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-top-level-message",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-message-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-only-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "last-valid-log-record",
+        "result": "PASS"
+      },
+      {
+        "name": "control-characters",
+        "result": "PASS"
+      },
+      {
+        "name": "plain-log-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "unavailable-helper-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "empty-default-error",
+        "result": "PASS"
+      },
+      {
+        "name": "nonstring-message-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "success-stays-success",
+        "result": "PASS"
+      },
+      {
+        "name": "zero-exit-without-inventory-fails",
+        "result": "PASS"
+      }
+    ],
+    "tested_scope": "CURRENT_ERROR_ROUTER_FUNCTION_NOT_FULL_STOCK_SCAN",
+    "case_count": 14,
+    "helper_sha256": "cb5f5098e2180578d7b71beb97fd842bebef6a3e99cd5bc0be12c934917c344f",
+    "boot_id": "550d4384-8aeb-4a26-8551-d041ae0fe535",
+    "selinux": "Enforcing"
+  },
+  "app_axes_result": "FAIL",
+  "axis_frames": 43,
+  "observed_tap": [
+    540,
+    1164
+  ],
+  "placeholder_bounds": "[95,1101][985,1227]",
+  "next_loaded_bounds": "[95,1179][985,1359]",
+  "interpretation": "Adjacent frames and actual input command are consistent with async-loading coordinate drift; exact click-time frame was not captured",
+  "library_timings_reached": false,
+  "actual_anr_diagnostic": "NOT_AVAILABLE",
+  "initial_unrooted_app": "PASS",
+  "final_workspace": {
+    "result": "PASS",
+    "entries": [],
+    "delayed_recheck_seconds": 1
+  },
+  "root_policy_revoked": true
+}

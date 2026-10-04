@@ -9,7 +9,25 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
 from android_ui_smoke import bounds, center, tab_target, crash_reason
 from adb_ui import dump_ui
-from app_library_gate import candidate_notification_deny, PACKAGE
+from app_library_gate import candidate_notification_deny, PACKAGE, measure
+from inventory_timings import verified_timing
+
+
+def library_preflight_ok(value, pid=None):
+    """The same live-verified App session must be ready before axis selection."""
+    try:
+        samples = value.get('samples', [])
+        count = value.get('inventory_count')
+        return (value.get('result') == 'PASS' and type(count) is int and count > 0 and len(samples) == 2
+                and {(s.get('kind'), s.get('repetition')) for s in samples} == {('app_start',0),('library_open',0)}
+                and len({s.get('pid') for s in samples}) == 1
+                and all(str(s.get('pid', '')).isdigit() and (pid is None or s['pid'] == pid)
+                        and s.get('count') == count and s.get('verified') is True
+                        and s.get('target_fatal') is False and s.get('anr') is False
+                        and verified_timing(s.get('request_timings'), s.get('start_ms',0), count)
+                        for s in samples))
+    except (TypeError, KeyError, ValueError, AttributeError):
+        return False
 
 
 def clickable_text_targets(tree, texts):
@@ -142,9 +160,14 @@ def qualify(adb, output, font_name, font_names):
         raise RuntimeError('Actual App axis navigation failed at ' + stage + ': ' + last_error)
 
     try:
-        run('shell', 'am', 'force-stop', PACKAGE)
+        # A placeholder chooser can move while the first real inventory and
+        # persisted mix configuration arrive. Complete the existing actual-App
+        # live verification first, then keep that same ready process/session.
+        report['library_preflight'] = measure(adb, output / 'library-preflight',
+                                               len(font_names), repetitions=1)
+        if not library_preflight_ok(report['library_preflight']):
+            raise RuntimeError('Actual App live library preflight did not complete')
         run('logcat', '-c')
-        run('shell', 'am', 'start', '-W', '-n', PACKAGE + '/io.github.xgl34222220.luoshu.MainActivity')
         tap(wait_for(lambda tree: tab_target(tree, '组合', PACKAGE), 'composition-tab'))
         tap(wait_for(lambda tree: slot_chooser(tree, '中文基底', font_names)[0], 'detailed-cjk-chooser'))
 

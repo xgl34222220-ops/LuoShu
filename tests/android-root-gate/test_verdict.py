@@ -94,6 +94,8 @@ def valid_delivery():
         'target_fatal': False, 'anr': False, 'hidden_axis_visible': False, 'cjk_card_scanned_to_next_slot': True,
         'next_slot_detail_bounds': '[0,150][200,190]',
         'observed_labels': ['字宽', '纹理细节', 'XTRA', '可变字体', '英文字形']}
+    report['app_axes']['library_preflight'] = copy.deepcopy(report['final_ui']['observations'])
+    report['app_axes']['library_preflight'].update(result='PASS', inventory_count=1000)
     source = {'snapshot_digest': 'b'*64, 'source_fingerprint': 'font-selection-v1:' + 'c'*64}
     report['app_apply']['input_events'] = [dict(identity, event='snapshot', **source),
         dict(identity, event='full_validation', valid=True, code=0),

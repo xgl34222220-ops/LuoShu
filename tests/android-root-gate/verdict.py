@@ -255,6 +255,9 @@ def delivery_blockers(report):
     errors.extend(stock_error_blockers(report.get('magisk_stock_error')))
     errors.extend(axis_metadata_blockers(report.get('axis_metadata')))
     axes_ui = report.get('app_axes', {})
+    from app_axis_gate import library_preflight_ok
+    if not library_preflight_ok(axes_ui.get('library_preflight', {}), axes_ui.get('actual_app_pid')):
+        errors.append('fresh verified App library preflight missing before axis selection')
     observed = axes_ui.get('observed_labels', [])
     imported = axes_ui.get('import_result', {})
     imported_data = imported.get('data', {})

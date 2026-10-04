@@ -51,6 +51,11 @@ distinct kernel reboots and seven actual mount views. Earlier pinned harnesses
 retain their fourteen/six contract; a historical PASS never acquires App
 composite coverage.
 
+Axis-preflight harness versions first complete two actual App library requests
+in the same App process before entering the axis picker. Their preserved timing
+JSON and raw cold/warm request logs must agree. These two fixture-setup samples
+are separate from the fourteen 100/1000/final performance samples.
+
 Exit 0 means this artifact passed these checks. Exit 1 with a FAIL JSON means
 preserved evidence blocks acceptance. Invalid inputs or a mismatched digest
 abort before writing a success report. Artifact replay is not a new Android run.

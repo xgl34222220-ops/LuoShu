@@ -18,6 +18,8 @@ sys.path.insert(0, str(gate_root))
 from verdict import delivery_blockers, qualification_blockers, preflight_blockers
 from module_gate import payload_mount_proof
 from app_axis_gate import detail_headings
+import app_axis_gate as axis_gate
+requires_axis_preflight = hasattr(axis_gate, 'library_preflight_ok')
 requires_app_composite = (gate_root / 'app_composite_gate.py').is_file()
 if requires_app_composite:
     from app_composite_gate import verify_ui_artifact
@@ -225,6 +227,24 @@ with zipfile.ZipFile(path) as z:
     ui = report('app-axes/report.json')
     if any(axes.get(k) != v for k, v in ui.items()):
         errors.append('App axis report differs from preserved original UI report')
+    preflight_samples_verified = 0
+    if requires_axis_preflight:
+        preflight = ui.get('library_preflight', {})
+        try:
+            if report('app-axes/library-preflight/timing.json') != preflight:
+                errors.append('axis preflight report differs from original actual-App timing file')
+            import inventory_timings as axis_timings
+            for sample in preflight.get('samples', []):
+                kind = 'cold' if sample.get('kind') == 'app_start' else 'warm'
+                name = 'app-axes/library-preflight/' + kind + '-0.log'
+                actual = axis_timings.request_timings(read(name), sample.get('start_ms', 0))
+                if actual == sample.get('request_timings') and axis_timings.verified_timing(
+                        actual, sample.get('start_ms', 0), sample.get('count')):
+                    preflight_samples_verified += 1
+            if preflight_samples_verified != 2:
+                errors.append('two fresh same-session App axis preflight requests not proven from raw logs')
+        except (KeyError, TypeError, ValueError) as error:
+            errors.append('mandatory App axis preflight raw evidence missing or invalid: ' + str(error))
     labels = set()
     actual_detail_endpoints = set()
     for frame in ui.get('frames', []):
@@ -298,6 +318,7 @@ with zipfile.ZipFile(path) as z:
         actual_cff2_axis_metadata=m.get('axis_metadata'), actual_app_axes=axes,
         app_axis_screenshot_sha256=sha256(screenshot).hexdigest(),
         actual_app_axis_frames_verified=len(ui.get('frames', [])),
+        actual_axis_preflight_samples_verified=preflight_samples_verified,
         raw_target_anr_files=target_anr_files, raw_blocking_dialog_files=blocking_dialog_files,
         actual_request_timing_samples_verified=actual_request_samples,
         initial_unrooted_app_smoke=runner.get('stock_app_ui'),

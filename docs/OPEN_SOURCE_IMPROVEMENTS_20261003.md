@@ -269,3 +269,15 @@ artifact `11295993991` 下载后 [独立包核验](TEST_CANDIDATE_VERIFICATION_3
 独立 verifier 新增实际选择/操作/完成 XML、截图摘要、ADB PID stdout 和新任务原始 cat stdout 的对照；完整新门禁至少要求 16 个不同内核重启与 7 组实际挂载视图。历史固定 harness 仍用其自身 14 次/6 组契约，不能把历史结果写成新 App 组合结果。Miuix/Material 产品代码、候选 `57aa02ed`、17 冻结文件、hook/权限边界全未改；第十一轮仍用其固定验收提交继续运行，本批另在同一原分支排队。
 
 [当前宿主证明](APP_COMPOSITE_GUARDS_HOST_20261004.json) 与 [原始测试输出](evidence/app-composite-harness-host-20261004.txt) 标记 HOST_SYNTHETIC_HARNESS_TESTS：新增 8 个方法后总 126 个 PASS，覆盖错误 package/重复或禁用控件、槽位外同名字体、直接应用/CLI 替代、旧任务/错来源/换启动或 PID、错误成功文字、伪造原始帧及失败后 CLI 兜底等拒绝条件。原始第八批用固定 `93b4075d` 重放仍 PASS，仅证明历史判定兼容。新 App 完整组合的 Android 结果尚未取得；截图与像素几何、原生 ARM64/OEM 真机、备份恢复 API 和不同真实字体库的未验证项保留。
+
+验收提交 [`e2dd5b16`](https://github.com/xgl34222220-ops/LuoShu/commit/e2dd5b16eb53380536dc926b98994760f115ef2b) 的 [第十二轮 Root 37185796564](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37185796564) 已于第十一轮结束后接续运行，固定同一修正候选。当前没有该轮 Android 完成结果；原任务继续跟进。
+
+## 第十三批：按本轮原始 XML 修复轴验收的异步载入时序
+
+第十一轮于 07:43 UTC 结束 **FAIL**。下载 artifact `11296349946`，独立验证外层摘要 `51b608498ecc5231033136a7e3734c278f8fa037a386f5fa722fb0b6987a0f4d`。[新失败证明](ROOT_ANDROID_FAILURE_37184908266.json) 保留本次 12 个实际内核重启、16 条规范挂载证明/2 别名、5 面真实 CFF2/CLI 组合通过与后续缺失范围。长日志修正在原 ARM64/Android shell 上实际通过全部 [14 个扫描错误函数用例](evidence/root-stock-error-37184908266.json)，包括 300 KiB、shell-looking 字面数据和同名 delimiter。32 交接/18 来源/15 当前组合错误也重新通过；并非沿用宿主或旧 Android 数字。安装 APK 已绑定新包，候选无意外原生 tombstone，App 临时政策已撤销、工作区为空、两个 AVD 回收、KVM 元数据未变，初次无 Root App 独立检查为 PASS。
+
+新的 blocker 为 `original-axis-fixture-row` 没有找到实际字体行。[失效点记录](AXIS_NAVIGATION_FAILURE_37184908266.json) 和 [载入前 XML](evidence/root-axis-loading-37184908266.xml)/[随后 XML](evidence/root-axis-loaded-37184908266.xml) 与真实 input 命令显示：脚本从占位框 `[95,1101][985,1227]` 取到点击点 `(540,1164)`；随后框变为 `[95,1179][985,1359]`，旧点击点落在其上方，选择器未打开。这个相邻帧观察符合异步载入使坐标失效；没有捕获精确点击瞬间的帧，不把推断写成目标 App ANR 的根因。实际失败诊断读取了 4 份有界系统 ANR 文件，没有找到目标 App 栈，结果 NOT_AVAILABLE；库存采样、App 应用及最终验收未到达。
+
+采用理由：上批 [AndroidX UI Automator 源码](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/test/uiautomator/uiautomator/src/main/java/androidx/test/uiautomator/UiObject2.java)/[Apache-2.0](https://github.com/androidx/androidx/blob/11ece46a49d485c7644e53cb0684a611d7a0ec10/LICENSE.txt) 的条件等待，以及 [官方文档](https://developer.android.com/training/testing/other-components/ui-automator) 对“稳定层次并不代表后台任务完成”的区分，适用于这个真实失败。脚本先复用已有实际 App 库门禁，要求当前导入夹具的冷/暖实时核查、正确数量、完整数值阶段和请求回收；保持同一已就绪 App 进程进入组合页面，不再重新冷启到占位状态。没有把固定睡眠、CLI 校验或旧缓存当作 UI 就绪，也不增加预算、改产品界面或授予新权限。
+
+独立 verifier 对新增的 2 个轴准备采样按原始日志重算，并与实际阶段 JSON 和轴 App PID 一致；原来 14 个 100/1000/最终采样继续独立要求，不能合并成新的性能样本数。新 [宿主负例证明](AXIS_PREFLIGHT_GUARDS_HOST_20261004.json) 和 [原始输出](evidence/axis-preflight-harness-host-20261004.txt) 标记 HOST_SYNTHETIC_AND_RAW_XML_REPLAY：2 个新增方法后总 128 个 PASS，覆盖这次真实 XML 的旧坐标失效，以及未核实、失败、过期、换 PID、缺少内部阶段的准备请求不得通过。17 冻结文件匹配。第十二轮仍用其固定旧脚本运行；本批将接续同一原分支和验真候选进行完整门禁，Android 结果尚待实际执行。
