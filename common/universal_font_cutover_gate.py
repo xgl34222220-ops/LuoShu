@@ -36,6 +36,20 @@ def _load(path: Path) -> dict[str, Any]:
     return value
 
 
+def _text_capable(target: dict[str, Any]) -> bool:
+    contract = target.get("targetContract") if isinstance(target.get("targetContract"), dict) else {}
+    coverage = contract.get("coverage") if isinstance(contract.get("coverage"), dict) else {}
+    for flag, count in (("hasHan", "hanCount"), ("hasLatin", "latinCount")):
+        if coverage.get(flag) is True:
+            return True
+        try:
+            if int(coverage.get(count) or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def evaluate(
     plan: dict[str, Any],
     route: dict[str, Any],
@@ -85,6 +99,11 @@ def evaluate(
             reasons.append(f"protected-role-not-preserved:{role}:{path}")
         if role == "unknown-protected" and action != "review":
             reasons.append(f"unknown-role-not-review:{path}")
+        if action == "review" and _text_capable(target):
+            # A text face the classifier could not explain (often the OEM main
+            # UI font) would silently stay stock under Universal, while the
+            # legacy switcher still covers it.
+            reasons.append(f"unclassified-text-slot:{path}")
 
     if replacement_count == 0:
         reasons.append("no-universal-replacement-targets")

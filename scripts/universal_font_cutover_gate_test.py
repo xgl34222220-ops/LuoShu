@@ -100,6 +100,31 @@ def main() -> int:
         assert rejected["eligible"] is False, rejected
         assert any("protected-role-not-preserved" in reason for reason in rejected["reasons"]), rejected
 
+        # A text face left in review (e.g. an OEM main UI font the classifier
+        # could not explain) must send the switch to the legacy engine instead
+        # of shipping a payload that silently leaves it stock.
+        unexplained = deepcopy(plan)
+        broad = deepcopy(unexplained["targets"][logical])
+        broad.update(
+            path="/system/fonts/OemBroad.ttf",
+            role="unknown-protected",
+            action="review",
+            status="review",
+        )
+        broad.pop("source", None)
+        broad["targetContract"]["coverage"] = {"hasHan": True, "hasLatin": True}
+        unexplained["targets"]["/system/fonts/OemBroad.ttf"] = broad
+        rejected = gate.evaluate(unexplained, route, artifacts, deployed, payload_root)
+        assert rejected["eligible"] is False, rejected
+        assert "unclassified-text-slot:/system/fonts/OemBroad.ttf" in rejected["reasons"], rejected
+
+        # A review slot without any text coverage stays harmless.
+        unexplained["targets"]["/system/fonts/OemBroad.ttf"]["targetContract"]["coverage"] = {}
+        rejected = gate.evaluate(unexplained, route, artifacts, deployed, payload_root)
+        assert not any(
+            reason.startswith("unclassified-text-slot:") for reason in rejected["reasons"]
+        ), rejected
+
         tampered_payload = payload_root / "system/fonts/Stock-Regular.ttf"
         tampered_payload.write_bytes(tampered_payload.read_bytes() + b"x")
         rejected = gate.evaluate(plan, route, artifacts, deployed, payload_root)
