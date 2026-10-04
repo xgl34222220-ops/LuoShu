@@ -650,6 +650,7 @@ def _replace_role_glyphs(
     *,
     only: set[int] | None = None,
     required_override: set[int] | None = None,
+    oblique: float = 0.0,
 ) -> dict[str, Any]:
     base_cmap = base.getBestCmap() or {}
     source_cmap = source.getBestCmap() or {}
@@ -716,7 +717,8 @@ def _replace_role_glyphs(
             new_advance = max(1, min(65535, int(round(float(source_advance) * float(geometry.get("upemScale") or 1.0)))))
             new_lsb = int(round(float(source_lsb) * float(geometry.get("upemScale") or 1.0)))
 
-        transform = Transform(scale_x, 0, 0, scale_y, shift_x, shift_y)
+        # oblique: synthetic slant for an italic node fed by an upright face.
+        transform = Transform(scale_x, 0, oblique * scale_y, scale_y, shift_x, shift_y)
         if base_kind == "glyf":
             bounds = _replace_glyf_outline(
                 base, source, source_glyph_set, base_name, source_name, transform
@@ -752,6 +754,7 @@ def _replace_role_glyphs(
         "replacedGlyphs": replaced,
         "exactAdvance": exact,
         "exactAdvanceMismatches": exact_mismatches,
+        **({"syntheticOblique": oblique} if oblique else {}),
     }
 
 
@@ -1445,6 +1448,25 @@ def _subset_variable_source_for_stock(source: TTFont, stock: Path, face_index: i
     return len(source.getGlyphOrder())
 
 
+# Android's own fake italic skews upright glyphs by textSkewX = -0.25.
+SYNTHETIC_OBLIQUE = 0.25
+
+
+def _node_italic(artifact: dict[str, Any]) -> bool:
+    """Whether this XML node renders italic (style, ital or slnt axis)."""
+    if str(artifact.get("requiredStyle") or "normal").lower() in {"italic", "oblique"}:
+        return True
+    axes = _axis_values(artifact.get("requiredAxes"))
+    return axes.get("ital", 0.0) >= 0.5 or abs(axes.get("slnt", 0.0)) > 0.0
+
+
+def _ensure_postscript_name(font: TTFont, required: str, artifact_id: str) -> None:
+    """XML may reference one stock file under several PostScript aliases;
+    the output carries the name its own node requires."""
+    if required and required not in template_engine.font_names(font):
+        _set_postscript_name(font, required, artifact_id)
+
+
 def _compile_stock_shell(
     target: dict[str, Any],
     artifact: dict[str, Any],
@@ -1494,21 +1516,16 @@ def _compile_stock_shell(
         base, collection = _open_stock_container(
             stock, max(0, _int(artifact.get("requiredFaceIndex"), 0))
         )
+        oblique = SYNTHETIC_OBLIQUE if _node_italic(artifact) and source_info.get("italic") is not True else 0.0
         replaced = _replace_role_glyphs(
             base,
             source_instance,
             str(target.get("role") or ""),
             geometry,
+            oblique=oblique,
         )
         _drop_stale_tables(base)
-
-        required_ps = str(artifact.get("requiredPostScriptName") or "")
-        if required_ps:
-            names = template_engine.font_names(base)
-            if required_ps not in names:
-                raise CompilerError(
-                    f"原厂目标 face 不包含 required PostScriptName：{required_ps}"
-                )
+        _ensure_postscript_name(base, str(artifact.get("requiredPostScriptName") or ""), str(artifact["artifactId"]))
 
         if collection is None:
             _save_font(base, output)
@@ -1672,24 +1689,24 @@ def _composite_required(composite_role: str, base_cmap: dict[int, str]) -> set[i
     return {cp for cp in template_engine.PROBE_GROUPS["cjk"] if cp in base_cmap}
 
 
-def _composite_pick(ref: dict[str, Any], weight: int) -> tuple[dict[str, Any], str]:
+def _composite_pick(ref: dict[str, Any], weight: int, italic: bool = False) -> tuple[dict[str, Any], str]:
     """Face for one node: the user's fixed instance, or the assigned face whose
-    weight axis reaches the node weight, else the nearest static weight."""
+    weight axis reaches the node weight, else the nearest static weight. A face
+    of the node's style is preferred; otherwise the other style is used and the
+    caller slants it."""
     if ref.get("compositeMode") == "fixed":
         return ref, "fixed"
-    italic = ref.get("italic") is True
-    best: tuple[tuple[int, float, str], dict[str, Any], str] | None = None
+    best: tuple[tuple[int, int, float, str], dict[str, Any], str] | None = None
     for candidate in ref.get("candidates") or [ref]:
-        if (candidate.get("italic") is True) != italic:
-            continue
+        style_penalty = 0 if (candidate.get("italic") is True) == italic else 1
         axis = next((a for a in candidate.get("axes") or []
                      if isinstance(a, dict) and a.get("tag") == "wght"), None)
         if candidate.get("variable") is True and axis is not None and \
                 float(axis["min"]) <= weight <= float(axis["max"]):
-            key, how = (0, 0.0, str(candidate.get("uid") or "")), "variable"
+            key, how = (style_penalty, 0, 0.0, str(candidate.get("uid") or "")), "variable"
         else:
             distance = float(abs((_int(candidate.get("weight"), 400) or 400) - weight))
-            key, how = (1, distance, str(candidate.get("uid") or "")), "nearest-static"
+            key, how = (style_penalty, 1, distance, str(candidate.get("uid") or "")), "nearest-static"
         if best is None or key < best[0]:
             best = (key, candidate, how)
     if best is None:
@@ -1780,7 +1797,8 @@ def _compile_composite_shell(
             wanted = classes.get(composite_role, set())
             if not isinstance(ref, dict) or not wanted:
                 continue
-            candidate, how = _composite_pick(ref, weight)
+            italic = _node_italic(artifact)
+            candidate, how = _composite_pick(ref, weight, italic)
             instance, info = _composite_instance(candidate, how, ref, weight, route_axes, wanted, temp_root)
             instances.append(instance)
             geometry = _geometry_plan(target, stock_profile, _profile_from_font(instance), weight)
@@ -1788,14 +1806,13 @@ def _compile_composite_shell(
                 base, instance, role, geometry,
                 only=wanted,
                 required_override=_composite_required(composite_role, base_cmap) & wanted,
+                oblique=SYNTHETIC_OBLIQUE if italic and candidate.get("italic") is not True else 0.0,
             )
             reports[composite_role] = dict(info, replaced=replaced, geometry=geometry)
         if not reports:
             raise CompilerError("组合目标没有可替换的字形类别")
         _drop_stale_tables(base)
-        required_ps = str(artifact.get("requiredPostScriptName") or "")
-        if required_ps and required_ps not in template_engine.font_names(base):
-            raise CompilerError(f"原厂目标 face 不包含 required PostScriptName：{required_ps}")
+        _ensure_postscript_name(base, str(artifact.get("requiredPostScriptName") or ""), str(artifact.get("artifactId") or ""))
         if collection is None:
             _save_font(base, output)
         else:
@@ -1865,7 +1882,7 @@ def _choose_mode(
     target_format = str(contract.get("format") or "").upper()
     source_kind = "cff" if "CFF" in source_format else "glyf"
     target_kind = "cff" if target_format == "OTF" else "glyf"
-    if source_kind == target_kind:
+    if source_kind == target_kind and not (_node_italic(artifact) and source.get("italic") is not True):
         return "source-as-base"
     return "stock-shell"
 
@@ -1906,9 +1923,12 @@ def _compile_unit(
                 # instance; variable groups and composites resolve the source
                 # per XML node weight instead.
                 continue
+            if risk == "italic-style-mismatch":
+                # Slot-level: set when any XML node of the file is italic. Each
+                # node's style is resolved below (synthetic slant if needed).
+                continue
             if risk in {
                 "static-weight-fallback",
-                "italic-style-mismatch",
                 "source-weight-axis-out-of-range",
             }:
                 raise CompilerError(f"FontPlan 风险不能由编译器安全消除：{risk}")

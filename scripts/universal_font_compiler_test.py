@@ -18,6 +18,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
 
+import device_font_template as template_engine
 import font_inventory
 import font_source_profile
 import minimal_xml_router
@@ -581,6 +582,46 @@ def main() -> int:
         )
         assert_ready(thin_manifest)
         assert thin_manifest["artifacts"][0]["mode"] == "source-variable-preserve"
+
+        # 12) One stock file referenced upright and italic (with a PostScript
+        #     alias the file does not carry), user font upright only: both
+        #     nodes compile; the italic node is slanted like Android's fake
+        #     italic and the output carries the alias it was routed under.
+        italic_stock = temp / "StockStyled.ttf"
+        make_font(italic_stock, family="Stock Styled", y_min=-100, y_max=720)
+        italic_xml = temp / "italic.xml"
+        italic_xml.write_text(
+            '<familyset><family name="sans-serif">'
+            '<font weight="400" style="normal">StockStyled.ttf</font>'
+            '<font weight="400" style="italic" postScriptName="StockAlias-Italic">StockStyled.ttf</font>'
+            '</family></familyset>',
+            encoding="utf-8",
+        )
+        italic_logical = "/system/fonts/StockStyled.ttf"
+        italic_slot = slot_from_stock(
+            italic_logical, italic_stock, family="sans-serif",
+            source_xml="/system/etc/italic.xml", declared="StockStyled.ttf",
+        )
+        italic_slot["xmlRefs"] = [
+            italic_slot["xmlRefs"][0],
+            dict(italic_slot["xmlRefs"][0], style="italic", postScriptName="StockAlias-Italic"),
+        ]
+        italic_plan, italic_route = build_plans(source, italic_slot, "latin", italic_xml)
+        assert "italic-style-mismatch" in italic_plan["targets"][italic_logical]["risks"]
+        italic_manifest = compiler.compile_all(
+            italic_plan, italic_route, {italic_logical: italic_stock}, temp / "out-italic", False
+        )
+        assert_ready(italic_manifest)
+        by_style = {item["contract"]["requiredStyle"]: item for item in italic_manifest["artifacts"]}
+        assert by_style["italic"]["mode"] == "stock-shell", by_style["italic"]
+        assert by_style["italic"]["report"]["replaced"]["syntheticOblique"] == compiler.SYNTHETIC_OBLIQUE
+        assert "syntheticOblique" not in (by_style["normal"]["report"].get("replaced") or {})
+        with TTFont(by_style["italic"]["output"]) as built:
+            coords = list(built["glyf"][built.getBestCmap()[ord("H")]].coordinates)
+            bottom = [x for x, y in coords if y < 0]
+            top = [x for x, y in coords if y > 600]
+            assert min(top) - min(bottom) > 150, coords  # slanted, not upright
+            assert "StockAlias-Italic" in template_engine.font_names(built)
 
         # 10) A second compile into the same directory reuses ready artifacts
         #     byte-for-byte, yields the same manifestId and prunes stale files.
