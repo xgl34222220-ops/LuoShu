@@ -148,6 +148,73 @@ _uc_paths() {
     [ -s "$UC_PLAN" ] && [ -s "$UC_ROUTE" ] && [ -s "$UC_ARTIFACTS" ] && [ -s "$UC_DEPLOYMENT" ] && [ -d "$UC_PAYLOAD" ]
 }
 
+# Runs Universal prepare -> readiness gate -> stage-next for one family key.
+# Returns 0 after staging (stage JSON on stdout). On failure nothing has been
+# staged; UC_FAIL holds a reason code and UC_FAIL_DETAIL a short diagnostic.
+_uc_universal() {
+    _uc_font="$1"
+    UC_FAIL=''
+    UC_FAIL_DETAIL=''
+    if ! _uc_precondition; then
+        UC_FAIL=universal-precondition-missing
+        return 1
+    fi
+
+    _uc_write_state preparing "$_uc_font" universal preparing
+    _uc_progress 8 "通用引擎正在分析设备字体拓扑"
+    _uc_budget=$(_uc_budget_seconds)
+    _uc_started=$(date +%s 2>/dev/null || echo 0)
+    _uc_log "universal prepare start font=$_uc_font budget=${_uc_budget}s"
+    # The compiler stops before starting a unit past this deadline.
+    _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
+        LUOSHU_UNIVERSAL_DEADLINE=$((_uc_started + _uc_budget)) \
+        sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
+    _uc_prepare_rc=$?
+    _uc_log "universal prepare finished font=$_uc_font rc=$_uc_prepare_rc elapsed=$(( $(date +%s 2>/dev/null || echo 0) - _uc_started ))s"
+    if [ "$_uc_prepare_rc" -ne 0 ]; then
+        _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
+        UC_FAIL=universal-prepare-failed
+        UC_FAIL_DETAIL=$(printf '%s\n' "$_uc_prepare_output" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tail -n1)
+        return 1
+    fi
+
+    _uc_progress 72 "正在检查正式接管安全条件"
+    if ! _uc_paths "$_uc_font"; then
+        UC_FAIL=universal-artifacts-missing
+        return 1
+    fi
+
+    _uc_gate_output=$(_uc_python "$GATE" \
+        --font-plan "$UC_PLAN" \
+        --route-plan "$UC_ROUTE" \
+        --artifact-manifest "$UC_ARTIFACTS" \
+        --deployment "$UC_DEPLOYMENT" \
+        --payload-root "$UC_PAYLOAD" 2>&1)
+    _uc_gate_rc=$?
+    _uc_log "gate font=$_uc_font rc=$_uc_gate_rc result=$_uc_gate_output"
+    if [ "$_uc_gate_rc" -ne 0 ] || ! printf '%s' "$_uc_gate_output" | grep -q '"eligible":true'; then
+        UC_FAIL=universal-readiness-gate-rejected
+        UC_FAIL_DETAIL=$(printf '%s' "$_uc_gate_output" | sed -n 's/.*"reasons":\["\([^"]*\)".*/\1/p' | head -n1)
+        return 1
+    fi
+
+    _uc_progress 88 "通用引擎验证通过，正在准备下一次启动"
+    _uc_stage_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" sh "$DEPLOYMENT" stage-prepared "$_uc_font" 2>&1)
+    _uc_stage_rc=$?
+    if [ "$_uc_stage_rc" -ne 0 ] || ! printf '%s' "$_uc_stage_output" | grep -q '"status":"ok"'; then
+        _uc_log "universal stage failed font=$_uc_font rc=$_uc_stage_rc output=$_uc_stage_output"
+        UC_FAIL=universal-stage-failed
+        return 1
+    fi
+
+    _uc_write_state staged "$_uc_font" universal ready-next-boot
+    _uc_progress 96 "通用字体负载已准备，完整重启后自动验收"
+    printf '%s\n' "$_uc_stage_output"
+    return 0
+}
+
 _uc_switch() {
     _uc_font="$1"
     [ -n "$_uc_font" ] || { printf '{"status":"error","message":"未指定字体"}\n'; return 1; }
@@ -168,63 +235,28 @@ _uc_switch() {
         mix|LuoShuAutoMix|LuoShuMix*) _uc_legacy "$_uc_font" composite-family; return $? ;;
     esac
 
-    if ! _uc_precondition; then
-        _uc_legacy "$_uc_font" universal-precondition-missing
-        return $?
-    fi
+    _uc_universal "$_uc_font" && return 0
+    _uc_legacy "$_uc_font" "$UC_FAIL"
+    return $?
+}
 
-    _uc_write_state preparing "$_uc_font" universal preparing
-    _uc_progress 8 "通用引擎正在分析设备字体拓扑"
-    _uc_budget=$(_uc_budget_seconds)
-    _uc_started=$(date +%s 2>/dev/null || echo 0)
-    _uc_log "universal prepare start font=$_uc_font budget=${_uc_budget}s"
-    # The compiler stops before starting a unit past this deadline so the
-    # legacy fallback still has the rest of the switch timeout to finish.
-    _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
-        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
-        LUOSHU_UNIVERSAL_DEADLINE=$((_uc_started + _uc_budget)) \
-        sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
-    _uc_prepare_rc=$?
-    _uc_log "universal prepare finished font=$_uc_font rc=$_uc_prepare_rc elapsed=$(( $(date +%s 2>/dev/null || echo 0) - _uc_started ))s"
-    if [ "$_uc_prepare_rc" -ne 0 ]; then
-        _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
-        _uc_legacy "$_uc_font" universal-prepare-failed
-        return $?
-    fi
-
-    _uc_progress 72 "正在检查正式接管安全条件"
-    if ! _uc_paths "$_uc_font"; then
-        _uc_legacy "$_uc_font" universal-artifacts-missing
-        return $?
-    fi
-
-    _uc_gate_output=$(_uc_python "$GATE" \
-        --font-plan "$UC_PLAN" \
-        --route-plan "$UC_ROUTE" \
-        --artifact-manifest "$UC_ARTIFACTS" \
-        --deployment "$UC_DEPLOYMENT" \
-        --payload-root "$UC_PAYLOAD" 2>&1)
-    _uc_gate_rc=$?
-    _uc_log "gate font=$_uc_font rc=$_uc_gate_rc result=$_uc_gate_output"
-    if [ "$_uc_gate_rc" -ne 0 ] || ! printf '%s' "$_uc_gate_output" | grep -q '"eligible":true'; then
-        _uc_legacy "$_uc_font" universal-readiness-gate-rejected
-        return $?
-    fi
-
-    _uc_progress 88 "通用引擎验证通过，正在准备下一次启动"
-    _uc_stage_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
-        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" sh "$DEPLOYMENT" stage-prepared "$_uc_font" 2>&1)
-    _uc_stage_rc=$?
-    if [ "$_uc_stage_rc" -ne 0 ] || ! printf '%s' "$_uc_stage_output" | grep -q '"status":"ok"'; then
-        _uc_log "universal stage failed font=$_uc_font rc=$_uc_stage_rc output=$_uc_stage_output"
-        _uc_legacy "$_uc_font" universal-stage-failed
-        return $?
-    fi
-
-    _uc_write_state staged "$_uc_font" universal ready-next-boot
-    _uc_progress 96 "通用字体负载已准备，完整重启后自动验收"
-    printf '%s\n' "$_uc_stage_output"
-    return 0
+# Composite (mix) switch from universal_composite.sh. There is no legacy
+# fallback here: if Universal cannot apply the composite, report why and leave
+# the current and any queued font untouched.
+_uc_switch_composite() {
+    [ -s "$CONFIG_DIR/universal-composite.conf" ] || {
+        printf '{"status":"error","message":"组合字体设置缺失"}\n'
+        return 1
+    }
+    rm -f "$ROLLBACK_STATE" 2>/dev/null || true
+    _uc_universal mix && return 0
+    _uc_write_state failed mix universal "$UC_FAIL"
+    _uc_log "composite failed reason=$UC_FAIL detail=$UC_FAIL_DETAIL"
+    _ucc_message="通用引擎无法应用该组合，当前字体未改变"
+    [ -z "$UC_FAIL_DETAIL" ] || _ucc_message="$_ucc_message（$UC_FAIL_DETAIL）"
+    printf '{"status":"error","reason":"%s","message":"%s"}\n' "$UC_FAIL" \
+        "$(printf '%s' "$_ucc_message" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    return 1
 }
 
 _uc_write_rollback_state() {
@@ -420,11 +452,12 @@ _uc_schedule_rollback() {
 
 case "${1:-switch}" in
     switch) _uc_switch "${2:-}" ;;
+    switch-composite) _uc_switch_composite ;;
     rollback-from-fail) _uc_schedule_rollback "${2:-}" ;;
     status)
         if [ -s "$CUTOVER_STATE" ]; then cat "$CUTOVER_STATE"
         else printf 'state=idle\ndecision=none\n'
         fi
         ;;
-    *) echo "Usage: $0 {switch|rollback-from-fail|status} [font-family|boot-id]" >&2; exit 2 ;;
+    *) echo "Usage: $0 {switch|switch-composite|rollback-from-fail|status} [font-family|boot-id]" >&2; exit 2 ;;
 esac

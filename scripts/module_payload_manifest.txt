@@ -129,6 +129,7 @@ common/universal_font_runtime_verify.py
 common/universal_font_runtime_verify.sh
 common/universal_font_cutover_gate.py
 common/universal_font_cutover.sh
+common/universal_composite.sh
 common/weighted_mix_task.sh
 common/python
 .luoshu-runtime

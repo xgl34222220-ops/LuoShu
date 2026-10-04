@@ -10,9 +10,15 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 export MODDIR
+UNIVERSAL_MIX="$MODDIR/common/universal_composite.sh"
 LEGACY_V14_MIX="$MODDIR/common/legacy_v14_4/mix_router.sh"
 case "${1:-config}" in
     start|config|status|recover|reconcile)
+        # Composites run on the Universal engine; it reports an error instead
+        # of falling back to the legacy runtime.
+        if [ -f "$UNIVERSAL_MIX" ]; then
+            exec sh "$UNIVERSAL_MIX" "$@"
+        fi
         if [ -f "$LEGACY_V14_MIX" ]; then
             exec sh "$LEGACY_V14_MIX" "$@"
         fi
