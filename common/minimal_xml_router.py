@@ -440,6 +440,128 @@ def _artifact_contract(font_plan: dict[str, Any], target: dict[str, Any], node: 
     }
 
 
+VARIABLE_GROUP_ROLES = {"ui-sans", "cjk", "latin"}
+VARIABLE_GROUP_TARGET_FORMATS = {"TTF", "TTC"}
+
+
+def _source_axis_ranges(target: dict[str, Any]) -> dict[str, tuple[float, float]]:
+    source = target.get("source") if isinstance(target.get("source"), dict) else {}
+    result: dict[str, tuple[float, float]] = {}
+    for axis in source.get("axes") or []:
+        if not isinstance(axis, dict):
+            continue
+        try:
+            result[str(axis.get("tag") or "")] = (float(axis["min"]), float(axis["max"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    result.pop("", None)
+    return result
+
+
+def _variable_group_key(target: dict[str, Any], node: dict[str, Any]) -> tuple[Any, ...] | None:
+    """Key under which XML nodes may share one variable artifact, or None.
+
+    Android instantiates a variable font from each <font>'s <axis> children at
+    runtime, so nodes that differ only in axis values can point at one
+    variable-preserving artifact instead of one static instance per node. Only
+    nodes the source's own axes can reach qualify; the rest keep per-node
+    compilation.
+    """
+    if str(target.get("role") or "") not in VARIABLE_GROUP_ROLES:
+        return None
+    contract = target.get("targetContract") if isinstance(target.get("targetContract"), dict) else {}
+    if contract.get("variable") is not True:
+        return None
+    if str(contract.get("format") or "").upper() not in VARIABLE_GROUP_TARGET_FORMATS:
+        return None
+    source = target.get("source") if isinstance(target.get("source"), dict) else {}
+    if source.get("variable") is not True or "CFF" in str(source.get("format") or "").upper():
+        return None
+    ranges = _source_axis_ranges(target)
+    axes = node.get("axes") if isinstance(node.get("axes"), list) else []
+    if not axes:
+        return None
+    tags: set[str] = set()
+    for axis in axes:
+        tag = str(axis.get("tag") or "") if isinstance(axis, dict) else ""
+        try:
+            value = float(axis.get("stylevalue"))
+        except (TypeError, ValueError):
+            return None
+        if tag not in ranges or not (ranges[tag][0] <= value <= ranges[tag][1]):
+            return None
+        tags.add(tag)
+    # Without an explicit wght the runtime would render the source default
+    # instance, not the node's weight.
+    if "wght" in ranges and "wght" not in tags:
+        return None
+    return (
+        str(target.get("path") or ""),
+        int(node.get("index") or 0),
+        str(node.get("postScriptName") or ""),
+        str(node.get("style") or "normal"),
+    )
+
+
+def _variable_group_contract(
+    font_plan: dict[str, Any],
+    target: dict[str, Any],
+    nodes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    first = nodes[0]
+    members = sorted(
+        (
+            {
+                "weight": int(node.get("weight") or 400),
+                "axes": [
+                    {"tag": str(axis.get("tag") or ""), "stylevalue": str(axis.get("stylevalue") or "")}
+                    for axis in node.get("axes") or []
+                ],
+            }
+            for node in nodes
+        ),
+        key=lambda item: (item["weight"], json.dumps(item["axes"], sort_keys=True)),
+    )
+    semantic = {
+        "fontPlanId": font_plan.get("planId"),
+        "targetPath": target.get("path"),
+        "role": target.get("role"),
+        "compiler": target.get("compiler"),
+        "requirements": target.get("requirements"),
+        "source": target.get("source"),
+        "targetContract": target.get("targetContract"),
+        "variableGroup": {
+            "index": first.get("index"),
+            "postScriptName": first.get("postScriptName"),
+            "style": first.get("style"),
+            "members": members,
+        },
+    }
+    digest = _canonical_hash(semantic)
+    extension = _artifact_extension(target, first)
+    weights = sorted({member["weight"] for member in members})
+    representative = min(weights, key=lambda weight: (abs(weight - 400), weight))
+    required_axes: list[dict[str, str]] = []
+    for member in members:
+        for axis in member["axes"]:
+            if axis not in required_axes:
+                required_axes.append(axis)
+    return {
+        "artifactId": f"ufc:{digest[:32]}",
+        "suggestedFileName": f"LuoShu-UF-{digest[:20]}{extension}",
+        "container": "collection" if extension in {".ttc", ".otc"} else "sfnt",
+        "requiredFaceIndex": int(first.get("index") or 0),
+        "requiredPostScriptName": str(first.get("postScriptName") or ""),
+        "requiredAxes": required_axes,
+        "requiredWeight": representative,
+        "requiredStyle": str(first.get("style") or "normal"),
+        "preserveXmlAttributes": True,
+        "preserveAxisChildren": True,
+        "variableGroup": True,
+        "variableMembers": members,
+    }
+
+
 def _target_route_refs(target: dict[str, Any]) -> list[dict[str, Any]]:
     refs = target.get("xmlRefs")
     if not isinstance(refs, list):
@@ -565,6 +687,7 @@ def build_route_plan(
     physical_only: list[str] = []
     deferred_dynamic: list[str] = []
     node_artifacts: dict[tuple[str, int], str] = {}
+    matched: list[tuple[str, dict[str, Any], str, dict[str, Any], dict[str, Any], dict[str, Any]]] = []
 
     for target_path in sorted(targets):
         target = targets[target_path]
@@ -612,49 +735,69 @@ def build_route_plan(
                     "match": match,
                 })
                 continue
+            matched.append((target_path, target, source_xml, locator, node, match))
 
+    group_nodes: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for target_path, target, _source_xml, _locator, node, _match in matched:
+        group_key = _variable_group_key(target, node)
+        if group_key is not None and all(
+            existing["fingerprint"] != node["fingerprint"] for existing in group_nodes[group_key]
+        ):
+            group_nodes[group_key].append(node)
+    group_artifacts = {
+        key: _variable_group_contract(font_plan, targets[key[0]], nodes)
+        for key, nodes in group_nodes.items()
+        if len(nodes) >= 2
+    }
+
+    for target_path, target, source_xml, locator, node, match in matched:
+        document = documents[source_xml]
+        group_key = _variable_group_key(target, node)
+        if group_key in group_artifacts:
+            artifact = copy.deepcopy(group_artifacts[group_key])
+        else:
             artifact = _artifact_contract(font_plan, target, node)
-            key = (source_xml, int(node["ordinal"]))
-            previous = node_artifacts.get(key)
-            if previous is not None:
-                if previous != artifact["artifactId"]:
-                    conflicts.append({
-                        "sourceXml": source_xml,
-                        "ordinal": int(node["ordinal"]),
-                        "firstArtifactId": previous,
-                        "secondArtifactId": artifact["artifactId"],
-                        "targetPath": target_path,
-                    })
-                # Duplicate XML graph evidence for the same target/node/artifact is
-                # not a second mutation.
-                continue
-            node_artifacts[key] = artifact["artifactId"]
+        key = (source_xml, int(node["ordinal"]))
+        previous = node_artifacts.get(key)
+        if previous is not None:
+            if previous != artifact["artifactId"]:
+                conflicts.append({
+                    "sourceXml": source_xml,
+                    "ordinal": int(node["ordinal"]),
+                    "firstArtifactId": previous,
+                    "secondArtifactId": artifact["artifactId"],
+                    "targetPath": target_path,
+                })
+            # Duplicate XML graph evidence for the same target/node/artifact is
+            # not a second mutation.
+            continue
+        node_artifacts[key] = artifact["artifactId"]
 
-            operation = {
-                "operation": "replace-font-reference",
-                "targetPath": target_path,
-                "role": str(target.get("role") or ""),
-                "targetStatus": str(target.get("status") or ""),
-                "compiler": str(target.get("compiler") or ""),
-                "requirements": list(target.get("requirements") or []),
-                "risks": list(target.get("risks") or []),
-                "locator": locator,
-                "match": match,
-                "node": node,
-                "nodeFingerprint": node["fingerprint"],
-                "artifact": artifact,
-                "mutation": {
-                    "field": "font.text",
-                    "from": str(node.get("declared") or ""),
-                    "toArtifactId": artifact["artifactId"],
-                    "preserveFamilyOrder": True,
-                    "preserveFallbackOrder": True,
-                    "preserveFamilyAttributes": True,
-                    "preserveFontAttributes": True,
-                    "preserveAxisChildren": True,
-                },
-            }
-            document["operations"].append(operation)
+        operation = {
+            "operation": "replace-font-reference",
+            "targetPath": target_path,
+            "role": str(target.get("role") or ""),
+            "targetStatus": str(target.get("status") or ""),
+            "compiler": str(target.get("compiler") or ""),
+            "requirements": list(target.get("requirements") or []),
+            "risks": list(target.get("risks") or []),
+            "locator": locator,
+            "match": match,
+            "node": node,
+            "nodeFingerprint": node["fingerprint"],
+            "artifact": artifact,
+            "mutation": {
+                "field": "font.text",
+                "from": str(node.get("declared") or ""),
+                "toArtifactId": artifact["artifactId"],
+                "preserveFamilyOrder": True,
+                "preserveFallbackOrder": True,
+                "preserveFamilyAttributes": True,
+                "preserveFontAttributes": True,
+                "preserveAxisChildren": True,
+            },
+        }
+        document["operations"].append(operation)
 
     for source_xml, document in documents.items():
         operations = document.get("operations")

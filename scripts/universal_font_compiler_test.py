@@ -457,6 +457,123 @@ def main() -> int:
             assert len(built["glyf"][replaced].coordinates) == 3
             assert not built["gvar"].variations.get(replaced)
 
+        # 9) Several XML weights of one variable stock file share a single
+        #    variable artifact; nodes the source axes cannot reach (wght=50) or
+        #    without <axis> children keep per-node compilation.
+        group_source = temp / "UserGroupVF.ttf"
+        group_stock = temp / "StockGroupVF.ttf"
+        make_font(group_source, family="User Group VF", variable=True, y_min=-100, y_max=720)
+        make_font(group_stock, family="Stock Group VF", variable=True, axis_min=50,
+                  y_min=-100, y_max=720)
+        group_xml = temp / "group.xml"
+        group_xml.write_text(
+            '<familyset><family name="sans-serif">'
+            + "".join(
+                f'<font weight="{w}" style="normal">StockGroupVF.ttf'
+                f'<axis tag="wght" stylevalue="{w}"/></font>'
+                for w in (50, 300, 400, 700)
+            )
+            + '<font weight="900" style="normal">StockGroupVF.ttf</font>'
+            + '</family></familyset>',
+            encoding="utf-8",
+        )
+        group_logical = "/system/fonts/StockGroupVF.ttf"
+        group_slot = slot_from_stock(
+            group_logical, group_stock, family="sans-serif",
+            source_xml="/system/etc/group.xml", declared="StockGroupVF.ttf",
+        )
+        group_slot["xmlRefs"] = [
+            dict(group_slot["xmlRefs"][0], weight=w) for w in (50, 300, 400, 700, 900)
+        ]
+        group_plan, group_route = build_plans(group_source, group_slot, "latin", group_xml)
+        operations = group_route["documents"]["/system/etc/group.xml"]["operations"]
+        by_weight = {op["node"]["weight"]: op["artifact"] for op in operations}
+        assert len(by_weight) == 5, by_weight
+        shared = {by_weight[w]["artifactId"] for w in (300, 400, 700)}
+        assert len(shared) == 1, by_weight
+        assert by_weight[400]["variableGroup"] is True
+        assert by_weight[400]["requiredWeight"] == 400
+        assert [m["weight"] for m in by_weight[400]["variableMembers"]] == [300, 400, 700]
+        assert not by_weight[50].get("variableGroup"), by_weight[50]
+        assert not by_weight[900].get("variableGroup"), by_weight[900]
+        assert len({a["artifactId"] for a in by_weight.values()}) == 3
+
+        group_manifest = compiler.compile_all(
+            group_plan, group_route, {group_logical: group_stock}, temp / "out-group", False
+        )
+        modes = {item["artifactId"]: item for item in group_manifest["artifacts"]}
+        grouped = modes[by_weight[400]["artifactId"]]
+        assert grouped["status"] == "ready", grouped
+        assert grouped["mode"] == "source-variable-preserve", grouped
+        assert len(grouped["routeNodes"]) == 3, grouped
+        with TTFont(grouped["output"]) as built:
+            assert "fvar" in built and "gvar" in built
+            assert built["hhea"].ascent == 900
+        # The 50 node is outside the source wght range, so it compiles alone and
+        # its own contract decides; it must not drag the shared artifact down.
+        assert modes[by_weight[50]["artifactId"]].get("mode") != "source-variable-preserve"
+
+        # Deployment renders all grouped nodes to one shared file; the 50 node,
+        # if it compiled, keeps its own file.
+        # The 50 node is the only blocked one: the source cannot reach it.
+        assert group_manifest["summary"]["blockedCount"] == 1, group_manifest
+        assert "wght=50" in modes[by_weight[50]["artifactId"]]["reason"]
+
+        # Deployment renders all grouped nodes to one shared file while the
+        # axis-less 900 node keeps its own file.
+        import universal_font_deployment as deployment
+        deploy_xml = temp / "group-deploy.xml"
+        deploy_xml.write_text(group_xml.read_text(encoding="utf-8").replace(
+            '<font weight="50" style="normal">StockGroupVF.ttf<axis tag="wght" stylevalue="50"/></font>', ""
+        ), encoding="utf-8")
+        deploy_slot = json.loads(json.dumps(group_slot))
+        deploy_slot["xmlRefs"] = [ref for ref in deploy_slot["xmlRefs"] if ref["weight"] != 50]
+        deploy_plan, deploy_route = build_plans(group_source, deploy_slot, "latin", deploy_xml)
+        deploy_manifest = compiler.compile_all(
+            deploy_plan, deploy_route, {group_logical: group_stock}, temp / "out-group-deploy", False
+        )
+        assert_ready(deploy_manifest)
+        assert deploy_manifest["summary"]["artifactCount"] == 2, deploy_manifest["summary"]
+        payload = temp / "group-payload"
+        deployed = deployment.build_deployment(deploy_plan, deploy_route, deploy_manifest, payload)
+        deployment.validate_deployment(deployed, deploy_plan, deploy_route, deploy_manifest, payload)
+        rendered = ET.parse(payload / "system/etc/group.xml")
+        refs = {
+            int(font.get("weight")): (font.text or "").strip()
+            for font in rendered.iter("font")
+        }
+        assert len({refs[w] for w in (300, 400, 700)}) == 1, refs
+        assert refs[900] != refs[400], refs
+        for font in rendered.iter("font"):
+            if int(font.get("weight")) in (300, 400, 700):
+                assert font.find("axis").get("stylevalue") == font.get("weight")
+        assert len(list((payload / "system/fonts").glob("LuoShu-UF-*"))) == 2
+
+        # 10) A second compile into the same directory reuses ready artifacts
+        #     byte-for-byte, yields the same manifestId and prunes stale files.
+        cache_dir = temp / "out-cache"
+        first = compiler.compile_all(font_plan, route_plan, {logical: stock}, cache_dir, False)
+        assert first["cache"] == {"reused": 0, "compiled": first["summary"]["artifactCount"]}
+        (cache_dir / "LuoShu-UF-stale.ttf").write_bytes(b"stale")
+        second = compiler.compile_all(font_plan, route_plan, {logical: stock}, cache_dir, False)
+        assert second["cache"]["reused"] == first["summary"]["artifactCount"], second["cache"]
+        assert second["cache"]["compiled"] == 0
+        assert second["manifestId"] == first["manifestId"]
+        compiler.validate_manifest(second, font_plan, route_plan)
+        assert not (cache_dir / "LuoShu-UF-stale.ttf").exists()
+        # A damaged artifact or a changed stock file is recompiled, not reused.
+        victim = Path(second["artifacts"][0]["output"])
+        victim.write_bytes(victim.read_bytes() + b"x")
+        third = compiler.compile_all(font_plan, route_plan, {logical: stock}, cache_dir, False)
+        assert third["cache"]["compiled"] == 1, third["cache"]
+        compiler.validate_manifest(third, font_plan, route_plan)
+        changed_stock = temp / "Stock-Regular-ota.ttf"
+        changed_stock.write_bytes(stock.read_bytes() + b"\0\0\0\0")
+        fourth = compiler.compile_all(
+            font_plan, route_plan, {logical: changed_stock}, cache_dir, False
+        )
+        assert fourth["cache"]["reused"] == 0, fourth["cache"]
+
         # 8) Past the cutover deadline the compiler stops before starting a unit
         #    so the legacy fallback keeps the rest of the switch timeout.
         os.environ["LUOSHU_UNIVERSAL_DEADLINE"] = str(int(time.time()) - 1)

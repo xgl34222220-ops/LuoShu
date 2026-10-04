@@ -79,7 +79,8 @@ _ufc_compile() {
 
     _uc_manifest=$(_ufc_manifest "$_uc_family") || return 1
     _uc_output=$(_ufc_output_dir "$_uc_family") || return 1
-    rm -rf "$_uc_output" 2>/dev/null || true
+    # Keep previous artifacts: the compiler reuses an artifact only when its
+    # contract, stock bytes and output bytes still match, and prunes the rest.
     rm -f "$_uc_manifest" 2>/dev/null || true
     mkdir -p "$_uc_output" "$MANIFEST_DIR" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建字体编译缓存"}\n'

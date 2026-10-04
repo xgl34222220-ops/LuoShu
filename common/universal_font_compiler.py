@@ -1077,14 +1077,32 @@ def _target_variable_axes(target: dict[str, Any]) -> dict[str, tuple[float, floa
     return result
 
 
-def _validate_source_variable_compat(source_font: TTFont, target: dict[str, Any]) -> dict[str, Any]:
+def _member_axis_ranges(artifact: dict[str, Any]) -> dict[str, tuple[float, float, float]]:
+    """Axis ranges actually exercised by the XML nodes sharing a group artifact."""
+    values: dict[str, list[float]] = {}
+    for member in artifact.get("variableMembers") or []:
+        for tag, value in _axis_values(member.get("axes") if isinstance(member, dict) else None).items():
+            values.setdefault(tag, []).append(value)
+    return {tag: (min(items), min(items), max(items)) for tag, items in values.items()}
+
+
+def _validate_source_variable_compat(
+    source_font: TTFont,
+    target: dict[str, Any],
+    artifact: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if "fvar" not in source_font:
         raise CompilerError("物理 variable 目标要求源字体保持 variable，但源字体不是 variable")
     source_axes = {
         str(axis.axisTag): (float(axis.minValue), float(axis.defaultValue), float(axis.maxValue))
         for axis in source_font["fvar"].axes
     }
-    target_axes = _target_variable_axes(target)
+    if artifact is not None and artifact.get("variableGroup") is True:
+        # XML nodes name the axis values Android will instantiate; the source
+        # must reach exactly those, not every axis the stock file happens to have.
+        target_axes = _member_axis_ranges(artifact)
+    else:
+        target_axes = _target_variable_axes(target)
     if not target_axes:
         raise CompilerError("FontPlan 将目标标为 variable，但缺少 target variationAxes")
     for tag, (target_min, _target_default, target_max) in target_axes.items():
@@ -1470,12 +1488,17 @@ def _compile_source_variable_preserve(
     stock_geometry: TTFont | None = None
     validation_instance: TTFont | None = None
     try:
-        compatibility = _validate_source_variable_compat(source, target)
+        compatibility = _validate_source_variable_compat(source, target, artifact)
         if _outline_kind(source) != "glyf":
             raise CompilerError("物理 variable 保真模式当前只接受 glyf variable 源字体")
 
-        stock_face = max(0, _int(target.get("targetContract", {}).get("faceIndex"), 0))
-        weight = _int(target.get("targetContract", {}).get("weight"), 400)
+        grouped = artifact.get("variableGroup") is True
+        if grouped:
+            stock_face = max(0, _int(artifact.get("requiredFaceIndex"), 0))
+            weight = _int(artifact.get("requiredWeight"), 400)
+        else:
+            stock_face = max(0, _int(target.get("targetContract", {}).get("faceIndex"), 0))
+            weight = _int(target.get("targetContract", {}).get("weight"), 400)
         stock_geometry, stock_location = _stock_geometry_font(stock, stock_face, weight, {})
         stock_profile = _profile_from_font(stock_geometry)
 
@@ -1513,6 +1536,9 @@ def _compile_source_variable_preserve(
             _apply_target_line_contract(source, target, stock_profile)
             variable_font = source
 
+        required_ps = str(artifact.get("requiredPostScriptName") or "")
+        if grouped and required_ps:
+            _set_postscript_name(variable_font, required_ps, str(artifact.get("artifactId") or ""))
         _drop_stale_tables(variable_font)
         _copy_compiled_face_into_stock_container(
             stock,
@@ -1559,6 +1585,9 @@ def _choose_mode(
     target_variable = contract.get("variable") is True
     is_collection = _magic(stock) == COLLECTION_MAGIC
     fixed_axes = bool(_axis_values(artifact.get("requiredAxes")))
+    if artifact.get("variableGroup") is True and role not in SPECIALIZED_ROLES:
+        # Several XML weights share one variable artifact (see the router).
+        return "source-variable-preserve"
     if role in SPECIALIZED_ROLES or is_collection or fixed_axes:
         return "stock-shell"
     if target_variable and deployment_kinds == ["physical-slot"]:
@@ -1681,6 +1710,78 @@ def _manifest_id(
     return f"sha256:{_canonical_hash(_manifest_semantic(font_plan_id, route_id, artifacts, deferred))}"
 
 
+ARTIFACT_CACHE_INDEX = ".artifact-cache.json"
+
+
+def _load_artifact_cache(output_dir: Path) -> dict[str, dict[str, Any]]:
+    try:
+        raw = json.loads((output_dir / ARTIFACT_CACHE_INDEX).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict) or _int(raw.get("compilerRevision"), 0) != COMPILER_REVISION:
+        return {}
+    entries = raw.get("artifacts")
+    if not isinstance(entries, dict):
+        return {}
+    return {str(key): value for key, value in entries.items() if isinstance(value, dict)}
+
+
+def _reuse_cached_artifact(
+    cache: dict[str, dict[str, Any]],
+    unit: dict[str, Any],
+    stock_paths: dict[str, Path],
+    output_dir: Path,
+    allow_live_stock: bool,
+) -> dict[str, Any] | None:
+    """Return a previous ready artifact for this exact contract, or None.
+
+    artifactId already hashes the FontPlan (device topology, roles and source
+    file identity) and the XML contract; the stock and output bytes are
+    re-hashed here so an OTA font update or a damaged cache is never reused.
+    """
+    artifact = unit["artifact"]
+    entry = cache.get(str(artifact.get("artifactId") or ""))
+    if not entry or entry.get("status") != "ready" or entry.get("contract") != artifact:
+        return None
+    target_path = str(unit["target"].get("path") or "")
+    if entry.get("targetPath") != target_path:
+        return None
+    output = output_dir / Path(str(entry.get("output") or "")).name
+    try:
+        if not output.is_file() or _sha256(output) != entry.get("sha256"):
+            return None
+        stock = _resolve_stock(target_path, stock_paths, allow_live_stock)
+        recorded = entry.get("stock") if isinstance(entry.get("stock"), dict) else {}
+        if _sha256(stock) != recorded.get("sha256"):
+            return None
+    except (CompilerError, OSError):
+        return None
+    reused = copy.deepcopy(entry)
+    reused.update(
+        output=str(output),
+        deploymentKinds=list(unit.get("deploymentKinds") or []),
+        routeNodes=copy.deepcopy(unit.get("routeNodes") or []),
+        stock=dict(recorded, logicalPath=target_path, sourcePath=str(stock)),
+    )
+    return reused
+
+
+def _store_artifact_cache(output_dir: Path, artifacts: list[dict[str, Any]]) -> None:
+    ready = {
+        str(item["artifactId"]): item
+        for item in artifacts
+        if item.get("status") == "ready" and item.get("output")
+    }
+    keep = {Path(str(item["output"])).name for item in ready.values()}
+    for path in output_dir.iterdir():
+        if path.is_file() and path.name != ARTIFACT_CACHE_INDEX and path.name not in keep:
+            path.unlink(missing_ok=True)
+    _atomic_json(output_dir / ARTIFACT_CACHE_INDEX, {
+        "compilerRevision": COMPILER_REVISION,
+        "artifacts": ready,
+    })
+
+
 def _deadline() -> float:
     """Absolute epoch deadline set by the cutover controller (0 = none)."""
     value = _float(os.environ.get("LUOSHU_UNIVERSAL_DEADLINE"), 0.0) or 0.0
@@ -1704,8 +1805,15 @@ def compile_all(
     output_dir.mkdir(parents=True, exist_ok=True)
     units = _collect_units(font_plan, route_plan)
     deadline = _deadline()
+    cache = _load_artifact_cache(output_dir)
     artifacts = []
+    reused = 0
     for index, unit in enumerate(units):
+        cached = _reuse_cached_artifact(cache, unit, stock_paths, output_dir, allow_live_stock)
+        if cached is not None:
+            artifacts.append(cached)
+            reused += 1
+            continue
         if deadline and time.time() >= deadline:
             # Leave the remaining switch budget to the legacy engine instead of
             # finishing a payload the task supervisor would kill anyway.
@@ -1713,6 +1821,7 @@ def compile_all(
                 f"通用引擎超出时间预算：已编译 {index}/{len(units)} 个字体单元"
             )
         artifacts.append(_compile_unit(unit, stock_paths, output_dir, allow_live_stock))
+    _store_artifact_cache(output_dir, artifacts)
     ready = sum(item["status"] == "ready" for item in artifacts)
     blocked = sum(item["status"] == "blocked" for item in artifacts)
     deferred = list(route_plan.get("deferredDynamicTargets") or [])
@@ -1766,6 +1875,8 @@ def compile_all(
             "executableNow": False,
         },
         "deferredDynamicTargets": deferred,
+        # Diagnostics only; not part of manifestId.
+        "cache": {"reused": reused, "compiled": len(artifacts) - reused},
         "artifactMap": dict(sorted(artifact_map.items())),
         "physicalTargetMap": dict(sorted(physical_target_map.items())),
         "dynamicTargetMap": dict(sorted(dynamic_target_map.items())),
