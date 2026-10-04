@@ -216,7 +216,7 @@ artifact `11294395635` 下载后[独立包核验](TEST_CANDIDATE_VERIFICATION_37
 
 新 Root workflow 只绑定这个已验真的包，新增实际安装模块下的 14 个扫描错误函数用例，要求原 ARM64 Python、Android shell、同一内核启动 ID、Enforcing 及正确 helper 哈希。判定器拒绝错环境、缺失/重复/失败用例；独立 verifier 进一步核对真实命令 stdout 与 Git helper 字节。新宿主 harness 113 个于 0.638 秒 PASS，仅证明脚本与判定逻辑；完整 Android 结果仍待本次新运行。第八批固定候选的 PASS 保留为该批证据，不替代第九批验收。
 
-验收提交 [`b108bf8d`](https://github.com/xgl34222220-ops/LuoShu/commit/b108bf8d5f95b5136564dfb7e56b23fbd04daf50) 已启动 [第九批完整 Root 37181343923](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37181343923)，身份、前置和一次性 AVD 准备通过，原 ARM64 Android 长步骤正在执行；不取消或重复启动，下面的新改动不会进入这个固定包。
+验收提交 [`b108bf8d`](https://github.com/xgl34222220-ops/LuoShu/commit/b108bf8d5f95b5136564dfb7e56b23fbd04daf50) 的 [第九批完整 Root 37181343923](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37181343923) 已于 06:28 UTC 结束 FAIL。实际原 ARM64 错误函数的 `bounded-log-tail`（300 KiB 前缀）触发 `/system/bin/printf: Argument list too long`，无法把捕获日志送进 decoder；输出错误消息为空，命令退出 1。本轮不称为 14 个通过，也没有到达 Root App 轴/库/应用/最终冷暖阶段。下面第十一批按这条新失败修复，不改写第八批的独立 PASS 或取消第十批固定任务。
 
 ## 第十批：有限库存请求的内部阶段与实际工作计数
 
@@ -233,3 +233,17 @@ App 隔离诊断版仅导出固定数值字段，单行不超过 2048 字符，�
 下载 artifact `11295571904`，[独立核验](TEST_CANDIDATE_VERIFICATION_37181760478.json) PASS：外层 ZIP `32c3dbe10bad56ba94d5fa93700ce89e392c7b6083f69c47b686ccb7397abfc6`、模块 `e271b52d6210b937bae6e9bffcda2a4974414eee8c42bfe1ffe5d2d8c8fc2ff4`、APK `d43941f0a519454c0d64837792e0b826f60351fefecc2f2a6b31b632a1580dce`，11 个运行文件（包括新库存 worker）、17 冻结文件、旧引擎、内外 APK 与来源一致。另用已验真第九批包制作临时已知坏夹具，只改 worker 并更新模块摘要使检查确实进入源码身份比较；[源码负例](INVENTORY_SOURCE_GUARD_HOST_20261004.json) 明确被拒且未写 PASS。这是 HOST_ARTIFACT_MUTATION_TEST，不是 Android 验收。原包逐字节保留。
 
 新 harness 要求全部 14 个当前冷/暖采样取得固定阶段；每条成功的 live fingerprint/scan/refresh 都必须有一致的阶段总和及正确工作次数。指纹成功不能掩盖缺少明细的成功 scan；失败请求原样保留且仍必须随后成功，缓存命中仍须两次快照且零重建/写入。五个新增解析/判定负例方法后本轮宿主 118 个于 0.633 秒 PASS。独立 verifier 继续按实际原始 App 日志重算。新的完整 Root workflow 仅绑定本批新包；第九批任务继续使用其固定旧包及判定器，concurrency 不取消运行任务，本批将按同组队列接续。阶段采样尚不是新 Android 结果。
+
+验收提交 [`e1b2748f`](https://github.com/xgl34222220-ops/LuoShu/commit/e1b2748f674a8b6092c65144d82e67d45363c380) 的 [第十批 Root 37182379231](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37182379231) 已接续进入完整 Android 步骤，固定 `5194e3c4` 候选；它尚未包含下面的修正。正在跟进，不能以旧结果填写阶段数据。
+
+## 第十一批：按实际 Android 失败修复大日志的参数传递
+
+第九批 artifact `11296120669` 已下载并校验外层 `dd81556305e20f2a169a146ae53017d2f55b5f6f7db1b00b0f76de46b0962709`。保留 [实际错误 stderr](evidence/root-stock-error-37181343923.txt) 和 [独立失败证明](ROOT_ANDROID_FAILURE_37181343923.json)：12 个实际内核重启 ID、16 条可重算挂载证明/2 别名、5 面真实 CFF2 和 CLI 组合完成；32 交接/18 来源/15 组合错误的命令与 stdout 一致。候选无意外原生 tombstone，两个 AVD 已回收、KVM 元数据未变。初次无 Root App 遇 System UI ANR，明确 BLOCKED；Root App 后续未到达，没有授予 App 的 Root 政策。最终任务空间检查也未到达，不能填空目录 PASS。
+
+采用理由：Linux 对 execve 的单参数长度有限制，而宿主 dash 的 `printf` 为内建，之前宿主用例未进入这个限制。核对 [Linux v6.6 定义源码](https://github.com/torvalds/linux/blob/v6.6/include/uapi/linux/binfmts.h)、[COPYING / GPL-2.0 WITH Linux-syscall-note](https://github.com/torvalds/linux/blob/v6.6/COPYING) 和 [execve 项目手册](https://man7.org/linux/man-pages/man2/execve.2.html)，只借鉴参数与数据分离原则，没有复制内核实现。限制与页大小有关，不宣称所有 Android 设备都有同一字节阈值，也不修改内核或资源限制。
+
+原厂扫描的末行读取、锁等待复用输出和错误解码改为 here-document stdin 重定向，避免把整段日志作为外部 `printf` 参数。变量内容只展开为数据，保留 shell-looking 文本和分隔符行；仍在已完成扫描后使用相同 bounded decoder，不建立项目日志文件、任务或调用方 stdin 租约，shell 可使用其自身临时描述符。helper 文件和进程监督实现与 `e1b2748f` 字节一致；成功/返回码/锁/核心委托、17 冻结文件未变。本批仅覆盖这条有结构化尾部的大日志失败，不能据此宣称所有异常原始日志及解释器缺失情形都已穷尽。
+
+宿主 fixture 现在强制调用真实 `/usr/bin/printf`，不伪造 E2BIG；Android 保留原 shell。[改前宿主复现](STOCK_ERROR_ARGV_BEFORE_HOST_20261004.json) 在同一 `bounded-log-tail` 失败；[改后 14 个函数用例](STOCK_ERROR_EXTERNAL_PRINTF_HOST_20261004.json) PASS，保留 300 KiB 长度，并增强 `$()`/变量/反引号与同名 delimiter 的字面数据检查。原厂扫描锁/等待复用、17 文件边界重新 PASS，宿主 harness 118 个于 0.640 秒 PASS；不把这些当 Android 成功。
+
+独立 Root verifier 对已知早期失败、尚无后续 App 文件的 artifact 现在写出 FAIL/缺失范围及已独立检查的部分证据，仍拒绝不完整验收。实际第九批重放保持 FAIL；第八批固定 `93b4075d` 历史重放仍 PASS，不能替本批新 Android 结果。新的候选 CI 和完整 Root 修复验收尚待执行。

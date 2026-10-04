@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -16,7 +17,7 @@ def run(module, shell):
     source = (module / 'common/font_manager.sh').read_text()
     escape = 'json_escape_router() {' + source.split('\njson_escape_router() {', 1)[1].split('\nstock_scan_available() {', 1)[0]
     function = 'stock_scan_json() {' + source.split('\nstock_scan_json() {', 1)[1].split('\nif [ "${1:-}" = action', 1)[0]
-    message = '无法分析 "中文 字体.ttf"；请检查 C:\\data\\font 😀'
+    message = '无法分析 "中文 字体.ttf"；请检查 C:\\data\\font 😀 $(printf injected) ${HOME} `pwd`'
     compact = lambda value: json.dumps(value, ensure_ascii=False, separators=(',', ':'))
     cases = [
         ('chinese-quotes-and-path', compact({'status': 'error', 'message': message}), 1, message, False, False),
@@ -30,7 +31,7 @@ def run(module, shell):
         ('unavailable-helper-fallback', 'plain failure', 1, 'plain failure', True, False),
         ('empty-default-error', '', 1, '原厂字体扫描失败', False, False),
         ('nonstring-message-fallback', '{"message":42}', 1, '{"message":42}', False, False),
-        ('bounded-log-tail', 'x' * (300 * 1024) + '\n{"message":"末条错误"}', 1, '末条错误', False, False),
+        ('bounded-log-tail', 'x' * (300 * 1024) + '\nLUOSHU_STOCK_OUTPUT\n{"message":"末条错误"}', 1, '末条错误', False, False),
         ('success-stays-success', '{"status":"ok","slotCount":2}', 0, None, False, True),
         ('zero-exit-without-inventory-fails', '{"status":"ok","message":"missing inventory"}', 0, 'missing inventory', False, False),
     ]
@@ -62,7 +63,16 @@ esac
         # original installed interpreter and byte-identical helper on Android.
         proxy.write_text(proxy.read_text().replace('#!/system/bin/sh', '#!' + shell))
         proxy.chmod(0o700)
-        script.write_text(escape + function + '''
+        # Dash has a printf builtin; Android's original shell resolves printf
+        # externally. Exercise the real kernel argv limit on HOST_ONLY too,
+        # without replacing the Android shell or simulating E2BIG in a stub.
+        external_printf = ''
+        if not android:
+            printf = shutil.which('printf')
+            if printf is None:
+                raise RuntimeError('External printf required for stock error host contract')
+            external_printf = 'printf() { command ' + shlex.quote(printf) + ' "$@"; }\n'
+        script.write_text(escape + function + external_printf + '''
 stock_scan_available() { return 0; }
 stock_scan_lock_acquire() { STOCK_SCAN_WAITED=false; return 0; }
 stock_scan_lock_release() { return 0; }

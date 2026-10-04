@@ -159,6 +159,35 @@ with zipfile.ZipFile(path) as z:
             unexpected_native.append(command)
     if unexpected_native:
         errors.append('candidate/module native crash remains')
+    missing_app_files = [name for name in ('app-axes/report.json', 'app-axes/actual-axis-ui.png') if name not in z.namelist()]
+    if missing_app_files:
+        # A known early Android failure legitimately never reaches these gates.
+        # Preserve the independently checked partial evidence without fabricating
+        # App observations or returning success for a truncated artifact.
+        errors.append('mandatory later App evidence not reached or absent: ' + ', '.join(missing_app_files))
+        failed_stock_steps = [step for step in m.get('steps', [])
+                              if step.get('exit') != 0 and any('luoshu-stock-error-contract.py --module ' in str(arg)
+                                                               for arg in step.get('argv', []))]
+        result = dict(result='FAIL', blockers=errors, evidence_kind='FRESH_ANDROID_EARLY_GATE_FAILURE',
+            artifact_sha256=sha256(raw).hexdigest(), runtime_source=source,
+            module_sha256=module_sha, expected_apk_sha256=apk_sha, installed_candidate_apk_proven=False,
+            verified_module_reboots=len(attempts), collection_faces=len(faces),
+            collection_output_sha256=build.get('outputSha256'), generation_runtime=g.get('generation_runtime'),
+            canonical_mount_proofs=proofs_checked, alias_count=sum(p != target for p, target in stock_paths.items()),
+            composite_result=g.get('result'), baseline_native_commands=known_baseline,
+            unexpected_native_commands=unexpected_native, failed_stock_error_steps=failed_stock_steps,
+            actual_android_mix_handoff=m.get('magisk_mix_handoff'), actual_android_preview_source=preview,
+            actual_android_composite_error=engine_error, actual_android_stock_error=stock_error,
+            initial_unrooted_stock_app=runner.get('stock_app_ui', {}).get('result'),
+            initial_unrooted_stock_app_detail=runner.get('stock_app_ui'), runner_result=runner.get('result'),
+            kvm_metadata_unchanged=runner.get('kvm_before') == runner.get('kvm_after'),
+            emulator_cleanup={name:report(name) for name in ('emulator-cleanup.json', 'magisk-emulator-cleanup.json')},
+            unverified=['Root App axes/library/application/reboot/restore/final timing gates',
+                        'App Root policy and final transient-workspace evidence unavailable or not independently verified'])
+        encoded = json.dumps(result, ensure_ascii=False, indent=2) + '\n'
+        Path(output).write_text(encoded)
+        print(encoded)
+        raise SystemExit(1)
     axes = m.get('app_axes', {})
     ui = report('app-axes/report.json')
     if any(axes.get(k) != v for k, v in ui.items()):

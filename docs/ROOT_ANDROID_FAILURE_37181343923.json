@@ -1,0 +1,391 @@
+{
+  "result": "FAIL",
+  "blockers": [
+    "execution recorded an error",
+    "candidate APK hash not bound",
+    "authorized App UID evidence missing",
+    "actual synthetic file inventory/hashes incomplete",
+    "current stock error function not proven on original Root Android runtime",
+    "actual CFF2 collection axis metadata missing or failed",
+    "actual App font-declared axis UI/read-only evidence incomplete or failed",
+    "actual App root not proven",
+    "100/1000 real libraries not both measured",
+    "actual App apply task not proven",
+    "App task/boot/selected font identity binding missing",
+    "ordered snapshot/full validation/core entry evidence missing",
+    "App-applied font exact restoration evidence missing",
+    "actual App apply/reboot/restore mount proof missing",
+    "App-applied font restore did not succeed",
+    "exact isolated App policy revocation missing",
+    "fresh final App crash/ANR observation absent or failed",
+    "final cold/warm live request phase timings incomplete or inconsistent",
+    "final owned transient workspace not proven empty",
+    "candidate APK identity changed",
+    "runner or complete module gate did not pass",
+    "all fourteen module/composite/App kernel reboots unproven",
+    "mandatory later App evidence not reached or absent: app-axes/report.json, app-axes/actual-axis-ui.png"
+  ],
+  "evidence_kind": "FRESH_ANDROID_EARLY_GATE_FAILURE",
+  "artifact_sha256": "dd81556305e20f2a169a146ae53017d2f55b5f6f7db1b00b0f76de46b0962709",
+  "runtime_source": "634a6d45dae07e59fc73ffb36725b98e2dcee080",
+  "module_sha256": "99180db7357c0035b6baa60fec2ef6a667106adb89e05aabaf2b3329a4514882",
+  "expected_apk_sha256": "1eb859a22d3b428c46b0e590972e8a6c7fe21f3a9c35dcab074b77f9fa9cc6a7",
+  "installed_candidate_apk_proven": false,
+  "verified_module_reboots": 12,
+  "collection_faces": 5,
+  "collection_output_sha256": "b8c9cba7c6c48a27f5d5f7a16234dde55910cf35824ee5247411748d73ba6da9",
+  "generation_runtime": {
+    "result": "PASS",
+    "task": "mix-1791094799-5764",
+    "crashLines": [],
+    "logSha256": "f16bfa996c7afbd9f609b47b6313b751fdcd7ebb1cc93ba58753bd069729ea23"
+  },
+  "canonical_mount_proofs": 16,
+  "alias_count": 2,
+  "composite_result": "PASS",
+  "baseline_native_commands": [
+    "sed -n s/.*\"message\":\"\\([^\"]*\\)\".*/\\1/p /data/adb/modules/LuoShu/config/switch_task.conf.output.1791093983-5114",
+    "sed -n s/.*\"message\":\"\\([^\"]*\\)\".*/\\1/p /data/adb/modules/LuoShu/config/switch_task.conf.output.1791093998-7701"
+  ],
+  "unexpected_native_commands": [],
+  "failed_stock_error_steps": [
+    {
+      "argv": [
+        "shell",
+        "/debug_ramdisk/magisk su -mm -c 'PYTHONHOME=/data/adb/modules/LuoShu/common/python PYTHONPATH=/data/adb/modules/LuoShu/common/python/lib/python3.14:/data/adb/modules/LuoShu/common/python/lib/python3.14/site-packages LD_LIBRARY_PATH=/data/adb/modules/LuoShu/common/python/lib:/data/adb/modules/LuoShu/common/python/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp /data/adb/modules/LuoShu/common/python/bin/luoshu-python /data/local/tmp/luoshu-stock-error-contract.py --module /data/adb/modules/LuoShu --shell /system/bin/sh --output /data/local/tmp/luoshu-stock-error-contract.json'"
+      ],
+      "exit": 1,
+      "elapsed_seconds": 12.519388253999978,
+      "stdout": "",
+      "stderr": "Traceback (most recent call last):\n  File \"/data/local/tmp/luoshu-stock-error-contract.py\", line 99, in <module>\n    value = json.dumps(run(args.module.resolve(), args.shell), ensure_ascii=False, separators=(',', ':')) + '\\n'\n                       ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/data/local/tmp/luoshu-stock-error-contract.py\", line 86, in run\n    raise RuntimeError(f'{name}: exit={result.returncode} output={value!r} stderr={result.stderr!r}; expected={expected!r}')\nRuntimeError: bounded-log-tail: exit=1 output={'status': 'error', 'message': ''} stderr='/data/local/tmp/luoshu-stock-error-a12acb25/error-function.sh[75]: /system/bin/printf: Argument list too long\\n/data/local/tmp/luoshu-stock-error-a12acb25/error-function.sh[75]: /system/bin/printf: Argument list too long\\n/data/local/tmp/luoshu-stock-error-a12acb25/error-function.sh[75]: /system/bin/printf: Argument list too long\\n'; expected='末条错误'\n"
+    }
+  ],
+  "actual_android_mix_handoff": {
+    "schema": "luoshu-mix-handoff-contract-v1",
+    "result": "PASS",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "cases": [
+      {
+        "name": "silent-start",
+        "result": "PASS"
+      },
+      {
+        "name": "conflicting-output",
+        "result": "PASS"
+      },
+      {
+        "name": "truncated-output",
+        "result": "PASS"
+      },
+      {
+        "name": "logged-task-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "queued-task",
+        "result": "PASS"
+      },
+      {
+        "name": "completed-task",
+        "result": "PASS"
+      },
+      {
+        "name": "failed-task",
+        "result": "PASS"
+      },
+      {
+        "name": "stale-task-with-fresh-output",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-cjk",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-latin",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-digit",
+        "result": "PASS"
+      },
+      {
+        "name": "unknown-state",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-state",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-task",
+        "result": "PASS"
+      },
+      {
+        "name": "chinese-native-regex-regression",
+        "result": "PASS"
+      },
+      {
+        "name": "escaped-quote-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-json",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-unicode-escapes",
+        "result": "PASS"
+      },
+      {
+        "name": "task-field-injection",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-message-lookalike",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-nested-message",
+        "result": "PASS"
+      },
+      {
+        "name": "truncated-json",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-message-type",
+        "result": "PASS"
+      },
+      {
+        "name": "last-valid-log-record",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-long-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-chinese-native-regression",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-escaped-quote-and-path",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-control-escape",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-truncated-message",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-invalid-string-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-unsupported-unicode-escape",
+        "result": "PASS"
+      },
+      {
+        "name": "progress-oversized-message",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 32,
+    "elapsed_seconds": 12.362,
+    "boot_id": "1edcebf7-cdff-4ca3-80c4-6cc8da81871e",
+    "selinux": "Enforcing"
+  },
+  "actual_android_preview_source": {
+    "schema": "luoshu-preview-source-contract-v1",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "result": "PASS",
+    "cases": [
+      {
+        "name": "static-nearest",
+        "result": "PASS"
+      },
+      {
+        "name": "exact-static",
+        "result": "PASS"
+      },
+      {
+        "name": "invalid-weight-default",
+        "result": "PASS"
+      },
+      {
+        "name": "static-tie-order",
+        "result": "PASS"
+      },
+      {
+        "name": "cross-format-tie-order",
+        "result": "PASS"
+      },
+      {
+        "name": "later-variable-wins-over-exact-static",
+        "result": "PASS"
+      },
+      {
+        "name": "first-variable-order",
+        "result": "PASS"
+      },
+      {
+        "name": "uppercase-extension",
+        "result": "PASS"
+      },
+      {
+        "name": "chinese-space-family",
+        "result": "PASS"
+      },
+      {
+        "name": "literal-backslash-family",
+        "result": "PASS"
+      },
+      {
+        "name": "leading-echo-option-family",
+        "result": "PASS"
+      },
+      {
+        "name": "single-pass-suffixes",
+        "result": "PASS"
+      },
+      {
+        "name": "trailing-name-separators",
+        "result": "PASS"
+      },
+      {
+        "name": "matching-directory-rejected",
+        "result": "PASS"
+      },
+      {
+        "name": "different-family-rejected",
+        "result": "PASS"
+      },
+      {
+        "name": "empty-library",
+        "result": "PASS"
+      },
+      {
+        "name": "large-independent-library",
+        "result": "PASS"
+      },
+      {
+        "name": "quiet-and-stdout-parser-agree",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 18,
+    "boot_id": "1edcebf7-cdff-4ca3-80c4-6cc8da81871e",
+    "selinux": "Enforcing"
+  },
+  "actual_android_composite_error": {
+    "schema": "luoshu-composite-error-contract-v1",
+    "environment": "ANDROID",
+    "module": "/data/adb/modules/LuoShu",
+    "shell": "/system/bin/sh",
+    "result": "PASS",
+    "cases": [
+      {
+        "name": "chinese-native-error",
+        "result": "PASS"
+      },
+      {
+        "name": "ascii-escaped-error",
+        "result": "PASS"
+      },
+      {
+        "name": "pretty-top-level-error",
+        "result": "PASS"
+      },
+      {
+        "name": "nested-lookalike-error",
+        "result": "PASS"
+      },
+      {
+        "name": "plain-text-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "unavailable-helper-fallback",
+        "result": "PASS"
+      },
+      {
+        "name": "bounded-valid-log-tail",
+        "result": "PASS"
+      },
+      {
+        "name": "timeout-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "oom-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "signal-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "no-execute-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "runtime-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "missing-runtime-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "wrong-abi-code-priority",
+        "result": "PASS"
+      },
+      {
+        "name": "empty-default-error",
+        "result": "PASS"
+      }
+    ],
+    "case_count": 15,
+    "boot_id": "1edcebf7-cdff-4ca3-80c4-6cc8da81871e",
+    "selinux": "Enforcing"
+  },
+  "actual_android_stock_error": null,
+  "initial_unrooted_stock_app": "BLOCKED",
+  "initial_unrooted_stock_app_detail": {
+    "result": "BLOCKED",
+    "reason": "System UI ANR prevents App UI validation",
+    "environment_system_ui_anr": true,
+    "am_start_output": "Starting: Intent { cmp=io.github.xgl34222220.luoshu.stabletest/io.github.xgl34222220.luoshu.MainActivity }\nStatus: ok\nLaunchState: COLD\nActivity: com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity\nTotalTime: 1881\nWaitTime: 1915\nComplete\n"
+  },
+  "runner_result": "FAIL",
+  "kvm_metadata_unchanged": true,
+  "emulator_cleanup": {
+    "emulator-cleanup.json": {
+      "emulator_started": true,
+      "emulator_reaped": true,
+      "pid": 2727,
+      "returncode": 0
+    },
+    "magisk-emulator-cleanup.json": {
+      "emulator_started": true,
+      "emulator_reaped": true,
+      "pid": 3298,
+      "returncode": 0
+    }
+  },
+  "unverified": [
+    "Root App axes/library/application/reboot/restore/final timing gates",
+    "App Root policy and final transient-workspace checks were not reached"
+  ],
+  "run_id": 37181343923,
+  "artifact_id": 11296120669,
+  "harness_commit": "b108bf8d5f95b5136564dfb7e56b23fbd04daf50"
+}

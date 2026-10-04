@@ -45,6 +45,10 @@ write, or fewer than two live snapshots. Earlier pinned harnesses stay unchanged
 Exit 0 means this artifact passed these checks. Exit 1 with a FAIL JSON means
 preserved evidence blocks acceptance. Invalid inputs or a mismatched digest
 abort before writing a success report. Artifact replay is not a new Android run.
+When an earlier gate fails before App-axis files exist, the tool writes a FAIL
+with verified partial observations and the missing mandatory scope. This never
+turns a truncated artifact into PASS; installed-App and later UI proof remain
+explicitly unverified.
 
 [AOSP ANR diagnosis](https://source.android.com/docs/core/tests/debug/read-bug-reports#find-stack-traces)
 explains binding VM traces to ANR PID/time and the limits of a late thread snapshot.

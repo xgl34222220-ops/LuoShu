@@ -1,0 +1,8 @@
+{
+  "result": "EXPECTED_PRE_FIX_FAILURE",
+  "environment": "HOST_ONLY_WITH_REAL_EXTERNAL_PRINTF",
+  "source": "e1b2748f674a8b6092c65144d82e67d45363c380",
+  "scope": "Original stock error function with actual kernel argv limit; no device/process cleanup acceptance",
+  "exit": 1,
+  "failure": "RuntimeError: bounded-log-tail: exit=1 output={'status': 'error', 'message': ''} stderr='/tmp/luoshu-stock-error-jl7iz3bv/error-function.sh: 71: /usr/bin/printf: Argument list too long\\n/tmp/luoshu-stock-error-jl7iz3bv/error-function.sh: 71: /usr/bin/printf: Argument list too long\\n/tmp/luoshu-stock-error-jl7iz3bv/error-function.sh: 71: /usr/bin/printf: Argument list too long\\n'; expected='末条错误'"
+}
