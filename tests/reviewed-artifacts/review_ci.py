@@ -106,6 +106,10 @@ def main(pin_path, output_path):
         failed = [s for s in module.get('steps', []) if s.get('exit') != 0][-6:]
         diagnostics = dict(root_run=pin['root_run'], module_error=module.get('error'),
                            app_axis_stage=stage,
+                           raw_axis_runtime_log=z.read('app-axes/runtime.log').decode('utf-8', errors='replace')
+                           if 'app-axes/runtime.log' in z.namelist() else None,
+                           raw_axis_commands=z.read('app-axes/commands.jsonl').decode('utf-8', errors='replace')
+                           if 'app-axes/commands.jsonl' in z.namelist() else None,
                            failed_commands=[{k:s.get(k) for k in ('argv','exit','elapsed_seconds','stdout','stderr')}
                                             for s in failed],
                            owned_stage_files=[n for n in z.namelist() if n.startswith(
