@@ -500,6 +500,15 @@ def settled(pidfile):
         return 125
 
 
+def cleanup_rejected(pidfile, reason):
+    """Keep uncertain records intact and explain installer rejection."""
+    print(json.dumps({'status': 'error', 'data': {'cleaned': False,
+                      'pidFile': str(pidfile), 'reason': reason},
+                      'message': '旧任务身份或清理状态未确认，记录已保留'},
+                     ensure_ascii=False, separators=(',', ':')))
+    return 125
+
+
 def legacy_cancel(pidfile, module):
     """Migration only: snapshot live identity after exact old command proof.
 
@@ -512,12 +521,14 @@ def legacy_cancel(pidfile, module):
         if not pid_text:
             return 0
         pid = int(pid_text.splitlines()[0])
-    except OSError:
+    except FileNotFoundError:
         return 0
+    except OSError:
+        return cleanup_rejected(pidfile, 'legacy-pid-unreadable')
     except (ValueError, IndexError):
-        return 125
+        return cleanup_rejected(pidfile, 'legacy-pid-invalid')
     if pid <= 1:
-        return 125
+        return cleanup_rejected(pidfile, 'legacy-pid-unsafe')
     record = None
     for entry in Path('/proc').iterdir():
         if entry.name.isdigit():
@@ -537,14 +548,24 @@ def legacy_cancel(pidfile, module):
         try:
             saved_boot = saved_boot or (pidfile.parent / 'boot-id').read_text().strip()
         except OSError:
-            return 125
+            return cleanup_rejected(pidfile, 'legacy-boot-missing')
+    # Empty/unknown/fallback values do not prove a completed previous boot.
+    if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', saved_boot):
+        return cleanup_rejected(pidfile, 'legacy-boot-invalid')
     if saved_boot != BOOT:
         for suffix in ('', '.task', '.boot', '.start'):
             Path(str(pidfile) + suffix).unlink(missing_ok=True)
         return 0
     lock_start = dict(line.split('=', 1) for line in pid_text.splitlines()[1:] if '=' in line).get('starttime')
-    if lock_start and lock_start != record['start']:
-        return 125
+    try:
+        sidecar_start = Path(str(pidfile) + '.start').read_text().strip()
+    except FileNotFoundError:
+        sidecar_start = None
+    except OSError:
+        return cleanup_rejected(pidfile, 'legacy-start-unreadable')
+    for saved_start in (lock_start, sidecar_start):
+        if saved_start is not None and saved_start != record['start']:
+            return cleanup_rejected(pidfile, 'legacy-start-mismatch')
     try:
         command = Path('/proc', str(record['procPid']), 'cmdline').read_bytes().decode().split('\0')
         task = Path(str(pidfile) + '.task').read_text().strip()
@@ -558,7 +579,7 @@ def legacy_cancel(pidfile, module):
         Path(arg).name == task for arg in owned_script)
     if not owned_script or not (task and (task in command or script_task) or singleton and any(
             Path(arg).name == 'google_font_provider_service.sh' for arg in owned_script)):
-        return 125
+        return cleanup_rejected(pidfile, 'legacy-command-unconfirmed')
     saved = {record['procPid']: record, **process_tree([record['procPid']])}
     started = time.monotonic()
     signal_record(record, signal.SIGTERM)
@@ -619,7 +640,7 @@ def main():
         for root in roots:
             if root.is_dir():
                 if not root.resolve().is_relative_to(module):
-                    result = 125
+                    result = cleanup_rejected(root, 'task-root-outside-module')
                     continue
                 for owner in root.rglob('*.owner.json'):
                     pidfile = str(owner.resolve())[:-len('.owner.json')]
@@ -628,7 +649,7 @@ def main():
                     seen.add(pidfile)
                     record = read_owner(pidfile)
                     if not record:
-                        result = 125
+                        result = cleanup_rejected(pidfile, 'task-owner-record-invalid')
                         continue
                     output, code = cancel(pidfile, record['task'])
                     print(json.dumps(output, ensure_ascii=False, separators=(',', ':')))

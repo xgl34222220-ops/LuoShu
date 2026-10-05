@@ -74,12 +74,31 @@ _lc_temp="$_lc_install_tmp/installer.$$.sh"
 # An update must stop verified old tasks before their identity records are
 # migrated or removed. The running font payload itself stays untouched.
 if [ -f "$MODPATH/common/background_task.sh" ]; then
-    if ! (
+    _lc_task_log="$_lc_install_tmp/old-task-check.$$.log"
+    if (
         . "$MODPATH/common/background_task.sh"
         LUOSHU_TASK_SCOPE_RUNNER="$MODPATH/common/task_scope.sh"
         export LUOSHU_TASK_SCOPE_RUNNER
         luoshu_stop_module_tasks "$LUOSHU_OLD_MOD"
-    ); then
+    ) >"$_lc_task_log" 2>&1; then
+        rm -f "$_lc_task_log" 2>/dev/null || true
+    else
+        _lc_task_rc=$?
+        ui_print "! 旧任务检查失败（错误码 $_lc_task_rc）"
+        case "$_lc_task_rc" in
+            126|127) ui_print '! 旧任务检查程序未能启动' ;;
+            125) ui_print '! 旧任务身份或收尾证明未通过校验' ;;
+        esac
+        # Child stdout/stderr is not reliably displayed by every Root manager.
+        # Surface errors first through its own UI; manager abort may remove the
+        # staging tree and this scratch log, so it is not a durable report.
+        if [ -s "$_lc_task_log" ]; then
+            grep -v '"status":"ok"' "$_lc_task_log" | tail -n 12 | while IFS= read -r _lc_task_line; do
+                ui_print "! $_lc_task_line"
+            done
+        else
+            ui_print '! 清理程序未返回详情；未确认的旧任务仍受保护'
+        fi
         abort '旧字体任务尚未清理完成，未继续迁移，任务记录已保留'
         return 1 2>/dev/null || exit 1
     fi
