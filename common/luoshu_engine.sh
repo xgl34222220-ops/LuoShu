@@ -159,6 +159,7 @@ _le_capture_previous() {
 # a stock Latin/digit file) ahead of the system font. Build its replacement now,
 # keyed by deployment, so boot can bind it before zygote and system_server start.
 THEME_TARGET="${LUOSHU_THEME_FONT_TARGET:-/data/system/theme/fonts/Roboto-Regular.ttf}"
+THEME_ROUTER="${LUOSHU_THEME_FONT_ROUTER:-/data/system/fonts/theme_webview/Roboto-Regular.ttf}"
 THEME_EARLY_DIR="$CONFIG_DIR/hyperos-theme-font-early"
 
 _le_theme_key() {
@@ -167,31 +168,71 @@ _le_theme_key() {
 
 _le_theme_view() {
     _ltv_payload="$1"; _ltv_id="$2"
-    [ -f "$THEME_TARGET" ] && [ ! -L "$THEME_TARGET" ] || return 0
+    _ltv_key=$(_le_theme_key "$_ltv_id")
+    mkdir -p "$THEME_EARLY_DIR" "$MODDIR/logs" 2>/dev/null || return 1
+    _ltv_manifest="$THEME_EARLY_DIR/$_ltv_key.mounts"
+    _ltv_pending="$_ltv_manifest.tmp.$$"
+    : > "$_ltv_pending" || return 1
     _ltv_source=''
     for _ltv_candidate in "$_ltv_payload/system/fonts/MiSansVF.ttf" "$_ltv_payload/product/fonts/MiSansVF.ttf" \
         "$_ltv_payload/system/fonts/Roboto-Regular.ttf"; do
         [ -s "$_ltv_candidate" ] && { _ltv_source="$_ltv_candidate"; break; }
     done
-    [ -n "$_ltv_source" ] || return 0
-    mkdir -p "$THEME_EARLY_DIR" "$MODDIR/logs" 2>/dev/null || return 0
-    _ltv_out="$THEME_EARLY_DIR/$(_le_theme_key "$_ltv_id").ttf"
-    if [ ! -s "$_ltv_out" ]; then
+    _ltv_index=0
+    _ltv_seen=''
+    for _ltv_route in "$THEME_TARGET" "$THEME_ROUTER"; do
+        [ -e "$_ltv_route" ] || continue
+        _ltv_target=$(readlink -f "$_ltv_route" 2>/dev/null) || {
+            rm -f "$_ltv_pending"; return 1;
+        }
+        # Preserve framework links and reject redirects outside these two
+        # established font paths, just as the bounded late theme bridge does.
+        case "$_ltv_target" in "$THEME_TARGET"|"$THEME_ROUTER") ;; *) rm -f "$_ltv_pending"; return 1 ;; esac
+        [ -f "$_ltv_target" ] && [ ! -L "$_ltv_target" ] && [ -n "$_ltv_source" ] || {
+            rm -f "$_ltv_pending"; return 1;
+        }
+        [ "$_ltv_target" != "$_ltv_seen" ] || continue
+        _ltv_seen="$_ltv_target"
+        case "$_ltv_target" in *'|'*) rm -f "$_ltv_pending"; return 1 ;; esac
+        _ltv_temporary="$THEME_EARLY_DIR/.$_ltv_key.$_ltv_index.tmp.$$"
+        # Rebuild even for an identical payload id: the ROM may have changed
+        # the theme's layout contract since this payload was last selected.
         _le_python "$MODDIR/common/hyperos_theme_font_patch.py" --source "$_ltv_source" \
-            --target "$THEME_TARGET" --output "$_ltv_out" >/dev/null 2>>"$MODDIR/logs/fontswitch.log" || {
-            rm -f "$_ltv_out" 2>/dev/null || true
+            --target "$_ltv_target" --output "$_ltv_temporary" >/dev/null 2>>"$MODDIR/logs/fontswitch.log" || {
+            rm -f "$_ltv_temporary" "$_ltv_pending" 2>/dev/null || true
             printf '[%s] [THEME] early theme view build failed\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" \
                 >> "$MODDIR/logs/fontswitch.log" 2>/dev/null || true
-            return 0
+            return 1
         }
-    fi
-    chmod 0644 "$_ltv_out" 2>/dev/null || true
-    command -v chcon >/dev/null 2>&1 && chcon --reference="$THEME_TARGET" "$_ltv_out" 2>/dev/null || true
+        _ltv_hash=$(sha256sum "$_ltv_temporary" 2>/dev/null | awk '{print $1}')
+        [ -n "$_ltv_hash" ] || { rm -f "$_ltv_temporary" "$_ltv_pending"; return 1; }
+        # Immutable names preserve the old manifest's views if a later target
+        # fails while rebuilding this same deployment id.
+        _ltv_name="$_ltv_key.$_ltv_hash.ttf"
+        _ltv_out="$THEME_EARLY_DIR/$_ltv_name"
+        if [ -s "$_ltv_out" ] && [ "$(sha256sum "$_ltv_out" 2>/dev/null | awk '{print $1}')" = "$_ltv_hash" ]; then
+            rm -f "$_ltv_temporary"
+        else
+            mv -f "$_ltv_temporary" "$_ltv_out" || { rm -f "$_ltv_pending"; return 1; }
+        fi
+        chmod 0644 "$_ltv_out" 2>/dev/null || true
+        command -v chcon >/dev/null 2>&1 && chcon --reference="$_ltv_target" "$_ltv_out" 2>/dev/null || true
+        printf '%s|%s|%s\n' "$_ltv_name" "$_ltv_target" "$_ltv_hash" >> "$_ltv_pending" || {
+            rm -f "$_ltv_pending"; return 1;
+        }
+        _ltv_index=$((_ltv_index + 1))
+    done
+    mv -f "$_ltv_pending" "$_ltv_manifest" || return 1
     # Keep the view of the running deployment (rollback target) and the new one.
     _ltv_running=$(_le_theme_key "$(_le_value "$CONFIG_DIR/universal-font-runtime.conf" deploymentId)")
-    for _ltv_old in "$THEME_EARLY_DIR"/*.ttf; do
+    for _ltv_old in "$THEME_EARLY_DIR"/*.ttf "$THEME_EARLY_DIR"/*.mounts; do
         [ -f "$_ltv_old" ] || continue
-        case "$_ltv_old" in "$_ltv_out"|"$THEME_EARLY_DIR/$_ltv_running.ttf") ;; *) rm -f "$_ltv_old" ;; esac
+        case "${_ltv_old##*/}" in
+            "$_ltv_key.mounts"|"$_ltv_running.mounts"|"$_ltv_running.ttf") continue ;;
+        esac
+        grep -q -F "${_ltv_old##*/}|" "$_ltv_manifest" 2>/dev/null && continue
+        grep -q -F "${_ltv_old##*/}|" "$THEME_EARLY_DIR/$_ltv_running.mounts" 2>/dev/null && continue
+        rm -f "$_ltv_old"
     done
     return 0
 }
@@ -207,7 +248,10 @@ _le_stage() {
     _les_digest=$(printf '%s\n' "$_les_values" | sed -n '2p')
     [ -n "$_les_id" ] && [ -n "$_les_digest" ] || return 1
 
-    _le_theme_view "$BUILD_DIR/payload" "$_les_id"
+    _le_theme_view "$BUILD_DIR/payload" "$_les_id" || {
+        printf '{"status":"error","message":"主题字体视图生成失败，未提交新字体负载"}\n'
+        return 1
+    }
     _le_capture_previous
     _les_next="$MODDIR/.luoshu-payload-next"
     # Universal and default next-boot markers are mutually exclusive.

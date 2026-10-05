@@ -4,8 +4,9 @@
 Runs once after boot_completed. FAIL (the caller then stages a rollback) when the
 payload this boot was supposed to mount is not what the system sees: runtime or
 mount state disagree with the deployment, or a payload file is missing or
-different at its system path. Whether a FontManager dump mentions the replaced
-files is recorded as a note only: its format differs between ROMs.
+different at its system path. A failed FontManager query is WARN, never rollback
+evidence. Successful dump references are notes only: its format differs between
+ROMs, and file checks cannot establish what a third-party app actually renders.
 
 Output keeps the Phase 8 result format, so App status and rollback are unchanged.
 """
@@ -22,7 +23,15 @@ from typing import Any
 import luoshu_payload
 
 SCHEMA = "universal-font-runtime-verification-v1"
-REVISION = 2
+REVISION = 3
+
+# cmd can return an error on stdout, including on HyperOS. Nonempty stdout is
+# not evidence that the font service answered the query.
+FONT_MANAGER_ERRORS = (
+    "failure calling service", "failed transaction", "can't find service", "cannot find service",
+    "no shell command implementation", "exception occurred while executing", "securityexception",
+    "permission denial", "unknown command", "service not found",
+)
 
 
 def _conf(path: Path | None) -> dict[str, str]:
@@ -85,6 +94,15 @@ def verify(
     font_files = 0
     hits = 0
     dump = font_dump.lower()
+    font_manager_status = "query-failed" if any(error in dump for error in FONT_MANAGER_ERRORS) \
+        else "query-completed" if dump.strip() else "unavailable"
+    font_manager_available = font_manager_status == "query-completed"
+    if not font_manager_available:
+        warnings.append("font-manager-query-failed" if dump.strip() else "font-manager-unavailable")
+    theme_state = mount_state.get("themeState", "unconfirmed")
+    theme_error = mount_state.get("themeError", "")
+    if theme_state == "failed":
+        warnings.append("theme-font-mount-failed")
     for item in deployment.get("files") or []:
         logical = str(item.get("logicalPath") or "")
         visible = _visible(logical, visible_root)
@@ -98,13 +116,16 @@ def verify(
         files.append(report)
         if item.get("kind") != "xml":
             font_files += 1
-            if Path(logical).name.lower() in dump:
+            if font_manager_available and Path(logical).name.lower() in dump:
                 hits += 1
     notes: list[str] = []
-    if dump.strip() and font_files and not hits:
+    if theme_state == "unconfirmed":
+        notes.append("theme-font-mount-unconfirmed")
+    if font_manager_available and font_files and not hits:
         # FontManager dumps differ between ROMs (HyperOS 3 lists no system file
-        # names); the visible, hash-checked files are the evidence that counts.
+        # names); the visible hashes establish file integrity only.
         notes.append("font-manager-no-replaced-file-reference")
+    notes.append("app-font-rendering-unverified")
 
     grade = "FAIL" if failures else "WARN" if warnings else "PASS"
     return {
@@ -126,7 +147,13 @@ def verify(
             "dynamicTargets": 0,
             "dynamicMounted": 0,
             "fontManagerHits": hits,
-            "fontManagerAvailable": bool(dump.strip()),
+            "fontManagerAvailable": font_manager_available,
+            "fontManagerStatus": font_manager_status,
+            "payloadFilesVerified": not failures,
+            "appRenderingVerified": False,
+            "themeState": theme_state,
+            "themeMounted": mount_state.get("themeMounted", "0"),
+            "themeError": theme_error,
             "failureCount": len(failures),
             "warningCount": len(warnings),
         },
@@ -145,6 +172,7 @@ def _write_outputs(result: dict[str, Any], output_json: Path, output_conf: Path)
     summary = result.get("summary") or {}
     lines = [
         f"schema={SCHEMA}",
+        f"engine={result.get('engine', '')}",
         f"grade={result.get('grade', 'FAIL')}",
         f"state={result.get('state', 'fail')}",
         f"mode={result.get('mode', 'universal-runtime')}",
@@ -157,6 +185,12 @@ def _write_outputs(result: dict[str, Any], output_json: Path, output_conf: Path)
         "dynamicTargets=0",
         "dynamicMounted=0",
         f"fontManagerHits={summary.get('fontManagerHits', 0)}",
+        f"fontManagerAvailable={str(bool(summary.get('fontManagerAvailable'))).lower()}",
+        f"fontManagerStatus={summary.get('fontManagerStatus', 'unavailable')}",
+        f"payloadFilesVerified={str(bool(summary.get('payloadFilesVerified'))).lower()}",
+        "appRenderingVerified=false",
+        f"themeState={summary.get('themeState', 'unconfirmed')}",
+        f"themeMounted={summary.get('themeMounted', '0')}",
         f"failureCount={summary.get('failureCount', 0)}",
         f"warningCount={summary.get('warningCount', 0)}",
         f"time={result.get('time', int(time.time()))}",

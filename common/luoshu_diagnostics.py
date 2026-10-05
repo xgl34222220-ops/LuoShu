@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import json
 import os
+import posixpath
 import struct
 import subprocess
 import sys
@@ -106,8 +107,86 @@ def _stock_candidates(logical: str, lower_root: Path, live_ok: bool) -> list[tup
 
 def _resolve_stock(logical: str, lower_root: Path, live_ok: bool) -> tuple[str, Path] | None:
     for origin, candidate in _stock_candidates(logical, lower_root, live_ok):
-        if candidate.is_file():
+        if origin == "lower":
+            candidate = _snapshot_file(logical, lower_root / "lower", lower_layout=True)
+        elif origin == "mirror":
+            # The mirror prefix itself is trusted; aliases below it must stay
+            # within the mirror, not resolve through the active system overlay.
+            mirror = candidate
+            for _part in Path(logical).relative_to("/").parts:
+                mirror = mirror.parent
+            candidate = _snapshot_file(logical, mirror, lower_layout=False)
+        if candidate is not None and candidate.is_file():
             return origin, candidate
+    return None
+
+
+def _snapshot_path(logical: str, root: Path, lower_layout: bool) -> Path | None:
+    parts = Path(logical).parts
+    if not parts or parts[0] != "/" or ".." in parts or (len(parts) > 1 and parts[1] == "data"):
+        return None
+    if lower_layout:
+        if len(parts) < 3 or parts[2] != "fonts":
+            return None
+        return root / f"{parts[1]}-fonts" / Path(*parts[3:])
+    return root / Path(*parts[1:])
+
+
+def _snapshot_logical(relative: Path, lower_layout: bool) -> str | None:
+    parts = relative.parts
+    if not parts or ".." in parts:
+        return None
+    if lower_layout:
+        if not parts[0].endswith("-fonts"):
+            return None
+        return str(Path("/") / parts[0][:-6] / "fonts" / Path(*parts[1:]))
+    return str(Path("/") / relative)
+
+
+def _snapshot_file(logical: str, root: Path, *, lower_layout: bool) -> Path | None:
+    """Resolve ROM aliases only through the trusted pre-mount snapshot.
+
+    An absolute /system/fonts link copied into lower would normally open the
+    active overlay. Rebase it into lower (including cross-partition aliases).
+    Links to /data themes, missing lower targets and cycles have no stock input.
+    """
+    try:
+        root = root.resolve(strict=True)
+        if not root.is_dir():
+            return None
+        current = logical
+        seen: set[str] = set()
+        for _hop in range(40):
+            if current in seen:
+                return None
+            seen.add(current)
+            candidate = _snapshot_path(current, root, lower_layout)
+            if candidate is None:
+                return None
+            parts = candidate.relative_to(root).parts
+            for number in range(len(parts)):
+                prefix = root / Path(*parts[:number + 1])
+                if not prefix.is_symlink():
+                    continue
+                target = Path(os.readlink(prefix))
+                # Internal snapshot links may use its physical layout; try
+                # that interpretation before the original ROM path layout.
+                physical = Path(posixpath.normpath(str(target if target.is_absolute() else prefix.parent / target)))
+                try:
+                    remapped = _snapshot_logical(physical.relative_to(root), lower_layout)
+                except ValueError:
+                    remapped = None
+                if remapped is None:
+                    source = _snapshot_logical(Path(*parts[:number + 1]), lower_layout)
+                    if source is None:
+                        return None
+                    remapped = posixpath.normpath(str(target if target.is_absolute() else Path(source).parent / target))
+                current = posixpath.normpath(str(Path(remapped) / Path(*parts[number + 1:])))
+                break
+            else:
+                return candidate if candidate.is_file() else None
+    except (OSError, RuntimeError, ValueError):
+        return None
     return None
 
 

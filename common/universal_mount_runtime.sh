@@ -12,6 +12,7 @@ MOUNT_STATE="$CONFIG_DIR/universal-font-mount.conf"
 STATE_ROOT="${LUOSHU_UNIVERSAL_MOUNT_STATE_ROOT:-/data/adb/luoshu/universal-mount}"
 DYNAMIC_LIST="$STATE_ROOT/dynamic.mounts"
 THEME_TARGET="${LUOSHU_THEME_FONT_TARGET:-/data/system/theme/fonts/Roboto-Regular.ttf}"
+THEME_ROUTER="${LUOSHU_THEME_FONT_ROUTER:-/data/system/fonts/theme_webview/Roboto-Regular.ttf}"
 THEME_EARLY_DIR="$CONFIG_DIR/hyperos-theme-font-early"
 THEME_LIST="$STATE_ROOT/theme.mounts"
 
@@ -143,14 +144,29 @@ _ufmr_is_mounted() {
     awk -v path="$_ufmr_target" '$5 == path {found=1} END {exit !found}' "$_ufmr_mountinfo" 2>/dev/null
 }
 
+_ufmr_readonly_visible() (
+    _ufmr_ro_visible="$1"; _ufmr_ro_path="$2"; _ufmr_ro_info="$3"
+    if [ -n "${LUOSHU_UNIVERSAL_TEST_VISIBLE_ROOT:-}" ] && \
+        [ "$_ufmr_ro_info" != /proc/self/mountinfo ] && [ "$_ufmr_ro_info" != /proc/1/mountinfo ]; then
+        # Ordered fixture rows model lower-to-upper layers. A lower ro row
+        # cannot certify a visible rw layer when remount falsely returns 0.
+        awk -v path="$_ufmr_ro_path" '$5 == path {found=1; ro=($6 ~ /(^|,)ro(,|$)/)} END {exit !(found && ro)}' \
+            "$_ufmr_ro_info" 2>/dev/null
+        exit $?
+    fi
+    # Use the opened visible file's mount id, rather than any same-path row:
+    # mount ids can be reused and mountinfo ordering is not an ownership test.
+    exec 3<"$_ufmr_ro_visible" || exit 1
+    _ufmr_ro_id=$(awk '$1 == "mnt_id:" {print $2; exit}' /proc/self/fdinfo/3 2>/dev/null)
+    [ -n "$_ufmr_ro_id" ] || exit 1
+    awk -v id="$_ufmr_ro_id" -v path="$_ufmr_ro_path" \
+        '$1 == id && $5 == path {found=1; ro=($6 ~ /(^|,)ro(,|$)/)} END {exit !(found && ro)}' \
+        "$_ufmr_ro_info" 2>/dev/null
+)
+
 _ufmr_is_readonly() {
-    _ufmr_target="$1"
     [ "${LUOSHU_UNIVERSAL_TEST_ASSUME_RO:-0}" = 1 ] && return 0
-    _ufmr_mountinfo="${LUOSHU_UNIVERSAL_MOUNTINFO:-/proc/self/mountinfo}"
-    awk -v path="$_ufmr_target" '
-        $5 == path && $6 ~ /(^|,)ro(,|$)/ {found=1}
-        END {exit !found}
-    ' "$_ufmr_mountinfo" 2>/dev/null
+    _ufmr_readonly_visible "$1" "$1" "${LUOSHU_UNIVERSAL_MOUNTINFO:-/proc/self/mountinfo}"
 }
 
 _ufmr_rollback_dynamic() {
@@ -202,33 +218,131 @@ _ufmr_apply_dynamic() {
     return 0
 }
 
-# HyperOS theme font: bound in the global namespace at the mount stage, before
-# zygote/system_server, so every process (SystemUI, launcher, apps) inherits it.
-# The view was built when the font was applied (luoshu_engine.sh stage).
-_ufmr_theme_bind() {
-    _ufmr_theme_id=$(_ufmr_value "$RUNTIME_CONF" deploymentId | sed 's/^sha256://' | cut -c1-32)
-    _ufmr_theme_view="$THEME_EARLY_DIR/$_ufmr_theme_id.ttf"
-    [ -n "$_ufmr_theme_id" ] && [ -s "$_ufmr_theme_view" ] || return 0
-    _ufmr_theme_target=$(_ufmr_visible_target "$THEME_TARGET")
-    [ -f "$_ufmr_theme_target" ] && [ ! -L "$_ufmr_theme_target" ] || return 0
-    mkdir -p "$STATE_ROOT" 2>/dev/null || return 0
-    _ufmr_is_mounted "$_ufmr_theme_target" && return 0
-    _ufmr_mount --bind "$_ufmr_theme_view" "$_ufmr_theme_target" >/dev/null 2>&1 || \
-        _ufmr_mount -o bind "$_ufmr_theme_view" "$_ufmr_theme_target" >/dev/null 2>&1 || {
-            _ufmr_log "theme font bind failed target=$_ufmr_theme_target"
-            return 0
+# Verify an early theme view independently of the system payload. A later
+# bounded bridge can retry it, but an absent/failed bind must never be reported
+# as a successful early replacement.
+_ufmr_theme_fail() {
+    UFMR_THEME_STATE=failed
+    UFMR_THEME_ERROR="$1"
+    _ufmr_log "early theme font failed reason=$1 target=${_ufmr_theme_target:-none}"
+    return 1
+}
+
+_ufmr_theme_pid1_visible() {
+    _ufmr_theme_pid1_root="${LUOSHU_SELF_PID1_ROOT:-/proc/1/root}"
+    if [ -n "${LUOSHU_UNIVERSAL_TEST_VISIBLE_ROOT:-}" ]; then
+        _ufmr_theme_pid1_root="${LUOSHU_UNIVERSAL_TEST_PID1_VISIBLE_ROOT:-$LUOSHU_UNIVERSAL_TEST_VISIBLE_ROOT}"
+    fi
+    _ufmr_theme_pid1_target="${_ufmr_theme_pid1_root%/}$1"
+    [ "$(_ufmr_hash "$_ufmr_theme_pid1_target")" = "$2" ] || return 1
+    [ "${LUOSHU_UNIVERSAL_TEST_ASSUME_RO:-0}" = 1 ] && return 0
+    _ufmr_readonly_visible "$_ufmr_theme_pid1_target" "$1" \
+        "${LUOSHU_UNIVERSAL_TEST_PID1_MOUNTINFO:-/proc/1/mountinfo}"
+}
+
+_ufmr_theme_bind_one() {
+    _ufmr_theme_view="$THEME_EARLY_DIR/$1"
+    _ufmr_theme_logical="$2"
+    _ufmr_theme_expected="$3"
+    case "$_ufmr_theme_logical" in "$THEME_TARGET"|"$THEME_ROUTER") ;; *) _ufmr_theme_fail unsafe-target; return 1 ;; esac
+    case "$1" in ''|*/*) _ufmr_theme_fail unsafe-view; return 1 ;; esac
+    [ -n "$_ufmr_theme_expected" ] && [ -s "$_ufmr_theme_view" ] && \
+        [ "$(_ufmr_hash "$_ufmr_theme_view")" = "$_ufmr_theme_expected" ] || {
+        _ufmr_theme_fail view-integrity-failed; return 1;
+    }
+    _ufmr_theme_target=$(_ufmr_visible_target "$_ufmr_theme_logical")
+    # The manifest names resolved physical files. A rebuilt symlink must be
+    # handled by the late router-aware bridge instead of following a new route.
+    [ -f "$_ufmr_theme_target" ] && [ ! -L "$_ufmr_theme_target" ] || {
+        _ufmr_theme_fail target-changed; return 1;
+    }
+    _ufmr_theme_new_bind=0
+    if _ufmr_is_mounted "$_ufmr_theme_target" && \
+        [ "$(_ufmr_hash "$_ufmr_theme_target")" = "$_ufmr_theme_expected" ] && \
+        _ufmr_is_readonly "$_ufmr_theme_target"; then
+        : # Already exposes this exact verified view.
+    else
+        # A ROM bind or an old view is not proof of coverage. Layer the new
+        # read-only view on top; rollback leaves the previous mount intact.
+        _ufmr_mount --bind "$_ufmr_theme_view" "$_ufmr_theme_target" >/dev/null 2>&1 || \
+            _ufmr_mount -o bind "$_ufmr_theme_view" "$_ufmr_theme_target" >/dev/null 2>&1 || {
+            _ufmr_theme_fail bind-failed; return 1;
         }
-    _ufmr_mount -o remount,bind,ro "$_ufmr_theme_target" >/dev/null 2>&1 || \
-        _ufmr_mount -o bind,remount,ro "$_ufmr_theme_target" >/dev/null 2>&1 || true
-    printf '%s\n' "$_ufmr_theme_target" > "$THEME_LIST" 2>/dev/null || true
-    _ufmr_log "theme font bound early view=${_ufmr_theme_view##*/} target=$_ufmr_theme_target"
+        _ufmr_theme_new_bind=1
+        if ! { _ufmr_mount -o remount,bind,ro "$_ufmr_theme_target" >/dev/null 2>&1 || \
+            _ufmr_mount -o bind,remount,ro "$_ufmr_theme_target" >/dev/null 2>&1; } || \
+            ! _ufmr_is_readonly "$_ufmr_theme_target" || \
+            [ "$(_ufmr_hash "$_ufmr_theme_target")" != "$_ufmr_theme_expected" ]; then
+            _ufmr_umount "$_ufmr_theme_target" >/dev/null 2>&1 || true
+            _ufmr_theme_fail bind-verification-failed; return 1
+        fi
+    fi
+    if ! _ufmr_theme_pid1_visible "$_ufmr_theme_logical" "$_ufmr_theme_expected"; then
+        # Do not detach an inherited/foreign mount that we did not install.
+        [ "$_ufmr_theme_new_bind" -eq 0 ] || _ufmr_umount "$_ufmr_theme_target" >/dev/null 2>&1 || true
+        _ufmr_theme_fail pid1-visibility-mismatch; return 1
+    fi
+    _ufmr_theme_identity=$(stat -L -c '%d:%i' "$_ufmr_theme_target" 2>/dev/null)
+    _ufmr_theme_source_identity=$(stat -L -c '%d:%i' "$_ufmr_theme_view" 2>/dev/null)
+    # A foreign mount containing identical bytes passes coverage verification,
+    # but it is not ours to detach later. Real binds retain the source inode.
+    if [ "$_ufmr_theme_new_bind" -eq 1 ] || \
+        { [ -n "$_ufmr_theme_identity" ] && [ "$_ufmr_theme_identity" = "$_ufmr_theme_source_identity" ]; }; then
+        if [ -z "$_ufmr_theme_identity" ] || ! printf '%s|%s|%s\n' \
+            "$_ufmr_theme_target" "$_ufmr_theme_expected" "$_ufmr_theme_identity" >> "$THEME_LIST"; then
+            [ "$_ufmr_theme_new_bind" -eq 0 ] || _ufmr_umount "$_ufmr_theme_target" >/dev/null 2>&1 || true
+            _ufmr_theme_fail journal-write-failed; return 1
+        fi
+    fi
+    UFMR_THEME_MOUNTED=$((UFMR_THEME_MOUNTED + 1))
+    _ufmr_log "theme font bound early view=${_ufmr_theme_view##*/} target=$_ufmr_theme_target pid1-visible=1"
+    return 0
+}
+
+_ufmr_theme_bind() {
+    UFMR_THEME_STATE=not-applicable
+    UFMR_THEME_ERROR=''
+    UFMR_THEME_MOUNTED=0
+    _ufmr_theme_target=''
+    _ufmr_theme_id=$(_ufmr_value "$RUNTIME_CONF" deploymentId | sed 's/^sha256://' | cut -c1-32)
+    _ufmr_theme_manifest="$THEME_EARLY_DIR/$_ufmr_theme_id.mounts"
+    mkdir -p "$STATE_ROOT" 2>/dev/null || { _ufmr_theme_fail state-unavailable; return 1; }
+    : > "$THEME_LIST" || { _ufmr_theme_fail journal-write-failed; return 1; }
+    if [ -s "$_ufmr_theme_manifest" ]; then
+        while IFS='|' read -r _ufmr_theme_name _ufmr_theme_route _ufmr_theme_hash; do
+            _ufmr_theme_bind_one "$_ufmr_theme_name" "$_ufmr_theme_route" "$_ufmr_theme_hash" || return 1
+        done < "$_ufmr_theme_manifest"
+        UFMR_THEME_STATE=mounted
+        return 0
+    fi
+    # Compatibility for a payload staged by the previous module build. Only
+    # its original exact path can use the legacy one-view cache.
+    if [ ! -e "$_ufmr_theme_manifest" ] && [ -s "$THEME_EARLY_DIR/$_ufmr_theme_id.ttf" ] && \
+        [ -e "$(_ufmr_visible_target "$THEME_TARGET")" ] && \
+        [ ! -e "$(_ufmr_visible_target "$THEME_ROUTER")" ]; then
+        _ufmr_theme_legacy_hash=$(_ufmr_hash "$THEME_EARLY_DIR/$_ufmr_theme_id.ttf")
+        _ufmr_theme_bind_one "$_ufmr_theme_id.ttf" "$THEME_TARGET" "$_ufmr_theme_legacy_hash" || return 1
+        UFMR_THEME_STATE=mounted
+        return 0
+    fi
+    for _ufmr_theme_route in "$THEME_TARGET" "$THEME_ROUTER"; do
+        [ ! -e "$(_ufmr_visible_target "$_ufmr_theme_route")" ] || {
+            _ufmr_theme_target=$_ufmr_theme_route
+            _ufmr_theme_fail view-not-prepared; return 1;
+        }
+    done
     return 0
 }
 
 _ufmr_theme_unbind() {
     [ -s "$THEME_LIST" ] || return 0
-    while IFS= read -r _ufmr_theme_target; do
-        [ -n "$_ufmr_theme_target" ] && _ufmr_umount "$_ufmr_theme_target" >/dev/null 2>&1 || true
+    while IFS='|' read -r _ufmr_theme_target _ufmr_theme_owned_hash _ufmr_theme_owned_identity; do
+        # Only detach the exact verified view recorded by this runtime. A ROM
+        # theme update/foreign replacement must survive rollback.
+        [ -n "$_ufmr_theme_target" ] && [ -n "$_ufmr_theme_owned_hash" ] && [ -n "$_ufmr_theme_owned_identity" ] || continue
+        [ "$(stat -L -c '%d:%i' "$_ufmr_theme_target" 2>/dev/null)" = "$_ufmr_theme_owned_identity" ] && \
+            [ "$(_ufmr_hash "$_ufmr_theme_target")" = "$_ufmr_theme_owned_hash" ] && \
+            _ufmr_umount "$_ufmr_theme_target" >/dev/null 2>&1 || true
     done < "$THEME_LIST"
     : > "$THEME_LIST" 2>/dev/null || true
 }
@@ -253,6 +367,9 @@ _ufmr_write_state() {
         printf 'deploymentId=%s\n' "$_ufmr_id"
         printf 'payloadDigest=%s\n' "$_ufmr_digest"
         printf 'dynamicMounted=%s\n' "$_ufmr_dynamic"
+        printf 'themeState=%s\n' "${UFMR_THEME_STATE:-not-attempted}"
+        printf 'themeMounted=%s\n' "${UFMR_THEME_MOUNTED:-0}"
+        printf 'themeError=%s\n' "${UFMR_THEME_ERROR:-}"
         printf 'error=%s\n' "$_ufmr_error"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$MOUNT_STATE.tmp.$$" 2>/dev/null && mv -f "$MOUNT_STATE.tmp.$$" "$MOUNT_STATE" 2>/dev/null || true
@@ -304,10 +421,13 @@ universal_font_mount_hook() {
     fi
     _ufmr_dynamic_count=$(wc -l < "$DYNAMIC_LIST" 2>/dev/null | tr -d '[:space:]')
     case "$_ufmr_dynamic_count" in ''|*[!0-9]*) _ufmr_dynamic_count=0 ;; esac
+    _ufmr_theme_rc=0
+    _ufmr_theme_bind || _ufmr_theme_rc=1
+    # The system/dynamic payload remains usable when the independent theme
+    # view fails; keep its transaction mounted and expose the theme failure.
     _ufmr_write_state mounted "$_ufmr_manager" "$_ufmr_stage" "$_ufmr_dynamic_count" ''
-    _ufmr_theme_bind
-    _ufmr_log "mounted deployment=$(_ufmr_value "$RUNTIME_CONF" deploymentId) manager=$_ufmr_manager stage=$_ufmr_stage dynamic=$_ufmr_dynamic_count"
-    return 0
+    _ufmr_log "mounted deployment=$(_ufmr_value "$RUNTIME_CONF" deploymentId) manager=$_ufmr_manager stage=$_ufmr_stage dynamic=$_ufmr_dynamic_count theme=$UFMR_THEME_STATE"
+    return "$_ufmr_theme_rc"
 }
 
 case "${1:-hook}" in

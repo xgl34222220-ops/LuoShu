@@ -38,6 +38,8 @@ LATIN_CODEPOINTS = frozenset((
     | set(range(0x2000, 0x2070))
     | set(range(0x20A0, 0x20D0))
     | set(range(0x2100, 0x2150))
+    | set(range(0xFF21, 0xFF3B))  # Fullwidth Latin letters are the English slot.
+    | set(range(0xFF41, 0xFF5B))
 ) - DIGIT_CODEPOINTS)
 REQUIRED = {
     "latin": frozenset(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")),

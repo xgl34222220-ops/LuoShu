@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
@@ -258,6 +260,47 @@ def test_composite_static(temp: Path) -> None:
     assert all(index is None for index in xml_nodes.indexes), nodes
 
 
+def add_fullwidth_latin(path: Path) -> None:
+    """Give the original fixture independent fullwidth Latin glyph slots."""
+    with TTFont(path) as font:
+        cmap = font.getBestCmap()
+        order = list(font.getGlyphOrder())
+        variations = font["gvar"].variations if "gvar" in font else None
+        for point in (*range(0xFF21, 0xFF3B), *range(0xFF41, 0xFF5B)):
+            original = cmap[point - 0xFEE0]
+            name = f"fullwidth_u{point:04X}"
+            order.append(name)
+            font["glyf"][name] = copy.deepcopy(font["glyf"][original])
+            font["hmtx"].metrics[name] = font["hmtx"].metrics[original]
+            if variations is not None:
+                variations[name] = copy.deepcopy(variations.get(original, []))
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    table.cmap[point] = name
+        font.setGlyphOrder(order)
+        font.save(path)
+
+
+def test_composite_fullwidth_latin(temp: Path) -> None:
+    # Both uploaded HyperOS source cmaps include fullwidth Latin slots. Original
+    # fixtures give them visible outlines: those letters follow the English
+    # slot and must not silently retain the Chinese source's outlines.
+    topology, _stocks, xml_map = device(temp)
+    spec = _mix_spec(temp, "auto")
+    for role in ("cjk", "latin"):
+        add_fullwidth_latin(Path(spec["roles"][role]["files"][0]))
+    for mode in ("auto", "fixed"):
+        spec["roles"]["cjk"]["mode"] = mode
+        _manifest, _report, payload = run(temp, f"fullwidth-{mode}", topology, spec, xml_map)
+        with TTFont(payload / MISANS.lstrip("/"), fontNumber=0) as font:
+            for point in (*range(0xFF21, 0xFF3B), *range(0xFF41, 0xFF5B)):
+                assert glyph_points(font, chr(point)) == 4, f"fullwidth Latin U+{point:04X} kept CJK glyph"
+            assert glyph_points(font, "一") == 5, "Chinese stays in the Chinese slot"
+            assert glyph_points(font, "0") == 3, "digits stay in the digit slot"
+            if mode == "auto":
+                assert _bounds(font, "Ａ", 900)[2] > _bounds(font, "Ａ")[2] + 20
+
+
 def test_latin_only(temp: Path) -> None:
     topology, _stocks, xml_map = device(temp)
     latin = temp / "LatinOnly.ttf"
@@ -349,12 +392,43 @@ def test_metrics_from_stock_file(temp: Path) -> None:
     assert {"path": CLOCK, "reason": "stock-metrics-missing"} in report["keptStock"], report["keptStock"]
 
 
+def test_stock_alias_uses_lower_only(temp: Path) -> None:
+    # HyperOS exposes system MiSans as an absolute product-font alias. Reading
+    # the copied symlink directly follows the active replacement, whereas the
+    # captured product bytes retain the stock coverage and line metrics.
+    lower = temp / "lower"
+    (lower / "system-fonts").mkdir(parents=True)
+    (lower / "product-fonts").mkdir()
+    alias = lower / "system-fonts/MiSansVF.ttf"
+    alias.symlink_to("/product/fonts/MiSansVF.ttf")
+    original = lower / "product-fonts/MiSansVF.ttf"
+    fixture.make_font(original, family="Captured Original", ascent=910)
+    live = temp / "active-custom.ttf"
+    fixture.make_cjk_font(live, family="Active Custom", pentagon=True)
+    with patch.dict(os.environ, LUOSHU_SELF_MOUNT_STATE_ROOT=str(temp)):
+        found = engine._stock_file(MISANS, {})
+        assert found == original, found
+        assert engine._read_metrics(found)["hhea"]["ascent"] == 910
+        alias.unlink()
+        alias.symlink_to(live)
+        assert engine._stock_file(MISANS, {}) is None, "lower must not read an external active custom font"
+        assert engine._stock_file(MISANS, {MISANS: live}) == live, "explicit caller map remains authoritative"
+        alias.unlink()
+        alias.symlink_to("/product/fonts/missing.ttf")
+        assert engine._stock_file(MISANS, {}) is None
+        alias.unlink()
+        alias.symlink_to("/product/fonts/cycle.ttf")
+        (lower / "product-fonts/cycle.ttf").symlink_to(MISANS)
+        assert engine._stock_file(MISANS, {}) is None
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-engine-") as raw:
         temp = Path(raw)
         for test in (test_variable_single, test_static_family, test_composite_variable, test_composite_static,
-                     test_latin_only,
-                     test_collection_and_protected, test_no_ui_target, test_metrics_from_stock_file):
+                     test_composite_fullwidth_latin, test_latin_only,
+                     test_collection_and_protected, test_no_ui_target, test_metrics_from_stock_file,
+                     test_stock_alias_uses_lower_only):
             sub = temp / test.__name__
             sub.mkdir()
             test(sub)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import subprocess
@@ -55,13 +56,22 @@ def main() -> int:
         # HyperOS theme font: the stage builds its replacement for the boot-time bind.
         theme = temp / "theme" / "Roboto-Regular.ttf"
         theme.parent.mkdir()
-        fixture.make_font(theme, family="Theme Stub")
-        rc, out = sh(moddir, "stage", "UserSans", env={"LUOSHU_THEME_FONT_TARGET": str(theme)})
+        router = temp / "theme_webview" / "Roboto-Regular.ttf"
+        router.parent.mkdir()
+        fixture.make_font(router, family="Theme Stub")
+        theme.symlink_to(router)
+        theme_env = {"LUOSHU_THEME_FONT_TARGET": str(theme), "LUOSHU_THEME_FONT_ROUTER": str(router)}
+        rc, out = sh(moddir, "stage", "UserSans", env=theme_env)
         assert rc == 0 and '"pipeline":"luoshu-engine-v3"' in out, out
         next_root = moddir / ".luoshu-payload-next"
         manifest = json.loads((next_root / ".luoshu-runtime/deployment/deployment.json").read_text(encoding="utf-8"))
-        view = config / "hyperos-theme-font-early" / (manifest["deploymentId"].split(":", 1)[1][:32] + ".ttf")
+        view_dir = config / "hyperos-theme-font-early"
+        early_manifest = view_dir / (manifest["deploymentId"].split(":", 1)[1][:32] + ".mounts")
+        routes = early_manifest.read_text(encoding="utf-8").splitlines()
+        view = view_dir / routes[0].split("|")[0]
         assert view.is_file() and view.stat().st_size > theme.stat().st_size, list(view.parent.glob("*"))
+        assert len(routes) == 1 and routes[0].split("|")[1] == str(router), routes
+        assert theme.is_symlink(), "stage must retain framework routing symlinks"
         payload_format.validate_payload_integrity(manifest, next_root)
         state = dict(line.split("=", 1) for line in
                      (config / "universal-font-next.conf").read_text(encoding="utf-8").splitlines())
@@ -78,7 +88,10 @@ def main() -> int:
             "cjkMode=auto\nlatinMode=auto\ndigitMode=fixed\n", encoding="utf-8")
         rc, out = sh(moddir, "prepare", "mix")
         assert rc == 0 and '"status":"ok"' in out, out
-        rc, out = sh(moddir, "stage", "mix")
+        # Two real framework paths can coexist with different layout metrics.
+        theme.unlink()
+        fixture.make_font(theme, family="Theme Direct", advance=510)
+        rc, out = sh(moddir, "stage", "mix", env=theme_env)
         assert rc == 0, out
         manifest = json.loads((next_root / ".luoshu-runtime/deployment/deployment.json").read_text(encoding="utf-8"))
         payload_format.validate_payload_integrity(manifest, next_root)
@@ -86,6 +99,35 @@ def main() -> int:
                      (config / "universal-font-next.conf").read_text(encoding="utf-8").splitlines())
         # The queued UserSans request does not change which payload is live.
         assert state["font"] == "mix" and state["previousFont"] == "OldFont", state
+        map_path = config / "hyperos-theme-font-early" / (manifest["deploymentId"].split(":", 1)[1][:32] + ".mounts")
+        routes = map_path.read_text(encoding="utf-8").splitlines()
+        assert len(routes) == 2 and {line.split("|")[1] for line in routes} == {str(theme), str(router)}, routes
+
+        # A corrupt existing theme must block staging, preserve the already
+        # queued deployment, and return a visible error instead of false success.
+        prior_state = (config / "universal-font-next.conf").read_bytes()
+        prior_map = map_path.read_bytes()
+        prior_views = {line.split("|")[0]: (view_dir / line.split("|")[0]).read_bytes() for line in routes}
+        rc, out = sh(moddir, "prepare", "mix")
+        assert rc == 0, out
+        rebuilt = json.loads((config / "luoshu-engine-build/deployment.json").read_text(encoding="utf-8"))
+        assert rebuilt["deploymentId"] == manifest["deploymentId"], "regression must rebuild the queued deployment id"
+        # First target changes its layout contract and builds successfully;
+        # the second target then fails. Old map and both old views stay valid.
+        from fontTools.ttLib import TTFont
+        with TTFont(theme) as changed:
+            changed["hhea"].ascent += 75
+            changed.save(theme)
+        router.write_bytes(b"invalid-theme")
+        rc, out = sh(moddir, "stage", "mix", env=theme_env)
+        assert rc != 0 and "主题字体视图生成失败" in out, out
+        assert (config / "universal-font-next.conf").read_bytes() == prior_state
+        assert map_path.read_bytes() == prior_map
+        for line in routes:
+            name, _target, digest = line.split("|")
+            actual = (view_dir / name).read_bytes()
+            assert actual == prior_views[name] and hashlib.sha256(actual).hexdigest() == digest
+        payload_format.validate_payload_integrity(manifest, next_root)
 
         # Missing fonts fail with a message and stage nothing new.
         rc, out = sh(moddir, "prepare", "NoSuchFont")

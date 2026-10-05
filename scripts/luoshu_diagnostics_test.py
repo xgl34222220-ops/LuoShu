@@ -66,6 +66,74 @@ def main() -> int:
 
         # Hollowing keeps everything the engine inspects: style, axes, coverage.
         import luoshu_diagnostics
+        keep_points = luoshu_diagnostics._keep_codepoints()
+        fullwidth_points = set(range(0xFF21, 0xFF3B)) | set(range(0xFF41, 0xFF5B))
+        assert fullwidth_points <= keep_points
+        # Give fullwidth English independent cmap entries, with no ASCII alias
+        # that could accidentally retain their outlines in a lite bundle.
+        from fontTools.ttLib import TTFont
+        fullwidth_source = temp / "Fullwidth.ttf"
+        fixture.make_font(fullwidth_source, family="Fullwidth English")
+        with TTFont(fullwidth_source) as font:
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    table.cmap = dict(table.cmap)
+                    for point in fullwidth_points:
+                        table.cmap[point] = table.cmap.pop(point - 0xFEE0)
+            font.save(fullwidth_source)
+        fullwidth_hollow = temp / "FullwidthHollow.ttf"
+        luoshu_diagnostics._hollow(fullwidth_source, fullwidth_hollow, keep_points)
+        with TTFont(fullwidth_source) as original, TTFont(fullwidth_hollow) as hollow_font:
+            for point in fullwidth_points:
+                original_glyph = original["glyf"][original.getBestCmap()[point]]
+                hollow_glyph = hollow_font["glyf"][hollow_font.getBestCmap()[point]]
+                assert hollow_glyph.numberOfContours > 0, hex(point)
+                assert original_glyph.getCoordinates(original["glyf"]) == hollow_glyph.getCoordinates(hollow_font["glyf"]), hex(point)
+        # Real pre-mount snapshots retain ROM symlinks. Reading such a link
+        # through pathlib can escape into the active overlay; resolve all hops
+        # inside lower/mirror instead, or record a missing stock snapshot.
+        aliases = temp / "aliases" / "lower"
+        (aliases / "system-fonts").mkdir(parents=True)
+        (aliases / "product-fonts").mkdir()
+        stock_bytes = b"original-stock"
+        (aliases / "system-fonts" / "MiSansVF.ttf").write_bytes(stock_bytes)
+        absolute = aliases / "system-fonts" / "MiSans-Regular.ttf"
+        absolute.symlink_to("/system/fonts/MiSansVF.ttf")
+        relative = aliases / "system-fonts" / "MiSans-Medium.ttf"
+        relative.symlink_to("MiSans-Regular.ttf")
+        (aliases / "product-fonts" / "Cross.ttf").write_bytes(b"cross-partition-stock")
+        (aliases / "system-fonts" / "Cross.ttf").symlink_to("../../product/fonts/Cross.ttf")
+        (aliases / "system-fonts" / "Physical.ttf").symlink_to("../product-fonts/Cross.ttf")
+        for name in ("MiSans-Regular.ttf", "MiSans-Medium.ttf"):
+            found = luoshu_diagnostics._resolve_stock(f"/system/fonts/{name}", aliases.parent, False)
+            assert found is not None and found[0] == "lower", name
+            assert found[1].read_bytes() == stock_bytes, found
+        for name in ("Cross.ttf", "Physical.ttf"):
+            found = luoshu_diagnostics._resolve_stock(f"/system/fonts/{name}", aliases.parent, False)
+            assert found is not None and found[1].read_bytes() == b"cross-partition-stock", name
+        overlay = temp / "live-overlay.ttf"
+        overlay.write_bytes(b"current-custom-payload")
+        unsafe = aliases / "system-fonts" / "Unsafe.ttf"
+        unsafe.symlink_to(overlay)
+        assert unsafe.is_file() and unsafe.read_bytes() == b"current-custom-payload"
+        assert luoshu_diagnostics._resolve_stock("/system/fonts/Unsafe.ttf", aliases.parent, False) is None
+        (aliases / "system-fonts" / "Theme.ttf").symlink_to("/data/system/theme/fonts/Roboto-Regular.ttf")
+        assert luoshu_diagnostics._resolve_stock("/system/fonts/Theme.ttf", aliases.parent, False) is None
+        (aliases / "system-fonts" / "Cycle.ttf").symlink_to("Cycle.ttf")
+        assert luoshu_diagnostics._resolve_stock("/system/fonts/Cycle.ttf", aliases.parent, False) is None
+        (aliases / "system-fonts" / "Nested").symlink_to(temp)
+        assert luoshu_diagnostics._resolve_stock("/system/fonts/Nested/live-overlay.ttf", aliases.parent, False) is None
+        # Mirrors rebase absolute ROM links just like lower does.
+        mirror = temp / "mirror"
+        (mirror / "system/fonts").mkdir(parents=True)
+        (mirror / "system/fonts/Original.ttf").write_bytes(stock_bytes)
+        (mirror / "system/fonts/Alias.ttf").symlink_to("/system/fonts/Original.ttf")
+        found = luoshu_diagnostics._snapshot_file("/system/fonts/Alias.ttf", mirror, lower_layout=False)
+        assert found is not None and found.read_bytes() == stock_bytes
+        (mirror / "data/system/theme/fonts").mkdir(parents=True)
+        (mirror / "data/system/theme/fonts/Theme.ttf").write_bytes(b"current-theme-font")
+        (mirror / "system/fonts/Theme.ttf").symlink_to("/data/system/theme/fonts/Theme.ttf")
+        assert luoshu_diagnostics._snapshot_file("/system/fonts/Theme.ttf", mirror, lower_layout=False) is None
         hollow = temp / "hollow.ttf"
         luoshu_diagnostics._hollow(cjk, hollow, luoshu_diagnostics._keep_codepoints())
 
@@ -124,6 +192,27 @@ def main() -> int:
         )
         assert missing_lower.returncode == 0, missing_lower.stdout + missing_lower.stderr
         assert json.loads(missing_lower.stdout)["data"]["stockCount"] == 0
+        with zipfile.ZipFile(temp / "out" / "nolower.zip") as archive:
+            missing_index = json.loads(archive.read("index.json"))
+            assert len(missing_index["stockSkipped"]) == len(stocks), missing_index
+            assert {item["reason"] for item in missing_index["stockSkipped"]} == {"no-stock-snapshot"}
+
+        # A live payload reachable through a lower symlink must not be shipped
+        # under the stock label, even if the source is otherwise a valid font.
+        broken_slot = lower / "lower" / "system-fonts" / "Roboto-Regular.ttf"
+        broken_slot.unlink()
+        broken_slot.symlink_to(latin)
+        unsafe_export = subprocess.run(
+            [sys.executable, str(ROOT / "common" / "luoshu_diagnostics.py"), "--full",
+             "--moddir", str(moddir), "--output", str(temp / "out" / "unsafe.zip"), "--lower-root", str(lower)],
+            check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        assert unsafe_export.returncode == 0, unsafe_export.stdout + unsafe_export.stderr
+        with zipfile.ZipFile(temp / "out" / "unsafe.zip") as archive:
+            unsafe_index = json.loads(archive.read("index.json"))
+            assert "/system/fonts/Roboto-Regular.ttf" not in unsafe_index["stock"], unsafe_index
+            assert {"path": "/system/fonts/Roboto-Regular.ttf", "reason": "no-stock-snapshot"} in unsafe_index["stockSkipped"]
+            assert "stock/system/fonts/Roboto-Regular.ttf" not in archive.namelist()
 
         replay = subprocess.run(
             [sys.executable, str(ROOT / "tools" / "replay_diagnostics.py"), str(bundle),

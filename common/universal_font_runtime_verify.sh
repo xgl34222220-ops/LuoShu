@@ -110,10 +110,20 @@ _uvr_collect_font_dump() {
     : > "$FONT_DUMP" 2>/dev/null || return 1
     for _uvr_cmd in "cmd font dump" "cmd font list" "dumpsys font" "dumpsys font_manager"; do
         _uvr_tmp="$STATE_ROOT/font-manager.tmp.$$"
-        sh -c "$_uvr_cmd" > "$_uvr_tmp" 2>/dev/null
-        if [ -s "$_uvr_tmp" ]; then
+        sh -c "$_uvr_cmd" > "$_uvr_tmp" 2>&1
+        _uvr_dump_rc=$?
+        if [ "$_uvr_dump_rc" -eq 0 ] && [ -s "$_uvr_tmp" ] && \
+                ! grep -Eiq "failure calling service|failed transaction|can't find service|cannot find service|no shell command implementation|exception occurred while executing|securityexception|permission denial|unknown command|service not found" "$_uvr_tmp"; then
             mv -f "$_uvr_tmp" "$FONT_DUMP" 2>/dev/null || true
             return 0
+        fi
+        # Keep error evidence if all service variants fail, but let a later
+        # successful query replace it rather than stopping at error stdout.
+        if [ -s "$_uvr_tmp" ]; then
+            if [ "$_uvr_dump_rc" -ne 0 ]; then
+                printf '\nFailure calling service: query exit status %s\n' "$_uvr_dump_rc" >> "$_uvr_tmp"
+            fi
+            mv -f "$_uvr_tmp" "$FONT_DUMP" 2>/dev/null || true
         fi
         rm -f "$_uvr_tmp" 2>/dev/null || true
     done
@@ -147,13 +157,27 @@ _uvr_terminal_failure() {
 }
 
 _uvr_cleanup_retired_on_pass() {
-    [ "$(_uvr_value "$OUTPUT_CONF" grade)" = PASS ] || return 0
+    _uvr_cleanup_grade=$(_uvr_value "$OUTPUT_CONF" grade)
+    case "$_uvr_cleanup_grade" in PASS|WARN) ;; *) return 0 ;; esac
+    if [ "$(_uvr_value "$OUTPUT_CONF" engine)" = luoshu-engine-v3 ]; then
+        # Font-service queries are optional evidence; an OEM query failure must
+        # not retain old generated payloads when file and theme checks passed.
+        [ "$(_uvr_value "$OUTPUT_CONF" payloadFilesVerified)" = true ] || return 0
+        [ "$(_uvr_value "$OUTPUT_CONF" failureCount)" = 0 ] || return 0
+        case "$(_uvr_value "$OUTPUT_CONF" themeState)" in mounted|not-applicable) ;; *) return 0 ;; esac
+        if [ "$_uvr_cleanup_grade" = WARN ]; then
+            [ "$(_uvr_value "$OUTPUT_CONF" warningCount)" = 1 ] || return 0
+            case "$(_uvr_value "$OUTPUT_CONF" reason)" in font-manager-query-failed|font-manager-unavailable) ;; *) return 0 ;; esac
+        fi
+    else
+        [ "$_uvr_cleanup_grade" = PASS ] || return 0
+    fi
     _uvr_retired=$(_uvr_value "$ACTIVATED_CONF" retired)
     case "$_uvr_retired" in
         "$MODDIR"/.luoshu-retired/universal-*)
             rm -rf "$_uvr_retired" 2>/dev/null || return 1
             rmdir "$MODDIR/.luoshu-retired" 2>/dev/null || true
-            _uvr_log "PASS retired payload released: $_uvr_retired"
+            _uvr_log "$_uvr_cleanup_grade verified retired payload released: $_uvr_retired"
             ;;
     esac
     return 0
@@ -240,7 +264,7 @@ _uvr_finish() {
     _uvr_reason=$(_uvr_value "$OUTPUT_CONF" reason)
     _uvr_log "result=${_uvr_grade:-FAIL} reason=${_uvr_reason:-unknown} font=$_uvr_font rc=$_uvr_rc"
 
-    if [ "$_uvr_grade" = PASS ]; then
+    if [ "$_uvr_grade" = PASS ] || [ "$_uvr_grade" = WARN ]; then
         _uvr_cleanup_retired_on_pass
     elif [ "$_uvr_grade" = FAIL ] && [ -f "$CUTOVER_CONTROLLER" ]; then
         MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \

@@ -1,6 +1,14 @@
 name: Build Test Candidate
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - claude/laughing-hypatia-ogd2oz
+    paths:
+      - common/**
+      - scripts/**
+      - android-app/**
+      - .github/workflows/test-candidate.yml
   pull_request:
     branches:
       - main

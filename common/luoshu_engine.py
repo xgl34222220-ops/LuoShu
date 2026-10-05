@@ -34,7 +34,7 @@ import font_role_shadow
 import luoshu_merge
 import luoshu_payload as payload_format
 
-ENGINE_REVISION = 2
+ENGINE_REVISION = 3
 REPORT_SCHEMA = "luoshu-engine-report-v1"
 REPLACE_ROLES = {"ui-sans", "cjk", "latin", "clock", "numeric"}
 COMPOSITE_ROLES = ("cjk", "latin", "digit")
@@ -359,16 +359,29 @@ def _face_count(path: str, slot: dict[str, Any], stock_paths: dict[str, Path]) -
 
 
 def _stock_file(path: str, stock_paths: dict[str, Path]) -> Path | None:
-    """The stock bytes of a slot: an explicit map, the pre-mount lower snapshot,
-    then the live path (a previous LuoShu output there keeps stock line metrics)."""
+    """A trusted explicit map, or a ROM alias resolved within lower only.
+
+    The old ordinary live-file fallback is for devices without a captured
+    lower slot; it can supply retained line metrics, not prove stock identity.
+    A captured lower alias that cannot resolve must never read the live route.
+    """
+    explicit = stock_paths.get(path)
+    if explicit is not None and explicit.is_file():
+        return explicit
     parts = Path(path).parts
-    candidates = [stock_paths.get(path)]
     if len(parts) >= 4 and parts[2] == "fonts":
+        from luoshu_diagnostics import _snapshot_file
         lower = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
-        candidates.append(lower / "lower" / f"{parts[1]}-fonts" / Path(*parts[3:]))
-    if not Path(path).is_symlink():  # a link (HyperOS theme overlay) is never a stock file
-        candidates.append(Path(path))
-    return next((item for item in candidates if item is not None and item.is_file()), None)
+        captured = lower / "lower" / f"{parts[1]}-fonts" / Path(*parts[3:])
+        stock = _snapshot_file(path, lower / "lower", lower_layout=True)
+        if stock is not None:
+            return stock
+        if captured.exists() or captured.is_symlink():
+            return None
+    live = Path(path)
+    if not live.is_symlink() and live.is_file():
+        return live
+    return None
 
 
 def _read_metrics(file: Path, face_index: int = 0) -> dict[str, Any]:
