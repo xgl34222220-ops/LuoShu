@@ -33,17 +33,6 @@ _lhcc_safe_dynamic_name() {
     case "$_lhcc_name" in */*|'') return 1 ;; esac
     case "$_lhcc_name" in *.ttf|*.otf) ;; *) return 1 ;; esac
     _lhcc_lower=$(printf '%s' "$_lhcc_name" | tr '[:upper:]' '[:lower:]')
-    # Keep code/terminal monospace on stock; OEM numeral clocks are separate.
-    _lhcc_role_name=$_lhcc_lower
-    while :; do
-        case "$_lhcc_role_name" in
-            *monotype*) _lhcc_role_name=${_lhcc_role_name%%monotype*}${_lhcc_role_name#*monotype} ;;
-            *) break ;;
-        esac
-    done
-    case "$_lhcc_role_name" in
-        *mono*) case "$_lhcc_lower" in *clock*|*mitype*) ;; *) return 1 ;; esac ;;
-    esac
     case "$_lhcc_lower" in
         *italic*|*oblique*|*emoji*|*symbol*|*serif*|*cjkjp*|*cjkkr*) return 1 ;;
         *arabic*|*hebrew*|*thai*|*devanagari*|*bengali*|*tamil*|*telugu*|*malayalam*|\
@@ -114,9 +103,7 @@ _lhcc_names_for_root() {
             _lhcc_safe_dynamic_name "$_lhcc_name" || continue
             printf '%s\n' "$_lhcc_name"
         done
-    } | awk 'NF && !seen[$0]++' | while IFS= read -r _lhcc_candidate; do
-        _lhcc_safe_dynamic_name "$_lhcc_candidate" && printf '%s\n' "$_lhcc_candidate"
-    done
+    } | awk 'NF && !seen[$0]++'
 }
 
 luoshu_hyperos_full_payload_ensure() {

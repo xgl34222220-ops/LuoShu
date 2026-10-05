@@ -169,10 +169,11 @@ internal fun LuoShuAppShell(
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
+        features.refreshSystemWeight()
     }
     LaunchedEffect(page) {
         when (page) {
-            AppPage.Home -> Unit
+            AppPage.Home -> features.refreshSystemWeight()
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
@@ -189,10 +190,11 @@ internal fun LuoShuAppShell(
         enabled = page != AppPage.Home && !(page == AppPage.Settings && settingsDetailVisible),
     ) { page = if (page == AppPage.Logs) logsReturnPage else AppPage.Home }
 
-    val homeActions = remember(viewModel) {
+    val homeActions = remember(viewModel, features) {
         HomeActions(
             refresh = {
                 viewModel.refresh()
+                features.refreshSystemWeight()
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
@@ -203,6 +205,8 @@ internal fun LuoShuAppShell(
             openSettings = { page = AppPage.Settings },
             restoreDefault = { restoreDefault = true },
             reboot = viewModel::rebootDevice,
+            previewSystemWeight = features::previewSystemWeight,
+            resetSystemWeight = features::resetSystemWeight,
         )
     }
     val libraryActions = remember(viewModel) {
@@ -360,7 +364,7 @@ internal fun LuoShuAppShell(
                             CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
                                 HomeRoute(
                                     style = appearance.uiStyle,
-                                    state = viewModel.snapshot.toHomeUiState(),
+                                    state = viewModel.snapshot.toHomeUiState(features.systemWeight),
                                     actions = homeActions,
                                 )
                             }

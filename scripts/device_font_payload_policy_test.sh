@@ -21,10 +21,14 @@ device_font_cache_activate() {
     return 0
 }
 device_font_cache_schedule() {
+    [ "${LUOSHU_CACHE_AUTOSTART:-1}" = 0 ] || fail "明确应用不得自动启动缓存子任务"
+    [ "${LUOSHU_CACHE_FOREGROUND:-0}" = 1 ] || fail "缓存未归入前台字体事务"
     printf '%s\n' "$1" >> "$TMP/schedules"
     return 0
 }
 device_font_cache_build_pending() {
+    [ "${LUOSHU_CACHE_AUTOSTART:-1}" = 0 ] || fail "生成阶段不得自动启动缓存子任务"
+    [ "${LUOSHU_CACHE_FOREGROUND:-0}" = 1 ] || fail "生成阶段离开前台字体事务"
     _test_font=$(tail -n1 "$TMP/schedules")
     : > "$TMP/cache-ready-$_test_font"
     printf '%s\n' "$_test_font" >> "$TMP/builds"
@@ -49,6 +53,8 @@ ok grep -qx OtherFont "$TMP/schedules"
 ok grep -qx OtherFont "$TMP/builds"
 ok grep -qx OtherFont "$TMP/activations"
 ok grep -q '同一任务生成最终对齐负载' "$MODULE/logs/device-font-payload.log"
+eq "${LUOSHU_CACHE_AUTOSTART:-1}" 1
+eq "${LUOSHU_CACHE_FOREGROUND:-0}" 0
 
 : > "$TMP/schedules"
 : > "$TMP/builds"

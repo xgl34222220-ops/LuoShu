@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书 v2.0.0：原生 App 文件选择器导入桥。
-# 只接受 App 私有缓存中的 TTF/OTF/TTC/WOFF/WOFF2/ZIP；网页字体先安全转换为 SFNT。
+# 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 由安全字体包导入器处理。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -17,7 +17,6 @@ USER_IMPORT_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/import"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 FACE_EXTRACTOR="$MODDIR/common/font_extract_faces.py"
-WEB_CONVERTER="$MODDIR/common/font_web_convert.py"
 MAX_BYTES=268435456
 
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -71,9 +70,8 @@ safe_stem() {
 invalidate_font_cache() {
     rm -f "$MODDIR/config/native_font_index.json" \
           "$MODDIR/config/native_font_index.key" \
+
           "$MODDIR/config/recent_fonts.conf" 2>/dev/null || true
-    rm -rf "$MODDIR/config/source-font-profiles" 2>/dev/null || true
-    rm -rf "$MODDIR/config/universal-font-plans" 2>/dev/null || true
 }
 
 schedule_font_prewarm() {
@@ -193,46 +191,6 @@ EOF_RAW_PROBE
         "$(json_escape "$_family")" "$(json_escape "$_stem")" "$_format" "$_supports_cjk"
 }
 
-import_web_font_file() {
-    _iwf_src="$1"
-    _iwf_display="$2"
-    [ -x "$PYBIN" ] && [ -f "$WEB_CONVERTER" ] || {
-        fail_json "网页字体转换组件不可用"
-        return
-    }
-    _iwf_tmp="$MODDIR/cache/web-font-import.$$"
-    rm -rf "$_iwf_tmp" 2>/dev/null || true
-    mkdir -p "$_iwf_tmp" 2>/dev/null || { fail_json "无法创建网页字体转换目录"; return; }
-
-    _iwf_result=$(
-        PYTHONHOME="$PYROOT" \
-        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
-        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$PYBIN" "$WEB_CONVERTER" --input "$_iwf_src" --output-dir "$_iwf_tmp" 2>/dev/null
-    )
-    _iwf_rc=$?
-    if [ "$_iwf_rc" -ne 0 ]; then
-        _iwf_message=$(printf '%s\n' "$_iwf_result" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tail -n1)
-        rm -rf "$_iwf_tmp" 2>/dev/null || true
-        [ -n "$_iwf_message" ] || _iwf_message="网页字体转换失败"
-        fail_json "$_iwf_message"
-        return
-    fi
-
-    _iwf_converted=$(find "$_iwf_tmp" -maxdepth 1 -type f \( -name '*.ttf' -o -name '*.otf' \) -print 2>/dev/null | head -n1)
-    if [ ! -f "$_iwf_converted" ]; then
-        rm -rf "$_iwf_tmp" 2>/dev/null || true
-        fail_json "网页字体转换没有生成可用 SFNT"
-        return
-    fi
-
-    _iwf_import=$(import_font_file "$_iwf_converted" "$_iwf_display")
-    _iwf_import_rc=$?
-    rm -rf "$_iwf_tmp" 2>/dev/null || true
-    printf '%s\n' "$_iwf_import"
-    return "$_iwf_import_rc"
-}
-
 import_zip_file() {
     _src="$1"
     _display="$2"
@@ -253,7 +211,7 @@ import_zip_file() {
     cp -f "$_src" "$_target" 2>/dev/null || { fail_json "无法复制 ZIP 到安全导入目录"; return; }
     chmod 0644 "$_target" 2>/dev/null || true
 
-    _error_file="$MODDIR/cache/native-import-zip-error.$$"
+    _error_file="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/native-import-zip-error.$$"
     mkdir -p "${_error_file%/*}" 2>/dev/null || true
     _result=$(import_zip_package "$(basename "$_target")" 2>"$_error_file")
     _rc=$?
@@ -283,8 +241,7 @@ case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
 _ext=$(printf '%s' "${display_name##*.}" | tr '[:upper:]' '[:lower:]')
 case "$_ext" in
     ttf|otf|ttc) import_font_file "$source_path" "$display_name" ;;
-    woff|woff2) import_web_font_file "$source_path" "$display_name" ;;
     zip) import_zip_file "$source_path" "$display_name" ;;
-    *) fail_json "仅支持 TTF、OTF、TTC、WOFF、WOFF2 和字体模块 ZIP" ;;
+    *) fail_json "仅支持 TTF、OTF、TTC 和字体模块 ZIP" ;;
 esac
 exit 0

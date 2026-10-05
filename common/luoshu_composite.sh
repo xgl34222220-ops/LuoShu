@@ -8,7 +8,7 @@ case "$(uname -m 2>/dev/null || true)" in aarch64|arm64) ;; *) echo '{"status":"
 export PYTHONHOME="$RUNTIME"
 export PYTHONPATH="$RUNTIME/lib/python3.14:$RUNTIME/lib/python3.14/site-packages"
 export LD_LIBRARY_PATH="$RUNTIME/lib:$RUNTIME/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export TMPDIR="${TMPDIR:-$MODDIR/cache/tmp}"
+export TMPDIR="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"
 mkdir -p "$TMPDIR" 2>/dev/null || true
 if [ "${1:-}" = "--self-test" ]; then
     exec "$PYBIN" -c 'import fontTools; print("ok")'

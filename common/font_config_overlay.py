@@ -2,8 +2,8 @@
 """Generate and validate boot-safe Android font configuration overlays.
 
 The device document remains the source of truth. LuoShu redirects named UI families to
-balanced static weights. Named monospace families retain the exact original XML
-face, collection index, axes and spacing. Locale fallbacks, emoji, icons, symbols, serif faces and true italic faces
+balanced static weights and redirects named monospace families to a dedicated fixed-width
+derivative. Locale fallbacks, emoji, icons, symbols, serif faces and true italic faces
 remain untouched.
 """
 from __future__ import annotations
@@ -138,9 +138,7 @@ def effective_family_name(
 
 def is_protected_file(value: str, mono: bool = False) -> bool:
     filename = os.path.basename(value.strip()).lower()
-    tokens = PROTECTED_MONO_FILE_TOKENS if mono else tuple(t for t in PROTECTED_UI_FILE_TOKENS if t != 'mono')
-    if not mono and 'mono' in filename.replace('monotype', ''):
-        return True
+    tokens = PROTECTED_MONO_FILE_TOKENS if mono else PROTECTED_UI_FILE_TOKENS
     return not filename.endswith(FONT_SUFFIXES) or any(token in filename for token in tokens)
 
 
@@ -175,7 +173,7 @@ def rewrite_tree(tree: ET.ElementTree, prefix: str, mono_prefix: str = "LuoShuMo
         if parent is not None and local_name(parent.tag) == "family-list" and is_locale_specific_family(parent):
             continue
         mono = is_safe_mono_family(family_name)
-        if mono or not is_safe_family(family_name):
+        if not mono and not is_safe_family(family_name):
             continue
         selected_prefix = mono_prefix if mono else prefix
 

@@ -1,5 +1,19 @@
 #!/system/bin/sh
-# Root 后台任务启动器：脱离 App 的 su 会话、终端与进程组。
+# Bounded task launch and verified cancellation; no process-name/group kills.
+
+luoshu_scope_runner() {
+    printf '%s\n' "${LUOSHU_TASK_SCOPE_RUNNER:-${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-}}}/common/task_scope.sh}"
+}
+
+luoshu_scope_run() {
+    _lsr_task="$1"; _lsr_timeout="$2"; shift 2
+    sh "$(luoshu_scope_runner)" request-run "$_lsr_task" "$_lsr_timeout" -- "$@"
+}
+
+luoshu_stop_module_tasks() (
+    _lsmt_module="$1"
+    sh "$(luoshu_scope_runner)" cancel-all "$_lsmt_module"
+)
 
 luoshu_current_boot_id() {
     _lcbi_value=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
@@ -16,6 +30,10 @@ luoshu_pid_value() {
 luoshu_task_pid_alive() {
     _ltpa_pid_file="$1"
     _ltpa_task="${2:-}"
+    if [ -f "${_ltpa_pid_file}.owner.json" ]; then
+        sh "$(luoshu_scope_runner)" alive "$_ltpa_pid_file" "$_ltpa_task" >/dev/null 2>&1
+        return $?
+    fi
     _ltpa_pid=$(luoshu_pid_value "$_ltpa_pid_file")
     [ -n "$_ltpa_pid" ] || return 1
 
@@ -26,6 +44,14 @@ luoshu_task_pid_alive() {
         [ -n "$_ltpa_expected_boot" ] && [ "$_ltpa_expected_boot" = "$_ltpa_current_boot" ] || return 1
     fi
 
+    # Pre-scope records have no proof of ownership. Never trust PID alone.
+    [ -s "${_ltpa_pid_file}.start" ] && [ -s "${_ltpa_pid_file}.boot" ] || return 1
+    _ltpa_stat=$(cat "/proc/$_ltpa_pid/stat" 2>/dev/null) || return 1
+    _ltpa_tail=${_ltpa_stat##*) }
+    set -- $_ltpa_tail
+    [ "$1" != Z ] || return 1
+    shift 19
+    [ "$1" = "$(cat "${_ltpa_pid_file}.start" 2>/dev/null)" ] || return 1
     kill -0 "$_ltpa_pid" 2>/dev/null || return 1
     if [ -n "$_ltpa_task" ]; then
         # A numeric PID can be recycled by Android. The task sidecar and, when available,
@@ -33,8 +59,7 @@ luoshu_task_pid_alive() {
         [ -s "${_ltpa_pid_file}.task" ] || return 1
         [ "$(cat "${_ltpa_pid_file}.task" 2>/dev/null)" = "$_ltpa_task" ] || return 1
         if [ -r "/proc/$_ltpa_pid/cmdline" ]; then
-            _ltpa_cmdline=$(tr '\000' ' ' < "/proc/$_ltpa_pid/cmdline" 2>/dev/null)
-            case "$_ltpa_cmdline" in *"$_ltpa_task"*) ;; *) return 1 ;; esac
+            tr '\000' '\n' < "/proc/$_ltpa_pid/cmdline" 2>/dev/null | grep -Fqx -- "$_ltpa_task" || return 1
         fi
     fi
     return 0
@@ -43,27 +68,32 @@ luoshu_task_pid_alive() {
 luoshu_clear_task_pid() {
     _lctp_pid_file="$1"
     _lctp_task="${2:-}"
-    # The one-shot supervisor owns these sidecars until all descendants have
-    # exited. A worker must not erase ownership while its children still run.
-    if [ "${LUOSHU_TASK_SCOPE_PID_FILE:-}" = "$_lctp_pid_file" ] && \
-       [ -n "${LUOSHU_TASK_SCOPE_PID:-}" ] && \
-       { [ -z "$_lctp_task" ] || [ "${LUOSHU_TASK_SCOPE_TASK:-}" = "$_lctp_task" ]; }; then
-        return 0
+    # A worker's terminal write occurs before the supervisor reaps descendants.
+    # Only the supervisor may clear its live ownership record.
+    [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$_lctp_pid_file" ] || return 0
+    if [ -f "${_lctp_pid_file}.owner.json" ]; then
+        # Do not erase evidence after an externally SIGKILLed supervisor.
+        luoshu_task_pid_alive "$_lctp_pid_file" "$_lctp_task" && return 0
+        sh "$(luoshu_scope_runner)" cancel "$_lctp_pid_file" "$_lctp_task" >/dev/null 2>&1
+        return $?
     fi
     if [ -n "$_lctp_task" ] && [ -s "${_lctp_pid_file}.task" ] && [ "$(cat "${_lctp_pid_file}.task" 2>/dev/null)" != "$_lctp_task" ]; then
         return 0
     fi
-    rm -f "$_lctp_pid_file" "${_lctp_pid_file}.task" "${_lctp_pid_file}.boot" 2>/dev/null || true
+    rm -f "$_lctp_pid_file" "${_lctp_pid_file}.task" "${_lctp_pid_file}.boot" \
+        "${_lctp_pid_file}.start" "${_lctp_pid_file}.owner.json" "${_lctp_pid_file}.ready" 2>/dev/null || true
 }
 
 luoshu_stop_task_pid() {
     _lstp_pid_file="$1"
-    _lstp_pid=$(luoshu_pid_value "$_lstp_pid_file")
-    _lstp_task=$(cat "${_lstp_pid_file}.task" 2>/dev/null)
-    if luoshu_task_pid_alive "$_lstp_pid_file" "$_lstp_task"; then
-        luoshu_terminate_task_tree "$_lstp_pid"
+    _lstp_task="${2:-$(cat "${_lstp_pid_file}.task" 2>/dev/null)}"
+    if [ -f "${_lstp_pid_file}.owner.json" ] || [ -f "${_lstp_pid_file}.cleanup.json" ]; then
+        sh "$(luoshu_scope_runner)" cancel "$_lstp_pid_file" "$_lstp_task"
+        return $?
     fi
+    # Old records without persisted start time are stale, not kill authority.
     luoshu_clear_task_pid "$_lstp_pid_file"
+    printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"absent"}}\n' "$_lstp_task"
 }
 
 # Cancellation is rare: take one process-tree snapshot, rather than running a
@@ -117,7 +147,7 @@ luoshu_start_detached() {
     shift 3
     [ "$#" -gt 0 ] || return 2
     mkdir -p "${_lsd_pid_file%/*}" "${_lsd_log_file%/*}" 2>/dev/null || return 1
-    if luoshu_task_pid_alive "$_lsd_pid_file" "$_lsd_task"; then
+    if luoshu_task_pid_alive "$_lsd_pid_file"; then
         return 3
     fi
 
@@ -125,32 +155,27 @@ luoshu_start_detached() {
     # names here: the old generic _task variable was cleared by luoshu_clear_task_pid(), so
     # every new worker wrote an empty .task sidecar and was falsely recovered as interrupted.
     luoshu_clear_task_pid "$_lsd_pid_file"
+    rm -f "${_lsd_pid_file}.cleanup.json" 2>/dev/null || return 1
 
-    _lsd_scope="${MODDIR:-}/common/task_scope.sh"
-    if [ -f "$_lsd_scope" ]; then
-        [ -x "$MODDIR/common/python/bin/luoshu-python" ] || return 1
-        _lsd_timeout="${LUOSHU_TASK_TIMEOUT_SECONDS:-900}"
-        case "$_lsd_timeout" in ''|*[!0-9]*) _lsd_timeout=900 ;; esac
-        [ "$_lsd_timeout" -ge 30 ] 2>/dev/null || _lsd_timeout=30
-        [ "$_lsd_timeout" -le 900 ] 2>/dev/null || _lsd_timeout=900
-        set -- sh "$_lsd_scope" --pid-file "$_lsd_pid_file" --task "$_lsd_task" \
-            --timeout "$_lsd_timeout" -- "$@"
-    fi
-
-    if command -v nohup >/dev/null 2>&1 && command -v setsid >/dev/null 2>&1; then
-        MODDIR="${MODDIR:-}" nohup setsid "$@" </dev/null >>"$_lsd_log_file" 2>&1 &
-    elif command -v toybox >/dev/null 2>&1 && toybox nohup --help >/dev/null 2>&1 && toybox setsid --help >/dev/null 2>&1; then
-        MODDIR="${MODDIR:-}" toybox nohup toybox setsid "$@" </dev/null >>"$_lsd_log_file" 2>&1 &
-    elif command -v nohup >/dev/null 2>&1; then
-        MODDIR="${MODDIR:-}" nohup "$@" </dev/null >>"$_lsd_log_file" 2>&1 &
-    else
-        ( trap '' HUP; exec "$@" ) </dev/null >>"$_lsd_log_file" 2>&1 &
-    fi
+    _lsd_runner=$(luoshu_scope_runner)
+    [ -f "$_lsd_runner" ] || return 126
+    _lsd_timeout="${LUOSHU_TASK_TIMEOUT_SECONDS:-900}"
+    ( trap '' HUP; exec sh "$_lsd_runner" run --pid-file "$_lsd_pid_file" \
+        --task "$_lsd_task" --timeout "$_lsd_timeout" -- "$@" ) </dev/null >>"$_lsd_log_file" 2>&1 &
     _lsd_pid=$!
     case "$_lsd_pid" in ''|*[!0-9]*) return 1 ;; esac
-    printf '%s\n' "$_lsd_pid" >"$_lsd_pid_file" 2>/dev/null || return 1
-    printf '%s\n' "$_lsd_task" >"${_lsd_pid_file}.task" 2>/dev/null || true
-    luoshu_current_boot_id >"${_lsd_pid_file}.boot" 2>/dev/null || true
-    chmod 0644 "$_lsd_pid_file" "${_lsd_pid_file}.task" "${_lsd_pid_file}.boot" 2>/dev/null || true
-    return 0
+    # Identity and ready handshake are written by the supervisor, never $!.
+    # A very fast task may already have a complete cleanup proof instead.
+    _lsd_tries=0
+    while [ "$_lsd_tries" -lt 100 ]; do
+        [ "$(cat "${_lsd_pid_file}.ready" 2>/dev/null)" != "$_lsd_task" ] || return 0
+        if grep -Fq '"task": "'"$_lsd_task"'"' "${_lsd_pid_file}.cleanup.json" 2>/dev/null; then
+            return 0
+        fi
+        kill -0 "$_lsd_pid" 2>/dev/null || { wait "$_lsd_pid" 2>/dev/null; return 1; }
+        sleep .02
+        _lsd_tries=$((_lsd_tries + 1))
+    done
+    luoshu_stop_task_pid "$_lsd_pid_file" "$_lsd_task" >/dev/null 2>&1 || true
+    return 1
 }

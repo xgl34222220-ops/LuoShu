@@ -12,8 +12,14 @@ export LUOSHU_SWITCH_LOG="$MODDIR/logs/fontswitch.log"
 # fixture on the same contract instead of depending on the old 5-second test path.
 export LUOSHU_SWITCH_TIMEOUT_SECONDS=30
 export LUOSHU_SWITCH_WORKER_PID_FILE="$MODDIR/config/switch_task_worker.pid"
+export LUOSHU_TASK_SCOPE_PYTHON=python3
+export LUOSHU_RUNTIME_PATHS_PYTHON=python3
 mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs"
+printf 'id=LuoShu\n' > "$MODDIR/module.prop"
 cp "$ROOT/common/background_task.sh" "$MODDIR/common/background_task.sh"
+for name in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    ln -s "$ROOT/common/$name" "$MODDIR/common/$name"
+done
 cp "$ROOT/common/util_functions.sh" "$ROOT/common/util_functions_core.sh" "$MODDIR/common/"
 
 MANAGER="$TMP/fake-manager.sh"

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -25,7 +26,15 @@ class HotfixTest(unittest.TestCase):
         self.bin.mkdir()
         self.env = {**os.environ, 'MODDIR': str(self.module), 'MODULE_DIR': str(self.module),
                     'PATH': f'{self.bin}:{os.environ["PATH"]}',
-                    'LUOSHU_PUBLIC_DIR': str(self.root / 'public'), 'TEST_ROOT': str(self.root)}
+                    'LUOSHU_PUBLIC_DIR': str(self.root / 'public'), 'TEST_ROOT': str(self.root),
+                    'LUOSHU_TASK_SCOPE_PYTHON': sys.executable,
+                    'LUOSHU_RUNTIME_PATHS_PYTHON': sys.executable}
+        for key in ('LUOSHU_TASK_SCOPE_PID', 'LUOSHU_TASK_SCOPE_PIDFILE', 'LUOSHU_TASK_SCOPE_TASK',
+                    'LUOSHU_TASK_SCOPE_TMPDIR', 'LUOSHU_REAL_MODDIR', 'LUOSHU_STATE_DIR',
+                    'LUOSHU_CONFIG_DIR', 'LUOSHU_LOG_DIR', 'LUOSHU_CACHE_DIR', 'LUOSHU_TASKS_DIR',
+                    'LUOSHU_TMP_DIR', 'LUOSHU_BACKUP_DIR', 'LUOSHU_REPORTS_DIR',
+                    'LUOSHU_RUNTIME_PATHS_MODULE', 'LUOSHU_SCOPE_ALLOW_HANDOFF', 'LUOSHU_SCOPE_HANDOFF'):
+            self.env.pop(key, None)
 
     def command(self, name, content):
         path = self.bin / name
@@ -48,7 +57,7 @@ class HotfixTest(unittest.TestCase):
         self.assertFalse((self.module / '.legacy-v14-runtime').exists())
         self.assertFalse((self.module / '.luoshu-payload').exists())
 
-    def test_retired_weight_read_never_migrates_fonts_or_queries_settings(self):
+    def test_weight_read_does_not_migrate_fonts_and_queries_settings_once(self):
         for name in ('font_manager_v4.sh', 'util_functions.sh', 'util_functions_core.sh'):
             self.copy(name)
         legacy = self.root / 'legacy'
@@ -57,14 +66,15 @@ class HotfixTest(unittest.TestCase):
         self.env['LEGACY_FONTS_DIR'] = str(legacy)
         self.command('settings', 'echo call >> "$TEST_ROOT/settings-calls"\necho 50\n')
         result = json.loads(self.run_shell(self.common / 'font_manager_v4.sh', 'action', 'font_weight_status'))
-        self.assertFalse(result['data']['supported'])
-        self.assertTrue(result['data']['retired'])
-        self.assertFalse((self.root / 'settings-calls').exists())
+        self.assertEqual(result['data']['weight'], 450)
+        self.assertEqual((self.root / 'settings-calls').read_text().splitlines(), ['call'])
         self.assertFalse((self.root / 'public').exists(), 'status migrated public fonts')
 
     def test_status_does_not_start_deep_verifier_or_root_manager_daemon(self):
         self.copy('font_boot_state.sh')
         self.copy('app_bridge.sh')
+        for name in ('task_scope.sh', 'task_scope.py', 'runtime_paths.sh', 'runtime_paths_lock.py'):
+            self.copy(name)
         config = self.module / 'config'
         (config / 'active_font.conf').write_text('fixture\n')
         (config / 'text_reboot_required.conf').write_text('bootId=previous-boot\n')
@@ -77,6 +87,17 @@ class HotfixTest(unittest.TestCase):
         self.assertTrue(result['data']['rebootRequired'], 'unverified state must remain pending')
         self.assertFalse((self.root / 'deep-verify').exists())
         self.assertFalse((self.root / 'daemon').exists())
+        tasks = self.module / '.luoshu-state/tasks'
+        proofs = list(tasks.glob('request-*.pid.cleanup.json'))
+        self.assertEqual(len(proofs), 1, proofs)
+        proof = json.loads(proofs[0].read_text())
+        self.assertTrue(proof['cleaned'], proof)
+        self.assertEqual(proof['leftoverPids'], [], proof)
+        self.assertEqual(proof['cleanupErrors'], [], proof)
+        self.assertEqual(proof['result'], 0, proof)
+        for pattern in ('request-*.pid', 'request-*.pid.owner.json', 'request-*.pid.task',
+                        'request-*.pid.boot', 'request-*.pid.start'):
+            self.assertEqual(list(tasks.glob(pattern)), [], pattern)
 
     def test_provider_watch_includes_chrome_consumers_but_not_shell_arguments(self):
         proc = self.root / 'proc'

@@ -7,6 +7,9 @@ MOD="$TMP/module"
 mkdir -p "$MOD/common" "$MOD/config/device-font-sources" "$MOD/logs"
 cp "$ROOT/common/google_font_provider_bridge.sh" "$MOD/common/"
 cp "$ROOT/common/google_font_provider_patch.py" "$MOD/common/"
+cp "$ROOT/common/task_scope.sh" "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths.sh" "$ROOT/common/runtime_paths_lock.py" "$MOD/common/"
+export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
 printf 'fixture\n' > "$MOD/config/active_font.conf"
 SOURCE=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)
 TARGET_SOURCE=$(find /usr/share/fonts -type f -iname 'DejaVuSans-Bold.ttf' -print -quit)

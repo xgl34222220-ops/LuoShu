@@ -22,15 +22,6 @@
 
 发布运行时不会使用 FontTools 测试字体作为洛书内置字体，但仍保留上游外部声明以便完整追溯。
 
-## Google WOFF2 与 Brotli
-
-- 用途：在 Android ARM64 设备上离线解码 WOFF2，生成可由 Android 字体栈使用和进一步校验的 SFNT/TTC。
-- 来源：`google/woff2` 固定提交 `fb9c3379f2605b10f3e8f1d9636664ab5576775c`；其 Brotli 依赖固定提交 `533843e3546cd24c8344eaa899c6b0b681c8d222`。
-- 许可证：两者均为 MIT License。
-- 完整文本：`licenses/WOFF2-LICENSE.txt` 与 `licenses/Brotli-LICENSE.txt`。
-
-洛书只打包交叉编译后的 `woff2_decompress` 解码工具，不使用它修改原始字体文件；转换结果仍会经过洛书自己的 SFNT 与字体表校验。
-
 ## Miuix 与 AndroidLiquidGlass
 
 - 用途：Android 13 及以上悬浮底栏的背景取样、RuntimeShader 模糊与折射、边缘高光和平滑连续圆角。

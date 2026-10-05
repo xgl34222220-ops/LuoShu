@@ -5,38 +5,11 @@
 # App font inventory remains prewarmed through config/native_font_index.json.
 set +e
 MODDIR="${0%/*}"
-UNIVERSAL_MODE="$MODDIR/config/universal-font-runtime.conf"
-UNIVERSAL_RUNTIME="$MODDIR/common/universal_mount_runtime.sh"
-UNIVERSAL_VERIFY="$MODDIR/common/universal_font_runtime_verify.sh"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_SERVICE="$MODDIR/.luoshu-runtime/core/service.sh"
 
-if [ -s "$UNIVERSAL_MODE" ]; then
-    # Phase 7/8 runtime may only consume the frozen deployment artifacts.
-    # The legacy provider watcher re-discovers targets and chooses weights, so it
-    # must not run once the universal deployment pipeline is active.
-    [ -f "$UNIVERSAL_RUNTIME" ] && MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-        sh "$UNIVERSAL_RUNTIME" service >/dev/null 2>&1 || true
-    # Phase 8 runs once per boot after boot-complete. It consumes only the frozen
-    # Phase 4/6/7 artifacts and never starts a resident target-discovery loop.
-    [ -f "$UNIVERSAL_VERIFY" ] && MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-        sh "$UNIVERSAL_VERIFY" schedule >/dev/null 2>&1 || true
-    # Engine v3 payloads keep stock file names, so the provider and HyperOS
-    # theme bridges (which read .luoshu-payload/system/fonts) apply as before.
-    # Without them HyperOS apps keep the stock theme font (Latin/digit stub)
-    # in front of the replaced system font. The pre-v3 universal pipeline
-    # wrote no such payload and must stay excluded.
-    if grep -q '"luoshu-engine"' "$MODDIR/.luoshu-payload/.luoshu-runtime/deployment/deployment.json" 2>/dev/null && \
-        [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
-        (
-            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-                sh "$MODDIR/common/google_font_provider_service.sh" boot
-        ) </dev/null >/dev/null 2>&1 &
-    fi
-    exit 0
-fi
-
-# Legacy/current production paths keep the Google provider compatibility service.
+# Start from the real entry point before either service route is selected. The
+# mount loader sees $0=service_v4.sh on one route and is absent on the other.
 if [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
     (
         MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \

@@ -1,0 +1,56 @@
+# 正式 1.1.1 基线整理候选
+
+代码起点为 `refactor-v1.1.1`，提交 `be39f598bfb921526851c5c4a2e92905dacf4ea7`。
+此次候选继续使用已授权的 v2.0.0 升级编号，避免已装测试版的 App 被降级拒绝；编号不代表引入后续 v3 字体引擎。
+在线升级元数据和正式发布渠道保持基线内容。
+
+## 代码梳理
+
+审查覆盖基线 common 的 130 个脚本、内部运行层、模块入口、Android 主源码、测试及构建流程。
+`legacy_v14_4` 仍是 1.1.1 的实际应用链路，不属于可直接删除的旧目录。
+单字体入口为 App → app_bridge → font_switch_task → font_manager → font_switch_safe。
+组合入口为 App → font_mix_controller → legacy mix_router → v14_mix → v142/v143 → runtime/engine → 公共 composite。
+现有公共组合和角色检查器继续复用，不复制另一套实现。
+
+22 个启动、挂载及兼容核心按基线 SHA256 冻结，详见 `scripts/stable111_frozen_runtime.json`。
+`stable111_rework_gate.py` 同时核对源码和安装 ZIP，防止整理工作改变启动挂载行为。
+
+## 目录约定
+
+| 内容 | 位置 | 生命周期 |
+| --- | --- | --- |
+| 设置 | 模块 `.luoshu-state/config` | 更新保留 |
+| 日志、报告 | `.luoshu-state/logs`、`reports` | 模块管理 |
+| 可重建缓存 | `.luoshu-state/cache` | 集中管理 |
+| 任务身份及清理回执 | `.luoshu-state/tasks` | 验证后回收身份，保留回执 |
+| 任务及安装临时文件 | `.luoshu-state/tmp` | 对应任务收尾清理 |
+| 备份和迁移冲突 | `.luoshu-state/backup`、`migration-conflicts` | 保留恢复依据 |
+| 用户字体、导入和导出 | `/sdcard/LuoShu` | 用户数据，整理不删除 |
+| 外部字体恢复记录 | `/data/adb/luoshu/google-font-fallback` | 独立于模块卸载保留，恢复成功后处理 |
+| 当前、下次启动及退役负载 | `.luoshu-payload`、`.luoshu-payload-next`、`.luoshu-retired` | 保留 1.1.1 挂载契约 |
+| 自挂载工作区 | `/data/adb/luoshu` 的挂载子目录 | 保留挂载契约 |
+
+旧 config/logs/cache/backup/reports 保留受控相对链接供冻结核心使用；不会复制成第二套工作目录。
+首次迁移使用内核 flock，同一个锁文件不反复删除；中途退出后可继续迁移。
+拒绝外部链接和 Git 源码工作区原地迁移，配置冲突保留双方内容。
+
+## 进程收尾
+
+Root 请求、字体切换、组合、预热、provider 应用均经有期限的任务监督器。
+监督器使用 Linux subreaper 回收任务后代，包括双重 fork、setsid、忽略 TERM 和终止时再次 fork 的子进程。
+取消只按任务 token、启动周期、PID namespace 和进程启动时间核对身份，不按进程名或系统进程组清理。
+App 请求可将明确登记的有限任务交给字体 supervisor；普通内部 worker 不获得继续派生独立任务的许可。
+
+成功、失败、取消、超时均先收尾再确认终态；清理证据不完整时返回错误并保留身份，App 显示“等待清理”，现有刷新入口可重试该任务的取消。
+更新和卸载先停止已验证的旧任务，再迁移或移除身份记录。
+旧版本已经逃逸、且没有可验证身份的历史孤儿不按名称猜测杀掉；遇到无法确认的旧任务会停止迁移并保留证据。
+
+Google/theme provider 改为有限的一次应用和刷新，不再常驻监听。
+应用字体后新下载的 provider 字体在下一次明确应用或 reconcile 时处理。
+设备对齐缓存的闲时自动派生入口仅保留 pending 记录；明确应用时仍在当前任务内构建及激活，字体任务结束后不留下等待闲时的缓存进程。
+
+## 验证边界
+
+回归覆盖真实 Linux 进程及无关进程存活、预热和组合入口、取消后立即重试、目录并发与实际 SIGKILL 中断恢复、既有字体和安装卸载检查。
+Android 编译、lint、单元测试、签名和打包由候选构建工作流执行，产物不创建正式发布或标签。
+宿主和构建验证不能代替 HyperOS 真机确认；本轮也没有据此承诺所有 App 的数字英文覆盖已修复。

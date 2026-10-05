@@ -39,8 +39,8 @@ def main() -> int:
         source.write_text(SAMPLE, encoding="utf-8")
         tree = parse_xml(source)
         report = rewrite_tree(tree, "LuoShu", "LuoShuMono")
-        assert report["changed_fonts"] == 4, report
-        assert report["changed_mono_families"] == [], report
+        assert report["changed_fonts"] == 6, report
+        assert report["changed_mono_families"] == ["monospace", "serif-monospace"], report
 
         root = tree.getroot()
         families = {family.attrib.get("name", ""): family for family in root if family.tag == "family"}
@@ -51,9 +51,9 @@ def main() -> int:
         assert not list(list(sans)[0])
         assert child_text(families["sys-sans-en"]) == ["LuoShu-400.ttf"]
 
-        assert child_text(families["monospace"]) == ["DroidSansMono.ttf"]
+        assert child_text(families["monospace"]) == ["LuoShuMono-400.ttf"]
         family_lists = {item.attrib.get("name", ""): item for item in root if item.tag == "family-list"}
-        assert child_text(list(family_lists["serif-monospace"])[0]) == ["CutiveMono-Regular.ttf"]
+        assert child_text(list(family_lists["serif-monospace"])[0]) == ["LuoShuMono-400.ttf"]
         assert child_text(list(family_lists["google-sans-text"])[0]) == ["LuoShu-500.ttf"]
         assert child_text(families["serif"]) == ["NotoSerif-Regular.ttf"]
         assert child_text(families["material-icons"]) == ["MaterialIcons.ttf"]
@@ -116,7 +116,7 @@ def main() -> int:
         sans_font = list(families["ui-sans-serif"])[0]
         assert sans_font.text == "LuoShu-400.ttf"
         assert "index" not in sans_font.attrib
-        assert child_text(families["monospace"]) == ["DroidSansMono.ttf"]
+        assert child_text(families["monospace"]) == ["LuoShuMono-400.ttf"]
         serif_font = list(families["serif"])[0]
         assert serif_font.text == "NotoSerifCJK-Regular.ttc"
         assert serif_font.attrib.get("index") == "0"

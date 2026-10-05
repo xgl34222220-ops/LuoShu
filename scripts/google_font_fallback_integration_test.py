@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Real v1 journal migration + built-in state/actions; no device render claims."""
 import json
+import os
+import shutil
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -107,8 +110,10 @@ class IntegrationTest(unittest.TestCase):
         self.assertEqual(result['status'], 'unchanged')
         self.assertEqual(self.backend.calls, [])
 
-    def test_old_script_store_and_schema_are_unchanged(self):
-        self.assertEqual(str(m.STORE), '/data/adb/luoshu-google-font-fallback')
+    def test_store_survives_module_removal_and_v1_schema_remains_compatible(self):
+        self.assertEqual(str(m.STORE), '/data/adb/luoshu/google-font-fallback')
+        self.assertEqual(str(m.LEGACY_STORE), '/data/adb/luoshu-google-font-fallback')
+        self.assertNotIn('/modules/', str(m.STORE))
         self.assertEqual(m.SCHEMA, 'luoshu-google-font-fallback-v1')
 
     def test_runtime_and_ui_are_in_real_routes_and_payload(self):
@@ -124,6 +129,153 @@ class IntegrationTest(unittest.TestCase):
         self.assertNotIn('model.enable()', page.split('confirmButton')[0])
         uninstall = (ROOT / 'uninstall.sh').read_text()
         self.assertLess(uninstall.index('restore-owned --json'), uninstall.index('. "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"'))
+
+
+class JournalMigrationTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='fallback-journal-migration-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.legacy = self.root / 'luoshu-google-font-fallback'
+        self.legacy.mkdir(mode=0o700)
+        self.canonical = self.root / 'luoshu/google-font-fallback'
+        self.backend = FakeAndroid()
+        self.saved = {**self.backend.snapshot(0), 'schema': m.SCHEMA, 'original': 0}
+        m.Journal(self.legacy, 0).save(self.saved)
+
+    def migrate(self):
+        return m.prepare_store(self.canonical, self.legacy)
+
+    def canonical_store(self):
+        self.canonical.mkdir(mode=0o700, parents=True)
+
+    def test_complete_legacy_tree_moves_with_original_journal_inode_and_exact_bytes(self):
+        before_root = self.legacy.stat().st_ino
+        before = self.legacy / 'user-0.json'
+        old_inode, old_bytes = before.stat().st_ino, before.read_bytes()
+        self.assertEqual(self.migrate(), self.canonical)
+        self.assertEqual(self.canonical.stat().st_ino, before_root)
+        journal = m.Journal(self.canonical, 0)
+        self.assertEqual(journal.path.stat().st_ino, old_inode)
+        self.assertEqual(journal.path.read_bytes(), old_bytes)
+        self.assertTrue(self.legacy.is_symlink())
+        self.assertEqual(self.legacy.resolve(), self.canonical)
+        self.backend.states[0] = 2
+        m.restore(self.backend, journal)
+        self.assertEqual(self.backend.states, {0: 0, 10: 2})
+
+    def test_repeated_migration_is_idempotent(self):
+        self.migrate()
+        before = (self.canonical / 'user-0.json').stat().st_ino
+        self.migrate()
+        self.assertEqual((self.canonical / 'user-0.json').stat().st_ino, before)
+        self.assertEqual(list(self.canonical.parent.glob('google-font-fallback-legacy-*')), [])
+
+    def test_unknown_symlink_is_rejected_without_following_or_moving(self):
+        outsider = self.root / 'unrelated'
+        outsider.mkdir()
+        sentinel = outsider / 'keep'
+        sentinel.write_text('unrelated app data')
+        shutil.rmtree(self.legacy)
+        self.legacy.symlink_to(outsider, target_is_directory=True)
+        with self.assertRaises(m.FallbackError):
+            self.migrate()
+        self.assertEqual(sentinel.read_text(), 'unrelated app data')
+        self.assertTrue(self.legacy.is_symlink())
+        self.assertFalse(self.canonical.exists())
+
+    def test_unknown_files_and_unsafe_journals_keep_old_tree_intact(self):
+        original = (self.legacy / 'user-0.json').read_bytes()
+        unknown = self.legacy / 'not-owned.txt'
+        unknown.write_text('unrelated')
+        with self.assertRaises(m.FallbackError):
+            self.migrate()
+        self.assertEqual((self.legacy / 'user-0.json').read_bytes(), original)
+        self.assertFalse(self.canonical.exists())
+        unknown.unlink()
+        (self.legacy / 'user-0.json').chmod(0o666)
+        with self.assertRaises(m.FallbackError):
+            self.migrate()
+        self.assertEqual((self.legacy / 'user-0.json').read_bytes(), original)
+        self.assertFalse(self.canonical.exists())
+
+    def test_arbitrary_component_record_is_never_migrated_or_executed(self):
+        path = self.legacy / 'user-0.json'
+        bad = {**self.saved, 'component': 'example.unrelated/.Service'}
+        path.write_text(json.dumps(bad))
+        with self.assertRaises(m.FallbackError):
+            self.migrate()
+        self.assertEqual(json.loads(path.read_text()), bad)
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(self.canonical.exists())
+
+    def test_conflicting_undo_records_preserve_both_and_refuse_migration(self):
+        self.canonical_store()
+        newer = {**self.saved, 'original': 1}
+        m.Journal(self.canonical, 0).save(newer)
+        old_bytes = (self.legacy / 'user-0.json').read_bytes()
+        new_bytes = (self.canonical / 'user-0.json').read_bytes()
+        with self.assertRaises(m.FallbackError):
+            self.migrate()
+        self.assertFalse(self.legacy.is_symlink())
+        self.assertEqual((self.legacy / 'user-0.json').read_bytes(), old_bytes)
+        self.assertEqual((self.canonical / 'user-0.json').read_bytes(), new_bytes)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_existing_identical_record_is_archived_without_discarding_duplicate_inode(self):
+        self.canonical_store()
+        m.Journal(self.canonical, 0).save(self.saved)
+        old_inode = (self.legacy / 'user-0.json').stat().st_ino
+        old_bytes = (self.legacy / 'user-0.json').read_bytes()
+        self.migrate()
+        archives = list(self.canonical.parent.glob('google-font-fallback-legacy-*'))
+        self.assertEqual(len(archives), 1)
+        archived = archives[0] / 'user-0.json'
+        self.assertEqual(archived.stat().st_ino, old_inode)
+        self.assertEqual(archived.read_bytes(), old_bytes)
+        self.assertEqual(m.Journal(self.canonical, 0).read(), self.saved)
+
+    def test_nonoverlapping_users_merge_by_inode_without_cross_user_changes(self):
+        self.canonical_store()
+        saved10 = {**self.backend.snapshot(10), 'schema': m.SCHEMA, 'original': 1}
+        m.Journal(self.canonical, 10).save(saved10)
+        old_inode = (self.legacy / 'user-0.json').stat().st_ino
+        self.migrate()
+        self.assertEqual((self.canonical / 'user-0.json').stat().st_ino, old_inode)
+        self.assertEqual(m.Journal(self.canonical, 10).read(), saved10)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_active_legacy_transaction_blocks_migration_without_moving_records(self):
+        with m.locked_store(self.legacy):
+            with self.assertRaises(m.FallbackError):
+                self.migrate()
+        self.assertTrue((self.legacy / 'user-0.json').is_file())
+        self.assertFalse(self.canonical.exists())
+
+    def test_interruption_after_inode_move_keeps_recovery_record_available_on_retry(self):
+        old_inode = (self.legacy / 'user-0.json').stat().st_ino
+        with patch.object(m.os, 'symlink', side_effect=OSError('fixture interruption')):
+            with self.assertRaises(OSError):
+                self.migrate()
+        self.assertEqual((self.canonical / 'user-0.json').stat().st_ino, old_inode)
+        self.migrate()
+        self.backend.states[0] = 2
+        m.restore(self.backend, m.Journal(self.canonical, 0))
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_failed_restore_survives_deletion_of_module_directory(self):
+        self.migrate()
+        module = self.root / 'modules/LuoShu'
+        module.mkdir(parents=True)
+        self.backend.states[0] = 2
+        self.backend.fail = 0
+        result = m.restore_owned(self.backend, self.canonical)
+        self.assertEqual(result['status'], 'error')
+        shutil.rmtree(module)
+        self.assertIsNotNone(m.Journal(self.canonical, 0).read())
+        self.backend.fail = None
+        self.assertEqual(m.restore_owned(self.backend, self.canonical)['status'], 'restored')
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

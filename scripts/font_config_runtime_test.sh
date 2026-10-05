@@ -66,7 +66,7 @@ cat > "$ODM_ETC/fonts_customization.xml" <<'XML'
 </familyset>
 XML
 
-for prefix in LuoShu; do
+for prefix in LuoShu LuoShuMono; do
     for weight in 100 200 300 400 500 600 700 800 900; do
         dd if=/dev/zero of="$MOD/system/fonts/${prefix}-${weight}.ttf" bs=2048 count=1 2>/dev/null
         chmod 0644 "$MOD/system/fonts/${prefix}-${weight}.ttf"
@@ -110,8 +110,8 @@ grep -q 'MaterialIcons.ttf' "$MOD/system_ext/etc/fonts_customization.xml"
 grep -q 'LuoShu-500.ttf' "$MOD/my_product/etc/oplus_fonts_customization.xml"
 grep -q 'MaterialIcons-Rounded.ttf' "$MOD/my_product/etc/oplus_fonts_customization.xml"
 grep -q 'LuoShu-600.ttf' "$MOD/vendor/etc/fonts.xml"
-! grep -q 'LuoShuMono-400.ttf' "$MOD/vendor/etc/fonts.xml"
-grep -q 'VendorMono-Regular.ttf' "$MOD/vendor/etc/fonts.xml"
+grep -q 'LuoShuMono-400.ttf' "$MOD/vendor/etc/fonts.xml"
+! grep -q 'VendorMono-Regular.ttf' "$MOD/vendor/etc/fonts.xml"
 grep -q 'LuoShu-300.ttf' "$MOD/odm/etc/fonts_customization.xml"
 grep -q 'Mitype2019.ttf' "$MOD/odm/etc/fonts_customization.xml"
 
@@ -123,17 +123,17 @@ test -s "$MOD/config/font-config-source/vendor/fonts.xml"
 test -s "$MOD/config/font-config-source/odm/fonts_customization.xml"
 
 for partition in system product system_ext my_product vendor odm; do
-    for prefix in LuoShu; do
+    for prefix in LuoShu LuoShuMono; do
         for weight in 100 200 300 400 500 600 700 800 900; do
             test -s "$MOD/$partition/fonts/${prefix}-${weight}.ttf"
         done
     done
 done
 
-# A missing UI alias in any OEM partition must disable every generated XML before boot.
-rm -f "$MOD/my_product/fonts/LuoShu-500.ttf"
+# A missing mono alias in any OEM partition must disable every generated XML before boot.
+rm -f "$MOD/my_product/fonts/LuoShuMono-500.ttf"
 if font_config_boot_guard DemoFamily; then
-    echo 'boot guard unexpectedly accepted a missing my_product UI weight alias' >&2
+    echo 'boot guard unexpectedly accepted a missing my_product mono weight alias' >&2
     exit 1
 fi
 for overlay in \
@@ -146,16 +146,16 @@ for overlay in \
     test ! -e "$overlay"
 done
 
-# Regeneration repairs every partition alias from the validated system UI weight sets.
+# Regeneration repairs every partition alias from the validated system UI + mono sets.
 mkdir -p "$MOD/system/fonts"
-for prefix in LuoShu; do
+for prefix in LuoShu LuoShuMono; do
     for weight in 100 200 300 400 500 600 700 800 900; do
         dd if=/dev/zero of="$MOD/system/fonts/${prefix}-${weight}.ttf" bs=2048 count=1 2>/dev/null
     done
 done
 font_config_generate DemoFamily
 test -s "$MOD/my_product/fonts/LuoShu-500.ttf"
-test ! -e "$MOD/my_product/fonts/LuoShuMono-500.ttf"
+test -s "$MOD/my_product/fonts/LuoShuMono-500.ttf"
 font_config_disable
 for partition in system product system_ext my_product vendor odm; do
     test ! -e "$MOD/$partition/fonts/LuoShu-400.ttf"
@@ -175,7 +175,7 @@ done
 
 mk_weights() {
     mkdir -p "$MOD/system/fonts"
-    for _prefix in LuoShu; do
+    for _prefix in LuoShu LuoShuMono; do
         for _weight in 100 200 300 400 500 600 700 800 900; do
             dd if=/dev/zero of="$MOD/system/fonts/${_prefix}-${_weight}.ttf" bs=2048 count=1 2>/dev/null
             chmod 0644 "$MOD/system/fonts/${_prefix}-${_weight}.ttf"
@@ -218,7 +218,7 @@ rm -f "$MOD/odm"
 # Missing master weights are a global XML failure.
 font_config_disable
 mk_weights
-rm -f "$MOD/system/fonts/LuoShu-500.ttf"
+rm -f "$MOD/system/fonts/LuoShuMono-500.ttf"
 if _luoshu_font_config_generate_base DemoFamily; then
     echo 'XML overlay unexpectedly generated without a complete nine-weight set' >&2
     exit 1
@@ -227,21 +227,5 @@ test ! -e "$MOD/system/etc/fonts.xml"
 test ! -e "$MOD/product/etc/mi_fonts_customization.xml"
 test ! -e "$MOD/product/etc/hihonor_magic_fonts.xml"
 test ! -e "$MOD/product/etc/ACME_FONT_CONFIG.xml"
-
-# The stock snapshot never records LuoShu's own XML: neither a pre-v3 document
-# naming generated files nor a v3 document (stock names) equal to the payload.
-cp -f "$MOD/config/font-config-source/system/fonts.xml" "$TMP/stock-snapshot.xml"
-real_backup="$TMP/real-fonts.xml"
-cp -f "$SYSTEM_ETC/fonts.xml" "$real_backup"
-sed 's/Roboto-Regular.ttf/LuoShu-Roboto-Regular-100.ttf/' "$real_backup" > "$SYSTEM_ETC/fonts.xml"
-font_config_capture_original
-cmp -s "$TMP/stock-snapshot.xml" "$MOD/config/font-config-source/system/fonts.xml"
-mkdir -p "$MOD/system/etc"
-sed 's/weight="700"/weight="700" index="1"/' "$real_backup" > "$MOD/system/etc/fonts.xml"
-cp -f "$MOD/system/etc/fonts.xml" "$SYSTEM_ETC/fonts.xml"
-font_config_capture_original
-cmp -s "$TMP/stock-snapshot.xml" "$MOD/config/font-config-source/system/fonts.xml"
-cp -f "$real_backup" "$SYSTEM_ETC/fonts.xml"
-rm -f "$MOD/system/etc/fonts.xml"
 
 printf 'Font configuration runtime tests passed.\n'

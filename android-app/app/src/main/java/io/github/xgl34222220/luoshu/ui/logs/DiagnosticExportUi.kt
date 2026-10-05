@@ -35,7 +35,6 @@ internal data class DiagnosticExportState(
     val busy: Boolean = false,
     val path: String = "",
     val error: String = "",
-    val engineBundle: Boolean = false,
 ) {
     val resultVisible: Boolean get() = path.isNotBlank() || error.isNotBlank()
 }
@@ -149,23 +148,6 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
     }
 }
 
-// Full engine bundle: stock font XML/files, source fonts and engine stage JSON,
-// so a failed switch can be replayed off-device. Not sanitized; user shares it.
-internal suspend fun exportEngineBundle(): DiagnosticExportState {
-    val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
-    val result = RootShell.exec("sh ${RootShell.quote(bridge)} diag_export", timeoutMs = 900_000L)
-    val line = result.stdout.lineSequence().lastOrNull { it.contains("\"status\"") }.orEmpty()
-    val path = Regex("\"path\"\\s*:\\s*\"([^\"]+)\"").find(line)?.groupValues?.get(1).orEmpty()
-    if (result.code != 0 || path.isBlank()) {
-        val message = Regex("\"message\"\\s*:\\s*\"([^\"]+)\"").find(line)?.groupValues?.get(1)
-        return DiagnosticExportState(
-            error = message ?: result.stderr.ifBlank { result.stdout.trim().takeLast(300).ifBlank { "引擎诊断包生成失败（代码 ${result.code}）" } },
-            engineBundle = true,
-        )
-    }
-    return DiagnosticExportState(path = path, engineBundle = true)
-}
-
 @Composable
 internal fun DiagnosticExportButton(
     style: UiStyle,
@@ -194,20 +176,8 @@ internal fun DiagnosticExportDialog(
     style: UiStyle,
     state: DiagnosticExportState,
     onDismiss: () -> Unit,
-    onEngineBundle: () -> Unit = {},
 ) {
     val failed = state.error.isNotBlank()
-    val title = when {
-        state.engineBundle && failed -> "引擎诊断包生成失败"
-        state.engineBundle -> "引擎诊断包已生成"
-        failed -> "诊断报告生成失败"
-        else -> "脱敏诊断报告已生成"
-    }
-    val message = when {
-        failed -> state.error
-        state.engineBundle -> "诊断包包含系统字体配置、需要替换的原厂字体、最近使用的源字体、引擎各阶段结果和日志，用于在电脑上复现字体切换。包含手机型号和系统版本，不包含账号或聊天内容。请只发给开发者。"
-        else -> "报告包含引擎状态、字体度量、系统字体槽位及相关应用的字体资源信息，用于排查偏移和漏替换。不包含设备标识、账号或聊天内容。"
-    }
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
@@ -219,12 +189,12 @@ internal fun DiagnosticExportDialog(
             )
         },
         title = {
-            Text(title, fontWeight = FontWeight.Black)
+            Text(if (failed) "诊断报告生成失败" else "脱敏诊断报告已生成", fontWeight = FontWeight.Black)
         },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 Text(
-                    message,
+                    if (failed) state.error else "报告包含引擎状态、字体度量、系统字体槽位及相关应用的字体资源信息，用于排查偏移和漏替换。不包含设备标识、账号或聊天内容。",
                     color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
@@ -245,10 +215,5 @@ internal fun DiagnosticExportDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
-        dismissButton = if (!state.engineBundle && !failed) {
-            { TextButton(onClick = onEngineBundle) { Text("导出完整引擎诊断包") } }
-        } else {
-            null
-        },
     )
 }

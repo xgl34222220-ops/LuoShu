@@ -16,7 +16,7 @@ import stock_inventory_scan as stock  # noqa: E402
 
 
 def main() -> int:
-    assert stock.scanner.SCANNER_REVISION == 6, "manual/install scan must use the full v6 OEM XML inventory"
+    assert stock.scanner.SCANNER_REVISION == 4, "manual/install scan must use the full v4 generic inventory"
     installer = (ROOT / ".luoshu-runtime/compat/v227/customize.sh").read_text(encoding="utf-8")
     wrapper = (ROOT / "customize.sh").read_text(encoding="utf-8")
     service = (ROOT / "service.sh").read_text(encoding="utf-8")
@@ -82,6 +82,53 @@ def main() -> int:
                 os.environ.pop("LUOSHU_MOUNTINFO", None)
             else:
                 os.environ["LUOSHU_MOUNTINFO"] = old_mountinfo
+
+        # Exercise the real snapshot lifecycle with fake bind/umount calls.
+        # Both its default and exported temp root must stay in module state;
+        # stock lower paths and payloads are never used as a temporary workspace.
+        original_file = stock.__file__
+        original_children = stock._child_mount_targets
+        original_mount = stock._run_mount
+        original_umount = stock._run_umount
+        snapshot_environment = {
+            name: os.environ.pop(name, None)
+            for name in ("LUOSHU_TMP_DIR", "LUOSHU_INSTALL_STOCK_SNAPSHOT_ROOT")
+        }
+        child_target.write_bytes(b"active-font")
+        unmounted: list[Path] = []
+
+        def fake_mount(*arguments: str) -> bool:
+            if arguments[0] == "--bind":
+                (Path(arguments[-1]) / child_target.name).write_bytes(b"stock-font")
+            return True
+
+        try:
+            stock.__file__ = str(module / "common/stock_inventory_scan.py")
+            stock._child_mount_targets = lambda _logical: [str(child_target)]
+            stock._run_mount = fake_mount
+            stock._run_umount = unmounted.append
+            for exported in (False, True):
+                temporary = module / ".luoshu-state/tmp"
+                if exported:
+                    temporary = module / ".luoshu-state/tmp/installer"
+                    os.environ["LUOSHU_TMP_DIR"] = str(temporary)
+                snapshot = stock._bind_parent_stock_snapshot(logical)
+                assert snapshot is not None
+                assert snapshot.parent == temporary / "install-stock-scan" / str(os.getpid())
+                assert (snapshot / child_target.name).read_bytes() == b"stock-font"
+                assert child_target.read_bytes() == b"active-font"
+                stock._cleanup_install_snapshots()
+                assert snapshot in unmounted and not snapshot.parent.exists()
+        finally:
+            stock.__file__ = original_file
+            stock._child_mount_targets = original_children
+            stock._run_mount = original_mount
+            stock._run_umount = original_umount
+            for name, value in snapshot_environment.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
         state_root = temp / "state"
         key = f"{logical.parts[1]}-{logical.parts[2]}"

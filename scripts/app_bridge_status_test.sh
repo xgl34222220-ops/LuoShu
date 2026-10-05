@@ -6,14 +6,22 @@ TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-app-status)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MODULE="$TMP/module"
 CONFIG="$MODULE/config"
-mkdir -p "$CONFIG"
+mkdir -p "$CONFIG" "$MODULE/common"
+cp "$ROOT/common/app_bridge.sh" "$ROOT/common/task_scope.sh" \
+    "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths.sh" \
+    "$ROOT/common/runtime_paths_lock.py" "$MODULE/common/"
+HOST_PYTHON=$(python3 -c 'import sys; print(sys.executable)')
+export LUOSHU_TASK_SCOPE_PYTHON="$HOST_PYTHON"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$HOST_PYTHON"
+# Exercise real request ownership; an inherited test marker must not bypass it.
+unset LUOSHU_TASK_SCOPE_PID
 printf 'id=LuoShu\nversion=test\nversionCode=1\n' >"$MODULE/module.prop"
 
 assert_status() {
     _expected_effective="$1"
     _expected_state="$2"
     _expected_reason="$3"
-    _output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
+    _output=$(MODDIR="$MODULE" sh "$MODULE/common/app_bridge.sh" status 2>>"$TMP/request-cleanup.stderr")
     printf '%s' "$_output" | python3 -c '
 import json
 import sys
@@ -29,7 +37,7 @@ assert data["verificationReason"] == expected_reason, data
 
 assert_mount_failure() {
     _expected="$1"
-    _output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
+    _output=$(MODDIR="$MODULE" sh "$MODULE/common/app_bridge.sh" status 2>>"$TMP/request-cleanup.stderr")
     printf '%s' "$_output" | python3 -c '
 import json, sys
 data = json.load(sys.stdin)["data"]
@@ -68,37 +76,21 @@ assert_status unknown pending stale-verification
 touch "$CONFIG/text_reboot_required.conf"
 assert_status unknown pending-reboot ''
 
-# Universal production mode consumes Phase 8 grade and exposes Phase 9 rollback state.
-rm -f "$CONFIG/text_reboot_required.conf" "$CONFIG/device-font-load-verification.conf"
-printf 'UniversalFont\n' >"$CONFIG/active_font.conf"
-printf 'state=active\nfont=UniversalFont\ndeploymentId=u1\npayloadDigest=d1\n' >"$CONFIG/universal-font-runtime.conf"
-printf 'state=mounted\ndeploymentId=u1\npayloadDigest=d1\n' >"$CONFIG/universal-font-mount.conf"
-printf 'grade=PASS\nstate=pass\nmode=universal-runtime\nreason=runtime-verified\nactiveFont=UniversalFont\n' \
-    >"$CONFIG/universal-font-runtime-verification.conf"
-assert_status UniversalFont verified runtime-verified
+[ "$(readlink "$CONFIG")" = '.luoshu-state/config' ]
+"$HOST_PYTHON" - "$MODULE/.luoshu-state/tasks" <<'PY'
+import json
+from pathlib import Path
+import sys
 
-printf 'grade=FAIL\nstate=fail\nmode=universal-runtime\nreason=coverage-digits-missing\nactiveFont=UniversalFont\n' \
-    >"$CONFIG/universal-font-runtime-verification.conf"
-printf 'state=staged\ntargetFont=OldFont\ntargetMode=legacy\nreason=runtime-verification-failed\n' \
-    >"$CONFIG/universal-font-rollback.conf"
-touch "$CONFIG/text_reboot_required.conf"
-assert_status unknown rollback-pending coverage-digits-missing
-_output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
-printf '%s' "$_output" | python3 -c '
-import json, sys
-data = json.load(sys.stdin)["data"]
-assert data["rollbackPending"] is True, data
-assert data["rollbackState"] == "staged", data
-assert data["rollbackTargetFont"] == "OldFont", data
-assert data["rollbackTargetMode"] == "legacy", data
-' 
+tasks = Path(sys.argv[1])
+proofs = list(tasks.glob('request-*.pid.cleanup.json'))
+assert len(proofs) == 8, proofs
+for path in proofs:
+    proof = json.loads(path.read_text())
+    assert proof['cleaned'] and not proof['leftoverPids'] and proof['result'] == 0, proof
+for pattern in ('request-*.pid', 'request-*.pid.owner.json', 'request-*.pid.task',
+                'request-*.pid.boot', 'request-*.pid.start'):
+    assert not list(tasks.glob(pattern)), pattern
+PY
 
-
-# A Universal verification failure without a staged rollback must remain unknown,
-# never masquerade as an already-restored system default.
-rm -f "$CONFIG/universal-font-rollback.conf" "$CONFIG/text_reboot_required.conf"
-printf 'grade=FAIL\nstate=fail\nmode=universal-runtime\nreason=required-axis-missing\nactiveFont=UniversalFont\n' \
-    >"$CONFIG/universal-font-runtime-verification.conf"
-assert_status unknown failed required-axis-missing
-
-printf 'LuoShu App bridge distinguishes configured, effective and rollback fonts.\n'
+printf 'LuoShu App bridge distinguishes configured and effective fonts.\n'

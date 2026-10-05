@@ -1,7 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,7 +74,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 
 private enum class LogsTab(val label: String) {
-    TASKS("刷写"), ISSUES("问题"), LOGS("日志"),
+    TASKS("任务"), ISSUES("问题"), LOGS("日志"),
 }
 
 private enum class LogFilter(val label: String) {
@@ -119,7 +117,7 @@ internal fun LogsScreenCompact(
     LaunchedEffect(filter, query) { logListState.scrollToItem(0) }
 
     Column(Modifier.fillMaxSize()) {
-        LuoShuDetailBar(title = "字体刷写", onBack = onBack) {
+        LuoShuDetailBar(title = "任务与日志", onBack = onBack) {
             DiagnosticExportButton(style = style, state = diagnosticState, onClick = onDiagnostic)
             LuoShuHeaderAction(
                 icon = Icons.Rounded.Refresh,
@@ -262,7 +260,33 @@ private fun ChoiceChip(label: String, selected: Boolean, modifier: Modifier = Mo
 }
 
 @Composable
-private fun OverviewCard(state: LogsUiState) = FlashProgressCard(state)
+private fun OverviewCard(state: LogsUiState) {
+    val tokens = LocalMiuixTokens.current
+    Card(shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = tokens.cardBackground)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusIcon(if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle, MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        if (state.activeTaskCount > 0) "${state.activeTaskCount} 个任务正在处理" else "当前没有进行中的任务",
+                        color = tokens.textPrimary, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        if (state.rebootRequired) "字体已准备好，重启后生效" else "最近的操作结果保留在下方",
+                        color = if (state.rebootRequired) MaterialTheme.colorScheme.primary else tokens.textSecondary,
+                        fontSize = 12.sp, lineHeight = 18.sp,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Metric("进行中", state.activeTaskCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                Metric("已完成", state.completedTaskCount, tokens.success, Modifier.weight(1f))
+                Metric("失败", state.failedTaskCount, MaterialTheme.colorScheme.error, Modifier.weight(1f))
+            }
+        }
+    }
+}
 
 @Composable
 private fun IssueSummary(failedCount: Int, warningCount: Int, errorCount: Int) {
@@ -297,7 +321,7 @@ private fun TaskCard(task: TaskCenterItem) {
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
     ) {
-        Column(Modifier.animateContentSize(tween(220)).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusIcon(taskKindIcon(task.kind), color)
                 Spacer(Modifier.width(12.dp))
@@ -308,10 +332,7 @@ private fun TaskCard(task: TaskCenterItem) {
                 Spacer(Modifier.width(8.dp))
                 Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, if (expanded) "收起任务详情" else "展开任务详情", tint = tokens.textSecondary, modifier = Modifier.size(20.dp))
             }
-            Text(taskDisplayMessage(task.message), color = tokens.textSecondary, fontSize = 14.sp, lineHeight = 22.sp, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
-            if (expanded && task.message != taskDisplayMessage(task.message)) {
-                SelectionContainer { Text(task.message, color = tokens.textSecondary, fontSize = 12.sp, lineHeight = 18.sp, fontFamily = FontFamily.Monospace) }
-            }
+            Text(task.message, color = tokens.textSecondary, fontSize = 13.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = RoundedCornerShape(10.dp), color = color.copy(alpha = .09f)) {
                     Text(task.phase.label, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
@@ -338,8 +359,8 @@ private fun LogLine(number: Int, text: String) {
         logMatchesFilter(text, LogFilter.WARNING) -> tokens.warning
         else -> tokens.textPrimary
     }
-    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp), color = tokens.cardBackground.copy(alpha = .65f)) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.Top) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = tokens.cardBackground) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
             Text(number.toString(), modifier = Modifier.width(34.dp), color = tokens.textSecondary, fontSize = 11.sp, lineHeight = 19.sp, fontFamily = FontFamily.Monospace)
             SelectionContainer(Modifier.weight(1f)) {
                 Text(text, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp, lineHeight = 19.sp)

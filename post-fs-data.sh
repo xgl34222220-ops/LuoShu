@@ -6,26 +6,10 @@
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
-UNIVERSAL_NEXT_STATE="$MODDIR/config/universal-font-next.conf"
-UNIVERSAL_NEXT_HELPER="$MODDIR/common/universal_next_boot.sh"
-if [ -s "$UNIVERSAL_NEXT_STATE" ]; then
-    [ -f "$UNIVERSAL_NEXT_HELPER" ] && . "$UNIVERSAL_NEXT_HELPER"
-    type universal_font_next_boot_activate >/dev/null 2>&1 && \
-        universal_font_next_boot_activate >/dev/null 2>&1 || true
-else
-    NEXT_BOOT_HELPER="$MODDIR/common/next_boot_payload.sh"
-    [ -f "$NEXT_BOOT_HELPER" ] && . "$NEXT_BOOT_HELPER"
-    type luoshu_next_boot_activate >/dev/null 2>&1 && \
-        luoshu_next_boot_activate >/dev/null 2>&1 || true
-fi
-
-UNIVERSAL_MODE="$MODDIR/config/universal-font-runtime.conf"
-UNIVERSAL_RUNTIME="$MODDIR/common/universal_mount_runtime.sh"
-if [ -s "$UNIVERSAL_MODE" ]; then
-    [ -f "$UNIVERSAL_RUNTIME" ] && MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-        sh "$UNIVERSAL_RUNTIME" hook post-fs-data >/dev/null 2>&1 || true
-    exit 0
-fi
+NEXT_BOOT_HELPER="$MODDIR/common/next_boot_payload.sh"
+[ -f "$NEXT_BOOT_HELPER" ] && . "$NEXT_BOOT_HELPER"
+type luoshu_next_boot_activate >/dev/null 2>&1 && \
+    luoshu_next_boot_activate >/dev/null 2>&1 || true
 
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_FS="$MODDIR/.luoshu-runtime/core/post-fs-data.sh"

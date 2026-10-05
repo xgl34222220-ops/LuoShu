@@ -26,10 +26,9 @@ luoshu_next_boot_log() {
 luoshu_next_boot_write_mode() {
     _lnbwm_module="$1"
     _lnbwm_font="$2"
-    _lnbwm_target_mode="${3:-legacy}"
     _lnbwm_mode="$_lnbwm_module/config/font_runtime_legacy_v14_4.conf"
     _lnbwm_schema="$_lnbwm_module/config/font-payload-schema.conf"
-    if [ "$_lnbwm_font" = default ] || [ "$_lnbwm_target_mode" = default ] || [ "$_lnbwm_target_mode" = classic ]; then
+    if [ "$_lnbwm_font" = default ]; then
         rm -f "$_lnbwm_mode" "$_lnbwm_schema" 2>/dev/null || true
         return 0
     fi
@@ -72,7 +71,6 @@ luoshu_next_boot_activate() {
     _lnba_font=$(luoshu_next_boot_value "$_lnba_state" font)
     _lnba_previous=$(luoshu_next_boot_value "$_lnba_state" previousFont)
     _lnba_previous_legacy=$(luoshu_next_boot_value "$_lnba_state" previousLegacy)
-    _lnba_target_mode=$(luoshu_next_boot_value "$_lnba_state" targetMode)
     _lnba_request=$(luoshu_next_boot_value "$_lnba_state" requestId)
     _lnba_cjk=$(luoshu_next_boot_value "$_lnba_state" cjk)
     _lnba_latin=$(luoshu_next_boot_value "$_lnba_state" latin)
@@ -81,11 +79,6 @@ luoshu_next_boot_activate() {
     [ -n "$_lnba_font" ] || return 1
     [ -n "$_lnba_previous" ] || _lnba_previous=default
     [ "$_lnba_previous_legacy" = true ] || _lnba_previous_legacy=false
-    if [ -z "$_lnba_target_mode" ]; then
-        if [ "$_lnba_font" = default ]; then _lnba_target_mode=default
-        else _lnba_target_mode=legacy
-        fi
-    fi
 
     _lnba_retired_root="$_lnba_module/.luoshu-retired"
     _lnba_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
@@ -110,7 +103,7 @@ luoshu_next_boot_activate() {
     fi
 
     chmod 0755 "$_lnba_live" 2>/dev/null || true
-    if ! luoshu_next_boot_write_mode "$_lnba_module" "$_lnba_font" "$_lnba_target_mode"; then
+    if ! luoshu_next_boot_write_mode "$_lnba_module" "$_lnba_font"; then
         rm -rf "$_lnba_live" 2>/dev/null || true
         [ ! -d "$_lnba_retired" ] || mv "$_lnba_retired" "$_lnba_live" 2>/dev/null || true
         luoshu_next_boot_restore_selection "$_lnba_module" "$_lnba_previous" "$_lnba_previous_legacy"
@@ -120,26 +113,13 @@ luoshu_next_boot_activate() {
 
     printf '%s\n' "$_lnba_font" > "$_lnba_module/config/active_font.conf" 2>/dev/null || true
     chmod 0644 "$_lnba_module/config/active_font.conf" 2>/dev/null || true
-
-    # A legacy/default/classic payload taking over from Phase 9 must fully leave
-    # Universal runtime mode before mount routing continues in this same boot.
-    rm -f "$_lnba_module/config/universal-font-runtime.conf" \
-          "$_lnba_module/config/universal-font-runtime-verification.conf" \
-          "$_lnba_module/config/universal-font-runtime-verification.json" \
-          "$_lnba_module/config/universal-font-mount.conf" \
-          "$_lnba_module/config/universal-font-next.conf" \
-          "$_lnba_module/config/universal-font-activated.conf" \
-          "$_lnba_module/config/universal-font-rollback.conf" \
-          "$_lnba_module/config/text_reboot_required.conf" 2>/dev/null || true
     {
-
         printf 'font=%s\n' "$_lnba_font"
         printf 'requestId=%s\n' "$_lnba_request"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$_lnba_cjk" "$_lnba_latin" "$_lnba_digit"
         printf 'compositeHash=%s\n' "$_lnba_digest"
         printf 'previousFont=%s\n' "$_lnba_previous"
         printf 'previousLegacy=%s\n' "$_lnba_previous_legacy"
-        printf 'targetMode=%s\n' "$_lnba_target_mode"
         printf 'retired=%s\n' "$_lnba_retired"
         printf 'bootId=%s\n' "$_lnba_boot"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -154,6 +134,6 @@ luoshu_next_boot_activate() {
         rm -rf "$_lnba_retired" 2>/dev/null || true
         rm -f "$_lnba_activated" 2>/dev/null || true
     fi
-    luoshu_next_boot_log "activated payload for $_lnba_font; previous=$_lnba_previous targetMode=$_lnba_target_mode"
+    luoshu_next_boot_log "activated payload for $_lnba_font; previous=$_lnba_previous"
     return 0
 }

@@ -56,8 +56,8 @@ ok test "$(cat "$TMP/wc-count")" -eq 0
 
 ok grep -q '_luoshu_fast_filesize' "$ROOT/common/font_finalize_hotfix.sh"
 ok grep -q "mix_stage weight-map '正在准备九档字体映射' 92" "$ROOT/common/font_finalize_hotfix.sh"
-no grep -q "mix_stage mono-map" "$ROOT/common/font_finalize_hotfix.sh"
-no grep -q '_luoshu_config_make_mono_weight' "$ROOT/common/font_finalize_hotfix.sh"
+ok grep -q "mix_stage mono-map '正在生成等宽英文数字映射' 93" "$ROOT/common/font_finalize_hotfix.sh"
+ok test "$(grep -c '_luoshu_config_make_mono_weight .* 400' "$ROOT/common/font_finalize_hotfix.sh")" -eq 1
 
 # Finalization progress must reserve space after glyph generation and expose real stages.
 ok grep -q '完整复合字体已生成", 80' "$ROOT/common/composite_font.py"
@@ -72,4 +72,4 @@ ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34
 ok grep -q 'softWrap = false' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 ok grep -q 'modifier = modifier.fillMaxWidth()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 
-echo 'Mix finalization uses metadata-only validation, stock monospace preservation, and real progress stages.'
+echo 'Mix finalization uses metadata-only validation, one Mono build, and real progress stages.'

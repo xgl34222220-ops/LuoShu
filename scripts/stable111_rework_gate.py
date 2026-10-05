@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Check the pinned 1.1.1 boot/mount core and the delivered task helpers."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import zipfile
+
+ROOT = Path(__file__).resolve().parents[1]
+BASELINE = "be39f598bfb921526851c5c4a2e92905dacf4ea7"
+HELPERS = (
+    "common/task_scope.py", "common/task_scope.sh",
+    "common/runtime_paths.sh", "common/runtime_paths_lock.py",
+)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--zip", type=Path)
+    args = parser.parse_args()
+    pinned = json.loads((ROOT / "scripts/stable111_frozen_runtime.json").read_text())
+    assert pinned["baselineCommit"] == BASELINE, "unexpected baseline"
+    assert len(pinned["sha256"]) == 22, "incomplete frozen runtime inventory"
+    manifest = set((ROOT / "scripts/module_payload_manifest.txt").read_text().splitlines())
+    for name in HELPERS:
+        assert name in manifest and (ROOT / name).is_file(), f"missing helper: {name}"
+    for name, digest in pinned["sha256"].items():
+        assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, f"frozen core changed: {name}"
+    for name, digest in pinned["publishedMetadataSha256"].items():
+        assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, f"published channel changed: {name}"
+    assert not (ROOT / "common/luoshu_engine.py").exists(), "post-1.1.1 engine carried over"
+    assert not (ROOT / "common/luoshu_engine.sh").exists(), "post-1.1.1 engine carried over"
+    assert not (ROOT / "common/luoshu_engine_v3.py").exists(), "post-1.1.1 engine carried over"
+    if args.zip:
+        with zipfile.ZipFile(args.zip) as archive:
+            assert archive.testzip() is None, "damaged ZIP"
+            names = archive.namelist()
+            assert len(names) == len(set(names)), "duplicate archive entries"
+            for name in names:
+                parts = Path(name).parts
+                assert not name.startswith("/") and ".." not in parts, f"unsafe archive name: {name}"
+                assert ".luoshu-state" not in parts and "__pycache__" not in parts, f"runtime residue packaged: {name}"
+            for name in HELPERS:
+                assert archive.read(name) == (ROOT / name).read_bytes(), f"wrong packaged helper: {name}"
+            for name, digest in pinned["sha256"].items():
+                assert hashlib.sha256(archive.read(name)).hexdigest() == digest, f"wrong packaged core: {name}"
+    print("Pinned 1.1.1 core and task-helper payload checks passed.")
+
+
+if __name__ == "__main__":
+    main()

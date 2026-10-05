@@ -11,7 +11,7 @@ LUOSHU_OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 _lc_source_dir=$(CDPATH= cd -- "${0%/*}" 2>/dev/null && pwd)
 _lc_base="$MODPATH/.luoshu-runtime/compat/v227/customize.sh"
 _lc_helper="$MODPATH/common/private_payload.sh"
-_lc_temp="$MODPATH/.customize-v227.$$.sh"
+_lc_paths="$MODPATH/common/runtime_paths.sh"
 [ -f "$_lc_base" ] || _lc_base="$_lc_source_dir/.luoshu-runtime/compat/v227/customize.sh"
 [ -f "$_lc_helper" ] || _lc_helper="$_lc_source_dir/common/private_payload.sh"
 [ -f "$_lc_helper" ] && . "$_lc_helper"
@@ -28,7 +28,35 @@ if [ ! -f "$_lc_base" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
-[ ! -f "$MODPATH/common/install_ui.sh" ] || . "$MODPATH/common/install_ui.sh"
+# Keep installer scratch and migrated preferences in the same owned tree.
+# Compatibility cores keep their stable config/log paths through relative links.
+if [ -f "$_lc_paths" ]; then
+    . "$_lc_paths"
+    if ! luoshu_runtime_paths_init "$MODPATH"; then
+        abort '洛书运行目录整理失败，已有文件已保留'
+        return 1 2>/dev/null || exit 1
+    fi
+fi
+_lc_install_tmp="${LUOSHU_TMP_DIR:-$MODPATH/.luoshu-state/tmp}"
+mkdir -p "$_lc_install_tmp" 2>/dev/null || {
+    abort '洛书安装临时目录不可用'
+    return 1 2>/dev/null || exit 1
+}
+_lc_temp="$_lc_install_tmp/installer.$$.sh"
+
+# An update must stop verified old tasks before their identity records are
+# migrated or removed. The running font payload itself stays untouched.
+if [ -f "$MODPATH/common/background_task.sh" ]; then
+    if ! (
+        . "$MODPATH/common/background_task.sh"
+        LUOSHU_TASK_SCOPE_RUNNER="$MODPATH/common/task_scope.sh"
+        export LUOSHU_TASK_SCOPE_RUNNER
+        luoshu_stop_module_tasks "$LUOSHU_OLD_MOD"
+    ); then
+        abort '旧字体任务尚未清理完成，未继续迁移，任务记录已保留'
+        return 1 2>/dev/null || exit 1
+    fi
+fi
 
 # A legacy physical payload is not an obsolete font cache: it is the exact source
 # tree that the current boot is using. Older 4.0 builds did not give that payload a
@@ -59,7 +87,7 @@ _lc_real_old_mod="$LUOSHU_OLD_MOD"
 _lc_old_view=''
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     if ! luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1; then
-        _lc_old_view="$MODPATH/.luoshu-old-view.$"
+        _lc_old_view="$_lc_install_tmp/old-view.$$"
         rm -rf "$_lc_old_view" 2>/dev/null || true
         mkdir -p "$_lc_old_view/config" 2>/dev/null || _lc_old_view=''
         if [ -n "$_lc_old_view" ]; then
@@ -114,12 +142,14 @@ if [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
     ui_print '• 本次刷写不会同步重建字体；重启后可在洛书中重新应用以升级引擎'
 fi
 
-type luoshu_install_step >/dev/null 2>&1 && luoshu_install_step 4 "部署字体挂载"
 if ! luoshu_private_install_migrate "$MODPATH"; then
     abort '洛书私有挂载树部署失败'
     return 1 2>/dev/null || exit 1
 fi
+if [ -f "$_lc_paths" ] && ! luoshu_runtime_paths_init "$MODPATH"; then
+    abort '洛书运行目录迁移未完成，已有文件已保留'
+    return 1 2>/dev/null || exit 1
+fi
 ui_print '✓ 私有字体负载已部署'
 ui_print '✓ 洛书将独立完成字体挂载'
-type luoshu_install_complete >/dev/null 2>&1 && luoshu_install_complete
 return 0 2>/dev/null || exit 0

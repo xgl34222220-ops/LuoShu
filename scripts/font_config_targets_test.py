@@ -74,8 +74,8 @@ def main() -> int:
     assert lines["vivoSansVF.ttf"].split("|")[1] == "400"
     assert lines["FlymeSans-Medium.ttf"].split("|")[1] == "500"
     assert lines["GoogleSansText-Medium.ttf"].split("|")[3] == "ui"
-    assert "RobotoMono-Regular.ttf" not in lines
-    assert "CutiveMono-Regular.ttf" not in lines
+    assert lines["RobotoMono-Regular.ttf"].split("|")[3] == "mono"
+    assert lines["CutiveMono-Regular.ttf"].split("|")[3] == "mono"
     for protected in (
         "Roboto-Italic.ttf",
         "NotoSansCJKjp-Regular.otf",

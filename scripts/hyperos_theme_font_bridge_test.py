@@ -4,6 +4,7 @@ from pathlib import Path
 import os
 import subprocess
 import sys
+import time
 import tempfile
 import unittest
 
@@ -62,6 +63,8 @@ class ThemeViewTest(unittest.TestCase):
                     'LUOSHU_THEME_FONT_ROUTER': str(self.router),
                     'LUOSHU_THEME_FONT_ALIAS': str(self.alias), 'LUOSHU_PROC_ROOT': str(self.proc),
                     'LUOSHU_GOOGLE_FONT_PYTHON': sys.executable,
+                    'LUOSHU_TASK_SCOPE_PYTHON': sys.executable,
+                    'LUOSHU_RUNTIME_PATHS_PYTHON': sys.executable,
                     'TEST_ROOT': str(self.root)}
 
     def command(self, name, body):
@@ -88,6 +91,62 @@ class ThemeViewTest(unittest.TestCase):
             self.assertEqual(view['OS/2'].sTypoAscender, target['OS/2'].sTypoAscender)
         self.assertEqual(self.source.read_bytes(), source_bytes)
         self.assertEqual(self.target.read_bytes(), target_bytes)
+
+    def test_supervised_cancel_and_timeout_remove_real_unpublished_font_artifact(self):
+        output = self.root / 'cancelled-view.ttf'
+        make_font(output, points=(*range(32, 127), HAN))
+        original_output = output.read_bytes()
+        source_bytes, target_bytes = self.source.read_bytes(), self.target.read_bytes()
+        worker = self.root / 'paused-theme-worker.py'
+        worker.write_text('''import sys, time
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import hyperos_theme_font_patch as patcher
+real_write = patcher.write_metrics
+marker = Path(sys.argv[2])
+def paused(source, temporary, contract):
+    result = real_write(source, temporary, contract)
+    marker.write_text(str(temporary))
+    time.sleep(30)
+    return result
+patcher.write_metrics = paused
+sys.argv = ['theme-patch', '--source', sys.argv[3], '--target', sys.argv[4], '--output', sys.argv[5]]
+patcher.main()
+''')
+        for mode in ('cancel', 'timeout'):
+            with self.subTest(mode=mode):
+                marker = self.root / (mode + '-artifact')
+                command = ['sh', str(ROOT / 'common/task_scope.sh'), 'run',
+                           '--pid-file', str(self.module / '.luoshu-state/tasks' / (mode + '.pid')),
+                           '--task', 'theme-' + mode, '--timeout', '2' if mode == 'timeout' else '10', '--',
+                           sys.executable, str(worker), str(ROOT / 'common'), str(marker),
+                           str(self.source), str(self.target), str(output)]
+                env = dict(self.env)
+                env.pop('PYTHONHOME', None)
+                process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertTrue(marker.exists(), 'worker did not create the actual font artifact')
+                    temporary = Path(marker.read_text())
+                    with TTFont(temporary) as font:
+                        self.assertIn(HAN, font.getBestCmap())
+                        self.assertIn('gvar', font)
+                        self.assertEqual(font['hhea'].ascent, 920)
+                    if mode == 'cancel':
+                        process.terminate()
+                    _out, error = process.communicate(timeout=5)
+                    self.assertEqual(process.returncode, 143 if mode == 'cancel' else 124, error)
+                    self.assertFalse(temporary.exists())
+                    self.assertEqual(list(output.parent.glob('.theme-view-*')), [])
+                    self.assertEqual(output.read_bytes(), original_output)
+                    self.assertEqual(self.source.read_bytes(), source_bytes)
+                    self.assertEqual(self.target.read_bytes(), target_bytes)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=5)
 
     def test_output_can_never_replace_theme_file(self):
         with self.assertRaises(ValueError):

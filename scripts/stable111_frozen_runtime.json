@@ -1,0 +1,32 @@
+{
+  "baselineCommit": "be39f598bfb921526851c5c4a2e92905dacf4ea7",
+  "sha256": {
+    "post-fs-data.sh": "cc020643e7cfeadbf0379a171f7ac68fe59aa99231b157f545110c5a3a950349",
+    "post-mount.sh": "0b6c85c002278d3b74c1fc6831689c392436d37ef6fde351e7f23bc8ede779e3",
+    "service.sh": "018c5ba7dad155ed14b81783ae2015f38659620443e0865de3335471484d1426",
+    "boot-completed.sh": "9b29a846c3f0cf821a9355a4553a32cf548e419788d2dfc5d9c5475f0c95f431",
+    "common/private_payload.sh": "74bffb9c2086505495ed73f316d8b8b4f0c8db9e857d059ac2c8fa34b98858fb",
+    "common/private_mount_policy.sh": "30335757d318402eef6286dca14ee3894ab0042768072a96dd4a1f3464159df8",
+    "common/next_boot_payload.sh": "7eb0d9aad2e20599ed9519cc31ad2982f4d616def7f1ee24f298f16256fc8ed7",
+    "common/mount_self_atomic.sh": "7c9fa6c7a9318a32747e6845ef601041e2b26e6ce686fee49d6e4ecec3333ecd",
+    "common/mount_self_backend.sh": "4edd59d23f9962191afd7ae7344b637dd95ad38d8bdd91c4b6e817d6d8b1e33d",
+    "common/mount_self_fallback.sh": "132ff016087ca03f49d6ca16fb2717cc0c4751b96e26315a526d81e8fa036d1b",
+    "common/mount_compat.sh": "48745d0810398a77ddb34c93e7a935599934dedbf5f86e948f6124d1e855d76a",
+    "common/mount_compat_base.sh": "45f386608aebd8256f34e3718a46a3fca5921d341716b4ceb20a01ed9a3943d0",
+    "common/mount_compat_policy.sh": "c293f88de5922ab05b53e861c952e08825666a93a1c916fe0f53396507a95eb5",
+    "common/mount_fast_sync.sh": "2cb5d24d03a8d406988868ee99c9e58d333da3f124b7d5237da10dd1f9a2eae4",
+    "common/font_runtime_mount.sh": "be56fbb4e361442564e49c6bf6f967820b2c06f0de8b3c9064df0981e431b2b8",
+    "common/font_runtime_policy.sh": "492cf353897a0b6260e23291212d4673d57977fef0aed9f14fdf9cad0fa39a1c",
+    ".luoshu-runtime/compat/v227/customize.sh": "a47776c94154d18a90205399e7865778e7fc97eb085a181d76b2776477f9fcd8",
+    ".luoshu-runtime/compat/v227/post-fs-data.sh": "6b35af2a7850881cd7a89c970a469ede7a72c92def77997f814b2811048512cb",
+    ".luoshu-runtime/compat/v227/uninstall.sh": "1ca0ee5007e7342a12fc2ca93a7931c2ce78e349194b3cbbf45bc81f11cf27d9",
+    ".luoshu-runtime/core/post-fs-data.sh": "5d13331319d3b913093fd1044374a42f8ca7bdcfd82f2e81f9a3da6773c93d10",
+    ".luoshu-runtime/core/post-mount.sh": "b123727c1fdba0e8339b39e2d30935120c371b714241a42406ef1fe4d82c829a",
+    ".luoshu-runtime/core/service.sh": "2b79a94265a17abc0ec18c00ad04176ecd60754aa18edb42e2fe4c859ad5cd89"
+  },
+  "publishedMetadataSha256": {
+    "update.json": "b31c8b63f7673bf6a2efc716afdc5053697508bc2faadcce82d9a9d96db19446",
+    "update-prerelease.json": "b31c8b63f7673bf6a2efc716afdc5053697508bc2faadcce82d9a9d96db19446",
+    "config/stable_version_policy.json": "58e93349fd8026015a2fbf81deee3a97bd0409e051f8dbf3bfea2c0181d6db2e"
+  }
+}

@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,7 +22,7 @@ class TaskCenterModelTest {
         assertEquals(TaskKind.IMPORT, tasks[1].kind)
         assertEquals(TaskPhase.SUCCESS, tasks[1].phase)
         assertEquals(TaskKind.SCAN, tasks[2].kind)
-        assertEquals(TaskPhase.INFO, tasks[2].phase)
+        assertEquals(TaskPhase.RUNNING, tasks[2].phase)
     }
 
     @Test
@@ -56,7 +57,7 @@ class TaskCenterModelTest {
         ).single()
 
         assertEquals(TaskKind.MIX, task.kind)
-        assertEquals(TaskPhase.INFO, task.phase)
+        assertEquals(TaskPhase.RUNNING, task.phase)
         assertEquals(68, task.progress)
     }
 
@@ -71,5 +72,44 @@ class TaskCenterModelTest {
         )
 
         assertTrue(tasks.isEmpty())
+    }
+
+    @Test
+    fun failedFontWorkStillCountsAsActiveUntilCleanupIsConfirmed() {
+        val phase = taskPhaseFor("ERROR", "复合字体生成失败，后台任务清理尚未确认", "cleanup-pending")
+        val task = TaskCenterItem(
+            id = "owned-font", kind = TaskKind.MIX, phase = phase,
+            title = taskTitle(TaskKind.MIX, phase), message = "后台任务清理尚未确认", current = true,
+        )
+
+        assertEquals(TaskPhase.WAITING_CLEANUP, task.phase)
+        assertEquals("等待清理", task.phase.label)
+        assertEquals("字体组合等待清理", task.title)
+        assertTrue(task.active)
+        assertFalse(task.completed)
+        assertEquals(1, mergeTaskItems(listOf(task), emptyList()).count { it.active })
+    }
+
+    @Test
+    fun pendingCleanupOverridesOldSuccessAndRebootMessages() {
+        val phase = taskPhaseFor("INFO", "字体已准备完成，完整重启后生效", "cleanup-pending")
+        assertEquals(TaskPhase.WAITING_CLEANUP, phase)
+    }
+
+    @Test
+    fun confirmedTerminalResultsRemoveThePendingTaskFromActiveCount() {
+        val pending = TaskCenterItem(
+            id = "owned-font", kind = TaskKind.APPLY, phase = TaskPhase.WAITING_CLEANUP,
+            title = "字体应用等待清理", message = "后台任务清理尚未确认", current = true,
+        )
+        val cancelled = pending.copy(
+            phase = taskPhaseFor("INFO", "字体任务已取消，后台进程已清理", "cancelled"),
+            message = "字体任务已取消，后台进程已清理",
+        )
+        assertEquals(TaskPhase.INFO, cancelled.phase)
+        assertFalse(cancelled.active)
+        assertEquals(0, mergeTaskItems(listOf(cancelled), emptyList()).count { it.active })
+        assertFalse(pending.copy(phase = TaskPhase.FAILED).active)
+        assertFalse(pending.copy(phase = TaskPhase.SUCCESS).active)
     }
 }

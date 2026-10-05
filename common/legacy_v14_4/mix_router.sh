@@ -13,10 +13,14 @@ if [ -z "$REALMOD" ]; then
         REALMOD="/data/adb/modules/LuoShu"
     fi
 fi
+[ -f "$REALMOD/common/runtime_paths.sh" ] && {
+    . "$REALMOD/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "$REALMOD" || exit 126
+}
 LEGACY="$REALMOD/common/legacy_v14_4"
-RUNTIME="$REALMOD/.legacy-v14-runtime"
+RUNTIME="${LUOSHU_CACHE_DIR:-$REALMOD/cache}/legacy-v14-runtime"
 LIVE_PAYLOAD="$REALMOD/.luoshu-payload"
-MIX_STAGE="$REALMOD/.luoshu-mix-stage"
+MIX_STAGE="${LUOSHU_TMP_DIR:-$REALMOD/.luoshu-state/tmp}/mix-stage"
 NEXT_PAYLOAD="$REALMOD/.luoshu-payload-next"
 NEXT_STATE="$REALMOD/config/font-payload-next.conf"
 MIX_STAGE_STATE="$REALMOD/config/mix-stage-next.conf"
@@ -25,7 +29,7 @@ ACTIVE_CONF="$REALMOD/config/active_font.conf"
 LEGACY_MODE="$REALMOD/config/font_runtime_legacy_v14_4.conf"
 REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
-FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
+FINALIZE_LOCK="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/mix-stage-finalize.lock"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 
 read_value() {
@@ -81,15 +85,10 @@ mix_reconcile_fast() (
     [ -f "$REALMOD/common/background_task.sh" ] || return 0
     . "$REALMOD/common/background_task.sh"
     mix_worker_alive_fast() {
-        for _mwaf_file in "$REALMOD/config/axes_worker.pid" \
-            "$REALMOD/config/auto_multiweight_worker.pid"; do
+        for _mwaf_file in "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/axes_worker.pid" \
+            "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/auto_multiweight_worker.pid"; do
             luoshu_task_pid_alive "$_mwaf_file" "$_mrf_task" || continue
-            _mwaf_pid=$(luoshu_pid_value "$_mwaf_file")
-            # The shared helper checks recycled PID/task/boot identities. Require
-            # an exact task argument as well, rather than a task-prefix match.
-            [ -r "/proc/$_mwaf_pid/cmdline" ] || return 0
-            tr '\000' '\n' < "/proc/$_mwaf_pid/cmdline" 2>/dev/null | \
-                grep -Fxq -- "$_mrf_task" && return 0
+            return 0
         done
         return 1
     }
@@ -117,8 +116,8 @@ mix_reconcile_fast() (
         return 0
     fi
     mv -f "$_mrf_tmp" "$_mrf_file" 2>/dev/null || { rm -f "$_mrf_tmp"; return 0; }
-    for _mrf_pid_file in "$REALMOD/config/axes_worker.pid" \
-        "$REALMOD/config/auto_multiweight_worker.pid"; do
+    for _mrf_pid_file in "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/axes_worker.pid" \
+        "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/auto_multiweight_worker.pid"; do
         luoshu_clear_task_pid "$_mrf_pid_file" "$_mrf_task"
     done
 )
@@ -138,6 +137,17 @@ mix_status_json_fast() {
         return 0
     fi
     _state=$(read_value "$_task_file" state)
+    _status_child=$(read_value "$_task_file" childTask)
+    [ -n "$_status_child" ] || _status_child="$_task"
+    case "$_state" in success|failed)
+        . "$REALMOD/common/background_task.sh"
+        if luoshu_task_pid_alive "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/axes_worker.pid" "$_task" || \
+           luoshu_task_pid_alive "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/auto_multiweight_worker.pid" "$_task" || \
+           luoshu_task_pid_alive "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/mix-monitor-$_status_child.pid" "$_status_child.monitor"; then
+            _state=running
+        fi
+        ;;
+    esac
     _message=$(read_value "$_task_file" message)
     _percent=$(read_value "$_task_file" percent)
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
@@ -489,6 +499,9 @@ setup_runtime() {
     # handoff helpers. Without them Android can keep the public task at 34% until
     # the complete composite build exits.
     force_link "$REALMOD/common/background_task.sh" "$RUNTIME/common/background_task.sh" || return 1
+    force_link "$REALMOD/common/task_scope.sh" "$RUNTIME/common/task_scope.sh" || return 1
+    force_link "$REALMOD/common/task_scope.py" "$RUNTIME/common/task_scope.py" || return 1
+    force_link "$REALMOD/common/runtime_paths.sh" "$RUNTIME/common/runtime_paths.sh" || return 1
     force_link "$REALMOD/common/mix_task_handoff.sh" "$RUNTIME/common/mix_task_handoff.sh" || return 1
     force_link "$REALMOD/common/python" "$RUNTIME/common/python" || return 1
     force_link "$REALMOD/common/font_manager.sh" "$RUNTIME/common/font_manager.sh" || return 1
@@ -515,6 +528,38 @@ mark_mix_mode_if_success() {
 }
 
 _cmd="${1:-config}"
+if [ "$_cmd" = cancel ]; then
+    _cancel_task="${2:-}"
+    [ -n "$_cancel_task" ] || { printf '{"status":"error","message":"缺少任务身份"}\n'; exit 2; }
+    . "$REALMOD/common/background_task.sh"
+    _cancel_current=$(read_value "$REALMOD/config/axes_task.conf" task)
+    if [ -n "$_cancel_current" ] && [ "$_cancel_current" != "$_cancel_task" ]; then
+        printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"absent"}}\n' "$(json_escape_router "$_cancel_task")"
+        exit 0
+    fi
+    _cancel_rc=0
+    for _cancel_pid in axes_worker auto_multiweight_worker; do
+        _cancel_file="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/$_cancel_pid.pid"
+        [ "$(cat "$_cancel_file.task" 2>/dev/null)" != "$_cancel_task" ] || \
+            luoshu_stop_task_pid "$_cancel_file" "$_cancel_task" >/dev/null || _cancel_rc=125
+    done
+    if [ "$_cancel_rc" -eq 0 ]; then
+        # Nested engine/monitor scopes are cancelled by their owning worker;
+        # never remove a completed or queued next-boot payload here.
+        _cancel_conf="$REALMOD/config/axes_task.conf"
+        _cancel_state=$(read_value "$_cancel_conf" state)
+        case "$_cancel_state" in queued|running)
+            sed -e 's/^state=.*/state=failed/' -e 's/^message=.*/message=字体组合已取消，任务子进程已回收/' \
+                -e 's/^percent=.*/percent=100/' -e "s/^finished=.*/finished=$(date +%s)/" \
+                "$_cancel_conf" > "$_cancel_conf.cancel.$$" && mv -f "$_cancel_conf.cancel.$$" "$_cancel_conf"
+            ;;
+        esac
+        printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"cancelled"}}\n' "$(json_escape_router "$_cancel_task")"
+    else
+        printf '{"status":"error","data":{"task":"%s","cleaned":false},"message":"任务收尾未完成"}\n' "$(json_escape_router "$_cancel_task")"
+    fi
+    exit "$_cancel_rc"
+fi
 if [ "$_cmd" = reconcile ]; then
     # Reconcile task ownership without rebuilding compatibility runtime links.
     mix_reconcile_fast

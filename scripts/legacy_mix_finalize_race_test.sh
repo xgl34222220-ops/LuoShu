@@ -4,12 +4,25 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROUTER="$ROOT/common/legacy_v14_4/mix_router.sh"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-mix-finalize)
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+cleanup() {
+    [ ! -f "${MODULE:-}/common/task_scope.sh" ] || MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cancel-all "$MODULE" >/dev/null 2>&1 || true
+    rm -rf "$TMP"
+}
+trap cleanup EXIT HUP INT TERM
 
 MODULE="$TMP/module"
-mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config"
+mkdir -p "$MODULE/common" "$MODULE/config"
+for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    cp "$ROOT/common/$helper" "$MODULE/common/$helper"
+done
+export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
 printf 'module\n' > "$MODULE/module.prop"
-printf 'new-composite\n' > "$MODULE/.luoshu-mix-stage/system/fonts/MiSansVF.ttf"
+. "$MODULE/common/runtime_paths.sh"
+luoshu_runtime_paths_init "$MODULE"
+STAGE="$MODULE/.luoshu-state/tmp/mix-stage"
+mkdir -p "$STAGE/system/fonts"
+printf 'new-composite\n' > "$STAGE/system/fonts/MiSansVF.ttf"
 printf 'default\n' > "$MODULE/config/active_font.conf"
 cat > "$MODULE/config/mix-stage-next.conf" <<'EOF_STATE'
 requestId=request-a
@@ -20,7 +33,7 @@ previousFont=default
 previousLegacy=false
 time=1
 EOF_STATE
-cat > "$MODULE/.luoshu-mix-stage/.luoshu-mix-generation.conf" <<'EOF_MANIFEST_A'
+cat > "$STAGE/.luoshu-mix-generation.conf" <<'EOF_MANIFEST_A'
 requestId=request-a
 cjk=CjkA
 latin=LatinA
@@ -45,7 +58,7 @@ test -s "$MODULE/.luoshu-payload-next/system/fonts/MiSansVF.ttf"
 grep -q '^font=mix$' "$MODULE/config/font-payload-next.conf"
 grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-a$' "$MODULE/config/font-payload-next.conf"
-test ! -e "$MODULE/.mix-stage-finalize.lock"
+test ! -e "$MODULE/.luoshu-state/tasks/mix-stage-finalize.lock"
 
 # Recover the narrow interrupted state: directory rename completed, state write
 # did not. The preserved stage metadata is sufficient to finish without rebuild.
@@ -67,8 +80,8 @@ grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 # A later selection is a different generation even though both payloads are named
 # `mix`.  It must replace the already prepared generation instead of returning the
 # old English/digit composite as an idempotent success.
-mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts"
-printf 'newer-composite\n' > "$MODULE/.luoshu-mix-stage/system/fonts/MiSansVF.ttf"
+mkdir -p "$STAGE/system/fonts"
+printf 'newer-composite\n' > "$STAGE/system/fonts/MiSansVF.ttf"
 cat > "$MODULE/config/mix-stage-next.conf" <<'EOF_STATE_B'
 requestId=request-b
 cjk=CjkA
@@ -78,7 +91,7 @@ previousFont=mix
 previousLegacy=true
 time=3
 EOF_STATE_B
-cat > "$MODULE/.luoshu-mix-stage/.luoshu-mix-generation.conf" <<'EOF_MANIFEST_B'
+cat > "$STAGE/.luoshu-mix-generation.conf" <<'EOF_MANIFEST_B'
 requestId=request-b
 cjk=CjkA
 latin=LatinB
@@ -129,10 +142,17 @@ latinAxes=wght=420
 digitAxes=wght=430
 percent=62
 EOF_RUNNING
+. "$MODULE/common/background_task.sh"
+MODDIR="$MODULE" LUOSHU_TASK_TIMEOUT_SECONDS=30 luoshu_start_detached \
+    "$MODULE/.luoshu-state/tasks/axes_worker.pid" axes-fast "$MODULE/logs/fixture.log" sh -c 'sleep 25'
 MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-running.out"
 grep -q '"state":"running"' "$TMP/status-running.out"
 grep -q '"percent":62' "$TMP/status-running.out"
 sed -i 's/^state=running$/state=success/' "$MODULE/config/axes_task.conf"
+MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-still-cleaning.out"
+grep -q '"state":"running"' "$TMP/status-still-cleaning.out"
+MODDIR="$MODULE" luoshu_stop_task_pid "$MODULE/.luoshu-state/tasks/axes_worker.pid" axes-fast > "$TMP/status-cleaned.out"
+MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/axes_worker.pid" axes-fast
 MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-commit.out"
 grep -q '"state":"success"' "$TMP/status-commit.out"
 grep -q '"percent":100' "$TMP/status-commit.out"

@@ -4,7 +4,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p "$TMP/module/common" "$TMP/module/config" "$TMP/module/logs"
+printf 'id=LuoShu\n' > "$TMP/module/module.prop"
 cp "$ROOT/common/background_task.sh" "$TMP/module/common/background_task.sh"
+for name in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    ln -s "$ROOT/common/$name" "$TMP/module/common/$name"
+done
+export LUOSHU_TASK_SCOPE_PYTHON=python3
+export LUOSHU_RUNTIME_PATHS_PYTHON=python3
 cat >"$TMP/module/common/dummy_worker.sh" <<'EOS'
 #!/bin/sh
 trap '' HUP
@@ -22,7 +28,7 @@ chmod 0755 "$TMP/module/common/dummy_worker.sh"
 )
 for _n in 1 2 3 4 5; do [ "$(cat "$TMP/state" 2>/dev/null)" = finished ] && break; sleep 1; done
 [ "$(cat "$TMP/state" 2>/dev/null)" = finished ]
-grep -q 'nohup setsid\|toybox nohup toybox setsid' "$ROOT/common/background_task.sh"
+grep -q 'task_scope.sh' "$ROOT/common/background_task.sh"
 grep -q 'luoshu_start_detached.*worker' "$ROOT/common/weighted_mix_task.sh"
 grep -q 'luoshu_start_detached.*worker' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'luoshu_start_detached.*worker' "$ROOT/common/font_mix.sh"

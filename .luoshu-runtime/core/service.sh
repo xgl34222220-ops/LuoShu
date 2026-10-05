@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
 # 洛书 - 后台服务（版本以 module.prop 为准）
-# 功能：开机后一次性校正权限、补装 App、校验字体挂载；不恢复全局粗细控制。
+# 功能：启动完成后校正权限、补装内置 App、重建旧字体负载、预热索引并恢复字重。
 # ============================================================
 
 MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/../.." 2>/dev/null && pwd)}"
@@ -45,15 +45,6 @@ MODULE_DIR="$MODDIR"
         cmd notification post -S bigtext -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || \
             cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || true
     }
-
-    # Upgrade-only Settings migration after boot. One bounded retry; a failed
-    # provider never causes a resident poller or a new attempt every boot.
-    if [ -f "$MODDIR/common/font_weight_retire.sh" ] && \
-       grep -qx 'state=pending' "$MODDIR/config/font-weight-retired-v2.conf" 2>/dev/null; then
-        if ! sh "$MODDIR/common/font_weight_retire.sh" "$MODDIR" "$MODDIR" boot >> "$MODDIR/logs/font-weight-retire.log" 2>&1; then
-            printf 'state=failed\n' > "$MODDIR/config/font-weight-retired-v2.conf"
-        fi
-    fi
 
     log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
     if [ -f "$LOG_FILE" ]; then
@@ -183,6 +174,19 @@ MODULE_DIR="$MODDIR"
             } > "$MODDIR/config/font-payload-reapply-notified.conf.tmp.$$" 2>/dev/null && \
                 mv -f "$MODDIR/config/font-payload-reapply-notified.conf.tmp.$$" \
                     "$MODDIR/config/font-payload-reapply-notified.conf" 2>/dev/null || true
+        fi
+    fi
+
+    # 恢复用户保存的 Android 全局字重调节；组合槽字重已固化到字体轮廓。
+    if [ -f "$MODDIR/config/font_weight.conf" ] && command -v settings >/dev/null 2>&1; then
+        FW_ADJ=$(sed -n 's/^adjustment=//p' "$MODDIR/config/font_weight.conf" 2>/dev/null | head -n1)
+        case "$FW_ADJ" in ''|*[!0-9-]*) FW_ADJ=0 ;; esac
+        if [ "$FW_ADJ" -ge -100 ] 2>/dev/null && [ "$FW_ADJ" -le 300 ] 2>/dev/null; then
+            if settings --user current put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1 || settings put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1; then
+                log_service "INFO" "已恢复系统字体粗细调整：$FW_ADJ"
+            else
+                log_service "INFO" "字体粗细调整恢复失败"
+            fi
         fi
     fi
 

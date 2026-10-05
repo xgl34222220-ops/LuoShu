@@ -59,8 +59,8 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     )
     result = rows(run(OVERLAY, "--batch", overlay_jobs).stdout)
     assert len(result) == 2, result
-    assert result[0][0:5] == ["generate", str(source), "ok", "1", "2"], result[0]
-    assert result[1][0:5] == ["validate", str(output), "ok", "0", "2"], result[1]
+    assert result[0][0:5] == ["generate", str(source), "ok", "1", "3"], result[0]
+    assert result[1][0:5] == ["validate", str(output), "ok", "0", "3"], result[1]
 
     tree = ET.parse(output)
     rendered = [
@@ -90,16 +90,16 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     discovered = rows(run(TARGETS, "--batch", target_jobs).stdout)
     target_rows = [row for row in discovered if row[0] == "TARGET"]
     doc_rows = [row for row in discovered if row[0] == "DOC"]
-    assert [row[2] for row in target_rows] == ["HonorSans-Medium.ttf", "Roboto-Regular.ttf"], target_rows
-    assert not any(row[2] == "CutiveMono.ttf" for row in target_rows), target_rows
+    assert [row[2] for row in target_rows] == ["CutiveMono.ttf", "HonorSans-Medium.ttf", "Roboto-Regular.ttf"], target_rows
+    assert next(row for row in target_rows if row[2] == "CutiveMono.ttf")[5] == "mono", target_rows
     assert all(row[2] != "HonorSerif.ttf" for row in target_rows), target_rows
-    assert doc_rows == [["DOC", str(source), "ok", "2", ""]], doc_rows
+    assert doc_rows == [["DOC", str(source), "ok", "3", ""]], doc_rows
 
     # Per-document errors must be reported without aborting later documents in the same process.
     mixed_jobs = tmp / "mixed jobs.txt"
     mixed_jobs.write_text(f"{broken}\n{source}\n", encoding="utf-8")
     mixed = rows(run(TARGETS, "--batch", mixed_jobs).stdout)
     assert any(row[:3] == ["DOC", str(broken), "error"] for row in mixed), mixed
-    assert any(row[:4] == ["DOC", str(source), "ok", "2"] for row in mixed), mixed
+    assert any(row[:4] == ["DOC", str(source), "ok", "3"] for row in mixed), mixed
 
 print("Font config batch protocol tests passed.")

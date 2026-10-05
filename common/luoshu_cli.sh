@@ -9,7 +9,7 @@ SWITCH="$MODDIR/common/font_switch_task.sh"
 BRIDGE="$MODDIR/common/app_bridge.sh"
 
 help_text() {
-    echo "洛书：状态｜列表｜应用 <字体名>｜恢复默认｜日志｜诊断"
+    echo "洛书：状态｜列表｜应用 <字体名>｜恢复默认｜日志"
     echo "字体变更完成后必须完整重启手机。"
 }
 
@@ -33,13 +33,6 @@ case "${1:-状态}" in
         ;;
     日志|logs)
         sh "$BRIDGE" logs "${2:-80}"
-        ;;
-    诊断|diagnostics)
-        echo "正在生成引擎诊断包，可能需要几分钟…"
-        case "${2:-}" in
-            完整|full) sh "$BRIDGE" diag_export full ;;
-            *) sh "$BRIDGE" diag_export ;;
-        esac
         ;;
     帮助|help|-h|--help)
         help_text

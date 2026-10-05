@@ -78,7 +78,7 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
                     kind = kind,
                     phase = snapshotPhase,
                     title = taskTitle(kind, snapshotPhase),
-                    message = taskDisplayMessage(snapshot.taskMessage),
+                    message = snapshot.taskMessage,
                     progress = snapshot.taskProgress,
                     timeLabel = "当前",
                     current = true,
@@ -117,15 +117,14 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
             )
         } else if (!operationBusy && operationMessage.isNotBlank()) {
             val kind = taskKindFor(operationMessage)
-            val observedPhase = taskPhaseFor("", operationMessage)
-            val phase = if (observedPhase == TaskPhase.RUNNING || observedPhase == TaskPhase.QUEUED) TaskPhase.INFO else observedPhase
+            val phase = taskPhaseFor("", operationMessage)
             add(
                 TaskCenterItem(
                     id = "latest-operation-${operationMessage.hashCode()}",
                     kind = kind,
                     phase = phase,
                     title = taskTitle(kind, phase),
-                    message = taskDisplayMessage(operationMessage),
+                    message = operationMessage,
                     progress = if (phase == TaskPhase.INFO) -1 else 100,
                     timeLabel = "最近",
                     current = true,

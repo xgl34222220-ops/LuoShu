@@ -52,11 +52,6 @@ test "$SOURCE_RESULT" = sourced-ok
 # App 的原生导入桥必须直接装配安全 ZIP 导入器与第三方模块字重兼容层。
 grep -q 'common/font_import.sh' "$ROOT/common/native_import.sh"
 grep -q 'common/font_import_compat.sh' "$ROOT/common/native_import.sh"
-grep -Fq 'font_web_convert.py' "$ROOT/common/native_import.sh"
-grep -Fq 'woff|woff2)' "$ROOT/common/native_import.sh"
-grep -Fq 'import_web_font_file' "$ROOT/common/native_import.sh"
-grep -Fq 'web-font-import.$$' "$ROOT/common/native_import.sh"
-grep -Fq 'source-font-profiles' "$ROOT/common/native_import.sh"
 grep -q 'import_zip_package "$(basename "$_target")"' "$ROOT/common/native_import.sh"
 ! grep -q 'action import_zip' "$ROOT/common/native_import.sh"
 

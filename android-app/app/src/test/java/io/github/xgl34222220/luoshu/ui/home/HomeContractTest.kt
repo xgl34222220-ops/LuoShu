@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import io.github.xgl34222220.luoshu.ModuleSnapshot
+import io.github.xgl34222220.luoshu.SystemWeightState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,7 +21,7 @@ class HomeContractTest {
             mountState = "failed",
             taskState = "success",
             taskMessage = "字体已准备",
-        ).toHomeUiState()
+        ).toHomeUiState(SystemWeightState())
 
         assertEquals("系统默认字体（DemoFont未生效）", state.currentFont)
         assertEquals("字体未生效", state.taskTitle)
@@ -38,7 +39,7 @@ class HomeContractTest {
             effectiveFont = "DemoFont",
             fontEffectState = "verified",
             mountState = "mounted",
-        ).toHomeUiState()
+        ).toHomeUiState(SystemWeightState())
 
         assertEquals("DemoFont", state.currentFont)
         assertEquals("字体引擎已就绪", state.taskTitle)
@@ -53,57 +54,9 @@ class HomeContractTest {
             effectiveFont = "unknown",
             fontEffectState = "pending-reboot",
             rebootRequired = true,
-        ).toHomeUiState()
+        ).toHomeUiState(SystemWeightState())
 
         assertEquals("DemoFont（等待完整重启）", state.currentFont)
-    }
-
-    @Test
-    fun rollbackPendingShowsRecoveryTargetWithoutPretendingRollbackAlreadyHappened() {
-        val state = ModuleSnapshot(
-            loading = false,
-            installed = true,
-            rootGranted = true,
-            activeFont = "BadUniversal",
-            effectiveFont = "unknown",
-            fontEffectState = "rollback-pending",
-            verificationGrade = "FAIL",
-            verificationReason = "coverage-digits-missing",
-            mountState = "mounted",
-            rollbackState = "staged",
-            rollbackPending = true,
-            rollbackTargetFont = "OldFont",
-            rollbackTargetMode = "legacy",
-            rebootRequired = true,
-        ).toHomeUiState()
-
-        assertEquals("BadUniversal（验证失败，待重启恢复 OldFont）", state.currentFont)
-        assertEquals("正在等待安全回退", state.taskTitle)
-        assertTrue(state.taskMessage.contains("OldFont"))
-        assertTrue(state.taskMessage.contains("完整重启"))
-        assertFalse(state.mountHealthy)
-        assertTrue(state.rebootRequired)
-    }
-
-    @Test
-    fun unresolvedUniversalFailureDoesNotPretendSystemDefaultIsAlreadyActive() {
-        val state = ModuleSnapshot(
-            loading = false,
-            installed = true,
-            rootGranted = true,
-            activeFont = "BadUniversal",
-            effectiveFont = "unknown",
-            fontEffectState = "failed",
-            verificationGrade = "FAIL",
-            verificationMode = "universal-fail",
-            verificationReason = "required-axis-missing",
-            mountState = "mounted",
-        ).toHomeUiState()
-
-        assertEquals("BadUniversal（运行验证失败）", state.currentFont)
-        assertEquals("字体未生效", state.taskTitle)
-        assertTrue(state.taskMessage.contains("无法安全确认"))
-        assertFalse(state.mountHealthy)
     }
 
     @Test
@@ -115,7 +68,7 @@ class HomeContractTest {
             fontEffectState = "failed",
             verificationReason = "dynamic-config-overridden",
             mountState = "mounted",
-        ).toHomeUiState()
+        ).toHomeUiState(SystemWeightState())
 
         assertTrue(state.taskMessage.contains("动态字体配置"))
         assertTrue(state.taskMessage.contains("系统字体"))

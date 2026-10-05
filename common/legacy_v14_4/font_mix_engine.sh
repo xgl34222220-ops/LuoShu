@@ -13,20 +13,29 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 
-CONFIG_DIR="$MODDIR/config"
+REALMOD="${LUOSHU_REAL_MODDIR:-$MODDIR}"
+. "$REALMOD/common/runtime_paths.sh" || exit 126
+luoshu_runtime_paths_init "$REALMOD" || exit 126
+. "$REALMOD/common/background_task.sh" || exit 126
+. "$REALMOD/common/font_switch_lock.sh" || exit 126
+CONFIG_DIR="$LUOSHU_CONFIG_DIR"
 SYSTEM_FONTS_DIR="$MODDIR/system/fonts"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 TASK_FILE="$CONFIG_DIR/mix_task.conf"
 MIX_CONF="$CONFIG_DIR/font_mix.conf"
 ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
-LOCK_FILE="$MODDIR/.font_switch.lock"
-LOG_FILE="$MODDIR/logs/fontswitch.log"
+# mix_worker.pid's supervisor flock serializes engines across requests. This
+# extra legacy transaction guard is engine-private, and belongs to the apply
+# scope so SIGKILL during shell EXIT cannot leave a fresh token blocking retry.
+LOCK_FILE="${LUOSHU_TASK_SCOPE_TMPDIR:+$LUOSHU_TASK_SCOPE_TMPDIR/legacy-mix-switch.lock}"
+WORKER_PID="$LUOSHU_TASKS_DIR/mix_worker.pid"
+LOG_FILE="$LUOSHU_LOG_DIR/fontswitch.log"
 MODULE_DIR="$MODDIR"
 PAYLOAD_STAGE=""
 PAYLOAD_BACKUP=""
 PAYLOAD_ACTIVATED=0
-PAYLOAD_COMMIT_MARKER="$MODDIR/.font-payload-commit.ok"
+PAYLOAD_COMMIT_MARKER="$CONFIG_DIR/legacy-mix-payload-commit.ok"
 COMPOSITE_RESULT=""
 COMPOSITE_REPORT=""
 COMPOSITE_CACHE_HIT=false
@@ -149,9 +158,9 @@ verify_core_files() {
 }
 
 recover_interrupted_payload() {
-    if [ -f "$PAYLOAD_COMMIT_MARKER" ]; then
+    if [ -f "$PAYLOAD_COMMIT_MARKER" ] || [ -f "$MODDIR/.font-payload-commit.ok" ]; then
         rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
-        rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+        rm -f "$PAYLOAD_COMMIT_MARKER" "$MODDIR/.font-payload-commit.ok" 2>/dev/null || true
         return 0
     fi
     for _backup in "$MODDIR"/.font-payload-backup.*; do
@@ -164,8 +173,9 @@ recover_interrupted_payload() {
 }
 
 payload_stage_begin() {
-    PAYLOAD_STAGE="$MODDIR/.font-payload-stage.$$"
-    PAYLOAD_BACKUP="$MODDIR/.font-payload-backup.$$"
+    [ -n "${LUOSHU_TASK_SCOPE_TMPDIR:-}" ] || return 1
+    PAYLOAD_STAGE="$LUOSHU_TASK_SCOPE_TMPDIR/font-payload-stage"
+    PAYLOAD_BACKUP="$LUOSHU_TASK_SCOPE_TMPDIR/font-payload-backup"
     PAYLOAD_ACTIVATED=0
     rm -rf "$PAYLOAD_STAGE" "$PAYLOAD_BACKUP" "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
     # The compatibility router already cloned the live payload and this engine
@@ -219,7 +229,7 @@ payload_stage_finalize() {
 cleanup_mix_process() {
     payload_stage_abort
     payload_stage_rollback
-    rm -f "$LOCK_FILE" 2>/dev/null || true
+    luoshu_font_lock_release "$LOCK_FILE" "$$" 2>/dev/null || true
 }
 
 populate_coloros_payload() (
@@ -250,7 +260,7 @@ populate_generic_payload() (
 
 sync_secondary_partition() {
     _part="$1"; _real_root="$2"; _dest="$MODDIR/$_part/fonts"
-    _stage="$MODDIR/.${_part}-fonts-stage.$$"; _backup="$MODDIR/.${_part}-fonts-backup.$$"
+    _stage="$LUOSHU_TASK_SCOPE_TMPDIR/${_part}-fonts-stage"; _backup="$LUOSHU_TASK_SCOPE_TMPDIR/${_part}-fonts-backup"
     rm -rf "$_stage" "$_backup" 2>/dev/null || true
     mkdir -p "$_stage" 2>/dev/null || return 1
     if [ -d "$_dest" ]; then
@@ -368,8 +378,8 @@ build_composite_file() {
     [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
-    _cache="$MODDIR/cache/full-composite-v7"
-    mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
+    _cache="$LUOSHU_CACHE_DIR/full-composite-v7"
+    mkdir -p "$_cache" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
     _cjk_hash=$(composite_hash_file "$_cjk_src")
     _latin_hash=$(composite_hash_file "$_latin_src")
     _digit_hash=$(composite_hash_file "$_digit_src")
@@ -396,7 +406,7 @@ build_composite_file() {
         printf '{"status":"ok","fastPath":"same-source"}\n' >"$_report" 2>/dev/null || true
         write_progress cache '三项字体来源相同，已跳过重复合成' 100
     else
-        _tmp="$_cache/.${_key}.$$.tmp.otf"; _tmp_report="$_cache/.${_key}.$$.tmp.json"; _tmp_error="$_cache/.${_key}.$$.tmp.err"
+        _tmp="$LUOSHU_TASK_SCOPE_TMPDIR/composite.otf"; _tmp_report="$LUOSHU_TASK_SCOPE_TMPDIR/composite.json"; _tmp_error="$LUOSHU_TASK_SCOPE_TMPDIR/composite.err"
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" "$_progress" 2>/dev/null || true
         if command -v timeout >/dev/null 2>&1; then
             MODDIR="$MODDIR" timeout 480 sh "$_runner" --cjk "$_cjk_src" --latin "$_latin_src" --digit "$_digit_src" --output "$_tmp" --progress "$_progress" > "$_tmp_report" 2> "$_tmp_error"
@@ -486,15 +496,13 @@ commit_mix_config() {
 apply_mix() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
-    recover_interrupted_payload
-    if [ -e "$LOCK_FILE" ]; then
-        _pid=$(cat "$LOCK_FILE" 2>/dev/null)
-        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then set_mix_error '字体正在切换中'; return 2; fi
-        rm -f "$LOCK_FILE" 2>/dev/null || true
-    fi
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
-    echo $$ > "$LOCK_FILE"
-    trap cleanup_mix_process EXIT INT TERM
+    luoshu_font_lock_acquire "$LOCK_FILE" "$$" || { set_mix_error '字体正在切换中'; return 2; }
+    trap cleanup_mix_process EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    recover_interrupted_payload
 
     _cjk_src=$(find_family_file "$_cjk")
     _latin_src=$(find_family_file "$_latin")
@@ -527,8 +535,8 @@ apply_mix() {
         sync_secondary_coloros_dirs || echo '警告：ColorOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
     fi
     type luoshu_sync_mount_payload >/dev/null 2>&1 && luoshu_sync_mount_payload 2>/dev/null || true
-    rm -f "$LOCK_FILE" 2>/dev/null || true
-    trap - EXIT INT TERM
+    luoshu_font_lock_release "$LOCK_FILE" "$$" 2>/dev/null || true
+    trap - EXIT HUP INT TERM
     return 0
 }
 
@@ -542,7 +550,53 @@ status_json() {
         "$_enabled" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")"
 }
 
+mix_worker() {
+    _mw_task="$1"; _mw_cjk="$2"; _mw_latin="$3"; _mw_digit="$4"; _mw_started="$5"
+    _mw_timeout="${LUOSHU_MIX_TASK_TIMEOUT:-480}"
+    case "$_mw_timeout" in ''|*[!0-9]*) _mw_timeout=480 ;; esac
+    printf '[%s] mix start: cjk=%s latin=%s digit=%s task=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "$_mw_cjk" "$_mw_latin" "$_mw_digit" "$_mw_task"
+    # The inner scope returns only after reparented font workers are reaped.
+    # Its cleanup report is retained; the outer scope owns this worker's PID.
+    sh "$(luoshu_scope_runner)" run --pid-file "$LUOSHU_TASKS_DIR/mix-apply-$_mw_task.pid" \
+        --task "$_mw_task.apply" --timeout "$_mw_timeout" -- \
+        sh "$0" apply "$_mw_cjk" "$_mw_latin" "$_mw_digit"
+    _mw_rc=$?
+    _mw_finished=$(date +%s)
+    if [ "$_mw_rc" -eq 0 ]; then
+        _mw_message='完整复合字体已准备，完整重启后生效'
+        [ "$(read_conf cacheHit false)" != true ] || _mw_message='已使用验证缓存准备字体组合，完整重启后生效'
+        command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix '字体组合已准备，请完整重启手机。' >/dev/null 2>&1 || true
+        write_task "$_mw_task" success "$_mw_message" "$_mw_cjk" "$_mw_latin" "$_mw_digit" "$_mw_started" "$_mw_finished"
+    else
+        _mw_failure=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
+        [ -n "$_mw_failure" ] || _mw_failure="字体组合失败（阶段代码 $_mw_rc）"
+        write_task "$_mw_task" failed "$_mw_failure" "$_mw_cjk" "$_mw_latin" "$_mw_digit" "$_mw_started" "$_mw_finished"
+    fi
+    return "$_mw_rc"
+}
+
+cancel_mix() {
+    _mc_wanted="${1:-$(sed -n 's/^task=//p' "$TASK_FILE" | head -n1)}"
+    luoshu_stop_task_pid "$WORKER_PID" "$_mc_wanted"
+    _mc_rc=$?
+    [ "$_mc_rc" -eq 0 ] || return "$_mc_rc"
+    # Publish cancellation only after the unified supervisor's cleanup proof.
+    if [ "$(sed -n 's/^task=//p' "$TASK_FILE" | head -n1)" = "$_mc_wanted" ]; then
+        _mc_cjk=$(sed -n 's/^cjk=//p' "$TASK_FILE" | head -n1)
+        _mc_latin=$(sed -n 's/^latin=//p' "$TASK_FILE" | head -n1)
+        _mc_digit=$(sed -n 's/^digit=//p' "$TASK_FILE" | head -n1)
+        _mc_started=$(sed -n 's/^started=//p' "$TASK_FILE" | head -n1)
+        write_task "$_mc_wanted" cancelled '字体组合已取消，任务进程已回收' "$_mc_cjk" "$_mc_latin" "$_mc_digit" "$_mc_started" "$(date +%s)"
+    fi
+}
+
 case "${1:-status}" in
+    worker) mix_worker "$2" "$3" "$4" "$5" "$6"; exit $? ;;
+    apply)
+        [ -n "${LUOSHU_TASK_SCOPE_TMPDIR:-}" ] || exit 126
+        apply_mix "$2" "$3" "$4"; exit $? ;;
+    cancel) cancel_mix "${2:-}"; exit $? ;;
     start)
         _cjk="$2"; _latin="$3"; _digit="$4"
         if [ -z "$_cjk" ] || [ -z "$_latin" ] || [ -z "$_digit" ]; then
@@ -553,30 +607,24 @@ case "${1:-status}" in
             printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'
             exit 0
         fi
-        mkdir -p "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || true
+        if luoshu_task_pid_alive "$WORKER_PID"; then
+            printf '{"status":"error","message":"字体组合任务正在运行"}\n'
+            exit 0
+        fi
+        mkdir -p "$CONFIG_DIR" "$LUOSHU_LOG_DIR" 2>/dev/null || true
         rotate_mix_log
         rm -f "$CONFIG_DIR/mix_last_error.txt" "$CONFIG_DIR/composite_progress.json" 2>/dev/null || true
         _task="mix-$(date +%s)-$$"; _started=$(date +%s)
         write_task "$_task" running '正在生成完整复合字体' "$_cjk" "$_latin" "$_digit" "$_started" ''
-        (
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] mix start: cjk=$_cjk latin=$_latin digit=$_digit task=$_task"
-            if MODDIR="$MODDIR" apply_mix "$_cjk" "$_latin" "$_digit"; then
-                _finished=$(date +%s)
-                _message='完整复合字体已准备，完整重启后生效'
-                [ "$COMPOSITE_CACHE_HIT" = true ] && _message='已使用验证缓存准备字体组合，完整重启后生效'
-                write_task "$_task" success "$_message" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
-                command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
-            else
-                _rc=$?; _finished=$(date +%s)
-                _failure="${LAST_MIX_ERROR:-}"
-                [ -n "$_failure" ] || _failure=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
-                [ -n "$_failure" ] || _failure="字体组合失败（阶段代码 $_rc）"
-                write_task "$_task" failed "$_failure" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
-            fi
-            rm -f "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
-        ) </dev/null >> "$LOG_FILE" 2>&1 &
-        _bg=$!
-        printf '%s\n' "$_bg" > "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
+        _start_timeout="${LUOSHU_MIX_TASK_TIMEOUT:-480}"
+        case "$_start_timeout" in ''|*[!0-9]*) _start_timeout=480 ;; esac
+        if ! LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS="$((_start_timeout + 15))" \
+            luoshu_start_detached "$WORKER_PID" "$_task" "$LOG_FILE" \
+            sh "$0" worker "$_task" "$_cjk" "$_latin" "$_digit" "$_started"; then
+            write_task "$_task" failed '无法启动字体组合任务监督器' "$_cjk" "$_latin" "$_digit" "$_started" "$(date +%s)"
+            printf '{"status":"error","message":"无法启动字体组合任务监督器"}\n'
+            exit 1
+        fi
         printf '{"status":"ok","data":{"task":"%s"}}\n' "$(json_escape "$_task")"
         ;;
     status) status_json ;;

@@ -169,8 +169,10 @@ def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
 
     parts = [part for part in logical.parts if part not in ("/", "")]
     key = "-".join(parts[-2:] or ["root"])
+    temporary = Path(os.environ.get("LUOSHU_TMP_DIR",
+                                    str(Path(__file__).resolve().parents[1] / ".luoshu-state/tmp")))
     base = Path(os.environ.get("LUOSHU_INSTALL_STOCK_SNAPSHOT_ROOT",
-                               f"/data/adb/luoshu/install-stock-scan/{os.getpid()}"))
+                               str(temporary / "install-stock-scan" / str(os.getpid()))))
     snapshot = base / key
     try:
         snapshot.mkdir(parents=True, exist_ok=True)

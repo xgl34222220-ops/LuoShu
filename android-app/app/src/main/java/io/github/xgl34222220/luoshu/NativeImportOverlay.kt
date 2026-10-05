@@ -299,7 +299,7 @@ private fun ImportResultDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(state.summary)
                     Text(
-                        "支持 TTF、OTF、TTC、WOFF、WOFF2 与字体模块 ZIP。网页字体会先转换为真实 SFNT；ZIP 不执行包内脚本。",
+                        "支持 TTF、OTF、TTC 与字体模块 ZIP。ZIP 只提取字体文件，不执行包内脚本。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -337,7 +337,7 @@ private fun ImportResultDialog(
                     )
                     Text(state.summary, color = tokens.textPrimary, lineHeight = 20.sp)
                     Text(
-                        "WOFF/WOFF2 会先安全转换为 SFNT；ZIP 仅提取字体，不执行包内脚本。",
+                        "ZIP 仅安全提取字体，不执行包内脚本。导入记录可在任务中心控制。",
                         color = tokens.textSecondary,
                         fontSize = 11.sp,
                     )

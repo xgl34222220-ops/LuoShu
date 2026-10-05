@@ -67,31 +67,28 @@ device_font_cache_schedule Demo >/dev/null
 no test -e "$FAILURES"
 ok test -s "$PENDING"
 
-CASE='开机入口必须回收陈旧 cache lock 后继续启动'
+CASE='开机入口保留缓存待办并且不自动启动任务'
 . "$ROOT/common/device_font_dynamic_guard.sh"
 _dfpr_module() { printf '%s\n' "$MOD"; }
 _dfpr_log() { :; }
 STARTED="$TMP/started"
 _dfcache_run_service_lowpri() { printf 'started\n' > "$STARTED"; }
 write_pending
+PENDING_BEFORE=$(cat "$PENDING")
+_dfpr_launch_pending_cache
+sleep 0.1
+no test -e "$STARTED"
+eq "$(cat "$PENDING")" "$PENDING_BEFORE"
+
+CASE='陈旧或活动锁不能把保留待办变成自动后台构建'
 mkdir -p "$MOD/.device-font-cache.lock"
 printf '999999\n' > "$MOD/.device-font-cache.lock/pid"
 _dfpr_launch_pending_cache
-_i=0
-while [ ! -s "$STARTED" ] && [ "$_i" -lt 20 ]; do
-    sleep 0.05
-    _i=$((_i + 1))
-done
-ok test -s "$STARTED"
-no test -e "$MOD/.device-font-cache.lock"
-
-CASE='活动 cache lock 必须阻止重复后台任务'
-rm -f "$STARTED"
-mkdir -p "$MOD/.device-font-cache.lock"
 printf '%s\n' "$$" > "$MOD/.device-font-cache.lock/pid"
 _dfpr_launch_pending_cache
 sleep 0.1
-no test -s "$STARTED"
+no test -e "$STARTED"
+eq "$(cat "$PENDING")" "$PENDING_BEFORE"
 rm -f "$MOD/.device-font-cache.lock/pid"
 rmdir "$MOD/.device-font-cache.lock"
 

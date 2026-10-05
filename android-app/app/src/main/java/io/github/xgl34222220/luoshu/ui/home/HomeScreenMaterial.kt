@@ -38,6 +38,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -129,6 +130,8 @@ fun HomeScreenMaterial(
             )
         }
 
+        item { MaterialSectionTitle("SYSTEM WEIGHT", "全局粗细微调", "向左更细，向右更粗") }
+        item { MaterialSystemWeightCard(state.systemWeight, actions) }
 
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -318,6 +321,85 @@ private fun MaterialMetricCard(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
             )
+        }
+    }
+}
+
+@Composable
+private fun MaterialSystemWeightCard(weight: HomeWeightUiState, actions: HomeActions) {
+    Card(
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .82f),
+        ),
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = MaterialTheme.shapes.large,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Speed, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Spacer(Modifier.width(13.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("当前粗细", fontWeight = FontWeight.Black, fontSize = 17.sp)
+                    Text(
+                        "系统最终显示时统一微调，不修改字体文件",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp,
+                    )
+                }
+                Text(
+                    if (weight.loading) "读取中" else weight.weight.toString(),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+            Spacer(Modifier.height(15.dp))
+            when {
+                weight.loading -> LuoShuLoadingSkeleton(
+                    Modifier.fillMaxWidth().height(12.dp),
+                    shape = MaterialTheme.shapes.small,
+                )
+                !weight.supported -> Text(
+                    weight.error.ifBlank { "当前系统不支持全局粗细微调" },
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.sp,
+                )
+                else -> {
+                    Slider(
+                        value = weight.weight.toFloat(),
+                        onValueChange = actions.previewSystemWeight,
+                        enabled = !weight.applying,
+                        valueRange = weight.min.toFloat()..weight.max.toFloat(),
+                        steps = (((weight.max - weight.min) / weight.step) - 1).coerceAtLeast(0),
+                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("更细 ${weight.min}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        Spacer(Modifier.weight(1f))
+                        Text("标准 400", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.weight(1f))
+                        Text("${weight.max} 更粗", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            weight.error.ifBlank { weight.message },
+                            modifier = Modifier.weight(1f),
+                            color = if (weight.error.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 10.sp,
+                            maxLines = 2,
+                        )
+                        TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) {
+                            Text("恢复原始")
+                        }
+                    }
+                }
+            }
         }
     }
 }

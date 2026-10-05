@@ -9,32 +9,52 @@ set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 MODULE_DIR="$MODDIR"
+if [ -f "$MODDIR/common/runtime_paths.sh" ]; then
+    . "$MODDIR/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "$MODDIR" || exit 1
+fi
+_gfp_tasks="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}"
+_gfp_scope="$MODDIR/common/task_scope.sh"
+# Direct entry points own the whole process tree. Sourced adapters inherit the
+# caller's scope; their expensive Python workers are supervised below as well.
+case "${0##*/}" in
+    google_font_provider_bridge.sh|hyperos_theme_font_bridge.sh)
+        if [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ]; then
+            [ -f "$_gfp_scope" ] || exit 1
+            exec sh "$_gfp_scope" request-run "font-provider-$$-$(date +%s)" \
+                "${LUOSHU_GOOGLE_FONT_TASK_TIMEOUT:-600}" -- sh "$0" "$@"
+        fi
+        ;;
+esac
 PYROOT="$MODDIR/common/python"
 PYTHON="${LUOSHU_GOOGLE_FONT_PYTHON:-$PYROOT/bin/luoshu-python}"
 PATCHER="$MODDIR/common/google_font_provider_patch.py"
-CACHE="$MODDIR/config/google-font-provider"
+CACHE="${LUOSHU_CACHE_DIR:-$MODDIR/.luoshu-state/cache}/google-font-provider"
+LEGACY_CACHE="$MODDIR/config/google-font-provider"
 STATE="$MODDIR/config/google-font-provider-mounts.conf"
 MOUNTS="$MODDIR/config/google-font-provider-namespaces.conf"
 INSPECT_CACHE="$CACHE/inspected-targets-v1.conf"
 REFRESH_QUEUE="$MODDIR/config/google-font-refresh-pending.conf"
-LOG="$MODDIR/logs/google-font-provider.log"
+LOG="${LUOSHU_LOG_DIR:-$MODDIR/logs}/google-font-provider.log"
 
 # One writer owns all provider/theme journals and the deferred-refresh queue.
-# The service's lifetime lock is separate: a manual apply/restore can safely
-# coexist with the sleeping watcher without racing its next maintenance pass.
+# The service lock is separate so concurrent one-shot entries do not race a
+# namespace journal or the descriptor recovery queue.
 _gfp_locked() {
     if [ "${_gfp_lock_held:-0}" = 1 ]; then "$@"; return $?; fi
     if ! type luoshu_font_lock_acquire >/dev/null 2>&1 && [ -f "$MODDIR/common/font_switch_lock.sh" ]; then
         . "$MODDIR/common/font_switch_lock.sh"
     fi
     if type luoshu_font_lock_acquire >/dev/null 2>&1; then
-        luoshu_font_lock_acquire "$MODDIR/.google-font-provider-bridge.lock" "$$" || return 1
+        [ -d "$MODDIR" ] || return 1
+        mkdir -p "$_gfp_tasks" || return 1
+        luoshu_font_lock_acquire "$_gfp_tasks/google-font-provider-bridge.lock" "$$" || return 1
         _gfp_lock_held=1
         case "${0##*/}" in
             google_font_provider_bridge.sh|hyperos_theme_font_bridge.sh)
                 # Entry scripts own their traps. A killed apply must release
                 # its lease before the service/installer attempts restore.
-                trap '_gfp_release_lock' EXIT
+                trap '_gfp_entry_cleanup' EXIT
                 trap 'exit 129' HUP
                 trap 'exit 130' INT
                 trap 'exit 143' TERM
@@ -44,7 +64,7 @@ _gfp_locked() {
     "$@"
     _gfp_locked_rc=$?
     if [ "${_gfp_lock_held:-0}" = 1 ]; then
-        luoshu_font_lock_release "$MODDIR/.google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
+        luoshu_font_lock_release "$_gfp_tasks/google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
         _gfp_lock_held=0
     fi
     return "$_gfp_locked_rc"
@@ -52,16 +72,35 @@ _gfp_locked() {
 
 _gfp_release_lock() {
     [ "${_gfp_lock_held:-0}" = 1 ] || return 0
-    luoshu_font_lock_release "$MODDIR/.google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
+    luoshu_font_lock_release "$_gfp_tasks/google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
     _gfp_lock_held=0
 }
 
+_gfp_entry_cleanup() {
+    # Only this invocation's temporary files are disposable. Live mount
+    # sources and journals remain available for an explicit recovery pass.
+    for _gfp_cleanup_file in "$CACHE"/.*.$$ "$CACHE"/*.tmp.$$ \
+        "${STATE}.tmp.$$" "${MOUNTS}.tmp.$$" "${REFRESH_QUEUE}".*.$$ \
+        "${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/google-font-provider-targets.$$" \
+        "${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/google-font-provider-fingerprint.$$"; do
+        [ -f "$_gfp_cleanup_file" ] && rm -f "$_gfp_cleanup_file"
+    done
+    if [ -n "${HTF_STATE:-}" ]; then
+        rm -f "${HTF_STATE}.tmp.$$"
+    fi
+    if [ -n "${HTF_MOUNTS:-}" ]; then
+        rm -f "${HTF_MOUNTS}.tmp.$$" "${HTF_MOUNTS}.tmp.$$.live" \
+            "${HTF_MOUNTS}.tmp.$$.handled" "${HTF_MOUNTS}.new.$$"
+    fi
+    _gfp_release_lock
+}
+
 _gfp_log() {
-    mkdir -p "$MODDIR/logs" 2>/dev/null || true
+    [ -d "$MODDIR" ] || return 0
+    mkdir -p "${LOG%/*}" 2>/dev/null || true
     _gfp_log_bytes=$(stat -c '%s' "$LOG" 2>/dev/null)
     case "$_gfp_log_bytes" in ''|*[!0-9]*) _gfp_log_bytes=0 ;; esac
-    # A persistent permission failure is retried throughout the boot lifetime.
-    # Keep its history bounded instead of growing a permanent error log.
+    # Keep repeated explicit repair errors bounded across boot/apply entries.
     [ "$_gfp_log_bytes" -lt 1048576 ] || mv -f "$LOG" "$LOG.1" 2>/dev/null || true
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" >> "$LOG" 2>/dev/null || true
 }
@@ -112,7 +151,7 @@ _gfp_valid_font() {
     [ "$_gfp_bytes" -ge 1024 ]
 }
 
-_gfp_python() {
+_gfp_python_worker() {
     [ -x "$PYTHON" ] && [ -f "$PATCHER" ] || return 1
     if [ "$PYTHON" = "$PYROOT/bin/luoshu-python" ]; then
         PYTHONHOME="$PYROOT" \
@@ -121,6 +160,28 @@ _gfp_python() {
             "$PYTHON" "$PATCHER" "$@"
     else
         "$PYTHON" "$PATCHER" "$@"
+    fi
+}
+
+_gfp_python() {
+    if [ -n "${LUOSHU_TASK_SCOPE_PID:-}" ]; then
+        _gfp_python_worker "$@"
+        return $?
+    fi
+    [ -f "$_gfp_scope" ] || return 1
+    # Sourced users need the same ownership boundary as the public entry.
+    # env preserves the bundled runtime variables without exposing a shell
+    # command string to quoting or argument expansion.
+    if [ "$PYTHON" = "$PYROOT/bin/luoshu-python" ]; then
+        sh "$_gfp_scope" request-run "font-provider-python-$$-$(date +%s)" \
+            "${LUOSHU_GOOGLE_FONT_TASK_TIMEOUT:-600}" -- env \
+            PYTHONHOME="$PYROOT" \
+            PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYTHON" "$PATCHER" "$@"
+    else
+        sh "$_gfp_scope" request-run "font-provider-python-$$-$(date +%s)" \
+            "${LUOSHU_GOOGLE_FONT_TASK_TIMEOUT:-600}" -- "$PYTHON" "$PATCHER" "$@"
     fi
 }
 
@@ -197,7 +258,9 @@ _gfp_targets() {
         printf '%s\n' "$LUOSHU_GOOGLE_FONT_TARGETS" | awk 'NF && !seen[$0]++'
         return 0
     fi
-    _gfp_list="$CACHE/.targets.$$"
+    _gfp_list_dir="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"
+    [ -d "$MODDIR" ] && mkdir -p "$_gfp_list_dir" || return 1
+    _gfp_list="$_gfp_list_dir/google-font-provider-targets.$$"
     : > "$_gfp_list" 2>/dev/null || return 1
     _gfp_seen_roots='|'
     for _gfp_root in \
@@ -222,9 +285,8 @@ _gfp_targets() {
     rm -f "$_gfp_list" 2>/dev/null || true
 }
 
-# Watch metadata, not font contents. This is used after boot to detect lazy GMS
-# downloads, atomic cache replacement and recreated/unmounted process views.
-# Batch stat calls so an idle pass never starts Python or hashes large fonts.
+# Fingerprint metadata for explicit diagnostics without opening font contents.
+# Batch stat calls keep one snapshot cheap; no process polls this while idle.
 _gfp_stat_files() {
     set --
     while IFS= read -r _gfp_stat_path; do
@@ -241,8 +303,9 @@ _gfp_stat_files() {
 }
 
 _gfp_fingerprint() {
-    mkdir -p "$CACHE" 2>/dev/null || return 1
-    _gfp_fp_targets="$CACHE/.watch-targets.$$"
+    _gfp_fp_dir="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"
+    [ -d "$MODDIR" ] && mkdir -p "$_gfp_fp_dir" || return 1
+    _gfp_fp_targets="$_gfp_fp_dir/google-font-provider-fingerprint.$$"
     _gfp_targets | LC_ALL=C sort -u > "$_gfp_fp_targets" || return 1
     _gfp_fp_proc="${LUOSHU_PROC_ROOT:-/proc}"
     {
@@ -295,7 +358,7 @@ _gfp_build_clone() {
             [ "$_gfp_old_target" = "$_gfp_target" ] || continue
             [ "$_gfp_old_source_hash" = "$_gfp_source_hash" ] || continue
             [ "$_gfp_old_weight" = "$_gfp_weight_value" ] || continue
-            case "$_gfp_old_clone" in "$CACHE/"*.ttf) ;; *) continue ;; esac
+            case "$_gfp_old_clone" in "$CACHE/"*.ttf|"$LEGACY_CACHE/"*.ttf) ;; *) continue ;; esac
             [ "$_gfp_target_hash" = "$_gfp_old_target_hash" ] || \
                 [ "$_gfp_target_hash" = "$_gfp_old_clone_hash" ] || continue
             _gfp_valid_font "$_gfp_old_clone" || continue
@@ -473,6 +536,11 @@ _gfp_mount_in_pid() {
 
         stage_detail=procroot-source-not-readable
         stage="${stage_dir%/}/.luoshu-provider-${owner_pid}-$$.ttf"
+        stage_cleanup() { rm -f "$stage" 2>/dev/null || true; }
+        trap stage_cleanup EXIT
+        trap "exit 129" HUP
+        trap "exit 130" INT
+        trap "exit 143" TERM
         rm -f "$stage" 2>/dev/null || true
         if [ -r "$proc_src" ]; then
             if mkdir -p "$stage_dir" 2>/dev/null && cat "$proc_src" > "$stage" 2>/dev/null; then
@@ -913,21 +981,14 @@ _gfp_restore() { _gfp_locked _gfp_restore_internal; }
 _gfp_refresh_consumers() { _gfp_locked _gfp_refresh_internal; }
 
 _gfp_boot() {
-    _gfp_attempt=1
-    _gfp_limit="${LUOSHU_GOOGLE_FONT_RETRIES:-12}"
-    case "$_gfp_limit" in ''|*[!0-9]*) _gfp_limit=12 ;; esac
-    [ "$_gfp_limit" -ge 1 ] 2>/dev/null || _gfp_limit=1
-    while [ "$_gfp_attempt" -le "$_gfp_limit" ]; do
-        _gfp_apply_once && return 0
-        _gfp_rc=$?
-        [ "$_gfp_attempt" -lt "$_gfp_limit" ] || return "$_gfp_rc"
-        sleep 5
-        _gfp_attempt=$((_gfp_attempt + 1))
-    done
-    return 2
+    _gfp_apply_once
 }
 
 if [ "${0##*/}" = google_font_provider_bridge.sh ]; then
+    trap '_gfp_entry_cleanup' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     case "${1:-boot}" in
         boot) _gfp_boot ;;
         apply|now) _gfp_apply_once ;;

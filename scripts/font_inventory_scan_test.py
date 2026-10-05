@@ -16,122 +16,6 @@ def run(command: list[str], env: dict[str, str] | None = None) -> subprocess.Com
     return subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
 
-def check_oem_xml_graph(scanner, temp: Path, font: Path) -> None:
-    """The observed seven-config topology, using original small fixtures."""
-    import font_topology_snapshot as topology
-    import font_role_shadow as role_policy
-
-    fixture = temp / "oem-xml"
-    etc = {part: fixture / part / "etc" for part in ("system", "system_ext", "product")}
-    fonts = {part: fixture / part / "fonts" for part in etc}
-    for path in (*etc.values(), *fonts.values()):
-        path.mkdir(parents=True)
-    for part in ("system", "product"):
-        shutil.copy2(font, fonts[part] / "Shared.ttf")
-    for name in ("BebasNeue-Mono.otf", "DelaGothicOne.otf", "MiSerifSCVF.ttf"):
-        shutil.copy2(font, fonts["product"] / name)
-    main_xml = (
-        '<familyset><family name="sans-serif">'
-        '<font weight="350" postScriptName="SharedText">Shared.ttf'
-        '<axis tag="wght" stylevalue="350"/></font>'
-        '<font weight="950" postScriptName="SharedText">Shared.ttf'
-        '<axis tag="wght" stylevalue="950"/></font>'
-        '</family></familyset>'
-    )
-    fallback_xml = (
-        '<familyset><family lang="ja"><font weight="400" fallbackFor="serif">Shared.ttf</font></family>'
-        '<family lang="zh-Hans"><font weight="400">Shared.ttf</font></family></familyset>'
-    )
-    customization = (
-        '<fonts-modification>'
-        '<family customizationType="new-named-family" name="miclock-bebas-neue-mono">'
-        '<font weight="400" postScriptName="BebasNeue-Mono">BebasNeue-Mono.otf</font></family>'
-        '<family customizationType="new-named-family" name="miclock-dela-gothic-one">'
-        '<font weight="400" postScriptName="LogoSCUnboundedSans-Regular">DelaGothicOne.otf</font></family>'
-        '<family customizationType="new-named-family" name="miclock-serif-sc-regular">'
-        '<font weight="400" postScriptName="MiSerifSCVF">MiSerifSCVF.ttf'
-        '<axis tag="wght" stylevalue="330"/></font>'
-        '<font weight="400" postScriptName="MiSerifSCVF">MiSerifSCVF.ttf'
-        '<axis tag="wght" stylevalue="330"/></font>'
-        '<font weight="700" postScriptName="MiSerifSCVF">MiSerifSCVF.ttf'
-        '<axis tag="wght" stylevalue="430"/></font></family>'
-        '<family customizationType="new-locale-family" operation="prepend" lang="ja">'
-        '<font weight="400">Shared.ttf</font></family>'
-        '<family customizationType="new-locale-family" operation="prepend" lang="zh-Hans">'
-        '<font weight="400">Shared.ttf</font></family></fonts-modification>'
-    )
-    documents = {
-        ("system", "fonts.xml"): main_xml,
-        ("system", "font_fallback.xml"): fallback_xml,
-        ("system_ext", "hyper_fonts.xml"): main_xml,
-        ("system_ext", "hyper_font_fallback.xml"): fallback_xml,
-        ("system_ext", "miui_fonts.xml"): main_xml,
-        ("system_ext", "miui_font_fallback.xml"): fallback_xml,
-        ("product", "mi_fonts_customization.xml"): customization,
-    }
-    for (part, name), xml in documents.items():
-        (etc[part] / name).write_text(xml, encoding="utf-8")
-    # A normal HyperOS alias points at another partition by logical path. The
-    # scanner must remap it to captured stock rather than follow the live view.
-    (etc["system"] / "fonts.xml").unlink()
-    (etc["system"] / "fonts.xml").symlink_to("/system_ext/etc/hyper_fonts.xml")
-    (etc["system"] / "font_settings.xml").write_text('<settings><family name="sans-serif"/></settings>')
-    (etc["system"] / "font_broken.xml").write_text('<familyset>')
-    (etc["system"] / "nested").mkdir()
-    (etc["system"] / "nested/fonts.xml").write_text(main_xml)
-    outside = fixture / "untrusted.xml"
-    outside.write_text(main_xml)
-    (etc["system"] / "font_escape.xml").symlink_to(outside)
-    source_roots = [(part, Path(f"/{part}/etc"), path) for part, path in etc.items()]
-    discovered = scanner._discover_xml_sources(source_roots)
-    assert len(discovered) == 7, discovered
-    assert {str(logical) for _part, logical, _actual in discovered} == {
-        f"/{part}/etc/{name}" for part, name in documents
-    }
-    font_roots = [scanner.base.FontRoot(part, Path(f"/{part}/fonts"), path) for part, path in fonts.items()]
-    graph = scanner._parse_full_xml_graph(discovered, font_roots)
-    assert graph["refCount"] == 18, graph
-    source = "/product/etc/mi_fonts_customization.xml"
-    product_refs = [ref for ref in graph["refs"] if ref["sourceXml"] == source]
-    assert len(product_refs) == 6
-    assert all(ref["resolvedPath"].startswith("/product/fonts/") for ref in product_refs)
-    assert all(ref["resolvedPath"] == "/system/fonts/Shared.ttf" for ref in graph["refs"]
-               if ref["sourceXml"] != source)
-    variable_refs = [ref for ref in product_refs if ref["declared"] == "MiSerifSCVF.ttf"]
-    assert [ref["weight"] for ref in variable_refs] == [400, 700]
-    assert [ref["axisSettings"] for ref in variable_refs] == [
-        [{"tag": "wght", "stylevalue": "330"}], [{"tag": "wght", "stylevalue": "430"}],
-    ]
-    assert all(ref["postScriptName"] == "MiSerifSCVF" for ref in variable_refs)
-    assert {ref["weight"] for ref in graph["refs"] if ref["family"] == "sans-serif"} == {350, 950}
-    fallback = [ref for ref in graph["refs"] if ref["fallbackFor"]]
-    assert len(fallback) == 3 and all(ref["fallbackFor"] == "serif" for ref in fallback)
-    locales = [ref for ref in product_refs if ref["declared"] == "Shared.ttf"]
-    assert {ref["familyAttributes"]["lang"] for ref in locales} == {"ja", "zh-Hans"}
-    assert all(ref["familyAttributes"]["operation"] == "prepend" for ref in locales)
-
-    # XML semantics attach to each existing physical path, with no duplicate
-    # slots and without silently promoting protected mono/serif/icon roles.
-    inventory = {
-        "schema": "device-font-inventory-v1", "state": "ready", "buildKey": "oem-xml",
-        "scannerRevision": scanner.SCANNER_REVISION, "inventoryRevision": 1,
-        "slots": {"/system/fonts/Shared.ttf": {"partition": "system", "source": "xml", "families": ["sans-serif"]}},
-        "xmlSources": [str(logical) for _part, logical, _actual in discovered], "xmlGraph": graph,
-        "families": {}, "romKind": "hyperos",
-    }
-    candidates = {"paths": [{"path": f"/{part}/fonts/{path.name}", "partition": part, "slotName": path.name}
-                             for part, directory in fonts.items() for path in sorted(directory.iterdir())]}
-    snapshot = topology.build_topology(inventory, candidates, "", None, None, "")
-    assert snapshot["summary"]["slotCount"] == 5
-    serif = snapshot["slots"]["/product/fonts/MiSerifSCVF.ttf"]
-    assert serif["families"] == ["miclock-serif-sc-regular"]
-    assert len(serif["xmlRefs"]) == 2 and not serif["legacyReplaceable"]
-    roles, _shadow = role_policy.build(snapshot)
-    assert roles["slots"]["/product/fonts/BebasNeue-Mono.otf"]["role"] == "monospace"
-    assert roles["slots"]["/product/fonts/MiSerifSCVF.ttf"]["role"] == "serif"
-    assert roles["slots"]["/product/fonts/DelaGothicOne.otf"]["role"] == "clock"
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--font", type=Path, required=True)
@@ -175,16 +59,11 @@ def main() -> int:
         shutil.copy2(args.font, future_fonts / "FutureUi-Regular.ttf")
 
         (etc_dirs["system"] / "fonts.xml").write_text(
-            '<familyset><family name="sans-serif"><font weight="400">Roboto-Regular.ttf</font></family>'
-            '<alias name="sans" to="sans-serif"/></familyset>\n',
+            '<familyset><family name="sans-serif"><font weight="400">Roboto-Regular.ttf</font></family></familyset>\n',
             encoding="utf-8",
         )
         (etc_dirs["product"] / "fonts_customization.xml").write_text(
-            '<fonts-modification>'
-            '<family name="system-ui"><font weight="400">ProductUi-Regular.ttf</font></family>'
-            '<family name="fallback-japanese" lang="ja" variant="compact">'
-            '<font weight="400">ProductUi-Regular.ttf</font></family>'
-            '</fonts-modification>\n',
+            '<fonts-modification><family name="system-ui"><font weight="400">ProductUi-Regular.ttf</font></family></fonts-modification>\n',
             encoding="utf-8",
         )
         (etc_dirs["my_product"] / "fonts.xml").write_text(
@@ -235,7 +114,7 @@ def main() -> int:
         candidates = json.loads((temp / "device_font_candidates.json").read_text(encoding="utf-8"))
         summary = payload["scanSummary"]
 
-        assert payload["scannerRevision"] == 6
+        assert payload["scannerRevision"] == 4
         assert payload["romKind"] == "coloros"
         assert result["stockFontFileCount"] == 8
         assert result["stockFontUniqueFileCount"] == 7
@@ -251,22 +130,6 @@ def main() -> int:
         assert summary["partitionFontFileCounts"]["odm"] == 1
         assert summary["partitionUniqueFontFileCounts"]["odm"] == 0
         assert summary["xmlSourceCount"] == 6
-        assert payload["xmlGraph"]["schema"] == "device-font-xml-graph-v1"
-        assert payload["xmlGraph"]["refCount"] >= 7
-        assert payload["xmlGraph"]["aliasCount"] == 1
-        fallback_refs = [
-            ref for ref in payload["xmlGraph"]["refs"]
-            if ref["family"] == "fallback-japanese"
-        ]
-        assert len(fallback_refs) == 1
-        assert fallback_refs[0]["familyAttributes"]["lang"] == "ja"
-        assert fallback_refs[0]["familyAttributes"]["variant"] == "compact"
-        assert fallback_refs[0]["resolvedPath"] == "/product/fonts/ProductUi-Regular.ttf"
-        assert payload["xmlGraph"]["aliases"] == [{
-            "sourceXml": "/system/etc/fonts.xml",
-            "name": "sans",
-            "to": "sans-serif",
-        }]
         assert payload["slotCount"] == 8
         assert "/system/fonts/Roboto-Regular.ttf" in payload["slots"]
         mystery = payload["slots"]["/system_ext/fonts/MysteryUiFace-Regular.ttf"]
@@ -293,22 +156,6 @@ def main() -> int:
         assert reused_result["candidatePathCount"] == 8
 
         scanner = importlib.import_module("font_inventory_scan")
-        assert not scanner._can_reuse(dict(payload, scannerRevision=5), "inventory-v4-rom")
-        # The previous valid graph is upgraded through a verified stock view.
-        old = dict(payload, scannerRevision=5)
-        output.write_text(json.dumps(old), encoding="utf-8")
-        upgraded = run(command, {**scan_env, "LUOSHU_STOCK_VIEW_VERIFIED": "1"})
-        assert upgraded.returncode == 0, upgraded.stderr
-        assert json.loads(upgraded.stdout)["status"] == "ok"
-        assert json.loads(output.read_text())["scannerRevision"] == 6
-        # A failed upgrade retains the old readable inventory byte-for-byte.
-        output.write_text(json.dumps(old), encoding="utf-8")
-        before = output.read_bytes()
-        failed_upgrade = run(command, {**scan_env, "LUOSHU_STOCK_VIEW_VERIFIED": "0"})
-        assert failed_upgrade.returncode != 0
-        assert output.read_bytes() == before
-        assert json.loads(failed_upgrade.stderr)["retainedInventory"] is True
-        check_oem_xml_graph(scanner, temp, args.font)
         theme = temp / "theme/fonts"
         theme.mkdir(parents=True)
         shutil.copy2(args.font, theme / "Theme.ttf")

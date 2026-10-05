@@ -2,6 +2,7 @@ package io.github.xgl34222220.luoshu
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -9,17 +10,20 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.UUID
+import org.json.JSONObject
 
 internal data class ShellResult(
     val code: Int,
     val stdout: String,
     val stderr: String,
+    val cleanupVerified: Boolean = true,
 )
 
 internal object RootShell {
     suspend fun exec(command: String, timeoutMs: Long = 600_000L): ShellResult = withContext(Dispatchers.IO) {
         try {
-            executeProcess(listOf("su", "-c", command), timeoutMs)
+            executeScopedRequest(command, timeoutMs)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (interrupted: InterruptedException) {
@@ -30,7 +34,7 @@ internal object RootShell {
                 error is IOException &&
                 raw.contains("interrupted by close", ignoreCase = true)
             ) {
-                return@withContext ShellResult(75, "", "Root 输出暂时中断，请重试")
+                return@withContext ShellResult(75, "", "Root 输出暂时中断，请重试", cleanupVerified = !error.cleanupUnconfirmed())
             }
             val message = if (
                 error is IOException &&
@@ -40,14 +44,120 @@ internal object RootShell {
             } else {
                 raw.ifBlank { error.javaClass.simpleName }
             }
-            ShellResult(127, "", message)
+            ShellResult(127, "", message, cleanupVerified = !error.cleanupUnconfirmed())
         }
     }
 
     fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 }
 
-/** Owns only the request process. Module workers are detached by app_bridge.sh. */
+private const val TASK_SCOPE = "/data/adb/modules/LuoShu/common/task_scope.sh"
+private const val REQUEST_CLEANUP_TIMEOUT_MS = 20_000L
+
+/** The backend owns descendants by token; the App only owns its local su request. */
+internal suspend fun executeScopedRequest(
+    command: String,
+    timeoutMs: Long,
+    token: String = "app-${UUID.randomUUID()}",
+    scopePath: String = TASK_SCOPE,
+    executor: suspend (List<String>, Long) -> ShellResult = ::executeProcess,
+): ShellResult {
+    require(timeoutMs > 0L) { "Request timeout must be positive" }
+    require(token.length <= 160 && token !in setOf(".", "..") && token.matches(Regex("[A-Za-z0-9._-]+"))) { "Invalid request token" }
+    val timeoutSeconds = ((timeoutMs - 1L) / 1_000L + 1L).coerceAtLeast(1L)
+    val request = "if [ -f ${RootShell.quote(scopePath)} ]; then " +
+        "sh ${RootShell.quote(scopePath)} request-run ${RootShell.quote(token)} $timeoutSeconds -- " +
+        "sh -c ${RootShell.quote(command)}; else " +
+        "printf '%s\\n' '洛书任务清理组件不可用，请先安装匹配模块' >&2; exit 127; fi"
+    try {
+        val result = executor(listOf("su", "-c", request), timeoutMs)
+        // 125 is the supervisor's fail-closed result when cleanup left descendants.
+        if (result.code != 124 && result.code != 125) return result
+        val cleanup = cleanupScopedRequest(scopePath, token, executor)
+        return if (cleanupConfirmed(cleanup, "token", token)) result else result.copy(
+            stderr = "${result.stderr}\n任务清理尚未确认：${cleanup.stderr.ifBlank { "请查看任务日志" }}".trim(),
+            cleanupVerified = false,
+        )
+    } catch (cancelled: CancellationException) {
+        val cleanup = cleanupScopedRequest(scopePath, token, executor)
+        if (!cleanupConfirmed(cleanup, "token", token)) {
+            cancelled.addSuppressed(OwnedTaskCleanupFailure("任务清理尚未确认：${cleanup.stderr.ifBlank { "请查看任务日志" }}"))
+        }
+        throw cancelled
+    } catch (error: Exception) {
+        // Pipe/read failures may happen after the command has already spawned children.
+        val cleanup = cleanupScopedRequest(scopePath, token, executor)
+        if (!cleanupConfirmed(cleanup, "token", token)) {
+            error.addSuppressed(OwnedTaskCleanupFailure("任务清理尚未确认：${cleanup.stderr.ifBlank { "请查看任务日志" }}"))
+        }
+        throw error
+    }
+}
+
+private suspend fun cleanupScopedRequest(
+    scopePath: String,
+    token: String,
+    executor: suspend (List<String>, Long) -> ShellResult,
+): ShellResult = withContext(NonCancellable) {
+    // A fresh request survives cancellation of the original coroutine and su process.
+    // It can only cancel the verified token; no process-name or App-wide kill is used.
+    val cleanup = "sh ${RootShell.quote(scopePath)} request-cancel ${RootShell.quote(token)}"
+    try {
+        executor(listOf("su", "-c", cleanup), REQUEST_CLEANUP_TIMEOUT_MS)
+    } catch (error: Exception) {
+        ShellResult(125, "", error.message ?: "任务清理失败")
+    }
+}
+
+internal fun cleanupConfirmed(result: ShellResult, identityKey: String, identity: String): Boolean {
+    if (result.code != 0 || identity.isBlank()) return false
+    return runCatching {
+        val line = result.stdout.lineSequence().first { it.trimStart().startsWith("{") }
+        val root = JSONObject(line)
+        val data = root.optJSONObject("data") ?: return@runCatching false
+        root.optString("status") == "ok" && data.optBoolean("cleaned", false) &&
+            data.optString(identityKey) == identity
+    }.getOrDefault(false)
+}
+
+internal class OwnedTaskCleanupFailure(message: String) : IOException(message)
+
+internal fun Throwable.cleanupUnconfirmed(): Boolean =
+    this is OwnedTaskCleanupFailure || suppressed.any { it is OwnedTaskCleanupFailure }
+
+internal fun ShellResult.requireCleaned() {
+    if (!cleanupVerified) throw OwnedTaskCleanupFailure(stderr.ifBlank { "任务清理尚未确认" })
+}
+
+/** Stop a known module worker before a failed/cancelled observer releases its busy state. */
+internal suspend fun <T> awaitOwnedFontTask(
+    taskId: String,
+    cancelCommand: String,
+    onCleanup: (Boolean, String) -> Unit,
+    executor: suspend (String, Long) -> ShellResult = { command, timeout -> RootShell.exec(command, timeout) },
+    block: suspend () -> T,
+): T {
+    require(taskId.isNotBlank()) { "Missing owned font task" }
+    try {
+        return block()
+    } catch (failure: Throwable) {
+        val cleaned = withContext(NonCancellable) {
+            val cleanup = try {
+                executor(cancelCommand, REQUEST_CLEANUP_TIMEOUT_MS)
+            } catch (error: Exception) {
+                ShellResult(125, "", error.message ?: "字体任务清理失败")
+            }
+            cleanupConfirmed(cleanup, "task", taskId).also { verified ->
+                // Publish while this context still survives the caller's cancellation.
+                onCleanup(verified, cleanup.stderr.ifBlank { cleanup.stdout })
+            }
+        }
+        if (!cleaned) failure.addSuppressed(OwnedTaskCleanupFailure("字体任务清理尚未确认"))
+        throw failure
+    }
+}
+
+/** Low-level request IO. Descendant ownership belongs to executeScopedRequest's backend. */
 internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): ShellResult =
     withContext(Dispatchers.IO) {
         currentCoroutineContext().ensureActive()

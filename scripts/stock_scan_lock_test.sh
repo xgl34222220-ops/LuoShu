@@ -7,6 +7,12 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
 mkdir -p "$MOD/common/python/bin" "$MOD/config" "$MOD/logs"
 cp "$ROOT/common/font_manager.sh" "$MOD/common/font_manager.sh"
+for helper in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    cp "$ROOT/common/$helper" "$MOD/common/$helper"
+done
+LUOSHU_TASK_SCOPE_PYTHON=$(command -v python3)
+LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
+export LUOSHU_TASK_SCOPE_PYTHON LUOSHU_RUNTIME_PATHS_PYTHON
 : > "$MOD/common/stock_inventory_scan.py"
 : > "$MOD/common/font_inventory.py"
 : > "$MOD/common/font_check.sh"
@@ -51,4 +57,11 @@ grep -q '"status":"ok"' "$TMP/one"
 grep -q '"status":"ok"' "$TMP/two"
 test "$(wc -l < "$TMP/count" | tr -d '[:space:]')" -eq 1
 test ! -e "$MOD/.stock-inventory-scan.lock"
+test -z "$(find "$MOD/.luoshu-state/tasks" -name '*.owner.json' -print)"
+python3 - "$MOD/.luoshu-state/tasks" <<'PY'
+import json, pathlib, sys
+proofs = list(pathlib.Path(sys.argv[1]).glob('*.cleanup.json'))
+assert len(proofs) == 2, proofs
+assert all((p := json.loads(path.read_text()))['cleaned'] and not p['leftoverPids'] for path in proofs)
+PY
 echo 'Stock inventory scan is serialized and a waiting App reuses the completed boot scan.'

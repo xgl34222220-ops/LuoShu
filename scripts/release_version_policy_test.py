@@ -76,8 +76,16 @@ class RefactorVersionTest(unittest.TestCase):
         info=version_info(props['version'],props.get('versionSeries',''))
         self.assertEqual(int(props['versionCode']),info['versionCode'])
         policy=json.loads((ROOT/'config/stable_version_policy.json').read_text())
-        self.assertEqual(policy['currentStable'],info['version'])
-        self.assertEqual(policy['nextStable'],info['nextStable'])
+        # A test candidate can use the already authorized next upgrade number
+        # without advancing the published stable channel or its release tag.
+        self.assertIn(info['version'], (policy['currentStable'], policy['nextStable']))
+        stable = version_info(policy['currentStable'], props.get('versionSeries', ''))
+        self.assertEqual(policy['nextStable'], stable['nextStable'])
+        for name in ('update.json', 'update-prerelease.json'):
+            published = json.loads((ROOT/name).read_text())
+            published_info = version_info(published['version'], props.get('versionSeries', ''))
+            self.assertEqual(published['versionCode'], published_info['versionCode'])
+            self.assertLessEqual(published['versionCode'], stable['versionCode'])
         result=subprocess.run(['sh','-c','. ./scripts/version.sh; printf "%s|%s|%s|%s" "$LUOSHU_VERSION" "$LUOSHU_RELEASE_TAG" "$LUOSHU_RELEASE_NOTES" "$LUOSHU_APP_VERSION_CODE"'],cwd=ROOT,capture_output=True,text=True,check=True)
         self.assertEqual(result.stdout,f"{info['version']}|{info['tag']}|{info['notesFile']}|{info['appVersionCode']}")
         self.assertTrue((ROOT/info['notesFile']).is_file())

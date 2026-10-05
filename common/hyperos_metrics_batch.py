@@ -20,26 +20,44 @@ from fontTools import subset
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
-from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name, _EXCLUDED
-from font_role_policy import (is_code_monospace, is_clock_slot, slot_for,
-                              protected_aliases, record_preserved, assert_isolated)
-import font_slot_weight as slot_weight
-from font_config_overlay import is_safe_family
+from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
 
 
 def weight_for_name(name: str) -> int:
-    return slot_weight.named_weight(name) or 400
+    stem = Path(name).stem.lower()
+    if stem.isdigit() and 100 <= int(stem) <= 900:
+        return int(stem)
+    for terms, weight in ((('extrabold', 'extra-bold'), 800),
+                          (('semibold', 'semi-bold', 'demibold'), 600),
+                          (('extralight', 'extra-light'), 200),
+                          (('black', 'heavy'), 900), (('bold',), 700),
+                          (('medium',), 500), (('light',), 300), (('thin',), 100)):
+        if any(term in stem for term in terms):
+            return weight
+    return 400
 
 
 def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
-def pick_source(fonts: Path, name: str, weight: int | None = None) -> Path:
-    return slot_weight.source_for(fonts, name, weight or weight_for_name(name))
+def pick_source(fonts: Path, name: str) -> Path:
+    weight = weight_for_name(name)
+    store = fonts / '.luoshu-font-store'
+    # Numeric and exact aliases carry the actual multiweight selection. Do not
+    # replace every weight with regular just because a regular anchor exists.
+    candidates = (fonts / f'LuoShu-{weight}.ttf', store / f'wght-{weight}.font',
+                  fonts / f'{weight}.ttf', fonts / name,
+                  store / 'mix-composite.font', store / 'regular.font',
+                  store / 'compact-regular.font', fonts / '400.ttf',
+                  fonts / 'MiSansVF.ttf', fonts / 'Roboto-Regular.ttf')
+    for path in candidates:
+        if nonempty(path):
+            return path
+    raise ValueError(f'没有可用的源字体：{name}')
 
 
 def read_inventory(module: Path) -> dict:
@@ -141,13 +159,6 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
     face = _pick_face(source)
     kwargs = {'fontNumber': face} if face >= 0 else {}
     with TTFont(source, lazy=True, recalcBBoxes=False, recalcTimestamp=False, **kwargs) as font:
-        # The bundled Android runtime has no lxml. An SVG table uses glyph IDs;
-        # dropping it or passing it unchanged through a renumbering subset can
-        # silently corrupt decorative glyphs. Keep this donor intact instead.
-        # write_metrics still prunes ONLY its routed cmap and preserves glyph IDs,
-        # SVG documents and outlines. This path trades size for fidelity.
-        if 'SVG ' in font:
-            return source, 0
         removed = remove_cjk_mappings(font, routing, stock_punctuation)
         if not removed:
             return source, 0
@@ -256,8 +267,7 @@ def write_metrics(source: Path, output: Path, contract: tuple,
                   'bitmapBaselineCorrection': bottom_correction,
                   'bitmapBaselineReason': bottom_reason,
                   'layoutBoundsDifferFromSource': source_frame != (head.yMin, head.yMax),
-                  'removedCjkMappings': removed,
-                  'svgPreserved': 'SVG ' in font}
+                  'removedCjkMappings': removed}
     os.chmod(output, 0o644)
     return report
 
@@ -371,85 +381,14 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
     return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
-def inventory_target(data: dict, logical: str) -> bool:
-    """Accept a trusted, single-face text slot even with an unknown OEM name."""
-    path = Path(logical)
-    if (len(path.parts) != 4 or path.parts[0] != '/' or path.parts[1] not in PARTS
-            or path.parts[2] != 'fonts' or path.suffix not in ('.ttf', '.otf')
-            or '..' in path.parts):
-        return False
-    slot = slot_for(data, logical)
-    if not slot or slot.get('path', logical) != logical:
-        return False
-    if is_code_monospace(path.name, slot) or slot.get('style', 'normal') != 'normal':
-        return False
-    if slot.get('format', slot.get('validatedFormat')) in ('TTC', 'OTC'):
-        return False
-    try:
-        if int(slot.get('faceIndex', 0)) != 0:
-            return False
-    except (ValueError, TypeError):
-        return False
-    lower = path.name.lower().replace('semicondensed', '')
-    if 'icon' in lower or any(token in lower for token in _EXCLUDED):
-        return False
-    coverage = slot.get('metrics', {}).get('coverage')
-    if not valid_coverage(coverage) or contract_for_slot(data, logical)[-1] != 'stock':
-        return False
-    role = (any(is_safe_family(f) for f in slot.get('families', []) if isinstance(f, str))
-            or logical == data.get('mainSlotPath')
-            or is_clock_slot(path.name, slot)
-            or (slot.get('source') == 'verified-scan' and
-                (coverage['hanCount'] >= 512 or
-                 (coverage['latinCount'] >= 52 and coverage['unicodeCount'] >= 96))))
-    return role and (coverage['hasLatin'] or coverage['hasHan']
-                     or coverage.get('hasDigits', False))
-
-
-def check_core_coverage(path: Path, slot: dict, logical: str, memo: dict) -> dict:
-    """Do not accept a full stock Latin/digit slot with missing selected glyphs.
-
-    Legacy partial stock counts cannot prove the individual original characters;
-    enforce the entire core alphabet only when all 52/10 were actually recorded.
-    """
-    coverage = slot.get('metrics', {}).get('coverage')
-    if not valid_coverage(coverage):
-        return {'textCoverage': 'unverified-no-stock-character-facts'}
-    st = path.stat()
-    identity = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
-    if identity not in memo:
-        face = _pick_face(path)
-        kwargs = {'fontNumber': face} if face >= 0 else {}
-        with TTFont(path, lazy=True, recalcBBoxes=False, **kwargs) as font:
-            # Retain only the 62 core code points, not a CJK cmap per alias.
-            memo[identity] = frozenset(cp for cp in preferred_unicode_codepoints(font)
-                                       if 48 <= cp <= 57 or 65 <= cp <= 90 or 97 <= cp <= 122)
-    points = memo[identity]
-    required = set()
-    if coverage['latinCount'] == 52:
-        required.update(range(65, 91)); required.update(range(97, 123))
-    if coverage.get('digitCount') == 10:
-        required.update(range(48, 58))
-    missing = sorted(required - points)
-    if missing:
-        raise ValueError('英数覆盖不完整：' + logical + ' 缺少 ' +
-                         ' '.join(f'U+{cp:04X}' for cp in missing))
-    return {'textCoverage': 'checked-core-characters',
-            'latinCount': sum(65 <= cp <= 90 or 97 <= cp <= 122 for cp in points),
-            'digitCount': sum(48 <= cp <= 57 for cp in points),
-            'coreLatinChecked': coverage['latinCount'] == 52,
-            'coreDigitsChecked': coverage.get('digitCount') == 10}
-
-
 def build(module: Path, stage: Path, names: list[str]) -> dict:
-    assert_isolated(module, stage)
+    if stage.resolve() == (module / '.luoshu-payload').resolve():
+        raise ValueError('拒绝修改本次启动正在使用的字体负载')
     fonts = stage / 'system/fonts'
     data = read_inventory(module)
     jobs = []
     preserved_aliases = []
-    excluded_aliases = protected_aliases(stage, data)
-    trusted = {logical for logical in data.get('slots', {}) if inventory_target(data, logical)}
-    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted))]))
+    excluded_aliases = []
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
@@ -457,20 +396,13 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             for alias in staged_fonts.iterdir():
                 if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
                         and alias.suffix in ('.ttf', '.otf')
-                        and not safe_physical_font_name(alias.name)
-                        and '/' + alias.relative_to(stage).as_posix() not in trusted):
+                        and not safe_physical_font_name(alias.name)):
                     excluded_aliases.append(alias)
         for name in dict.fromkeys(names):
             if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
                 raise ValueError(f'不安全的字体槽位：{name}')
             logical = f'/{part}/fonts/{name}'
-            original = slot_for(data, logical)
-            # A filename can conceal a collection used at a nonzero XML face.
-            # Never replace that stock container with our single-face output.
-            collection_target = (original.get('format', original.get('validatedFormat')) in ('TTC', 'OTC')
-                                 or str(original.get('faceIndex', 0)) not in ('0', 'None'))
-            if (collection_target or is_code_monospace(name, original) or
-                    (not safe_physical_font_name(name) and logical not in trusted)):
+            if not safe_physical_font_name(name):
                 # Never let a stale inventory/target list recreate obsolete
                 # language aliases. Removing only its isolated staged alias
                 # exposes the untouched ROM font when the payload is mounted.
@@ -480,7 +412,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 preserved_aliases.append(stage / part / 'fonts' / name)
                 continue
             if (root / name).exists():
-                jobs.append((pick_source(fonts, name, slot_weight.requested_weight(data, logical)), stage / part / 'fonts' / name,
+                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
                              contract_for_slot(data, logical)))
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
@@ -490,9 +422,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
     cache = {}
     compact_sources = {}
-    weight_sources = {}
     output_reports = {}
-    coverage_memo = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
     prepared = []
@@ -500,18 +430,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     fallback = 0
     try:
         for source, dest, contract in jobs:
-            logical = '/' + dest.relative_to(stage).as_posix()
-            donor_stat = source.stat()
-            weight = slot_weight.requested_weight(data, logical)
-            keep_variable = slot_weight.variable_target(data, logical)
-            weight_key = (donor_stat.st_dev, donor_stat.st_ino, donor_stat.st_size,
-                          donor_stat.st_mtime_ns, weight, keep_variable)
-            if weight_key not in weight_sources:
-                weight_sources[weight_key] = slot_weight.prepare(
-                    source, outputs / f'weight-{len(weight_sources)}.font', weight, keep_variable)
-            source, weight_report = weight_sources[weight_key]
-            check_core_coverage(source, slot_for(data, logical), logical, coverage_memo)
             stat = source.stat()
+            logical = '/' + dest.relative_to(stage).as_posix()
             routing, stock_punctuation, routing_reason = _cjk_routing(data, logical, cjk_fallback)
             if contract[-1] != 'stock':
                 routing, stock_punctuation, routing_reason = None, frozenset(), 'invalid-stock-contract'
@@ -533,7 +453,6 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                                     align_bitmap_bottom=align_bottom)
                 output_reports[key]['removedCjkMappings'] += compact_removed
                 cache[key] = output
-            core_report = check_core_coverage(cache[key], slot_for(data, logical), logical, coverage_memo)
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
             slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
@@ -545,13 +464,9 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'useTypoMetrics': contract[9],
                                 'cjkRoutingSource': 'stock-fallback' if routing else 'source',
                                 'cjkRoutingReason': routing_reason,
-                                **output_reports[key], **weight_report, **core_report,
-                                'targetDiscovery': 'inventory' if logical in trusted else 'physical-policy'})
+                                **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)
-        record_preserved(stage, ['/' + alias.relative_to(stage).as_posix()
-                                 for alias in excluded_aliases],
-                         replaced=['/' + dest.relative_to(stage).as_posix() for _, dest in prepared])
         for alias in preserved_aliases + excluded_aliases:
             # Initial generic mapping creates the alias as a regular font. Its
             # absence exposes the ROM lower symlink in OverlayFS and leaves it

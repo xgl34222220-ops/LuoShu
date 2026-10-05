@@ -58,14 +58,6 @@ EXCLUDED = (
 )
 
 
-# The old contract admitted these to replacement; they remain in the stock
-# census but now belong to the explicitly protected code-font role.
-CODE_MONO = tuple(n for n in RESTORED + PRESERVED if 'mono' in n.lower())
-RESTORED = tuple(n for n in RESTORED if n not in CODE_MONO)
-PRESERVED = tuple(n for n in PRESERVED if n not in CODE_MONO)
-EXCLUDED += CODE_MONO
-
-
 def shell_result(names: tuple[str, ...]) -> list[bool]:
     # Do not source another compatibility layer or inspect host font files.
     with tempfile.TemporaryDirectory() as temp:
@@ -123,7 +115,7 @@ class LatinPolicyRegressionTest(unittest.TestCase):
                 env[key] = temp
             proc = subprocess.run(
                 ['sh', '-c', '. "$1"; _lhcc_static_names() { '
-                 'printf "%s\\n" DroidSansFallback.ttf; }; _lhcc_names_for_root "$2"',
+                 'printf "%s\\n" NotoSansMono-Regular.ttf; }; _lhcc_names_for_root "$2"',
                  'sh', str(SHELL), str(root)],
                 cwd=temp, env=env, check=True, text=True, capture_output=True,
             )

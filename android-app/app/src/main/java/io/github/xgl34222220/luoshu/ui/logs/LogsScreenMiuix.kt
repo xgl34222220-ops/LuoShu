@@ -428,6 +428,6 @@ private fun miuixTaskPhaseColor(phase: TaskPhase): Color {
         TaskPhase.SUCCESS -> tokens.success
         TaskPhase.WAITING_REBOOT -> MaterialTheme.colorScheme.secondary
         TaskPhase.INFO -> tokens.textSecondary
-        TaskPhase.QUEUED, TaskPhase.RUNNING -> MaterialTheme.colorScheme.primary
+        TaskPhase.QUEUED, TaskPhase.RUNNING, TaskPhase.WAITING_CLEANUP -> MaterialTheme.colorScheme.primary
     }
 }

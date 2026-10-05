@@ -7,33 +7,46 @@ Google Sans provider fonts, theme fonts can be the primary CJK family too.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import signal
 import tempfile
 
 from fontTools.ttLib import TTFont
 from hyperos_metrics_batch import contract_for_slot, write_metrics
 
 
+@contextmanager
+def _temporary_output(directory: Path):
+    # Defer cancellation only across the create/record and unlink windows, so
+    # every created file has an owner before the CLI signal handler can unwind.
+    cancellation = {signal.SIGTERM, signal.SIGHUP, signal.SIGINT}
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, cancellation)
+    fd = None
+    temporary = None
+    try:
+        fd, name = tempfile.mkstemp(prefix='.theme-view-', dir=directory)
+        temporary = Path(name)
+        os.close(fd)
+        fd = None
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+        yield temporary
+    finally:
+        signal.pthread_sigmask(signal.SIG_BLOCK, cancellation)
+        try:
+            if fd is not None:
+                os.close(fd)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+
+
 def patch(source: Path, target: Path, output: Path) -> dict:
     if output.resolve() in {source.resolve(), target.resolve()}:
         raise ValueError('refusing to replace source or theme font')
-    with source.open('rb') as stream:
-        collection = stream.read(4) == b'ttcf'
-    if collection:
-        # Engine v3 writes extra weights as collection faces; face 0 is the
-        # file's own (regular) face.
-        output.parent.mkdir(parents=True, exist_ok=True)
-        fd, name = tempfile.mkstemp(prefix='.theme-face-', suffix='.ttf', dir=output.parent)
-        os.close(fd)
-        single = Path(name)
-        try:
-            with TTFont(source, fontNumber=0, recalcBBoxes=False, recalcTimestamp=False) as font:
-                font.save(single)
-            return patch(single, target, output)
-        finally:
-            single.unlink(missing_ok=True)
     for path in (source, target):
         with path.open('rb') as stream:
             if stream.read(4) not in (b'\x00\x01\x00\x00', b'OTTO', b'true'):
@@ -58,14 +71,9 @@ def patch(source: Path, target: Path, output: Path) -> dict:
         if not set(range(48, 58)) <= set(font.getBestCmap() or {}):
             raise ValueError('active source has no complete decimal digits')
     output.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix='.theme-view-', dir=output.parent)
-    os.close(fd)
-    temporary = Path(name)
-    try:
+    with _temporary_output(output.parent) as temporary:
         report = write_metrics(source, temporary, contract)
         os.replace(temporary, output)
-    finally:
-        temporary.unlink(missing_ok=True)
     return {'status': 'ok', 'outputBytes': output.stat().st_size, **report}
 
 
@@ -75,7 +83,19 @@ def main() -> None:
     parser.add_argument('--target', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
-    print(json.dumps(patch(args.source, args.target, args.output)))
+    previous = {}
+
+    def cancelled(number, _frame):
+        raise SystemExit(128 + number)
+
+    try:
+        for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            previous[number] = signal.getsignal(number)
+            signal.signal(number, cancelled)
+        print(json.dumps(patch(args.source, args.target, args.output)))
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
 
 
 if __name__ == '__main__':

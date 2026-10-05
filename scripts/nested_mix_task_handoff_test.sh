@@ -3,7 +3,13 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-mix-handoff)
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+cleanup() {
+    [ ! -f "${MODULE:-}/common/task_scope.sh" ] || MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cancel-all "$MODULE" >/dev/null 2>&1 || true
+    rm -rf "$TMP"
+}
+trap cleanup EXIT HUP INT TERM
+export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
 
 . "$ROOT/common/mix_task_handoff.sh"
 
@@ -58,6 +64,10 @@ if [ -s "$FONT" ]; then
     cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
     cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
     cp "$ROOT/common/mix_task_handoff.sh" "$MODULE/common/mix_task_handoff.sh"
+    for helper in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py util_functions_core.sh; do
+        cp "$ROOT/common/$helper" "$MODULE/common/$helper"
+    done
+    printf 'id=LuoShu\n' > "$MODULE/module.prop"
 
     cat >"$MODULE/common/font_role_check.sh" <<'EOF_ROLE'
 #!/bin/sh
@@ -69,6 +79,11 @@ MODDIR="${MODDIR:-${0%/*}/..}"
 TASK="$MODDIR/config/mix_task.conf"
 case "${1:-}" in
     start)
+        # Real scope proof; only the JSON response is deliberately omitted.
+        exec sh "$MODDIR/common/task_scope.sh" run --pid-file "$MODDIR/.luoshu-state/tasks/mix_worker.pid" \
+            --task base-no-output --timeout 12 -- sh "$0" worker "$2" "$3" "$4"
+        ;;
+    worker)
         cat >"$TASK" <<EOF_INNER
 task=base-no-output
 state=success
@@ -117,6 +132,13 @@ EOF_ENGINE
     fi
     test "$(sed -n 's/^childTask=//p' "$MODULE/config/axes_task.conf")" = base-no-output
     ! grep -q '无法启动完整复合字体引擎' "$MODULE/config/axes_task.conf"
+    COUNT=0
+    while ! MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/axes_worker.pid" "$OUTER"; do
+        [ "$COUNT" -lt 30 ] || exit 1
+        sleep .1
+        COUNT=$((COUNT + 1))
+    done
+    MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/mix_worker.pid" base-no-output
 
     # The committed payload is authoritative even when the inner controller's
     # final task-file write is delayed. This is the real-device false-timeout
@@ -127,6 +149,10 @@ EOF_ENGINE
 MODDIR="${MODDIR:-${0%/*}/..}"
 case "${1:-}" in
     start)
+        exec sh "$MODDIR/common/task_scope.sh" run --pid-file "$MODDIR/.luoshu-state/tasks/mix_worker.pid" \
+            --task base-committed --timeout 12 -- sh "$0" worker "$2" "$3" "$4"
+        ;;
+    worker)
         cat >"$MODDIR/config/mix_task.conf" <<EOF_INNER
 task=base-committed
 state=running
@@ -158,6 +184,13 @@ EOF_COMMITTED_ENGINE
     done
     test "$(sed -n 's/^state=//p' "$MODULE/config/axes_task.conf")" = success
     grep -q '负载已提交' "$MODULE/config/axes_task.conf"
+    COUNT=0
+    while ! MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/axes_worker.pid" "$OUTER"; do
+        [ "$COUNT" -lt 30 ] || exit 1
+        sleep .1
+        COUNT=$((COUNT + 1))
+    done
+    MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/mix_worker.pid" base-committed
 fi
 
 grep -q 'mix_task_handoff.sh' "$ROOT/common/weighted_mix_task.sh"

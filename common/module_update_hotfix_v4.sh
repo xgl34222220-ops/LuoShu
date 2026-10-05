@@ -71,7 +71,7 @@ luoshu_migrate_active_install() {
     fi
 
     luoshu_migrate_update_cache "$_lvm_old" "$_lvm_new" "$_lvm_compatible"
-    luoshu_clear_update_volatile "$_lvm_new"
+    luoshu_clear_update_volatile "$_lvm_new" || return 1
 
     # active_font.conf is selection state, never an "effective stock" flag.
     printf '%s\n' "$_lvm_active" > "$_lvm_new/config/active_font.conf" || return 1

@@ -316,5 +316,5 @@ private fun taskPhaseColor(phase: TaskPhase): Color = when (phase) {
     TaskPhase.SUCCESS -> MaterialTheme.colorScheme.tertiary
     TaskPhase.WAITING_REBOOT -> MaterialTheme.colorScheme.secondary
     TaskPhase.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
-    TaskPhase.QUEUED, TaskPhase.RUNNING -> MaterialTheme.colorScheme.primary
+    TaskPhase.QUEUED, TaskPhase.RUNNING, TaskPhase.WAITING_CLEANUP -> MaterialTheme.colorScheme.primary
 }

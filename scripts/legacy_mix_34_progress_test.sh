@@ -3,7 +3,11 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-legacy-34)
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+cleanup() {
+    [ ! -f "${MODULE:-}/common/task_scope.sh" ] || MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cancel-all "$MODULE" >/dev/null 2>&1 || true
+    rm -rf "$TMP"
+}
+trap cleanup EXIT HUP INT TERM
 
 MODULE="$TMP/module"
 PUBLIC="$TMP/public"
@@ -11,6 +15,12 @@ mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/cache" "$MODULE/logs" "$PUBL
 cp "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh" "$MODULE/common/v142_weighted_mix.sh"
 cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
 cp "$ROOT/common/mix_task_handoff.sh" "$MODULE/common/mix_task_handoff.sh"
+for helper in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    cp "$ROOT/common/$helper" "$MODULE/common/$helper"
+done
+export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
+printf 'id=LuoShu\n' > "$MODULE/module.prop"
 
 cat >"$MODULE/common/util_functions.sh" <<'EOF_UTIL'
 detect_font_family() { printf '%s\n' "${1%%-*}"; }
@@ -45,6 +55,11 @@ digit=$4
 started=1
 finished=
 EOF_TASK
+        sh "$MODDIR/common/task_scope.sh" run --pid-file "$MODDIR/.luoshu-state/tasks/mix_worker.pid" \
+            --task slow-start-inner --timeout 12 -- sh "$0" worker "$2" "$3" "$4"
+        printf '%s\n' '{"status":"ok","data":{"task":"slow-start-inner"}}'
+        ;;
+    worker)
         sleep 4
         cat >"$TASK" <<EOF_TASK
 task=slow-start-inner
@@ -56,7 +71,6 @@ digit=$4
 started=1
 finished=2
 EOF_TASK
-        printf '%s\n' '{"status":"ok","data":{"task":"slow-start-inner"}}'
         ;;
     recover) printf '%s\n' '{"status":"ok"}' ;;
 esac
@@ -95,10 +109,17 @@ while [ "$COUNT" -lt 10 ]; do
     COUNT=$((COUNT + 1))
 done
 test "${STATE:-}" = success
+COUNT=0
+while ! MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/axes_worker.pid" "$OUTER"; do
+    [ "$COUNT" -lt 30 ] || exit 1
+    sleep .1
+    COUNT=$((COUNT + 1))
+done
+MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cleaned "$MODULE/.luoshu-state/tasks/mix_worker.pid" slow-start-inner
 
 grep -q 'background_task.sh' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'mix_task_handoff.sh' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'mix-engine-start.*json' "$ROOT/common/legacy_v14_4/font_mix_runtime.sh"
+grep -q 'mix-engine-start' "$ROOT/common/legacy_v14_4/font_mix_runtime.sh"
 ! grep -q '_output=$(LUOSHU_PUBLIC_DIR=' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 ! sed -n '/^payload_stage_begin()/,/^}/p' "$ROOT/common/legacy_v14_4/font_mix_engine.sh" | grep -q 'cp -af'
 grep -q 'hyperos_metrics_batch.py' "$ROOT/common/hyperos_stage_complete.sh"

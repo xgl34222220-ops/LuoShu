@@ -12,11 +12,19 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+if [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ] && [ "${1:-status}" != worker ]; then
+    exec sh "$MODDIR/common/task_scope.sh" request-run "mix-cli-$$-$(date +%s)" 900 -- sh "$0" "$@"
+fi
+[ -f "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/runtime_paths.sh" ] && {
+    . "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "${LUOSHU_REAL_MODDIR:-$MODDIR}" || exit 126
+}
 
 CONFIG_DIR="$MODDIR/config"
 SYSTEM_FONTS_DIR="$MODDIR/system/fonts"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 TASK_FILE="$CONFIG_DIR/mix_task.conf"
+WORKER_PID="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix_worker.pid"
 MIX_CONF="$CONFIG_DIR/font_mix.conf"
 ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
@@ -26,7 +34,7 @@ MODULE_DIR="$MODDIR"
 PAYLOAD_STAGE=""
 PAYLOAD_BACKUP=""
 PAYLOAD_ACTIVATED=0
-PAYLOAD_COMMIT_MARKER="$MODDIR/.font-payload-commit.ok"
+PAYLOAD_COMMIT_MARKER="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/font-payload-commit.ok"
 COMPOSITE_RESULT=""
 COMPOSITE_REPORT=""
 COMPOSITE_CACHE_HIT=false
@@ -147,25 +155,33 @@ verify_core_files() {
 }
 
 recover_interrupted_payload() {
-    if [ -f "$PAYLOAD_COMMIT_MARKER" ]; then
-        rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
-        rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    if [ -f "$PAYLOAD_COMMIT_MARKER" ] || [ -f "$MODDIR/.font-payload-commit.ok" ]; then
+        rm -rf "${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"/payload-backup.* \
+            "${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"/payload-stage.* \
+            "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || return 1
+        rm -f "$PAYLOAD_COMMIT_MARKER" "$MODDIR/.font-payload-commit.ok" 2>/dev/null || return 1
         return 0
     fi
-    for _backup in "$MODDIR"/.font-payload-backup.*; do
+    for _backup in "${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"/payload-backup.* "$MODDIR"/.font-payload-backup.*; do
         [ -d "$_backup" ] || continue
-        rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
-        mv "$_backup" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+        rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
+        # A failed restore is still the sole intact old payload. Preserve it.
+        mv "$_backup" "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
         break
     done
-    rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
+    rm -rf "${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}"/payload-stage.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || return 1
 }
 
 payload_stage_begin() {
-    PAYLOAD_STAGE="$MODDIR/.font-payload-stage.$$"
-    PAYLOAD_BACKUP="$MODDIR/.font-payload-backup.$$"
+    _payload_task="${LUOSHU_TASK_SCOPE_TASK:-manual-$$}"
+    PAYLOAD_STAGE="${LUOSHU_TASK_SCOPE_TMPDIR:-${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}}/payload-stage"
+    # The rollback copy survives forced worker termination until restored; it
+    # must not live in a scope directory that the supervisor automatically deletes.
+    PAYLOAD_BACKUP="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/payload-backup.$_payload_task.$$"
     PAYLOAD_ACTIVATED=0
-    rm -rf "$PAYLOAD_STAGE" "$PAYLOAD_BACKUP" "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    [ ! -e "$PAYLOAD_BACKUP" ] || return 1
+    rm -rf "$PAYLOAD_STAGE" 2>/dev/null || return 1
+    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
     # The active payload is already protected by the transaction snapshot and by PAYLOAD_BACKUP.
     # Starting from an empty directory avoids copying dozens of large hard-linked aliases only to
     # delete them immediately before generating the replacement payload.
@@ -186,8 +202,8 @@ payload_stage_activate() {
         mkdir -p "$PAYLOAD_BACKUP" 2>/dev/null || return 1
     fi
     if ! mv "$PAYLOAD_STAGE" "$SYSTEM_FONTS_DIR" 2>/dev/null; then
-        rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
-        mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+        rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
+        mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
         return 1
     fi
     PAYLOAD_STAGE=""
@@ -197,24 +213,28 @@ payload_stage_activate() {
 
 payload_stage_rollback() {
     [ "$PAYLOAD_ACTIVATED" -eq 1 ] || return 0
-    rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
-    mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
-    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
+    mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
+    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
     PAYLOAD_BACKUP=""
     PAYLOAD_ACTIVATED=0
 }
 
 payload_stage_finalize() {
     [ "$PAYLOAD_ACTIVATED" -eq 1 ] || return 0
-    rm -rf "$PAYLOAD_BACKUP" 2>/dev/null || true
-    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    rm -rf "$PAYLOAD_BACKUP" 2>/dev/null || return 1
+    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
     PAYLOAD_BACKUP=""
     PAYLOAD_ACTIVATED=0
 }
 
 cleanup_mix_process() {
     payload_stage_abort
-    payload_stage_rollback
+    if [ -f "$PAYLOAD_COMMIT_MARKER" ]; then
+        payload_stage_finalize || true
+    else
+        payload_stage_rollback || true
+    fi
     type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort
     type luoshu_font_lock_release >/dev/null 2>&1 && \
         luoshu_font_lock_release "$LOCK_FILE" "$$" >/dev/null 2>&1 || true
@@ -472,7 +492,7 @@ apply_mix() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
     mix_stage initialize '正在初始化字体组合任务' 1
-    recover_interrupted_payload
+    recover_interrupted_payload || { set_mix_error '旧字体负载恢复失败，回滚副本已保留'; return 2; }
     if [ -e "$LOCK_FILE" ]; then
         if type luoshu_font_lock_active >/dev/null 2>&1 && luoshu_font_lock_active "$LOCK_FILE"; then
             set_mix_error '字体正在切换中'
@@ -590,8 +610,8 @@ mix_worker() {
         [ -n "$_failure" ] || _failure="字体组合失败（阶段代码 $_rc）"
         write_task "$_task" failed "$_failure" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
     fi
-    if type luoshu_clear_task_pid >/dev/null 2>&1; then luoshu_clear_task_pid "$CONFIG_DIR/mix_worker.pid" "$_task"
-    else rm -f "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
+    if type luoshu_clear_task_pid >/dev/null 2>&1; then luoshu_clear_task_pid "$WORKER_PID" "$_task"
+    else rm -f "$WORKER_PID" 2>/dev/null || true
     fi
 }
 
@@ -622,20 +642,31 @@ case "${1:-status}" in
         _task="mix-$(date +%s)-$$"; _started=$(date +%s)
         write_task "$_task" running '正在生成完整复合字体' "$_cjk" "$_latin" "$_digit" "$_started" ''
         if type luoshu_start_detached >/dev/null 2>&1; then
-  luoshu_start_detached "$CONFIG_DIR/mix_worker.pid" "$_task" "$LOG_FILE" sh "$0" worker "$_task" "$_cjk" "$_latin" "$_digit" "$_started" || {
+  LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS=900
+  export LUOSHU_SCOPE_HANDOFF LUOSHU_TASK_TIMEOUT_SECONDS
+  luoshu_start_detached "$WORKER_PID" "$_task" "$LOG_FILE" sh "$0" worker "$_task" "$_cjk" "$_latin" "$_digit" "$_started" || {
       write_task "$_task" failed '无法启动独立后台任务' "$_cjk" "$_latin" "$_digit" "$_started" "$(date +%s)"
       printf '{"status":"error","message":"无法启动独立后台任务"}\n'
       exit 0
   }
         else
-  ( trap '' HUP; MODDIR="$MODDIR" sh "$0" worker "$_task" "$_cjk" "$_latin" "$_digit" "$_started" ) </dev/null >>"$LOG_FILE" 2>&1 &
-  printf '%s\n' "$!" >"$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
+  printf '{"status":"error","message":"任务监督器不可用"}\n'; exit 126
         fi
         printf '{"status":"ok","data":{"task":"%s"}}\n' "$(json_escape "$_task")"
         ;;
-    worker) mix_worker "$2" "$3" "$4" "$5" "$6" ;;
+    worker)
+        if [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$WORKER_PID" ]; then
+            exec sh "$(luoshu_scope_runner)" run --pid-file "$WORKER_PID" --task "$2" --timeout 900 -- sh "$0" "$@"
+        fi
+        mix_worker "$2" "$3" "$4" "$5" "$6"
+        ;;
     status) status_json ;;
-    recover) recover_interrupted_payload; printf '{"status":"ok"}\n' ;;
+    recover)
+        luoshu_stop_task_pid "$WORKER_PID" >/dev/null || exit 125
+        if recover_interrupted_payload; then printf '{"status":"ok"}\n'
+        else printf '{"status":"error","message":"旧字体负载恢复失败，回滚副本已保留"}\n'; exit 1
+        fi
+        ;;
     *) printf '{"status":"error","message":"未知组合命令"}\n' ;;
 esac
 exit 0

@@ -156,17 +156,13 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: |
-            common/python
-            .luoshu-runtime/bin/woff2_decompress
-            licenses/WOFF2-LICENSE.txt
-            licenses/Brotli-LICENSE.txt
+          path: common/python
           key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
 
       - name: Prepare ARM64 composite runtime
         shell: bash
         run: |
-          if [[ ! -x common/python/bin/luoshu-python || ! -x .luoshu-runtime/bin/woff2_decompress ]]; then
+          if [[ ! -x common/python/bin/luoshu-python ]]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
 

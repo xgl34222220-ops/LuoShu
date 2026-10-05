@@ -3,7 +3,13 @@ set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+cleanup() {
+    [ ! -f "${MODDIR:-}/common/task_scope.sh" ] || MODDIR="$MODDIR" sh "$MODDIR/common/task_scope.sh" cancel-all "$MODDIR" >/dev/null 2>&1 || true
+    rm -rf "$TMP"
+}
+trap cleanup EXIT HUP INT TERM
+export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
 
 MODDIR="$TMP/module"
 PUBLIC_DIR="$TMP/public"
@@ -13,6 +19,10 @@ mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs" "$PUBLIC_DIR/fonts" \
 cp "$ROOT/common/font_manager.sh" "$MODDIR/common/font_manager.sh"
 cp "$ROOT/common/legacy_v14_4_switch.sh" "$MODDIR/common/legacy_v14_4_switch.sh"
 cp "$ROOT/common/font_switch_lock.sh" "$MODDIR/common/font_switch_lock.sh"
+for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    cp "$ROOT/common/$helper" "$MODDIR/common/$helper"
+done
+printf 'id=LuoShu\n' > "$MODDIR/module.prop"
 ln -s "$ROOT/common/legacy_v14_4" "$MODDIR/common/legacy_v14_4"
 printf 'live-payload-must-not-change\n' > "$MODDIR/.luoshu-payload/live-marker"
 printf 'BeforeSwitch\n' > "$MODDIR/config/active_font.conf"
@@ -123,6 +133,20 @@ test -d "$MODDIR/.luoshu-payload-next"
 grep -q '^state=prepared$' "$MODDIR/config/font-payload-next.conf"
 grep -q '^font=default$' "$MODDIR/config/font-payload-next.conf"
 grep -q '^previousFont=BeforeSwitch$' "$MODDIR/config/font-payload-next.conf"
+python3 - "$MODDIR" <<'PY'
+import json, sys
+from pathlib import Path
+module = Path(sys.argv[1])
+tasks = module / '.luoshu-state/tasks'
+proofs = list(tasks.glob('*.cleanup.json'))
+assert proofs, 'real switch scopes did not produce cleanup proof'
+assert not list(tasks.glob('*.owner.json')), 'switch retained a live supervisor owner'
+assert not list(tasks.glob('*.pid')), 'switch retained a PID record'
+assert not list((module / '.luoshu-state/tmp').glob('task-*')), 'switch retained staging'
+for path in proofs:
+    proof = json.loads(path.read_text())
+    assert proof['cleaned'] and proof['leftoverPids'] == [], proof
+PY
 
 # Keep the safety layer independent from the generation engine. The active backend
 # may import the lock helper, but it must never pull the v4 94% pipeline back in or

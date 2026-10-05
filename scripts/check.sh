@@ -29,23 +29,24 @@ python3 -m py_compile \
   "$ROOT/common/font_metadata.py" \
   "$ROOT/common/font_extract_faces.py" \
   "$ROOT/common/font_import_probe.py" \
-  "$ROOT/common/font_web_convert.py" \
-  "$ROOT/common/luoshu_engine.py" \
-  "$ROOT/common/luoshu_merge.py" \
-  "$ROOT/common/luoshu_coverage_audit.py" \
-  "$ROOT/common/luoshu_partial_variations.py" \
-  "$ROOT/common/luoshu_payload.py" \
-  "$ROOT/common/luoshu_verify.py" \
   "$ROOT/common/font_inventory.py"
+python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py"
+python3 "$ROOT/scripts/stable111_rework_gate.py"
+sh "$ROOT/scripts/runtime_paths_test.sh"
+python3 "$ROOT/scripts/task_scope_test.py"
+python3 "$ROOT/scripts/legacy_font_task_lifecycle_test.py"
+python3 "$ROOT/scripts/device_font_cache_lifecycle_test.py"
+sh "$ROOT/scripts/task_scope_shell_test.sh"
+sh "$ROOT/scripts/uninstall_safety_test.sh"
+sh "$ROOT/scripts/uninstall_cleanup_test.sh"
+sh "$ROOT/scripts/module_update_state_test.sh"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
   module.prop customize.sh post-fs-data.sh post-mount.sh boot-completed.sh service.sh uninstall.sh action.sh \
   README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
-  common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_web_convert.py common/universal_next_boot.sh common/universal_mount_runtime.sh common/font_inventory.py \
-  common/luoshu_engine.py common/luoshu_engine.sh common/luoshu_merge.py common/luoshu_payload.py common/luoshu_verify.py \
-  common/luoshu_coverage_audit.py common/luoshu_partial_variations.py \
+  common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -54,7 +55,7 @@ for file in \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/assert.sh scripts/module_layout_test.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
-  scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/universal_mount_runtime_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
+  scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
@@ -154,13 +155,6 @@ grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
 grep -q 'font_validate' "$ROOT/common/native_import.sh"
 grep -q 'font_extract_faces.py' "$ROOT/common/native_import.sh"
-grep -q 'font_web_convert.py' "$ROOT/common/native_import.sh"
-grep -q 'woff|woff2)' "$ROOT/common/native_import.sh"
-grep -q 'diag_export)' "$ROOT/common/app_bridge.sh"
-grep -q 'luoshu_engine.sh' "$ROOT/common/universal_font_cutover.sh"
-grep -q 'universal-font-runtime.conf' "$ROOT/post-fs-data.sh"
-grep -q 'universal-font-runtime.conf' "$ROOT/post-mount.sh"
-grep -q 'universal-font-runtime.conf' "$ROOT/service.sh"
 grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
 grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
@@ -245,17 +239,6 @@ grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
 grep -q '^MIT License$' "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
 grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
 grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
-test -s "$ROOT/licenses/WOFF2-LICENSE.txt"
-test -s "$ROOT/licenses/Brotli-LICENSE.txt"
-grep -q 'Copyright (c) 2013-2017 by the WOFF2 Authors.' "$ROOT/licenses/WOFF2-LICENSE.txt"
-grep -q 'Permission is hereby granted, free of charge' "$ROOT/licenses/WOFF2-LICENSE.txt"
-grep -q 'Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.' "$ROOT/licenses/Brotli-LICENSE.txt"
-grep -q 'Permission is hereby granted, free of charge' "$ROOT/licenses/Brotli-LICENSE.txt"
-test -x "$ROOT/.luoshu-runtime/bin/woff2_decompress"
-file "$ROOT/.luoshu-runtime/bin/woff2_decompress" | grep -q 'ARM aarch64'
-grep -q 'fb9c3379f2605b10f3e8f1d9636664ab5576775c' "$ROOT/scripts/prepare_composite_runtime.sh"
-grep -q '533843e3546cd24c8344eaa899c6b0b681c8d222' "$ROOT/scripts/prepare_composite_runtime.sh"
-grep -q 'Google WOFF2 与 Brotli' "$ROOT/THIRD_PARTY_NOTICES.md"
 grep -q '^                                 Apache License$' "$ROOT/licenses/Apache-2.0.txt"
 grep -q 'Miuix 与 AndroidLiquidGlass' "$ROOT/THIRD_PARTY_NOTICES.md"
 
@@ -278,14 +261,6 @@ sh "$ROOT/scripts/module_layout_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
-sh "$ROOT/scripts/universal_composite_bridge_test.sh"
-python3 "$ROOT/scripts/luoshu_diagnostics_test.py"
-python3 "$ROOT/scripts/luoshu_engine_test.py"
-python3 "$ROOT/scripts/luoshu_coverage_audit_test.py"
-python3 "$ROOT/scripts/luoshu_partial_variations_test.py"
-python3 "$ROOT/scripts/luoshu_engine_bridge_test.py"
-python3 "$ROOT/scripts/luoshu_verify_test.py"
-sh "$ROOT/scripts/universal_mount_runtime_test.sh"
 python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/stock_metric_contract_test.py"
 python3 "$ROOT/scripts/font_inventory_symlink_test.py"
@@ -341,6 +316,7 @@ python3 "$ROOT/scripts/font_config_batch_test.py"
 sh "$ROOT/scripts/font_digest_memo_test.sh"
 sh "$ROOT/scripts/foreground_quick_xml_test.sh"
 sh "$ROOT/scripts/font_switch_performance_test.sh"
+sh "$ROOT/scripts/font_mix_payload_recovery_test.sh"
 sh "$ROOT/scripts/legacy_switch_core_test.sh"
 sh "$ROOT/scripts/font_validation_cache_test.sh"
 sh "$ROOT/scripts/font_library_ui_layout_test.sh"
@@ -360,6 +336,3 @@ grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
 grep -q 'prepared-v8' common/multiweight_mix_task.sh
-
-# Stable 1.1.1 one-shot regressions and v2 settings retirement (synthetic fixtures).
-PYTHONPATH="$ROOT/common:$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -m unittest -q stable111_repair_test stable111_round2_test release_v2_retirement_test hyperos_coverage_regression_test

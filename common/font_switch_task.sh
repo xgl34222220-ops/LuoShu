@@ -13,6 +13,10 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 MODULE_DIR="$MODDIR"
+[ -f "$MODDIR/common/runtime_paths.sh" ] && {
+    . "$MODDIR/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "$MODDIR" || exit 126
+}
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 MANAGER="${LUOSHU_FONT_MANAGER:-$MODDIR/common/font_manager.sh}"
 TASK_FILE="${LUOSHU_SWITCH_TASK_FILE:-$MODDIR/config/switch_task.conf}"
@@ -20,10 +24,10 @@ LOG_FILE="${LUOSHU_SWITCH_LOG:-$MODDIR/logs/fontswitch.log}"
 STATUS_SCRIPT="$MODDIR/common/module_status.sh"
 HISTORY_TOOL="$MODDIR/system/bin/luoshu-history"
 BACKGROUND_TASK="$MODDIR/common/background_task.sh"
-WORKER_PID_FILE="${LUOSHU_SWITCH_WORKER_PID_FILE:-$MODDIR/config/switch_task_worker.pid}"
+WORKER_PID_FILE="${LUOSHU_SWITCH_WORKER_PID_FILE:-${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/switch_task_worker.pid}"
 LOAD_VERIFY_STATE="$MODDIR/config/device-font-load-verification.conf"
 [ -f "$BACKGROUND_TASK" ] && . "$BACKGROUND_TASK"
-START_LOCK="${LUOSHU_SWITCH_START_LOCK:-$MODDIR/.font_switch_start.lock}"
+START_LOCK="${LUOSHU_SWITCH_START_LOCK:-${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/font_switch_start.lock}"
 
 TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-360}"
 case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=360 ;; esac
@@ -186,14 +190,12 @@ progress_message() {
 
 run_bounded() {
     _font="$1"; _output="$2"; _task="$3"; _started="$4"; _progress_file="$5"
-    LUOSHU_SWITCH_PROGRESS_FILE="$_progress_file" sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
+    _switch_manager_pidfile="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/switch-manager-$_task.pid"
+    LUOSHU_SWITCH_PROGRESS_FILE="$_progress_file" sh "$(luoshu_scope_runner)" run \
+        --pid-file "$_switch_manager_pidfile" --task "manager-$_task" --timeout "$TIMEOUT_SECONDS" \
+        -- sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
     _child=$!; _switch_child=$_child; _elapsed=0; _next_heartbeat=0
     while pid_alive "$_child"; do
-        if [ "$_elapsed" -ge "$TIMEOUT_SECONDS" ]; then
-            terminate_child_tree "$_child"; wait "$_child" 2>/dev/null || true
-            _switch_child=
-            return 124
-        fi
         if [ "$_elapsed" -ge "$_next_heartbeat" ]; then
             _fallback=$((5 + (_elapsed * 80 / TIMEOUT_SECONDS)))
             [ "$_fallback" -le 85 ] 2>/dev/null || _fallback=85
@@ -215,7 +217,9 @@ worker_signal_exit() {
     _switch_signal_code="$1"
     trap '' HUP INT TERM
     if [ -n "${_switch_child:-}" ]; then
-        terminate_child_tree "$_switch_child"
+        if [ -n "${_switch_manager_pidfile:-}" ]; then
+            luoshu_stop_task_pid "$_switch_manager_pidfile" "manager-$_worker_task" >/dev/null 2>&1 || true
+        fi
         wait "$_switch_child" 2>/dev/null || true
         _switch_child=
     fi
@@ -227,13 +231,13 @@ worker_signal_exit() {
 run_worker() {
     _task="$1"; _font="$2"; _started="$3"
     _worker_task=$_task
-    _output="${TASK_FILE}.output.${_task}"
-    _progress="${TASK_FILE}.progress.${_task}"
-    trap 'rm -f "$_progress" 2>/dev/null || true; type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_worker_task"' EXIT
+    _output="${LUOSHU_TASK_SCOPE_TMPDIR:-${LUOSHU_TMP_DIR:-${TASK_FILE%/*}}}/switch.output.${_task}"
+    _progress="${LUOSHU_TASK_SCOPE_TMPDIR:-${LUOSHU_TMP_DIR:-${TASK_FILE%/*}}}/switch.progress.${_task}"
+    trap 'rm -f "$_output" "$_progress" 2>/dev/null || true; type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_worker_task"' EXIT
     trap 'worker_signal_exit 129' HUP
     trap 'worker_signal_exit 130' INT
     trap 'worker_signal_exit 143' TERM
-    mkdir -p "${LOG_FILE%/*}" 2>/dev/null || true
+    mkdir -p "${LOG_FILE%/*}" "${_output%/*}" 2>/dev/null || true
     printf 'percent=2\nmessage=正在启动字体切换任务\n' > "$_progress" 2>/dev/null || true
     write_task "$_task" running "$_font" '2% · 正在启动字体切换任务' "$_started" '' "$$" '' '' 0 '' false 2 || exit 1
     printf '[%s] safe switch start: %s task=%s timeout=%ss\n' \
@@ -246,20 +250,9 @@ run_worker() {
         if grep -q '"reused":true' "$_output" 2>/dev/null; then
             write_task "$_task" success "$_font" '100% · 当前字体已验证，无需重新生成或重启' \
                 "$_started" "$_finished" '' '' '' 0 '' true 100
-        elif grep -q '"pipeline":"universal"' "$_output" 2>/dev/null; then
-            # Phase 9 owns the pending state for Universal. Do not write the
-            # legacy load-verification marker or the App could confuse two engines.
-            write_task "$_task" success "$_font" '100% · 通用字体引擎已准备完成，完整重启后自动验收' \
-                "$_started" "$_finished" '' '' '' 0 '' false 100
-            [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
         else
             mark_load_verification_pending "$_font" || true
-            _done='100% · 字体已准备完成，完整重启后生效'
-            _kept="$MODDIR/config/universal-kept-stock.conf"
-            if [ "$(sed -n 's/^font=//p' "$_kept" 2>/dev/null | head -n1)" = "$_font" ]; then
-                _done="$_done；$(sed -n 's/^count=//p' "$_kept" | head -n1) 个非核心字体保留原厂：$(sed -n 's/^files=//p' "$_kept" | head -n1)"
-            fi
-            write_task "$_task" success "$_font" "$_done" \
+            write_task "$_task" success "$_font" '100% · 字体已准备完成，完整重启后生效' \
                 "$_started" "$_finished" '' '' '' 0 '' false 100
             [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
         fi
@@ -270,11 +263,13 @@ run_worker() {
             "$_started" "$_finished" '' '' '' "$TIMEOUT_SECONDS" '' false 100
     else
         _message=$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$_output" 2>/dev/null | tail -n1)
+        [ "$_rc" -ne 0 ] || _rc=1
         [ -n "$_message" ] || _message="字体切换失败（代码 $_rc），当前启动字体未被改动"
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
         write_task "$_task" failed "$_font" "$_message" "$_started" "$_finished" '' '' '' 0 '' false 100
     fi
     rm -f "$_output" "$_progress" 2>/dev/null || true
+    return "$_rc"
 }
 
 start_task() {
@@ -293,7 +288,7 @@ start_task() {
     trap 'start_lock_release' EXIT
     reconcile_task
     _state=$(read_value state); _task_old=$(read_value task); _pid=$(read_value pid)
-    if { [ "$_state" = queued ] || [ "$_state" = running ]; } && worker_alive "$_task_old" "$_pid"; then
+    if worker_alive "$_task_old" "$_pid"; then
         printf '{"status":"error","message":"已有字体任务在运行中，请查看当前进度"}\n'; return 0
     fi
 
@@ -307,19 +302,21 @@ start_task() {
         LUOSHU_SWITCH_HEARTBEAT_INTERVAL="$HEARTBEAT_INTERVAL" LUOSHU_SWITCH_WORKER_PID_FILE="$WORKER_PID_FILE"
 
     if type luoshu_start_detached >/dev/null 2>&1; then
+        LUOSHU_TASK_TIMEOUT_SECONDS=$((TIMEOUT_SECONDS + 10))
+        LUOSHU_SCOPE_HANDOFF=1
+        export LUOSHU_TASK_TIMEOUT_SECONDS LUOSHU_SCOPE_HANDOFF
         luoshu_start_detached "$WORKER_PID_FILE" "$_task" "$LOG_FILE" sh "$0" run "$_task" "$_font" "$_started"
         _start_rc=$?
-        if [ "$_start_rc" -ne 0 ] && [ "$_start_rc" -ne 3 ]; then
+        if [ "$_start_rc" -ne 0 ]; then
             write_task "$_task" failed "$_font" '无法启动独立字体切换任务' "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' 0 '' false 100
             printf '{"status":"error","message":"无法启动独立字体切换任务"}\n'; return 0
         fi
         _worker=$(head -n1 "$WORKER_PID_FILE" 2>/dev/null)
     else
-        ( trap '' HUP; exec sh "$0" run "$_task" "$_font" "$_started" ) </dev/null >> "$LOG_FILE" 2>&1 &
-        _worker=$!
+        printf '{"status":"error","message":"任务监督器不可用"}\n'; return 126
     fi
     case "$_worker" in ''|*[!0-9]*) _worker='' ;; esac
-    write_task "$_task" running "$_font" '2% · 正在启动字体切换任务' "$_started" '' "$_worker" '' '' 0 '' false 2 || true
+    # The worker owns all writes after spawn, including very fast completion.
     printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' \
         "$(json_escape "$_font")" "$(json_escape "$_task")"
 }
@@ -332,6 +329,12 @@ status_task() {
         printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'; return 0
     fi
     _state=$(read_value state); _font=$(read_value font); _message=$(read_value message)
+    case "$_state" in success|failed)
+        if worker_alive "$_task" ''; then
+            _state=running; _message='正在回收任务子进程';
+        fi
+        ;;
+    esac
     _started=$(read_value started); _finished=$(read_value finished); _heartbeat=$(read_value heartbeat)
     _timeout=$(read_value timeout); _elapsed=$(read_value elapsed); _percent=$(read_value percent)
     _boot=$(read_value bootId); _reused=$(read_value reused)
@@ -344,11 +347,41 @@ status_task() {
         "$(json_escape "$_boot")" "$_reused"
 }
 
+cancel_task() {
+    _cancel_wanted="$1"
+    [ -n "$_cancel_wanted" ] || { printf '{"status":"error","message":"缺少任务身份"}\n'; return 2; }
+    _cancel_current=$(read_value task)
+    if [ -n "$_cancel_current" ] && [ "$_cancel_current" != "$_cancel_wanted" ]; then
+        printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"absent"}}\n' "$(json_escape "$_cancel_wanted")"
+        return 0
+    fi
+    _cancel_result=$(luoshu_stop_task_pid "$WORKER_PID_FILE" "$_cancel_wanted")
+    _cancel_rc=$?
+    if [ "$_cancel_rc" -eq 0 ] && [ "$_cancel_current" = "$_cancel_wanted" ]; then
+        _cancel_state=$(read_value state)
+        case "$_cancel_state" in queued|running)
+            write_task "$_cancel_wanted" failed "$(read_value font)" '字体切换已取消，任务子进程已回收' \
+                "$(read_value started)" "$(date +%s)" '' '' '' "$(read_value elapsed)" '' false 100
+            ;;
+        esac
+    fi
+    printf '%s\n' "$_cancel_result"
+    return "$_cancel_rc"
+}
+
 case "${1:-status}" in
     start) start_task "${2:-}" ;;
     status) status_task "${2:-}" ;;
     reconcile) reconcile_task ;;
-    run) run_worker "${2:-}" "${3:-}" "${4:-0}" ;;
+    cancel) cancel_task "${2:-}"; exit $? ;;
+    run)
+        if [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$WORKER_PID_FILE" ]; then
+            exec sh "$(luoshu_scope_runner)" run --pid-file "$WORKER_PID_FILE" --task "${2:-}" \
+                --timeout "$((TIMEOUT_SECONDS + 10))" -- sh "$0" "$@"
+        fi
+        run_worker "${2:-}" "${3:-}" "${4:-0}"
+        exit $?
+        ;;
     *) printf '{"status":"error","message":"未知切换命令"}\n' ;;
 esac
 exit 0

@@ -24,11 +24,20 @@ EOF_WORKER
 chmod +x "$WORKER"
 
 . "$ROOT/common/background_task.sh"
+MODDIR="$TMP/module"; export MODDIR
+LUOSHU_TASK_SCOPE_PYTHON=python3; export LUOSHU_TASK_SCOPE_PYTHON
+LUOSHU_RUNTIME_PATHS_PYTHON=python3; export LUOSHU_RUNTIME_PATHS_PYTHON
+mkdir -p "$MODDIR/common"
+printf 'id=LuoShu\n' > "$MODDIR/module.prop"
+for name in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    ln -s "$ROOT/common/$name" "$MODDIR/common/$name"
+done
 luoshu_start_detached "$PID_FILE" "$TASK" "$LOG_FILE" sh "$WORKER" worker "$TASK"
 
 test -s "$PID_FILE"
 test -s "${PID_FILE}.task"
 test -s "${PID_FILE}.boot"
+test -s "${PID_FILE}.start"
 test "$(cat "${PID_FILE}.task")" = "$TASK"
 test "$(cat "${PID_FILE}.boot")" = "$(luoshu_current_boot_id)"
 luoshu_task_pid_alive "$PID_FILE" "$TASK"
@@ -41,10 +50,11 @@ fi
 luoshu_current_boot_id > "${PID_FILE}.boot"
 luoshu_task_pid_alive "$PID_FILE" "$TASK"
 
-luoshu_stop_task_pid "$PID_FILE"
+luoshu_stop_task_pid "$PID_FILE" "$TASK"
 test ! -e "$PID_FILE"
 test ! -e "${PID_FILE}.task"
 test ! -e "${PID_FILE}.boot"
+test ! -e "${PID_FILE}.start"
 
 echo 'background_task_test: PASS'
-python3 "$ROOT/scripts/background_task_tree_test.py"
+python3 "$ROOT/scripts/task_scope_test.py"

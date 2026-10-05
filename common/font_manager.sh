@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # LuoShu native App font-manager router.
 # Inventory, preview, delete and weight actions stay on the current manager.
-# Final font apply enters the Phase 9 cutover controller. Universal is attempted
-# first for eligible single-font switches; the isolated physical switch remains fallback.
+# Final font apply uses the isolated safe physical switch core, which builds the
+# next-boot payload off-line and never rewrites the source tree mounted by this boot.
 # Source-check compatibility markers owned by font_manager_v4.sh: native-v3 manifest-fast
 # The current inventory contract remains config/native_font_index.json.
 set +e
@@ -15,9 +15,11 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+if [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ]; then
+    exec sh "$MODDIR/common/task_scope.sh" request-run "manager-$$-$(date +%s)" 900 -- sh "$0" "$@"
+fi
 LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 CURRENT_MANAGER="$MODDIR/common/font_manager_v4.sh"
-CUTOVER_SWITCH="$MODDIR/common/universal_font_cutover.sh"
 SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 LEGACY_SWITCH="$MODDIR/common/legacy_v14_4_switch.sh"
 PYROOT="$MODDIR/common/python"
@@ -25,7 +27,6 @@ PYBIN="$PYROOT/bin/luoshu-python"
 STOCK_SCANNER="$MODDIR/common/stock_inventory_scan.py"
 STOCK_INVENTORY="$MODDIR/config/device_font_inventory.json"
 STOCK_SCAN_LOCK="$MODDIR/.stock-inventory-scan.lock"
-TOPOLOGY_COLLECTOR="$MODDIR/common/font_topology_snapshot.sh"
 export MODDIR LUOSHU_PUBLIC_DIR
 
 json_escape_router() {
@@ -34,12 +35,6 @@ json_escape_router() {
 
 stock_scan_available() {
     [ -x "$PYBIN" ] && [ -f "$STOCK_SCANNER" ] && [ -f "$MODDIR/common/font_inventory.py" ] && [ -f "$MODDIR/common/font_check.sh" ]
-}
-
-stock_topology_refresh() {
-    [ -f "$TOPOLOGY_COLLECTOR" ] && [ -s "$STOCK_INVENTORY" ] || return 0
-    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-        sh "$TOPOLOGY_COLLECTOR" refresh >>"$MODDIR/logs/font-topology.log" 2>&1 || true
 }
 
 stock_scan_lock_acquire() {
@@ -103,7 +98,6 @@ stock_scan_json() {
             rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
             stock_scan_lock_release
             trap - EXIT HUP INT TERM
-            stock_topology_refresh
             printf '%s\n' "$(printf '%s\n' "$_stock_out" | tail -n1)"
             return 0
         fi
@@ -124,7 +118,6 @@ stock_scan_json() {
         rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
         stock_scan_lock_release
         trap - EXIT HUP INT TERM
-        stock_topology_refresh
         printf '%s\n' "$_stock_last"
         return 0
     fi
@@ -149,9 +142,6 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
                 export LUOSHU_SWITCH_ACTIVE_LABEL
                 ;;
         esac
-    fi
-    if [ -f "$CUTOVER_SWITCH" ]; then
-        exec sh "$CUTOVER_SWITCH" switch "${3:-}"
     fi
     if [ -f "$SAFE_SWITCH" ]; then
         exec sh "$SAFE_SWITCH" "$@"

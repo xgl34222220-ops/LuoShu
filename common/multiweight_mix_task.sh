@@ -10,6 +10,13 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+if [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ] && [ "${1:-config}" != worker ]; then
+    exec sh "$MODDIR/common/task_scope.sh" request-run "multiweight-cli-$$-$(date +%s)" 900 -- sh "$0" "$@"
+fi
+[ -f "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/runtime_paths.sh" ] && {
+    . "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "${LUOSHU_REAL_MODDIR:-$MODDIR}" || exit 126
+}
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
 COMPOSITE_CACHE="$CACHE_ROOT/composites-v9"
@@ -31,7 +38,7 @@ MIX_CONF="$CONFIG_DIR/font_mix.conf"
 AXES_CONF="$CONFIG_DIR/axes_mix.conf"
 ACTIVE_CONF="$CONFIG_DIR/active_font.conf"
 REBOOT_CONF="$CONFIG_DIR/text_reboot_required.conf"
-WORKER_PID="$CONFIG_DIR/auto_multiweight_worker.pid"
+WORKER_PID="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/auto_multiweight_worker.pid"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 LOCK_FILE="$MODDIR/.font_switch.lock"
 
@@ -538,11 +545,10 @@ start_mix() {
         return
     }
     if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
+        if luoshu_task_pid_alive "$WORKER_PID"; then
             printf '{"status":"error","message":"已有自动多字重任务正在运行"}\n'
             return
-        }
+        fi
     fi
     if type luoshu_font_lock_busy >/dev/null 2>&1; then
         if luoshu_font_lock_busy "$LOCK_FILE"; then
@@ -568,14 +574,15 @@ start_mix() {
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode" \
         "$_root" '' "$(date +%s)" '' 1
     if type luoshu_start_detached >/dev/null 2>&1; then
+        LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS=900
+        export LUOSHU_SCOPE_HANDOFF LUOSHU_TASK_TIMEOUT_SECONDS
         luoshu_start_detached "$WORKER_PID" "$_task" "$LOG_FILE" sh "$0" worker "$_task" || {
   update_task "$_task" failed '无法启动独立后台任务' 100 "$(date +%s)"
   printf '{"status":"error","message":"无法启动独立后台任务"}\n'
   return
         }
     else
-        ( trap '' HUP; MODDIR="$MODDIR" sh "$0" worker "$_task" ) </dev/null >>"$LOG_FILE" 2>&1 &
-        printf '%s\n' "$!" >"$WORKER_PID" 2>/dev/null || true
+        printf '{"status":"error","message":"任务监督器不可用"}\n'; return 126
     fi
     printf '{"status":"ok","data":{"task":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s"}}\n' \
         "$(json_escape "$_task")" "$_cjk_mode" "$_latin_mode" "$_digit_mode"
@@ -607,7 +614,7 @@ config_json() {
 }
 
 recover_task() {
-    if type luoshu_stop_task_pid >/dev/null 2>&1; then luoshu_stop_task_pid "$WORKER_PID"
+    if type luoshu_stop_task_pid >/dev/null 2>&1; then luoshu_stop_task_pid "$WORKER_PID" >/dev/null || return 125
     else rm -f "$WORKER_PID" 2>/dev/null || true
     fi
     sh "$FALLBACK_ENGINE" recover
@@ -617,7 +624,12 @@ case "${1:-config}" in
     start) start_mix "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-infer}" "${9:-infer}" "${10:-infer}" ;;
     config) config_json ;;
     status) sh "$FALLBACK_ENGINE" status "${2:-}" ;;
-    worker) worker "$2" ;;
+    worker)
+        if [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$WORKER_PID" ]; then
+            exec sh "$(luoshu_scope_runner)" run --pid-file "$WORKER_PID" --task "$2" --timeout 900 -- sh "$0" "$@"
+        fi
+        worker "$2"
+        ;;
     recover) recover_task ;;
     *) printf '{"status":"error","message":"未知自动多字重命令"}\n' ;;
 esac

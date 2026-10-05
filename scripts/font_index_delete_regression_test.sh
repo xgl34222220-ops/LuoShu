@@ -19,24 +19,50 @@ cp "$ROOT/common/util_functions.sh" "$MODULE/common/util_functions.sh"
 cp "$ROOT/common/util_functions_core.sh" "$MODULE/common/util_functions_core.sh"
 cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
 cp "$ROOT/common/font_library_cache.sh" "$MODULE/common/font_library_cache.sh"
+for helper in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    cp "$ROOT/common/$helper" "$MODULE/common/$helper"
+done
+printf 'id=LuoShu\nversion=test\nversionCode=1\n' > "$MODULE/module.prop"
+HOST_PYTHON=$(python3 -c 'import sys; print(sys.executable)')
+export LUOSHU_TASK_SCOPE_PYTHON="$HOST_PYTHON" LUOSHU_RUNTIME_PATHS_PYTHON="$HOST_PYTHON"
+unset LUOSHU_TASK_SCOPE_PID LUOSHU_TASK_SCOPE_PIDFILE LUOSHU_TASK_SCOPE_TASK LUOSHU_TASK_SCOPE_TMPDIR
+unset LUOSHU_REAL_MODDIR LUOSHU_STATE_DIR LUOSHU_CONFIG_DIR LUOSHU_LOG_DIR LUOSHU_CACHE_DIR
+unset LUOSHU_TASKS_DIR LUOSHU_TMP_DIR LUOSHU_BACKUP_DIR LUOSHU_REPORTS_DIR LUOSHU_RUNTIME_PATHS_MODULE
+unset LUOSHU_SCOPE_ALLOW_HANDOFF LUOSHU_SCOPE_HANDOFF
 cp "$FONT" "$PUBLIC/fonts/Alpha-Regular.ttf"
 cp "$FONT" "$PUBLIC/fonts/Beta-Regular.ttf"
 
-BEFORE=$(MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_manager.sh" action list refresh)
+BEFORE=$(MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_manager.sh" action list refresh 2>>"$TMP/request-cleanup.stderr")
 printf '%s\n' "$BEFORE" | grep -q '"count":2'
 printf '%s\n' "$BEFORE" | grep -q '"id":"Alpha"'
 printf '%s\n' "$BEFORE" | grep -q '"id":"Beta"'
 
-DELETED=$(MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_manager.sh" action delete Alpha)
+DELETED=$(MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_manager.sh" action delete Alpha 2>>"$TMP/request-cleanup.stderr")
 printf '%s\n' "$DELETED" | grep -q '"status":"ok"'
 printf '%s\n' "$DELETED" | grep -q '"deleted":1'
 test ! -e "$PUBLIC/fonts/Alpha-Regular.ttf"
 test -s "$PUBLIC/fonts/Beta-Regular.ttf"
 
-AFTER=$(MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_manager.sh" action list refresh)
+AFTER=$(MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_manager.sh" action list refresh 2>>"$TMP/request-cleanup.stderr")
 printf '%s\n' "$AFTER" | grep -q '"count":1'
 ! printf '%s\n' "$AFTER" | grep -q '"id":"Alpha"'
 printf '%s\n' "$AFTER" | grep -q '"id":"Beta"'
+
+"$HOST_PYTHON" - "$MODULE/.luoshu-state/tasks" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+tasks = Path(sys.argv[1])
+proofs = list(tasks.glob('request-*.pid.cleanup.json'))
+assert len(proofs) == 3, proofs
+for path in proofs:
+    proof = json.loads(path.read_text())
+    assert proof['cleaned'] and not proof['leftoverPids'] and not proof['cleanupErrors'] and proof['result'] == 0, proof
+for pattern in ('request-*.pid', 'request-*.pid.owner.json', 'request-*.pid.task',
+                'request-*.pid.boot', 'request-*.pid.start'):
+    assert not list(tasks.glob(pattern)), pattern
+PY
 
 # Inventory/delete implementation remains in the preserved current manager; the
 # root manager is intentionally only a switch router.

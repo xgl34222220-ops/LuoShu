@@ -349,11 +349,6 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
         descent = int(hhea.descent)
         metrics = {
             "upem": upem,
-            "weightClass": int(os2.usWeightClass),
-            "isFixedPitch": bool(font['post'].isFixedPitch) if 'post' in font else False,
-            "variationAxes": [dict(tag=a.axisTag, minimum=float(a.minValue),
-                                   default=float(a.defaultValue), maximum=float(a.maxValue))
-                              for a in font['fvar'].axes] if 'fvar' in font else [],
             "coverage": summarize_coverage(font),
             "ascent": ascent,
             "descent": descent,

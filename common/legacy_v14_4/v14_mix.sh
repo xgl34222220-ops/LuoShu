@@ -76,6 +76,12 @@ if [ -f "$WEIGHTED" ]; then
             else sh "$WEIGHTED" recover
             fi
             ;;
+        cancel)
+            if [ -f "$AUTO_WEIGHTED" ]; then sh "$AUTO_WEIGHTED" cancel "${2:-}"
+            else sh "$WEIGHTED" cancel "${2:-}"
+            fi
+            exit $?
+            ;;
         *) printf '{"status":"error","message":"未知组合桥命令"}\n' ;;
     esac
     exit 0
@@ -99,6 +105,7 @@ case "${1:-status}" in
             "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "${_started:-0}" "${_finished:-0}"
         ;;
     recover) sh "$ENGINE" recover ;;
+    cancel) sh "$ENGINE" cancel "${2:-}"; exit $? ;;
     *) printf '{"status":"error","message":"未知组合命令"}\n' ;;
 esac
 exit 0

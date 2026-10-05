@@ -45,8 +45,7 @@ def summarize_coverage(font) -> dict:
     points = unicode_codepoints(font)
     han = sum(is_han(cp) for cp in points)
     latin = sum(0x41 <= cp <= 0x5A or 0x61 <= cp <= 0x7A for cp in points)
-    digits = sum(0x30 <= cp <= 0x39 for cp in points)
-    return {'hasDigits': bool(digits), 'digitCount': digits, 'hasHan': bool(han), 'hasLatin': bool(latin), 'hanCount': han,
+    return {'hasHan': bool(han), 'hasLatin': bool(latin), 'hanCount': han,
             'latinCount': latin, 'unicodeCount': len(points),
             'cjkPunctuation': sorted(cp for cp in points if is_cjk_punctuation(cp))}
 
@@ -58,12 +57,6 @@ def valid_coverage(value) -> bool:
     if any(type(count) is not int or not 0 <= count <= 0x110000 for count in counts):
         return False
     han, latin, total = counts
-    if 'hasDigits' in value or 'digitCount' in value:
-        digits = value.get('digitCount')
-        if (type(digits) is not int or not 0 <= digits <= min(10, total)
-                or type(value.get('hasDigits')) is not bool
-                or value['hasDigits'] != (digits > 0)):
-            return False
     punctuation = value.get('cjkPunctuation')
     return (type(value.get('hasHan')) is bool and value['hasHan'] == (han > 0)
             and type(value.get('hasLatin')) is bool and value['hasLatin'] == (latin > 0)

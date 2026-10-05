@@ -19,13 +19,15 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 GMS = 'com.google.android.gms'
 PROVIDER = GMS + '.fonts.provider.FontsProvider'
 COMPONENT = GMS + '/' + PROVIDER
-STORE = Path('/data/adb/luoshu-google-font-fallback')
-MODULE = Path('/data/adb/modules/LuoShu')
+STORE = Path('/data/adb/luoshu/google-font-fallback')
+LEGACY_STORE = Path('/data/adb/luoshu-google-font-fallback')
+MODULE = Path(os.environ.get('MODDIR', '/data/adb/modules/LuoShu'))
 SCHEMA = 'luoshu-google-font-fallback-v1'
 
 
@@ -211,6 +213,10 @@ def locked_store(directory: Path):
         raise FallbackError('恢复目录不是当前 Root 独占的真实目录。')
     fd = os.open(directory / 'operation.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
+        lock_info = os.fstat(fd)
+        if (not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != os.geteuid()
+                or lock_info.st_mode & 0o022):
+            raise FallbackError('恢复操作锁所有者或权限不安全。')
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
@@ -218,6 +224,115 @@ def locked_store(directory: Path):
         yield
     finally:
         os.close(fd)  # Keep lock inode stable; a killed process releases flock.
+
+
+def _store_inventory(directory: Path) -> dict[str, bytes]:
+    """Admit only the exact old tool's journal schema and stable lock inode."""
+    info = directory.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_mode & 0o077):
+        raise FallbackError('恢复目录不是当前 Root 独占的真实目录；未迁移。')
+    inventory = {}
+    for path in directory.iterdir():
+        if path.name == 'operation.lock':
+            secure_file(path)
+            continue
+        match = re.fullmatch(r'user-(0|[1-9][0-9]*)[.]json', path.name)
+        if not match or not 0 <= int(match[1]) <= 21474:
+            raise FallbackError('旧恢复目录包含无法确认归属的文件；保留原目录。')
+        Journal(directory, int(match[1])).read()
+        inventory[path.name] = path.read_bytes()
+    return inventory
+
+
+def _sync_store_parent(parent: Path) -> None:
+    fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _legacy_link_matches(legacy: Path, directory: Path) -> bool:
+    info = legacy.lstat()
+    if not stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid():
+        return False
+    raw = os.readlink(legacy)
+    target = Path(raw) if os.path.isabs(raw) else legacy.parent / raw
+    return os.path.abspath(target) == os.path.abspath(directory)
+
+
+def _secure_store_parent(parent: Path) -> None:
+    info = parent.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            or info.st_mode & 0o022):
+        raise FallbackError('洛书恢复根目录所有者或权限不安全。')
+
+
+def prepare_store(directory: Path = STORE, legacy: Path = LEGACY_STORE) -> Path:
+    """Move validated v1 undo records without tying them to module removal.
+
+    The old fixed pathname becomes a controlled alias. A conflicting new undo
+    record blocks migration; no journal is overwritten or discarded. Existing
+    duplicates are retained as one complete legacy directory under the same
+    persistent LuoShu root, while new records use only the canonical directory.
+    """
+    if legacy.is_symlink():
+        if not _legacy_link_matches(legacy, directory):
+            raise FallbackError('旧恢复目录是未经本工具确认的符号链接；未跟随。')
+        _secure_store_parent(directory.parent)
+        _store_inventory(directory)
+        return directory
+    old_exists = legacy.exists()
+    if old_exists:
+        _store_inventory(legacy)  # Validate before creating or moving anything.
+    parent = directory.parent
+    parent.mkdir(mode=0o700, parents=False, exist_ok=True)
+    _secure_store_parent(parent)
+    migration_lock = parent / '.google-font-fallback-migration.lock'
+    fd = os.open(migration_lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        lock_info = os.fstat(fd)
+        if (not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != os.geteuid()
+                or lock_info.st_mode & 0o022):
+            raise FallbackError('恢复迁移锁所有者或权限不安全。')
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise FallbackError('另一项恢复记录迁移正在执行。') from error
+        # Recheck after taking ownership; another entry may have migrated it.
+        if legacy.is_symlink():
+            if not _legacy_link_matches(legacy, directory):
+                raise FallbackError('旧恢复路径已被其他操作替换；未迁移。')
+            _store_inventory(directory)
+            return directory
+        if not legacy.exists():
+            with locked_store(directory):
+                _store_inventory(directory)
+            return directory
+        with locked_store(legacy):
+            old = _store_inventory(legacy)
+            if not directory.exists() and not directory.is_symlink():
+                os.rename(legacy, directory)  # Preserve the complete old inode tree.
+            else:
+                with locked_store(directory):
+                    current = _store_inventory(directory)
+                    if any(name in current and current[name] != value for name, value in old.items()):
+                        raise FallbackError('新旧恢复记录冲突；保留两份记录，未修改 Android。')
+                    for name in old:
+                        if name not in current:
+                            os.rename(legacy / name, directory / name)
+                    archive = parent / ('google-font-fallback-legacy-' + str(time.time_ns()) + '-' + str(os.getpid()))
+                    os.rename(legacy, archive)  # Retain duplicate journal bytes and inodes.
+            _sync_store_parent(parent)
+            if legacy.parent != parent:
+                _sync_store_parent(legacy.parent)
+            # Never replace a racing file or directory at the old pathname.
+            os.symlink(str(directory.absolute()), legacy)
+            _sync_store_parent(legacy.parent)
+        return directory
+    finally:
+        os.close(fd)
 
 
 def restore(backend: Android, journal: Journal) -> dict:
@@ -297,6 +412,7 @@ def main() -> int:
         if os.geteuid() != 0:
             raise FallbackError('需要 Root；未执行任何修改。')
         backend = Android()
+        directory = prepare_store(STORE, LEGACY_STORE)
         user = args.user if args.user is not None else backend.current_user()
         if not 0 <= user <= 21474:
             raise FallbackError('无效的 Android 用户编号。')
@@ -308,8 +424,8 @@ def main() -> int:
             raise FallbackError('请先启用洛书并应用自定义字体；未停用 Google 字体提供组件。')
         print('注意：此开关影响该用户所有依赖 GMS 下载字体的应用，也可能影响下载式表情字体。')
         print('Android 修改组件状态时可能重启相关 GMS 进程。不会清除账户、App 数据或字体目录。')
-        with locked_store(STORE):
-            journal = Journal(STORE, user)
+        with locked_store(directory):
+            journal = Journal(directory, user)
             result = enable(backend, journal) if args.action == 'enable' else restore(backend, journal)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

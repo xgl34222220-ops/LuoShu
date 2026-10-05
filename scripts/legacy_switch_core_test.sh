@@ -28,7 +28,8 @@ grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROUTER"
 # or rewrite it. It can only move the isolated staging tree into -next. Repeated
 # switches must be able to clone an already activated payload even when hard-link
 # or metadata-preserving copies are rejected by the current root/kernel setup.
-grep -q 'STAGE_PAYLOAD=.*\.luoshu-payload-stage' "$SAFE_BACKEND"
+grep -Fq 'STAGE_PAYLOAD="${LUOSHU_TASK_SCOPE_TMPDIR:+$LUOSHU_TASK_SCOPE_TMPDIR/font-payload-stage}"' "$SAFE_BACKEND"
+grep -q 'luoshu_scope_runner' "$SAFE_BACKEND"
 grep -q 'NEXT_PAYLOAD=.*\.luoshu-payload-next' "$SAFE_BACKEND"
 grep -q 'payload_clone_source' "$SAFE_BACKEND"
 grep -q 'cleanup_stale_stages' "$SAFE_BACKEND"
@@ -159,7 +160,8 @@ grep -q 'action switch' "$LEGACY_AUTO"
 grep -q 'BASE_ENGINE=.*font_mix.sh' "$LEGACY_WEIGHTED"
 grep -q '中文字体保留为完整基底' "$LEGACY_MIX_ENGINE"
 grep -q '不裁剪 ROM 字体槽' "$LEGACY_MIX_ENGINE"
-grep -q '\.legacy-v14-runtime' "$LEGACY_MIX_ROUTER"
+grep -q 'RUNTIME=.*LUOSHU_CACHE_DIR.*legacy-v14-runtime' "$LEGACY_MIX_ROUTER"
+grep -q 'MIX_STAGE=.*LUOSHU_TMP_DIR.*mix-stage' "$LEGACY_MIX_ROUTER"
 grep -q '\.luoshu-payload' "$LEGACY_MIX_ROUTER"
 grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
 # Composite staging must have the same repeat-switch fallback as normal font

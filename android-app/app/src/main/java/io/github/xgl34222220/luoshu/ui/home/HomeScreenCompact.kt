@@ -38,6 +38,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -220,6 +221,9 @@ internal fun HomeScreenCompact(
                         Modifier.weight(1f))
                 }
             }
+        }
+        item(key = "weight") {
+            SystemWeightCard(state.systemWeight.copy(applying = state.systemWeight.applying || state.taskRunning), actions, cardColor, textPrimary, textSecondary, shape)
         }
         item(key = "device-details") {
             Surface(shape = shape, color = cardColor) {
@@ -410,3 +414,82 @@ private fun CompactStatusCell(
     }
 }
 
+@Composable
+private fun SystemWeightCard(
+    weight: HomeWeightUiState,
+    actions: HomeActions,
+    cardColor: Color,
+    textPrimary: Color,
+    textSecondary: Color,
+    shape: RoundedCornerShape,
+) {
+    Card(
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        LuoShuGlyph(
+                            imageVector = Icons.Rounded.Speed,
+                            contentDescription = null,
+                            size = LuoShuIconTokens.StatusGlyph,
+                            opticalScale = .96f,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("全局粗细微调", color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("不修改字体文件，可随时恢复", color = textSecondary, fontSize = 12.sp)
+                }
+                Text(
+                    if (weight.loading) "读取中" else weight.weight.toString(),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            when {
+                weight.loading -> LuoShuLoadingSkeleton(
+                    Modifier.fillMaxWidth().height(12.dp),
+                    shape = RoundedCornerShape(999.dp),
+                )
+                !weight.supported -> Text(
+                    weight.error.ifBlank { "当前系统不支持全局粗细微调" },
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 12.sp,
+                )
+                else -> {
+                    Slider(
+                        value = weight.weight.toFloat(),
+                        onValueChange = actions.previewSystemWeight,
+                        enabled = !weight.applying,
+                        valueRange = weight.min.toFloat()..weight.max.toFloat(),
+                        steps = (((weight.max - weight.min) / weight.step) - 1).coerceAtLeast(0),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            weight.error.ifBlank { weight.message },
+                            modifier = Modifier.weight(1f),
+                            color = if (weight.error.isNotBlank()) MaterialTheme.colorScheme.error else textSecondary,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                        )
+                        TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) {
+                            Text("恢复原始")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -31,39 +31,11 @@ _dfpr_mark_dynamic_rebuild() {
 _dfpr_launch_pending_cache() {
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_pending="$_dfpr_module_dir/config/device-font-cache-pending.conf"
-    _dfpr_cache="$_dfpr_module_dir/common/device_font_cache.sh"
-    [ -s "$_dfpr_pending" ] && [ -f "$_dfpr_cache" ] || return 0
-    _dfpr_cache_lock="$_dfpr_module_dir/.device-font-cache.lock"
-    if [ -e "$_dfpr_cache_lock" ]; then
-        if type _dfcache_lock_reap_stale >/dev/null 2>&1; then
-            _dfcache_lock_reap_stale "$_dfpr_cache_lock" >/dev/null 2>&1 || true
-        elif type luoshu_font_lock_reap_stale >/dev/null 2>&1; then
-            luoshu_font_lock_reap_stale "$_dfpr_cache_lock" >/dev/null 2>&1 || true
-        fi
-        if [ -e "$_dfpr_cache_lock" ]; then
-            _dfpr_log INFO '设备对齐缓存后台任务已经在运行'
-            return 0
-        fi
-        _dfpr_log INFO '已回收陈旧设备对齐缓存锁'
-    fi
-    # This is the boot-time path, and it used to spawn the builder at normal priority while the
-    # other launcher used nice/ionice. The heavy fontTools pass therefore competed with the UI
-    # depending only on which path started it.
-    (
-        if type _dfcache_run_service_lowpri >/dev/null 2>&1; then
-            _dfcache_run_service_lowpri "$_dfpr_module_dir"
-        else
-            MODDIR="$_dfpr_module_dir"
-            MODULE_DIR="$_dfpr_module_dir"
-            export MODDIR MODULE_DIR
-            if command -v nice >/dev/null 2>&1; then
-                nice -n 19 sh "$_dfpr_cache" service >> "$_dfpr_module_dir/logs/device-font-cache.log" 2>&1
-            else
-                sh "$_dfpr_cache" service >> "$_dfpr_module_dir/logs/device-font-cache.log" 2>&1
-            fi
-        fi
-    ) &
-    _dfpr_log INFO '已启动设备对齐缓存后台任务'
+    [ -s "$_dfpr_pending" ] || return 0
+    # The frozen boot/mount core calls this after releasing its temporary view.
+    # Preserve that call and the pending intent, but only an explicit foreground
+    # font transaction may build it. A boot child cannot belong to a later apply.
+    _dfpr_log INFO '设备对齐缓存待办已保留，将在下次明确应用字体时生成'
     return 0
 }
 

@@ -71,7 +71,8 @@ luoshu_update_config_is_volatile() {
         device-font-cache-pending.conf|device-font-cache-failures.conf|\
         device-font-engine.conf|device-font-installed.conf|device-font-dynamic-mount.conf|\
         device-font-load-verification.json|device-font-manager-dump.txt|\
-        device-font-mount-evidence.txt|*.pid|*.pid.task|*.tmp|*.tmp.*)
+        device-font-mount-evidence.txt|*.pid|*.pid.task|*.pid.boot|*.pid.start|\
+        *.pid.owner.json|*.pid.cleanup.json|*.tmp|*.tmp.*)
             return 0
             ;;
     esac
@@ -103,6 +104,11 @@ luoshu_update_has_font_payload() {
 
 luoshu_clear_update_volatile() {
     _module="$1"
+    # Identity evidence is only removed after the new supervisor confirms the
+    # old module's owned jobs have exited. An unconfirmed cleanup blocks migration.
+    if type luoshu_stop_module_tasks >/dev/null 2>&1; then
+        luoshu_stop_module_tasks "$_module" || return 1
+    fi
     if type luoshu_font_lock_force_clear >/dev/null 2>&1; then
         luoshu_font_lock_force_clear "$_module/.font_switch.lock" >/dev/null 2>&1 || true
     else
@@ -144,6 +150,8 @@ luoshu_clear_update_volatile() {
         "$_module/.font_switch.lock" \
         "$_module/.font-payload-commit.ok" 2>/dev/null || true
     rm -f "$_module/config"/*.pid "$_module/config"/*.pid.task \
+        "$_module/config"/*.pid.boot "$_module/config"/*.pid.start \
+        "$_module/config"/*.pid.owner.json "$_module/config"/*.pid.cleanup.json \
         "$_module/config"/*.tmp "$_module/config"/*.tmp.* 2>/dev/null || true
     rm -rf "$_module"/.font-payload-stage.* "$_module"/.font-payload-backup.* 2>/dev/null || true
     if [ -e "$_module/.device-font-cache.lock" ]; then
@@ -275,7 +283,7 @@ luoshu_migrate_active_install() {
     _schema_compatible=false
     [ "$_old_schema" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ] && _schema_compatible=true
     luoshu_migrate_update_cache "$_old" "$_new" "$_schema_compatible" "$_lup_builder_compatible"
-    luoshu_clear_update_volatile "$_new"
+    luoshu_clear_update_volatile "$_new" || return 1
     # active_font.conf is the selection authority. Write the captured value after cleanup so a
     # packaged default or a partial config copy can never relabel an inherited composite as default.
     printf '%s\n' "$_active" >"$_new/config/active_font.conf" || return 1

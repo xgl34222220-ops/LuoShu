@@ -3,7 +3,13 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-stability)
-trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+cleanup() {
+    [ ! -f "${MODULE:-}/common/task_scope.sh" ] || MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" cancel-all "$MODULE" >/dev/null 2>&1 || true
+    rm -rf "$TMP"
+}
+trap cleanup EXIT HUP INT TERM
+export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
+export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
 
 MODULE="$TMP/module"
 mkdir -p "$MODULE/common/legacy_v14_4" "$MODULE/config"
@@ -12,6 +18,9 @@ cp "$ROOT/common/font_switch_task.sh" "$MODULE/common/font_switch_task.sh"
 cp "$ROOT/common/font_mix_controller.sh" "$MODULE/common/font_mix_controller.sh"
 cp "$ROOT/common/legacy_v14_4/mix_router.sh" "$MODULE/common/legacy_v14_4/mix_router.sh"
 cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
+for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+    cp "$ROOT/common/$helper" "$MODULE/common/$helper"
+done
 cp "$ROOT/module.prop" "$MODULE/module.prop"
 
 # 状态查询不得触发真正的字体切换；Root 管理器的“当前字体”也不得在字体已

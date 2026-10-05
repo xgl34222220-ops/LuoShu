@@ -7,8 +7,6 @@ PY_VERSION=${PY_VERSION:-3.14.6}
 PY_ARCHIVE=${PY_ARCHIVE:-python-3.14.6-aarch64-linux-android.tar.gz}
 PY_SHA256=${PY_SHA256:-38bbe77d3167b5cd554e03b1021324926f09f3825202b065951dd7638e9c37e5}
 FONTTOOLS_VERSION=${FONTTOOLS_VERSION:-4.63.0}
-WOFF2_COMMIT=${WOFF2_COMMIT:-fb9c3379f2605b10f3e8f1d9636664ab5576775c}
-WOFF2_BROTLI_COMMIT=${WOFF2_BROTLI_COMMIT:-533843e3546cd24c8344eaa899c6b0b681c8d222}
 NDK=${ANDROID_NDK_LATEST_HOME:-}
 
 rm -rf "$WORK" "$ROOT/common/python"
@@ -29,13 +27,8 @@ if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
   NDK="$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
 fi
 CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
-CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++"
-AR="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
 STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 test -x "$CC"
-test -x "$CXX"
-test -x "$AR"
 cat > "$WORK/luoshu_python.c" <<'C'
 #include <dlfcn.h>
 #include <stdio.h>
@@ -61,38 +54,6 @@ C
   "$WORK/luoshu_python.c" -ldl -o "$R/bin/luoshu-python"
 "$STRIP" "$R/bin/luoshu-python"
 file "$R/bin/luoshu-python" | grep -q 'ARM aarch64'
-
-# WOFF2 cannot be decoded by the pruned embedded Python runtime without a Brotli
-# extension. Build Google's reference decoder as a self-contained Android ARM64
-# helper instead of shipping a host Python extension or pretending an extension
-# rename is a conversion.
-WOFF2_SRC="$WORK/woff2-src"
-rm -rf "$WOFF2_SRC"
-git init -q "$WOFF2_SRC"
-git -C "$WOFF2_SRC" remote add origin https://github.com/google/woff2.git
-git -C "$WOFF2_SRC" fetch -q --depth 1 origin "$WOFF2_COMMIT"
-git -C "$WOFF2_SRC" checkout -q --detach FETCH_HEAD
-rm -rf "$WOFF2_SRC/brotli"
-git init -q "$WOFF2_SRC/brotli"
-git -C "$WOFF2_SRC/brotli" remote add origin https://github.com/google/brotli.git
-git -C "$WOFF2_SRC/brotli" fetch -q --depth 1 origin "$WOFF2_BROTLI_COMMIT"
-git -C "$WOFF2_SRC/brotli" checkout -q --detach FETCH_HEAD
-test "$(git -C "$WOFF2_SRC" rev-parse HEAD)" = "$WOFF2_COMMIT"
-test "$(git -C "$WOFF2_SRC/brotli" rev-parse HEAD)" = "$WOFF2_BROTLI_COMMIT"
-
-make -C "$WOFF2_SRC" -j2 all \
-  CC="$CC" CXX="$CXX" AR="$AR" ARFLAGS=cr \
-  COMMON_FLAGS='-O2 -fPIE -fno-omit-frame-pointer -no-canonical-prefixes -DFONT_COMPRESSION_BIN -D__STDC_FORMAT_MACROS' \
-  LFLAGS='-fPIE -pie -static-libstdc++ -Wl,--build-id=none -Wl,-z,relro,-z,now' >/dev/null
-test -x "$WOFF2_SRC/woff2_decompress"
-"$STRIP" "$WOFF2_SRC/woff2_decompress"
-mkdir -p "$ROOT/.luoshu-runtime/bin"
-cp -f "$WOFF2_SRC/woff2_decompress" "$ROOT/.luoshu-runtime/bin/woff2_decompress"
-chmod 0755 "$ROOT/.luoshu-runtime/bin/woff2_decompress"
-file "$ROOT/.luoshu-runtime/bin/woff2_decompress" | grep -q 'ARM aarch64'
-if [ -x "$READELF" ]; then
-  ! "$READELF" -d "$ROOT/.luoshu-runtime/bin/woff2_decompress" 2>/dev/null | grep -q 'libc++_shared'
-fi
 
 python3 -m venv "$WORK/host-venv"
 "$WORK/host-venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir -q "fonttools==$FONTTOOLS_VERSION"
@@ -129,8 +90,6 @@ chmod 0755 "$ROOT/common/python/bin/luoshu-python"
 cp "$R/lib/python3.14/LICENSE.txt" "$ROOT/licenses/CPython-LICENSE.txt"
 test -f "$R_DIST/licenses/LICENSE"
 cp "$R_DIST/licenses/LICENSE" "$ROOT/licenses/FontTools-LICENSE.txt"
-cp "$WOFF2_SRC/LICENSE" "$ROOT/licenses/WOFF2-LICENSE.txt"
-cp "$WOFF2_SRC/brotli/LICENSE" "$ROOT/licenses/Brotli-LICENSE.txt"
 if [ -f "$R_DIST/licenses/LICENSE.external" ]; then
   cp "$R_DIST/licenses/LICENSE.external" "$ROOT/licenses/FontTools-LICENSE.external.txt"
 else

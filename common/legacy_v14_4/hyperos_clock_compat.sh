@@ -54,8 +54,8 @@ _lhcc_weight_for_name() {
         350.ttf) printf '350\n' ;;
         500.ttf|*medium*) printf '500\n' ;;
         600.ttf|*semibold*|*semi-bold*|*demibold*) printf '600\n' ;;
-        800.ttf|*extrabold*|*extra-bold*) printf '800\n' ;;
         700.ttf|*bold*) printf '700\n' ;;
+        800.ttf|*extrabold*|*extra-bold*) printf '800\n' ;;
         900.ttf|*black*|*heavy*) printf '900\n' ;;
         *) printf '400\n' ;;
     esac
@@ -165,17 +165,6 @@ EOF_LHCC_STATIC
 
 _lhcc_safe_dynamic_name() {
     _lhcc_name="$1"
-    _lhcc_lower=$(printf '%s' "$_lhcc_name" | tr '[:upper:]' '[:lower:]')
-    _lhcc_role_name=$_lhcc_lower
-    while :; do
-        case "$_lhcc_role_name" in
-            *monotype*) _lhcc_role_name=${_lhcc_role_name%%monotype*}${_lhcc_role_name#*monotype} ;;
-            *) break ;;
-        esac
-    done
-    case "$_lhcc_role_name" in
-        *mono*) case "$_lhcc_lower" in *clock*|*mitype*) ;; *) return 1 ;; esac ;;
-    esac
     case "$_lhcc_name" in
         *Italic*|*Oblique*|*Emoji*|*Symbol*|*Icon*|*Serif*) return 1 ;;
         *Arabic*|*Hebrew*|*Thai*|*Devanagari*|*Bengali*|*Tamil*|*Telugu*|*Malayalam*|*Gujarati*|*Gurmukhi*|*Kannada*|*Khmer*|*Lao*|*Tibetan*|*Myanmar*) return 1 ;;
@@ -207,9 +196,7 @@ _lhcc_names_for_root() {
             _lhcc_safe_dynamic_name "$_lhcc_name" || continue
             printf '%s\n' "$_lhcc_name"
         done
-    } | awk 'NF && !seen[$0]++' | while IFS= read -r _lhcc_candidate; do
-        _lhcc_safe_dynamic_name "$_lhcc_candidate" && printf '%s\n' "$_lhcc_candidate"
-    done
+    } | awk 'NF && !seen[$0]++'
 }
 
 _lhcc_link_or_copy() {
@@ -240,17 +227,6 @@ luoshu_hyperos_clock_payload_ensure() {
         _lhcc_part_count=0
         while IFS= read -r _lhcc_name; do
             [ -n "$_lhcc_name" ] || continue
-            # A staged role exclusion must survive missing-slot boot repair.
-            if [ -f "$_lhcc_payload/.luoshu-stock-preserved.paths" ] &&
-               grep -Fqx "/$_lhcc_part/fonts/$_lhcc_name" "$_lhcc_payload/.luoshu-stock-preserved.paths"; then
-                rm -f "$_lhcc_overlay/$_lhcc_name" 2>/dev/null || return 1
-                continue
-            fi
-            if type _lhcc_safe_dynamic_name >/dev/null 2>&1 &&
-               ! _lhcc_safe_dynamic_name "$_lhcc_name"; then
-                rm -f "$_lhcc_overlay/$_lhcc_name" 2>/dev/null || return 1
-                continue
-            fi
             # The framework switches this exact ROM link between locale/theme
             # fonts after init. Covering it with a regular TTF freezes that route.
             # Read only the stock symlink text; never alter its /data target.

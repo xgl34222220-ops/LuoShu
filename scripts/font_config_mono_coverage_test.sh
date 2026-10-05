@@ -18,15 +18,15 @@ cat > "$TMP/fonts.xml" <<'XML'
   <family name="monospace"><font weight="400" style="normal">DroidSansMono.ttf</font></family>
 </familyset>
 XML
-python3 - "$ROOT" "$TMP/fonts.xml" <<'PY' || fail 'XML overlay did not preserve stock monospace'
+python3 - "$ROOT" "$TMP/fonts.xml" <<'PY' || fail 'XML overlay did not rewrite monospace to LuoShuMono'
 import sys, xml.etree.ElementTree as ET
 sys.path.insert(0, sys.argv[1] + "/common")
 from font_config_overlay import rewrite_tree
 tree = ET.parse(sys.argv[2])
 report = rewrite_tree(tree, "LuoShu", "LuoShuMono")
-assert report["changed_mono_families"] == [], report
+assert report["changed_mono_families"] == ["monospace"], report
 names = {f.attrib.get("name"): [c.text for c in f] for f in tree.getroot()}
-assert names["monospace"] == ["DroidSansMono.ttf"], names
+assert names["monospace"] == ["LuoShuMono-400.ttf"], names
 assert names["sans-serif"] == ["LuoShu-400.ttf"], names
 PY
 

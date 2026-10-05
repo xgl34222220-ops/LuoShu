@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("google_provider_patch", ROOT / "common/google_font_provider_patch.py")
 PATCHER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PATCHER)
+from google_font_provider_lifecycle_test import install_support
+
 FONT = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 
 
@@ -26,6 +28,11 @@ class ProviderPatchTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        for key in ("LUOSHU_TASK_SCOPE_PYTHON", "LUOSHU_RUNTIME_PATHS_PYTHON"):
+            previous = os.environ.get(key)
+            self.addCleanup(lambda key=key, previous=previous: os.environ.pop(key, None)
+                            if previous is None else os.environ.__setitem__(key, previous))
+            os.environ[key] = sys.executable
 
     def font(self, filename, family="Google Sans", weight=400, variable=False):
         path = self.root / filename
@@ -118,13 +125,11 @@ class ProviderPatchTest(unittest.TestCase):
                                  "--inspect-targets", str(candidates)], text=True, capture_output=True, check=True)
         self.assertEqual(result.stdout, f"{valid}\t600\n")
 
-    def test_service_applies_once_and_exits_with_owned_descendants_reaped(self):
+    def test_service_reconciles_once_without_resident_discovery(self):
         module = self.root / "module"
         (module / "common").mkdir(parents=True)
         (module / "config").mkdir()
         (module / "config/active_font.conf").write_text("fixture\n")
-        from host_task_scope_fixture import install_task_scope
-        install_task_scope(module)
         marker = self.root / "passes"
         (module / "common/google_font_provider_bridge.sh").write_text(
             'case "$1" in fingerprint) echo unchanged;; '
@@ -136,10 +141,11 @@ class ProviderPatchTest(unittest.TestCase):
             path = commands / name
             path.write_text(f"#!/bin/sh\n{content}\n")
             path.chmod(0o755)
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_RETRIES="3",
                    LUOSHU_GOOGLE_FONT_WATCH_CYCLES="0",
                    PROVIDER_TEST_MARKER=str(marker), PATH=f"{commands}:{os.environ['PATH']}")
-        subprocess.run(["sh", str(ROOT / "common/google_font_provider_service.sh")], env=env, check=True, timeout=10)
+        subprocess.run(["sh", str(ROOT / "common/google_font_provider_service.sh")], env=env, check=True)
         self.assertEqual(marker.read_text().splitlines(), ["pass"])
 
     def test_equal_clone_skips_remount_in_target_namespace(self):
@@ -169,8 +175,8 @@ class ProviderPatchTest(unittest.TestCase):
         (module / "config/active_font.conf").write_text("fixture\n")
         target = self.font("opaque")
         source = self.font("source.ttf", family="Custom")
-        cache = module / "config/google-font-provider"
-        cache.mkdir()
+        cache = module / ".luoshu-state/cache/google-font-provider"
+        cache.mkdir(parents=True)
         old_clone = cache / "previous-selection.ttf"
         shutil.copyfile(source, old_clone)
         shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
@@ -184,6 +190,7 @@ _gfp_mount_in_pid() {
 }
 _gfp_apply_once
 '''
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
                    LUOSHU_GOOGLE_FONT_TARGETS=str(target))
         result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
@@ -201,8 +208,8 @@ _gfp_apply_once
         source = self.font("source.ttf", family="Custom")
         shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
         shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
-        cache = module / "config/google-font-provider"
-        cache.mkdir()
+        cache = module / ".luoshu-state/cache/google-font-provider"
+        cache.mkdir(parents=True)
         old_clone = cache / "previous-selection.ttf"
         shutil.copyfile(source, old_clone)
         script = '''. "$1"
@@ -210,6 +217,7 @@ _gfp_unique_namespace_pids() { printf '10\\n'; }
 _gfp_mount_in_pid() { _gfp_mount_mode=already; return 0; }
 _gfp_apply_once
 '''
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
                    LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_ALLOW_RESTART="0")
         subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
@@ -228,6 +236,7 @@ _gfp_apply_once
         source = self.font("source.ttf", family="Custom")
         shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
         shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
                    LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
         command = ["sh", str(ROOT / "common/google_font_provider_bridge.sh"), "apply"]
@@ -238,7 +247,35 @@ _gfp_apply_once
         shutil.copyfile(first, target)
         subprocess.run(command, env=env, check=True, capture_output=True)
         self.assertEqual(Path(state.read_text().split("|")[1]), first)
-        self.assertEqual(list((module / "config/google-font-provider").glob("*.ttf")), [first])
+        self.assertEqual(list((module / ".luoshu-state/cache/google-font-provider").glob("*.ttf")), [first])
+
+    def test_legacy_config_clone_is_reused_by_its_original_inode_and_journal(self):
+        module = self.root / "module"
+        (module / "common").mkdir(parents=True)
+        (module / "config/device-font-sources").mkdir(parents=True)
+        (module / "config/active_font.conf").write_text("fixture\n")
+        target = self.font("opaque")
+        source = self.font("source.ttf", family="Custom")
+        shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
+        shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        install_support(module)
+        env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
+                   LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
+        command = ["sh", str(ROOT / "common/google_font_provider_bridge.sh"), "apply"]
+        subprocess.run(command, env=env, check=True, capture_output=True)
+        state = module / "config/google-font-provider-mounts.conf"
+        first = Path(state.read_text().split("|")[1])
+        legacy = module / "config/google-font-provider"
+        legacy.mkdir()
+        retained = legacy / first.name
+        first.rename(retained)
+        inode = retained.stat().st_ino
+        state.write_text(state.read_text().replace(str(first), str(retained)))
+        shutil.copyfile(retained, target)
+        subprocess.run(command, env=env, check=True, capture_output=True)
+        self.assertEqual(Path(state.read_text().split("|")[1]), retained)
+        self.assertEqual(retained.stat().st_ino, inode)
+        self.assertEqual(list((module / ".luoshu-state/cache/google-font-provider").glob("*.ttf")), [])
 
     def test_warm_target_inspection_and_new_namespace_do_not_restart_python(self):
         module = self.root / "module"
@@ -255,6 +292,7 @@ _gfp_apply_once || exit 10
 _gfp_python() { echo unexpected-python >&2; return 99; }
 _gfp_apply_once || exit 11
 '''
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
                    LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
         result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
@@ -281,6 +319,8 @@ cp -p "$TEST_ROOT/opaque-font" "$TEST_ROOT/replacement"
 mv "$TEST_ROOT/replacement" "$TEST_ROOT/opaque-font"
 _gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 12
 '''
+        install_support(module)
+        (module / ".luoshu-state/cache/google-font-provider").mkdir(parents=True, exist_ok=True)
         result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
                                 env={**os.environ, "MODDIR": str(module), "TEST_ROOT": str(self.root)},
                                 capture_output=True, text=True)
@@ -302,6 +342,8 @@ _gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out"
 _gfp_python() { while IFS= read -r target; do printf '%s\t400\n' "$target"; done < "$2"; }
 _gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 11
 '''
+        install_support(module)
+        (module / ".luoshu-state/cache/google-font-provider").mkdir(parents=True, exist_ok=True)
         result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
                                 env={**os.environ, "MODDIR": str(module), "TEST_ROOT": str(self.root)},
                                 capture_output=True, text=True)
@@ -332,6 +374,7 @@ _gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 11
 _gfp_hash_raw() { printf '%s\n' "$1" >> "$TEST_ROOT/hashed"; sha256sum "$1" | awk '{print $1}'; }
 _gfp_apply_once
 '''
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), TEST_ROOT=str(self.root),
                    LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
                    LUOSHU_GOOGLE_FONT_TARGETS="\n".join(map(str, targets)), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
@@ -355,6 +398,7 @@ _gfp_mount_in_pid() { _gfp_mount_mode=plain; return 0; }
 am() { printf '%s\\n' "$*" >> "$TEST_RESTARTS"; }
 _gfp_apply_once
 '''
+        install_support(module)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
                    LUOSHU_GOOGLE_FONT_TARGETS=str(target), TEST_RESTARTS=str(marker),
                    LUOSHU_GOOGLE_FONT_ALLOW_RESTART="0")

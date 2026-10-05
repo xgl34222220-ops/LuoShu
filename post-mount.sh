@@ -5,13 +5,6 @@
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
-UNIVERSAL_MODE="$MODDIR/config/universal-font-runtime.conf"
-UNIVERSAL_RUNTIME="$MODDIR/common/universal_mount_runtime.sh"
-if [ -s "$UNIVERSAL_MODE" ]; then
-    [ -f "$UNIVERSAL_RUNTIME" ] && MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-        sh "$UNIVERSAL_RUNTIME" hook post-mount >/dev/null 2>&1 || true
-    exit 0
-fi
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_MOUNT="$MODDIR/.luoshu-runtime/core/post-mount.sh"
 HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"

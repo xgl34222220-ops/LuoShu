@@ -39,23 +39,7 @@ for metadata_file in ("update.json", "update-prerelease.json"):
         repository="xgl34222220-ops/LuoShu", version=version,
         version_code=actual['versionCode'], tag=release_tag, notes_file=notes_file,
     )
-
-    # A withdrawn release may deliberately pin the update channel to the last
-    # known-good signed asset while sending users to the withdrawal notice
-    # instead of that old release's ordinary notes. Keep this exception narrow:
-    # asset identity/version metadata must still match the real release exactly.
-    withdrawal_notice = (
-        "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/"
-        "main/docs/WITHDRAWN_2.0.0.md"
-    )
-    if actual.get("changelog") == withdrawal_notice:
-        assert (ROOT / "docs" / "WITHDRAWN_2.0.0.md").is_file()
-        assert version == "v1.1.1", (metadata_file, version)
-        assert actual["versionCode"] == 60101, (metadata_file, actual["versionCode"])
-        assert release_tag == "refactor-v1.1.1", (metadata_file, release_tag)
-        assert actual["zipUrl"] == expected["zipUrl"], (metadata_file, actual)
-    else:
-        assert actual == expected, (metadata_file, actual)
+    assert actual == expected, (metadata_file, actual)
 
 for kwargs in (
     dict(repository="bad", version="v1", version_code=1, tag="v1", notes_file="n"),

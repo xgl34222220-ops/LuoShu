@@ -71,8 +71,9 @@ def main() -> int:
         if os.geteuid() != 0:
             raise FallbackError('需要 Root；未执行任何修改。')
         backend = Android()
+        directory = prepare_store(STORE, LEGACY_STORE)
         if args.action == 'restore-owned':
-            result = restore_owned(backend, STORE)
+            result = restore_owned(backend, directory)
             print(json.dumps(result, ensure_ascii=False))
             return 1 if result['status'] == 'error' else 0
         user = args.user if args.user is not None else backend.current_user()
@@ -83,8 +84,8 @@ def main() -> int:
         if not args.json and args.action != 'status':
             print('注意：此开关影响该用户所有依赖 GMS 下载字体的应用，也可能影响下载式表情字体。')
             print('Android 修改组件状态时可能重启相关 GMS 进程。不会清除账户、App 数据或字体目录。')
-        with locked_store(STORE):
-            journal = Journal(STORE, user)
+        with locked_store(directory):
+            journal = Journal(directory, user)
             if args.action == 'status':
                 result = describe(backend, journal, MODULE)
             else:

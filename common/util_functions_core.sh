@@ -13,6 +13,11 @@ MODULE_DIR="${MODULE_DIR:-/data/adb/modules/LuoShu}"
 CONFIG_DIR="${MODULE_DIR}/config"
 FONT_DIR="${MODULE_DIR}/fonts"
 LOG_DIR="${MODULE_DIR}/logs"
+[ -f "$MODULE_DIR/common/runtime_paths.sh" ] && . "$MODULE_DIR/common/runtime_paths.sh"
+if [ ! -e "$MODULE_DIR/.git" ] && [ ! -L "$MODULE_DIR/.git" ] && \
+   type luoshu_runtime_paths_init >/dev/null 2>&1; then
+    luoshu_runtime_paths_init "$MODULE_DIR" || { return 1 2>/dev/null || exit 1; }
+fi
 LOG_FILE="${LOG_DIR}/fontswitch.log"
 LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"

@@ -80,7 +80,7 @@ def family_role(element: ET.Element, name: str) -> str | None:
         if element.attrib.get(key):
             return None
     if _overlay_is_safe_mono_family is not None and _overlay_is_safe_mono_family(name):
-        return None  # Stock code family, including its collection face/axes.
+        return "mono"
     if any(token in name for token in PROTECTED_FAMILY_TOKENS):
         return None
     if _overlay_is_safe_family is not None:

@@ -182,4 +182,30 @@ FRESH_CODE=$?
 set -e
 test "$FRESH_CODE" -eq 2
 
+# An unconfirmed stop must keep identity evidence and block both the canonical
+# migrator and its supported old CLI override; later successful writes cannot
+# mask the cleanup error.
+for migrator in canonical compatibility; do
+    (
+        . "$ROOT/common/module_update_state.sh"
+        if [ "$migrator" = compatibility ]; then
+            . "$ROOT/common/module_update_hotfix_v4.sh"
+        fi
+        luoshu_stop_module_tasks() { return 125; }
+        BLOCKED="$TMP/blocked-$migrator"
+        mkdir -p "$BLOCKED/config"
+        printf 'identity-evidence\n' > "$BLOCKED/config/axes_worker.pid.owner.json"
+        if luoshu_clear_update_volatile "$BLOCKED"; then
+            echo 'Unknown cleanup unexpectedly erased task identity' >&2
+            exit 1
+        fi
+        grep -qx identity-evidence "$BLOCKED/config/axes_worker.pid.owner.json"
+        if luoshu_migrate_active_install "$CURRENT" "$BLOCKED"; then
+            echo 'Migration unexpectedly succeeded without confirmed cleanup' >&2
+            exit 1
+        fi
+        grep -qx identity-evidence "$BLOCKED/config/axes_worker.pid.owner.json"
+    )
+done
+
 echo 'Module updates preserve selection, reject incompatible generated payloads, and rebuild before commit.'

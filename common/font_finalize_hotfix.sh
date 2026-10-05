@@ -84,7 +84,7 @@ _luoshu_fast_link_font() {
 }
 
 # 组合引擎产出的静态字体已经完成轮廓与度量归一化，无需再把同一大字体序列化 18 次。
-# UI 九档引用对应来源；代码等宽字体保持原厂，不再合成/映射 Mono 字库。
+# UI 九档直接引用对应静态来源；Mono 只生成一次 400 档，其余权重共享同一固定宽度文件。
 font_config_prepare_payload_weights() {
     _lcw_module="$(_luoshu_config_weight_module)"
     _lcw_fonts="$(_luoshu_config_weight_fonts)"
@@ -110,13 +110,20 @@ font_config_prepare_payload_weights() {
         fi
     done
 
-    # Code monospace stays in the ROM. Do not construct nine proportional
-    # aliases and assign them to the stock monospace family.
+    type mix_stage >/dev/null 2>&1 && mix_stage mono-map '正在生成等宽英文数字映射' 93
+    _lcw_mono400="$_lcw_stage/LuoShuMono-400.ttf"
+    _luoshu_config_make_mono_weight "$_lcw_stage/LuoShu-400.ttf" "$_lcw_mono400" 400 || { rm -rf "$_lcw_stage"; return 1; }
+    for _lcw_weight in 100 200 300 500 600 700 800 900; do
+        _luoshu_fast_link_font "$_lcw_mono400" "$_lcw_stage/LuoShuMono-${_lcw_weight}.ttf" || { rm -rf "$_lcw_stage"; return 1; }
+    done
+
     for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
-        _lcw_ready="$_lcw_stage/LuoShu-${_lcw_weight}.ttf"
-        _lcw_dest="$_lcw_fonts/LuoShu-${_lcw_weight}.ttf"
-        rm -f "$_lcw_dest" 2>/dev/null || true
-        mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || { rm -rf "$_lcw_stage"; return 1; }
+        for _lcw_prefix in LuoShu LuoShuMono; do
+            _lcw_ready="$_lcw_stage/${_lcw_prefix}-${_lcw_weight}.ttf"
+            _lcw_dest="$_lcw_fonts/${_lcw_prefix}-${_lcw_weight}.ttf"
+            rm -f "$_lcw_dest" 2>/dev/null || true
+            mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || { rm -rf "$_lcw_stage"; return 1; }
+        done
     done
     rmdir "$_lcw_stage" 2>/dev/null || true
     return 0
@@ -187,13 +194,16 @@ EOF_LUOSHU_DYNAMIC_TARGETS
         _ldt_weight="$_ldt_b"
         _ldt_family="$_ldt_c"
         _ldt_role="$_ldt_d"
-        [ "$_ldt_role" = mono ] && continue
         case "$_ldt_file" in */*|*'..'*|LuoShu-*.ttf|LuoShuMono-*.ttf) continue ;; *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
         case "$_ldt_weight" in 100|200|300|400|500|600|700|800|900) ;; *) _ldt_weight=400 ;; esac
         _ldt_rel="${_ldt_font_dir#$_ldt_module/}/$_ldt_file"
         grep -Fq "$_ldt_rel|" "$_ldt_manifest_tmp" 2>/dev/null && continue
         _ldt_targets=$((_ldt_targets + 1))
-        _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        if [ "$_ldt_role" = mono ]; then
+            _ldt_source="$_ldt_module/system/fonts/LuoShuMono-${_ldt_weight}.ttf"
+        else
+            _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        fi
         _ldt_dest="$_ldt_font_dir/$_ldt_file"
         _luoshu_fast_font_ok "$_ldt_source" || continue
         mkdir -p "$_ldt_font_dir" 2>/dev/null || continue

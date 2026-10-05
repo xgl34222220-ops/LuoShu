@@ -11,6 +11,10 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+[ -f "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/runtime_paths.sh" ] && {
+    . "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "${LUOSHU_REAL_MODDIR:-$MODDIR}" || exit 126
+}
 
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/axes-mix"
@@ -27,8 +31,8 @@ ACTIVE_CONF="$CONFIG_DIR/active_font.conf"
 PROGRESS_FILE="$CONFIG_DIR/composite_progress.json"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOCK_FILE="$MODDIR/.font_switch.lock"
-WORKER_PID="$CONFIG_DIR/axes_worker.pid"
-AUTO_WORKER_PID="$CONFIG_DIR/auto_multiweight_worker.pid"
+WORKER_PID="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/axes_worker.pid"
+AUTO_WORKER_PID="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/auto_multiweight_worker.pid"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 
 MODULE_DIR="$MODDIR"
@@ -58,11 +62,32 @@ clear_worker_pid() {
     fi
 }
 
+wait_child_cleanup() {
+    _wcc_task="$1"
+    _wcc_engine="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix_worker.pid"
+    _wcc_monitor="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix-monitor-$_wcc_task.pid"
+    _wcc_tries=0
+    while [ "$_wcc_tries" -lt 300 ]; do
+        if ! luoshu_task_pid_alive "$_wcc_engine" "$_wcc_task" && \
+           ! luoshu_task_pid_alive "$_wcc_monitor" "$_wcc_task.monitor"; then
+            sh "$(luoshu_scope_runner)" cleaned "$_wcc_engine" "$_wcc_task" || return 125
+            if [ -f "$_wcc_monitor.cleanup.json" ] || [ -f "$_wcc_monitor.owner.json" ]; then
+                sh "$(luoshu_scope_runner)" cleaned "$_wcc_monitor" "$_wcc_task.monitor" || return 125
+            fi
+            return 0
+        fi
+        sleep .1
+        _wcc_tries=$((_wcc_tries + 1))
+    done
+    return 124
+}
+
 task_worker_alive() {
     _twa_task="$1"
     if type luoshu_task_pid_alive >/dev/null 2>&1; then
         luoshu_task_pid_alive "$WORKER_PID" "$_twa_task" && return 0
         luoshu_task_pid_alive "$AUTO_WORKER_PID" "$_twa_task" && return 0
+        return 1
     fi
     for _twa_file in "$WORKER_PID" "$AUTO_WORKER_PID"; do
         _twa_pid=$(sed -n '1{s/[^0-9].*$//;p;}' "$_twa_file" 2>/dev/null)
@@ -347,11 +372,16 @@ worker() {
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             case "$_base_state" in
                 success)
+                    wait_child_cleanup "$_child" || {
+                        update_task "$_wanted" failed '字体生成已结束，但子任务回收尚未确认' 100 "$_child" "$(date +%s)"
+                        rm -rf "$_root"; exit 125
+                    }
                     update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"
                     rewrite_public_config
                     rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
                     ;;
                 failed)
+                    wait_child_cleanup "$_child" || true
                     update_task "$_wanted" failed "$_base_message" 100 "$_child" "$(date +%s)"
                     rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
                     ;;
@@ -430,10 +460,9 @@ start_mix() {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return
     }
     if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
+        if luoshu_task_pid_alive "$WORKER_PID"; then
             printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
-        }
+        fi
     fi
     [ ! -e "$LOCK_FILE" ] || { printf '{"status":"error","message":"字体正在切换中"}\n'; return; }
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
@@ -450,19 +479,22 @@ start_mix() {
     write_task "$_request" queued '任务已进入后台队列' "$_cjk" "$_latin" "$_digit" \
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" '' "$(date +%s)" '' 1
     if type luoshu_start_detached >/dev/null 2>&1; then
+        LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS=900
+        export LUOSHU_SCOPE_HANDOFF LUOSHU_TASK_TIMEOUT_SECONDS
         luoshu_start_detached "$WORKER_PID" "$_request" "$LOG_FILE" sh "$0" worker "$_request" || {
             update_task "$_request" failed '无法启动独立后台任务' 100 '' "$(date +%s)"
             printf '{"status":"error","message":"无法启动独立后台任务"}\n'
             return
         }
     else
-        ( trap '' HUP; MODDIR="$MODDIR" sh "$0" worker "$_request" ) </dev/null >>"$LOG_FILE" 2>&1 &
-        printf '%s\n' "$!" >"$WORKER_PID" 2>/dev/null || true
+        printf '{"status":"error","message":"任务监督器不可用"}\n'; return 126
     fi
     printf '{"status":"ok","data":{"task":"%s"}}\n' "$(json_escape "$_request")"
 }
 
 recover_task() {
+    luoshu_stop_task_pid "$WORKER_PID" >/dev/null 2>&1 || return 125
+    luoshu_stop_task_pid "$AUTO_WORKER_PID" >/dev/null 2>&1 || return 125
     MODDIR="$MODDIR" sh "$BASE_ENGINE" recover >/dev/null 2>&1 || true
     if [ -s "$TASK_FILE" ]; then
         _state=$(read_value "$TASK_FILE" state)
@@ -477,12 +509,42 @@ recover_task() {
     printf '{"status":"ok"}\n'
 }
 
+cancel_task() {
+    _ct_task="${1:-}"
+    [ -n "$_ct_task" ] || return 2
+    _ct_current=$(read_value "$TASK_FILE" task)
+    if [ -n "$_ct_current" ] && [ "$_ct_current" != "$_ct_task" ]; then
+        printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"absent"}}\n' "$(json_escape "$_ct_task")"
+        return 0
+    fi
+    _ct_rc=0
+    for _ct_file in "$WORKER_PID" "$AUTO_WORKER_PID"; do
+        [ "$(cat "$_ct_file.task" 2>/dev/null)" != "$_ct_task" ] || luoshu_stop_task_pid "$_ct_file" "$_ct_task" >/dev/null || _ct_rc=125
+    done
+    if [ "$_ct_rc" -eq 0 ]; then
+        case "$(read_value "$TASK_FILE" state)" in queued|running)
+            update_task "$_ct_task" failed '字体组合已取消，任务子进程已回收' 100 '' "$(date +%s)"
+            ;;
+        esac
+        printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"cancelled"}}\n' "$(json_escape "$_ct_task")"
+    else
+        printf '{"status":"error","data":{"task":"%s","cleaned":false}}\n' "$(json_escape "$_ct_task")"
+    fi
+    return "$_ct_rc"
+}
+
 case "${1:-config}" in
     start) start_mix "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
     status) status_json "${2:-}" ;;
     config) config_json ;;
-    worker) worker "$2" ;;
+    worker)
+        if [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$WORKER_PID" ]; then
+            exec sh "$(luoshu_scope_runner)" run --pid-file "$WORKER_PID" --task "$2" --timeout 900 -- sh "$0" "$@"
+        fi
+        worker "$2"
+        ;;
     recover) recover_task ;;
+    cancel) cancel_task "${2:-}"; exit $? ;;
     *) printf '{"status":"error","message":"未知多轴组合命令"}\n' ;;
 esac
 exit 0

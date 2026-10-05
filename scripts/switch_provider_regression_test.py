@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Exercise service routing, active provider sources and slow-copy staging."""
 import os
+import json
+import sys
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import time
 import unittest
-from host_task_scope_fixture import install_task_scope
 
 ROOT = Path(__file__).resolve().parents[1]
+
+from google_font_provider_lifecycle_test import install_support
 
 
 def function(relative, name):
@@ -26,10 +29,25 @@ class SwitchProviderTest(unittest.TestCase):
         self.module = self.root / 'module'
         (self.module / 'common').mkdir(parents=True)
         (self.module / 'config').mkdir()
+        install_support(self.module)
+        shutil.copyfile(ROOT / 'common/background_task.sh', self.module / 'common/background_task.sh')
         self.bin = self.root / 'bin'
         self.bin.mkdir()
         self.env = {**os.environ, 'MODDIR': str(self.module),
-                    'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}
+                    'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
+                    'LUOSHU_TASK_SCOPE_PYTHON': sys.executable,
+                    'LUOSHU_RUNTIME_PATHS_PYTHON': sys.executable}
+
+    def assert_scopes_clean(self):
+        tasks = self.module / '.luoshu-state/tasks'
+        self.assertEqual(list(tasks.glob('*.pid')), [], 'a font task remained active')
+        reports = list(tasks.glob('*.pid.cleanup.json'))
+        self.assertTrue(reports, 'real task supervision produced no cleanup proof')
+        for path in reports:
+            proof = json.loads(path.read_text())
+            self.assertTrue(proof['cleaned'], proof)
+            self.assertEqual(proof['leftoverPids'], [])
+            self.assertEqual(proof.get('cleanupErrors', []), [])
 
     def executable(self, name, content):
         path = self.bin / name
@@ -42,8 +60,11 @@ class SwitchProviderTest(unittest.TestCase):
         (self.module / '.luoshu-runtime/core').mkdir(parents=True)
         (self.module / '.luoshu-runtime/core/service.sh').write_text('exit 0\n')
         marker = self.root / 'provider-starts'
-        (self.module / 'common/google_font_provider_service.sh').write_text(
-            'printf "started\\n" >> "$TEST_STARTS"\n')
+        shutil.copyfile(ROOT / 'common/google_font_provider_service.sh',
+                        self.module / 'common/google_font_provider_service.sh')
+        (self.module / 'common/google_font_provider_bridge.sh').write_text(
+            'case "$1" in apply) printf "started\\n" >> "$TEST_STARTS";; esac\n')
+        (self.module / 'config/active_font.conf').write_text('custom\n')
         self.executable('getprop', 'echo 1\n')
         legacy = self.module / 'config/font_runtime_legacy_v14_4.conf'
         for route in ('v4', 'physical'):
@@ -59,6 +80,16 @@ class SwitchProviderTest(unittest.TestCase):
                     time.sleep(.01)
                 self.assertTrue(marker.exists(), 'provider service was never launched')
                 self.assertEqual(marker.read_text().splitlines(), ['started'])
+                # Frozen service routing launches its finite provider pass in
+                # the background. Wait for that real scope's completed proof,
+                # rather than treating the first apply instruction as exit.
+                tasks = self.module / '.luoshu-state/tasks'
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    if list(tasks.glob('*.pid.cleanup.json')) and not list(tasks.glob('*.pid')):
+                        break
+                    time.sleep(.01)
+                self.assert_scopes_clean()
 
     def provider_source(self, weight):
         return subprocess.run(['sh', '-c', '. "$1"; _gfp_source_for_weight "$2"',
@@ -66,7 +97,6 @@ class SwitchProviderTest(unittest.TestCase):
             env=self.env, capture_output=True, text=True)
 
     def test_provider_service_recovers_empty_lock_from_previous_boot(self):
-        install_task_scope(self.module)
         marker = self.root / 'bridge-applied'
         service = self.module / 'common/google_font_provider_service.sh'
         shutil.copyfile(ROOT / 'common/google_font_provider_service.sh', service)
@@ -75,23 +105,24 @@ class SwitchProviderTest(unittest.TestCase):
             'case "$1" in fingerprint) echo unchanged;; '
             'apply) printf "applied\\n" >> "$TEST_APPLIED";; esac\n')
         (self.module / 'config/active_font.conf').write_text('example\n')
-        lock = self.module / '.google-font-provider.lock'
-        lock.mkdir()
+        lock = self.module / '.luoshu-state/tasks/google-font-provider.lock'
+        lock.mkdir(parents=True)
         self.executable('getprop', 'echo 1\n')
         subprocess.run(['sh', str(service)], env={**self.env,
-            'TEST_APPLIED': str(marker), 'LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS': '0.01',
-            'LUOSHU_GOOGLE_FONT_RETRIES': '1', 'LUOSHU_GOOGLE_FONT_WATCH_CYCLES': '0'},
+            'TEST_APPLIED': str(marker), 'LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS': '0.01'},
             capture_output=True, check=True, timeout=5)
         self.assertEqual(marker.read_text().splitlines(), ['applied'])
         self.assertFalse(lock.exists())
         marker.unlink()
         (self.module / 'config/active_font.conf').write_text('default\n')
-        # Default restores and exits; later selections require a new explicit pass.
+        self.assert_scopes_clean()
+        # Default is a completed one-shot restoration pass. There is no idle
+        # watcher; a later explicit reconciliation can select a custom font.
         subprocess.run(['sh', str(service)], env={**self.env,
-            'TEST_APPLIED': str(marker), 'LUOSHU_GOOGLE_FONT_RETRIES': '1',
-            'LUOSHU_GOOGLE_FONT_WATCH_CYCLES': '0'}, check=True, timeout=5)
+            'TEST_APPLIED': str(marker)}, capture_output=True, check=True, timeout=5)
         self.assertFalse(marker.exists(), 'default font must not run provider replacement')
-        self.assertFalse(lock.exists(), 'finite test run must release the guard lock')
+        self.assertFalse(lock.exists(), 'one-shot pass must release its provider lock')
+        self.assert_scopes_clean()
 
     def test_provider_reads_current_physical_payload_before_old_cache(self):
         live = self.module / '.luoshu-payload/system/fonts'
@@ -163,8 +194,6 @@ exec "$TEST_REAL_CP" "$@"
                 self.assertEqual((source / 'system/fonts/.luoshu-font-store/old.font').read_bytes(), original)
 
     def test_real_switch_router_commits_only_successful_stages(self):
-        install_task_scope(self.module)
-        shutil.copyfile(ROOT / 'common/font_role_policy.py', self.module / 'common/font_role_policy.py')
         legacy = self.module / 'common/legacy_v14_4'
         legacy.mkdir()
         for name in ('font_switch_safe.sh', 'payload_clone.sh'):
@@ -204,14 +233,15 @@ apply_font_by_rom() {
         self.assertEqual(prewarm.returncode, 0, prewarm.stdout + prewarm.stderr)
         self.assertEqual(old.read_bytes(), before)
         self.assertFalse((self.module / '.luoshu-payload-next').exists())
-        cache_confs = list((self.module / 'config/safe-switch-cache').glob('*/cache.conf'))
-        self.assertFalse(cache_confs, 'retired background prewarm must not generate caches')
+        cache_confs = list((self.module / '.luoshu-state/cache/safe-switch-cache').glob('*/cache.conf'))
+        self.assertTrue(cache_confs)
+        cache_root = cache_confs[0].parent
+        self.assertFalse((cache_root / 'tree/future_oem/fonts/OldDynamic.ttf').exists(),
+                         'discovered OEM partitions must not retain stale font payloads')
         success = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
         self.assertEqual(success.returncode, 0, success.stdout + success.stderr)
         self.assertIn('"status":"ok"', success.stdout)
         pending = self.module / '.luoshu-payload-next'
-        self.assertFalse((pending / 'future_oem/fonts/OldDynamic.ttf').exists(),
-                         'explicit switch must discard stale discovered partition payloads')
         self.assertEqual((pending / 'system/fonts/Roboto-Regular.ttf').read_bytes(),
                          (public / 'fonts/Selected.ttf').read_bytes())
         self.assertEqual(old.read_bytes(), before)
@@ -219,13 +249,15 @@ apply_font_by_rom() {
         (self.module / 'config/font-payload-next.conf').unlink()
         # Force a cache miss before exercising the mapper-failure rollback path.
         # A previously verified cache is allowed to bypass expensive regeneration.
-        shutil.rmtree(self.module / 'config/safe-switch-cache', ignore_errors=True)
+        shutil.rmtree(self.module / '.luoshu-state/cache/safe-switch-cache', ignore_errors=True)
         failed = subprocess.run(command, env={**env, 'TEST_MAPPING_FAIL': '1'},
                                 capture_output=True, text=True, timeout=5)
         self.assertNotEqual(failed.returncode, 0)
         self.assertFalse(pending.exists())
         self.assertEqual(old.read_bytes(), before)
         self.assertFalse(list(self.module.glob('.luoshu-payload-stage.*')))
+        self.assertEqual(list((self.module / '.luoshu-state/tmp').iterdir()), [])
+        self.assert_scopes_clean()
 
 
 if __name__ == '__main__':

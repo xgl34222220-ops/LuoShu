@@ -345,31 +345,11 @@ _dfcache_lock_release() {
 }
 
 _dfcache_autostart_pending() {
-    _dfc_font="$1"
-    _dfc_module="$(_dfcache_module)"
-    _dfc_script="$_dfc_module/common/device_font_cache.sh"
+    # Cache misses are built inside the explicit foreground apply transaction. Do not
+    # leave an idle waiter or builder behind after that font task has completed.
+    # Keep the pending intent for the next explicit apply, including legacy imports.
     [ "${LUOSHU_CACHE_AUTOSTART:-1}" != 0 ] || return 0
-    [ -f "$_dfc_script" ] || return 0
-    (
-        _dfc_waited=0
-        _dfc_active=''
-        while [ "$_dfc_waited" -lt 120 ]; do
-            _dfc_active=$(head -n1 "$_dfc_module/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-            _dfc_pending_font=$(sed -n 's/^font=//p' "$_dfc_module/config/device-font-cache-pending.conf" 2>/dev/null | head -n1)
-            if [ "$_dfc_active" = "$_dfc_font" ] && [ "$_dfc_pending_font" = "$_dfc_font" ] && _dfcache_foreground_idle; then
-                break
-            fi
-            sleep 1
-            _dfc_waited=$((_dfc_waited + 1))
-        done
-        [ "$_dfc_active" = "$_dfc_font" ] && [ "$_dfc_pending_font" = "$_dfc_font" ] && _dfcache_foreground_idle || exit 0
-        sleep 2
-        _dfcache_foreground_idle || exit 0
-        MODDIR="$_dfc_module"
-        MODULE_DIR="$_dfc_module"
-        export MODDIR MODULE_DIR
-        _dfcache_run_service_lowpri "$_dfc_module"
-    ) &
+    _dfcache_log "设备对齐缓存待办保留至下次明确应用：${1:-custom}"
     return 0
 }
 
@@ -399,7 +379,7 @@ device_font_cache_schedule() {
     chmod 0600 "$_dfc_pending" 2>/dev/null || true
     # An explicit switch is a new intent, not a retry of the thing that kept failing.
     _dfcache_failure_reset
-    _dfcache_log "已安排后台生成设备对齐缓存：$_dfc_font"
+    _dfcache_log "已安排当前字体事务生成设备对齐缓存：$_dfc_font"
     _dfcache_autostart_pending "$_dfc_font"
     return 0
 }

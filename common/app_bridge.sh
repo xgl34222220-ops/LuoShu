@@ -10,17 +10,25 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+if [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ]; then
+    case "${1:-status}" in
+        request-run|request-cancel|font-switch-cancel|font-mix-cancel|switch_cancel|mix_cancel) ;;
+        *) exec sh "$MODDIR/common/task_scope.sh" request-run "bridge-$$-$(date +%s)" 900 -- sh "$0" "$@" ;;
+    esac
+fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
 FONT_SWITCH_TASK="$MODDIR/common/font_switch_task.sh"
 SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
-UNIVERSAL_VERIFY="$MODDIR/common/universal_font_runtime_verify.sh"
-DIAGNOSTICS="$MODDIR/common/luoshu_diagnostics.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
+[ -f "$MODDIR/common/runtime_paths.sh" ] && {
+    . "$MODDIR/common/runtime_paths.sh"
+    luoshu_runtime_paths_init "$MODDIR" || exit 126
+}
 AXES_TASK_FILE="$MODDIR/config/axes_task.conf"
 SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
 TEXT_REBOOT_REQUIRED="$MODDIR/config/text_reboot_required.conf"
@@ -75,8 +83,8 @@ select_task_file() {
     [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true
     _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
     _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
-    case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
-    case "$_switch_state" in queued|running) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+    case "$_axes_state" in queued|running|cleanup-pending) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+    case "$_switch_state" in queued|running|cleanup-pending) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
 
     _axes_finished="$(read_prop "$AXES_TASK_FILE" finished)"
     _switch_finished="$(read_prop "$SWITCH_TASK_FILE" finished)"
@@ -107,62 +115,16 @@ status_json() {
     fi
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
-    _universal_runtime="$MODDIR/config/universal-font-runtime.conf"
-    _universal_verification="$MODDIR/config/universal-font-runtime-verification.conf"
-    _verification_grade=''
-    if [ -s "$_universal_runtime" ]; then
-        _verification_file="$_universal_verification"
-        _verification_reason=''
-        _verification_active=''
-        if [ -s "$_universal_verification" ]; then
-            _verification_grade="$(read_prop "$_verification_file" grade)"
-            _verification_reason="$(read_prop "$_verification_file" reason)"
-            _verification_active="$(read_prop "$_verification_file" activeFont)"
-        fi
-        case "$_verification_grade" in
-            PASS) _verification_state=verified; _verification_mode=universal-pass ;;
-            WARN) _verification_state=warning; _verification_mode=universal-warn ;;
-            FAIL) _verification_state=failed; _verification_mode=universal-fail ;;
-            *)
-                _verification_grade=PENDING
-                _verification_state=pending
-                _verification_mode=universal-pending
-                [ -n "$_verification_reason" ] || _verification_reason=awaiting-runtime-verification
-                ;;
-        esac
-        _mount_state="$(read_prop "$MODDIR/config/universal-font-mount.conf" state)"
-        _mount_failed="$(read_prop "$MODDIR/config/universal-font-mount.conf" error)"
-    else
-        _verification_file="$MODDIR/config/device-font-load-verification.conf"
-        _verification_state="$(read_prop "$_verification_file" state)"
-        _verification_mode="$(read_prop "$_verification_file" mode)"
-        _verification_reason="$(read_prop "$_verification_file" reason)"
-        _verification_active="$(read_prop "$_verification_file" activeFont)"
-        _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
-        _mount_failed="$(read_prop "$MODDIR/config/self-mount.conf" failed)"
-        case "$_verification_state" in
-            verified) _verification_grade=PASS ;;
-            failed) _verification_grade=FAIL ;;
-            *) _verification_grade=PENDING ;;
-        esac
-    fi
+    _verification_file="$MODDIR/config/device-font-load-verification.conf"
+    _verification_state="$(read_prop "$_verification_file" state)"
+    _verification_mode="$(read_prop "$_verification_file" mode)"
+    _verification_reason="$(read_prop "$_verification_file" reason)"
+    _verification_active="$(read_prop "$_verification_file" activeFont)"
+    _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
+    _mount_failed="$(read_prop "$MODDIR/config/self-mount.conf" failed)"
     [ -n "$_verification_state" ] || _verification_state='pending'
     [ -n "$_verification_mode" ] || _verification_mode='unknown'
-    [ -n "$_verification_grade" ] || _verification_grade='PENDING'
     [ -n "$_mount_state" ] || _mount_state='unknown'
-
-    _cutover_file="$MODDIR/config/universal-font-cutover.conf"
-    _rollback_file="$MODDIR/config/universal-font-rollback.conf"
-    _cutover_state="$(read_prop "$_cutover_file" state)"
-    _cutover_decision="$(read_prop "$_cutover_file" decision)"
-    _rollback_state="$(read_prop "$_rollback_file" state)"
-    _rollback_target_font="$(read_prop "$_rollback_file" targetFont)"
-    _rollback_target_mode="$(read_prop "$_rollback_file" targetMode)"
-    _rollback_pending=false
-    [ "$_rollback_state" = staged ] && _rollback_pending=true
-    [ -n "$_cutover_state" ] || _cutover_state=idle
-    [ -n "$_cutover_decision" ] || _cutover_decision=none
-    [ -n "$_rollback_state" ] || _rollback_state=none
 
     _selected="$(select_task_file)"
     _task_type="${_selected%%|*}"
@@ -192,10 +154,7 @@ status_json() {
 
     _effective_active='unknown'
     _font_effect_state='pending'
-    if [ "$_rollback_pending" = true ]; then
-        _effective_active=unknown
-        _font_effect_state=rollback-pending
-    elif [ "$_active" = default ]; then
+    if [ "$_active" = default ]; then
         _effective_active=default
         _font_effect_state=system
     elif [ "$_reboot_required" = true ]; then
@@ -204,26 +163,17 @@ status_json() {
         _verification_state=pending
         _verification_mode=unknown
         _verification_reason=stale-verification
-    elif [ "$_mount_state" = failed ]; then
-        # A failed atomic mount transaction is rolled back before Android consumes
-        # the payload, so the ROM default is the only safe effective-font claim.
+    elif [ "$_verification_state" = failed ] || [ "$_mount_state" = failed ]; then
+        # The atomic self-mount transaction rolls every LuoShu layer back on
+        # failure, so the only safe effective-font claim is the ROM default.
         _effective_active=default
         _font_effect_state=failed
-        _verification_reason=self-mount-failed
-    elif [ "$_verification_state" = failed ]; then
-        _font_effect_state=failed
-        if [ -s "$_universal_runtime" ]; then
-            # Runtime verification can fail on coverage/axis/geometry while the
-            # Universal payload is still visible in this boot. Never claim that
-            # the system default is already active unless the mount transaction
-            # itself rolled back.
-            _effective_active=unknown
-        else
-            _effective_active=default
+        if [ "$_mount_state" = failed ]; then
+            _verification_reason=self-mount-failed
         fi
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
-            aligned|mount-verified|mount-confirmed|universal-pass)
+            aligned|mount-verified|mount-confirmed)
                 _effective_active="$_active"
                 _font_effect_state=verified
                 ;;
@@ -233,13 +183,11 @@ status_json() {
         _font_effect_state=unverified
     fi
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationGrade":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","cutoverState":"%s","cutoverDecision":"%s","rollbackState":"%s","rollbackPending":%s,"rollbackTargetFont":"%s","rollbackTargetMode":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
         "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
         "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
-        "$(json_escape "$_verification_state")" "$(json_escape "$_verification_grade")" "$(json_escape "$_verification_mode")" \
+        "$(json_escape "$_verification_state")" "$(json_escape "$_verification_mode")" \
         "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" "$(json_escape "$_mount_failed")" \
-        "$(json_escape "$_cutover_state")" "$(json_escape "$_cutover_decision")" "$(json_escape "$_rollback_state")" "$_rollback_pending" \
-        "$(json_escape "$_rollback_target_font")" "$(json_escape "$_rollback_target_mode")" \
         "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
         "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" \
         "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"
@@ -362,6 +310,7 @@ weight_axis_info() {
 }
 
 case "${1:-status}" in
+    request-run|request-cancel) exec sh "$MODDIR/common/task_scope.sh" "$@" ;;
     status) status_json ;;
     fonts)
         manager_ready || exit 1
@@ -379,14 +328,6 @@ case "${1:-status}" in
     preview_source) preview_source_json "${2:-}" "${3:-400}" ;;
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
-    font_runtime_verify)
-        [ -f "$UNIVERSAL_VERIFY" ] || { printf '{"status":"error","message":"Runtime Verification 组件不可用"}\n'; exit 1; }
-        case "${2:-status}" in
-            run) MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$UNIVERSAL_VERIFY" run ;;
-            schedule) MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$UNIVERSAL_VERIFY" schedule ;;
-            *) MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$UNIVERSAL_VERIFY" status ;;
-        esac
-        ;;
     prewarm)
         if [ -f "$SAFE_SWITCH" ]; then
             MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
@@ -407,15 +348,13 @@ case "${1:-status}" in
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
+    font-switch-cancel|switch_cancel) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" cancel "${2:-}"; exit $? ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
     mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
     mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
+    font-mix-cancel|mix_cancel) mix_ready || exit 1; sh "$MIX_ENGINE" cancel "${2:-}"; exit $? ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
-    diag_export)
-        [ -f "$DIAGNOSTICS" ] || { printf '{"status":"error","message":"诊断包组件不可用"}\n'; exit 1; }
-        MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" sh "$DIAGNOSTICS" "${2:-}"
-        ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac
