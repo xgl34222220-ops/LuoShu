@@ -617,6 +617,10 @@ prepare_next_payload() {
         printf 'state=prepared\nfont=%s\n' "$_font"
         printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-${LUOSHU_SWITCH_REQUEST_ID:-safe-$$-$(date +%s)}}"
         printf 'previousFont=%s\npreviousLegacy=%s\n' "$_previous" "$_previous_legacy"
+        if [ "$_font" = mix ]; then
+            printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "${LUOSHU_MIX_EXPECTED_CJK:-}" "${LUOSHU_MIX_EXPECTED_LATIN:-}" "${LUOSHU_MIX_EXPECTED_DIGIT:-}"
+            printf 'compositeHash=%s\n' "$(read_state_value "${LUOSHU_MIX_MANIFEST:-/dev/null}" compositeHash)"
+        fi
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_next_tmp" 2>/dev/null || return 1
     luoshu_next_transaction_begin "$MODDIR" "$STAGE_PAYLOAD" "$_next_tmp" || return 1
@@ -808,7 +812,7 @@ switch_font() {
         return 1
     fi
 
-    if ! luoshu_next_transaction_commit "$MODDIR"; then
+    if ! luoshu_next_transaction_mix_receipt "$MODDIR" || ! luoshu_next_transaction_commit "$MODDIR"; then
         cancel_next_payload
         safe_error '字体事务提交失败，已恢复上次字体选择'
         return 1

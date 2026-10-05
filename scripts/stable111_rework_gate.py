@@ -11,6 +11,7 @@ BASELINE = "be39f598bfb921526851c5c4a2e92905dacf4ea7"
 HELPERS = (
     "common/task_scope.py", "common/task_scope.sh",
     "common/runtime_paths.sh", "common/runtime_paths_lock.py",
+    "common/font_next_transaction.sh", "common/font_live_switch.sh", "common/font_live_payload.py",
 )
 
 

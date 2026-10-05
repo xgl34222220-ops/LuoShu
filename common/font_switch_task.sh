@@ -128,7 +128,9 @@ worker_alive() {
 }
 
 live_journal_pending() {
-    [ -e "$LIVE_JOURNAL" ] || [ -L "$LIVE_JOURNAL" ]
+    [ -e "$LIVE_JOURNAL" ] || [ -L "$LIVE_JOURNAL" ] || \
+    [ -e "$MODDIR/.luoshu-state/backup/next-transaction" ] || \
+    [ -L "$MODDIR/.luoshu-state/backup/next-transaction" ]
 }
 
 recover_live_transaction() {
@@ -284,7 +286,7 @@ worker_signal_exit() {
         wait "$_switch_child" 2>/dev/null || true
         _switch_child=
     fi
-    write_task "$_worker_task" failed "$_font" '字体切换已终止，当前启动字体未被改动' \
+    write_task "$_worker_task" failed "$_font" '字体切换已终止，正在确认任务清理和挂载状态' \
         "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' "${_elapsed:-0}" '' false 100 || true
     exit "$_switch_signal_code"
 }
@@ -336,7 +338,7 @@ run_worker() {
     else
         _message=$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$_output" 2>/dev/null | tail -n1)
         [ "$_rc" -ne 0 ] || _rc=1
-        [ -n "$_message" ] || _message="字体切换失败（代码 $_rc），当前启动字体未被改动"
+        [ -n "$_message" ] || _message="字体切换失败（代码 $_rc），请查看日志和当前字体状态"
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
         write_task "$_task" failed "$_font" "$_message" "$_started" "$_finished" '' '' '' 0 '' false 100
     fi
@@ -426,6 +428,17 @@ status_task() {
     _live=$(read_value liveApplied); _activation=$(read_value activation)
     [ "$_reused" = true ] || _reused=false
     [ "$_live" = true ] && [ "$_boot" = "$(current_boot_id)" ] && ! live_journal_pending || _live=false
+    if [ "$_live" = true ]; then
+        _live_file="$MODDIR/config/font-live.conf"
+        [ "$(sed -n 's/^requestId=//p' "$_live_file" 2>/dev/null | head -n1)" = "$_task" ] && \
+        [ "$(sed -n 's/^requestId=//p' "$NEXT_STATE" 2>/dev/null | head -n1)" = "$_task" ] && \
+        [ "$(sed -n 's/^font=//p' "$_live_file" 2>/dev/null | head -n1)" = "$_font" ] && \
+        [ "$(sed -n 's/^state=//p' "$_live_file" 2>/dev/null | head -n1)" = mounted ] && \
+        [ "$(sed -n 's/^bootId=//p' "$_live_file" 2>/dev/null | head -n1)" = "$_boot" ] || _live=false
+        _live_mount=$(sed -n 's/^state=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)
+        { [ "$_font" = default ] && [ "$_live_mount" = idle ]; } || \
+        { [ "$_font" != default ] && [ "$_live_mount" = mounted ]; } || _live=false
+    fi
     [ -n "$_activation" ] || _activation=pending-reboot
     [ "$_live" = true ] || _activation=pending-reboot
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac

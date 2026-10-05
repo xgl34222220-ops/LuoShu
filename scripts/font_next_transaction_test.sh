@@ -18,7 +18,7 @@ FILES = ['font-payload-next.conf', 'active_font.conf', 'text_reboot_required.con
          'device-font-engine.conf', 'device-font-installed.conf', 'device-font-dynamic-mount.conf',
          'device-font-load-verification.json', 'device-font-load-verification.conf',
          'font-payload-rebuild-pending.conf', 'font-payload-reapply-notified.conf',
-         'device-font-cache-pending.conf']
+         'device-font-cache-pending.conf', 'mix-commit.conf']
 BOOT = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
 
 class NextTransactionTest(unittest.TestCase):
@@ -193,6 +193,74 @@ class NextTransactionTest(unittest.TestCase):
         self.assertEqual(result.returncode, -signal.SIGKILL)
         recovery = self.run_shell('luoshu_next_transaction_recover "$m"')
         self.assertEqual(recovery.returncode, 0, recovery.stderr); self.assert_prior(); self.assertFalse(self.journal.exists())
+
+    def test_killed_initial_journal_never_leaves_canonical_reservation(self):
+        injections = [
+            '_lnt_write_journal() { kill -KILL $$; }',
+            'mv() { [ "$2" != "$m/.luoshu-state/backup/next-transaction" ] || kill -KILL $$; command mv "$@"; }',
+        ]
+        for injection in injections:
+            with self.subTest(injection=injection):
+                result = self.run_shell(injection + '\n' + self.begin())
+                self.assertEqual(result.returncode, -signal.SIGKILL)
+                self.assertFalse(self.journal.exists()); self.assert_prior()
+                recovery = self.run_shell('luoshu_next_transaction_recover "$m"')
+                self.assertEqual(recovery.returncode, 0, recovery.stderr)
+                # The actual bounded supervisor removes the task temporary.
+                for temporary in self.work.glob('next-transaction-init.*'):
+                    shutil.rmtree(temporary)
+        self.assertEqual(self.run_shell(self.begin() + ' || exit $?\nluoshu_next_transaction_commit "$m"').returncode, 0)
+
+    def test_failed_initial_journal_cleans_task_temporary(self):
+        result = self.run_shell('_lnt_write_journal() { return 27; }\n' + self.begin())
+        self.assertEqual(result.returncode, 1); self.assert_prior()
+        self.assertFalse(self.journal.exists())
+        self.assertFalse(list(self.work.glob('next-transaction-init.*')))
+
+    def test_mix_initialization_uses_supervisor_temporary_not_shared_stage_parent(self):
+        stage = self.module / '.luoshu-state/tmp/mix-stage'
+        self.stage.rename(stage); self.stage = stage
+        result = self.run_shell('LUOSHU_TASK_SCOPE_TMPDIR="$m/.luoshu-state/tmp/task"\n'
+                                '_lnt_write_journal() { kill -KILL $$; }\n' + self.begin())
+        self.assertEqual(result.returncode, -signal.SIGKILL)
+        self.assertTrue(list(self.work.glob('next-transaction-init.*')))
+        self.assertFalse(list((self.module / '.luoshu-state/tmp').glob('next-transaction-init.*')))
+        self.assertFalse(self.journal.exists()); self.assert_prior()
+
+    def test_mix_receipt_is_committed_with_the_same_selection_tuple(self):
+        self.state.write_text('state=prepared\nfont=mix\nrequestId=test-mix\ncjk=Cjk\nlatin=Latin\ndigit=Digit\n')
+        result = self.run_shell(self.begin() + ' || exit $?\n'
+                                'luoshu_next_transaction_mix_receipt "$m" || exit $?\n'
+                                'luoshu_next_transaction_commit "$m"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = dict(row.split('=', 1) for row in (self.config / 'mix-commit.conf').read_text().splitlines())
+        self.assertEqual(receipt, dict(font='mix', requestId='test-mix', bootId=BOOT,
+                                      cjk='Cjk', latin='Latin', digit='Digit'))
+        self.assertFalse(self.journal.exists())
+
+    def test_mix_receipt_rollback_restores_prior_commit_proof(self):
+        self.state.write_text('state=prepared\nfont=mix\nrequestId=test-mix\n')
+        result = self.run_shell(self.begin() + ' || exit $?\n'
+                                'luoshu_next_transaction_mix_receipt "$m" || exit $?\n'
+                                'luoshu_next_transaction_rollback "$m"')
+        self.assertEqual(result.returncode, 0, result.stderr); self.assert_prior()
+
+    def test_non_mix_receipt_leaves_prior_mix_history_unchanged(self):
+        result = self.run_shell(self.begin() + ' || exit $?\n'
+                                'luoshu_next_transaction_mix_receipt "$m" || exit $?\n'
+                                'luoshu_next_transaction_commit "$m"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.config / 'mix-commit.conf').read_bytes(), self.before['mix-commit.conf'])
+
+    def test_mix_receipt_refuses_a_changed_published_request(self):
+        self.state.write_text('state=prepared\nfont=mix\nrequestId=test-mix\n')
+        result = self.run_shell(self.begin() + ' || exit $?\n'
+                                'printf "font=mix\\nrequestId=other\\n" > "$m/.luoshu-state/config/font-payload-next.conf"\n'
+                                'luoshu_next_transaction_mix_receipt "$m"')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual((self.config / 'mix-commit.conf').read_bytes(), self.before['mix-commit.conf'])
+        self.assertEqual(self.run_shell('luoshu_next_transaction_recover "$m"').returncode, 0)
+        self.assert_prior()
 
     def mark_previous_boot(self):
         journal = self.journal / 'journal.conf'

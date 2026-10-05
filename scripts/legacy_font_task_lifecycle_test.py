@@ -39,7 +39,7 @@ class LegacyFontTaskLifecycle(unittest.TestCase):
         (self.public / "fonts").mkdir(parents=True)
         for name in ("CJK", "Latin", "Digit", "Demo"):
             (self.public / "fonts" / (name + "-Regular.ttf")).write_bytes((name.encode() + b"font") * 400)
-        for name in ("background_task.sh", "task_scope.sh", "task_scope.py", "runtime_paths.sh", "runtime_paths_lock.py", "font_switch_lock.sh"):
+        for name in ("background_task.sh", "task_scope.sh", "task_scope.py", "runtime_paths.sh", "runtime_paths_lock.py", "font_switch_lock.sh", "font_next_transaction.sh"):
             shutil.copyfile(ROOT / "common" / name, self.module / "common" / name)
         for name in ("font_mix_engine.sh", "font_mix_runtime.sh", "font_switch_safe.sh", "payload_clone.sh"):
             shutil.copyfile(ROOT / "common/legacy_v14_4" / name, self.module / "common/legacy_v14_4" / name)

@@ -863,7 +863,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 } else if (reused) snapshot.fontEffectState else "pending-reboot",
                 liveApplied = liveApplied,
                 activation = result.optString("activation", if (liveApplied) "live-mounted" else "pending-reboot"),
-                mountState = if (liveApplied) "mounted" else snapshot.mountState,
+                mountState = if (liveApplied) {
+                    if (applied == "default") "idle" else "mounted"
+                } else snapshot.mountState,
                 mountFailure = if (liveApplied) "" else snapshot.mountFailure,
                 taskType = "switch",
                 taskId = taskId,
@@ -1013,6 +1015,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             onProgress(data)
             when (data.optString("state")) {
                 "success", "failed", "cancelled" -> return data
+                "cleanup-pending", "waiting-cleanup" -> error(data.optString("message", "字体任务清理尚未确认，请刷新重试"))
             }
         }
         error("字体任务超时，请查看日志")

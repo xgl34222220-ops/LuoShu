@@ -8,7 +8,8 @@ _lnt_files() {
         font_runtime_legacy_v14_4.conf font-payload-schema.conf \
         device-font-engine.conf device-font-installed.conf device-font-dynamic-mount.conf \
         device-font-load-verification.json device-font-load-verification.conf \
-        font-payload-rebuild-pending.conf font-payload-reapply-notified.conf device-font-cache-pending.conf
+        font-payload-rebuild-pending.conf font-payload-reapply-notified.conf device-font-cache-pending.conf \
+        mix-commit.conf
 }
 
 _lnt_setup() {
@@ -211,8 +212,22 @@ luoshu_next_transaction_begin() {
     _lnt_pid=${_lnt_self_stat%% *}; _lnt_identity=$(_lnt_start "$_lnt_pid") || return 1
     _lnt_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null) || return 1
     _lnt_payload_present=false; [ ! -d "$_lnt_next" ] || _lnt_payload_present=true
-    mkdir -m 0700 "$_lnt_dir" || return 1
-    _lnt_write_journal preparing || return 1
+    # Publish the first journal together with its directory. A killed mkdir /
+    # journal writer must leave only task-owned temporary, never a canonical
+    # journal-less reservation which would block every subsequent switch.
+    _lnt_canonical_dir="$_lnt_dir"
+    _lnt_init_root="${LUOSHU_TASK_SCOPE_TMPDIR:-${_lnt_stage%/*}}"
+    [ ! -L "$_lnt_init_root" ] || return 1
+    _lnt_init_parent=$(CDPATH= cd -P -- "$_lnt_init_root" 2>/dev/null && pwd) || return 1
+    case "$_lnt_init_parent/" in "$_lnt_module/.luoshu-state/tmp/"*) ;; *) return 1 ;; esac
+    _lnt_init_dir=$(mktemp -d "$_lnt_init_parent/next-transaction-init.XXXXXX") || return 1
+    _lnt_dir="$_lnt_init_dir"; _lnt_journal="$_lnt_dir/journal.conf"
+    if ! _lnt_write_journal preparing || ! mv "$_lnt_init_dir" "$_lnt_canonical_dir"; then
+        rm -rf "$_lnt_init_dir" 2>/dev/null || true
+        _lnt_dir="$_lnt_canonical_dir"; _lnt_journal="$_lnt_dir/journal.conf"
+        return 1
+    fi
+    _lnt_dir="$_lnt_canonical_dir"; _lnt_journal="$_lnt_dir/journal.conf"
     mkdir -m 0700 "$_lnt_dir/files" || return 1
     _lnt_presence="$_lnt_dir/presence.conf.tmp.$$"; : > "$_lnt_presence" || return 1
     for _lnt_name in $(_lnt_files); do
@@ -241,6 +256,32 @@ luoshu_next_transaction_commit() {
     _lnt_write_journal committed || return 1
     if ! _lnt_discard; then
         printf '%s\n' '[NEXT-TRANSACTION] selection committed; backup cleanup deferred to next recovery' >&2
+    fi
+    return 0
+}
+
+luoshu_next_transaction_mix_receipt() {
+    _lnt_setup "$1" && _lnt_read_journal || return 1
+    _lnt_owner_is_self && [ "$_lnt_state" = publishing ] && _lnt_owner_live || return 1
+    [ "$_lnt_font" = mix ] || return 0
+    _lnt_published_state="$_lnt_config/font-payload-next.conf"
+    [ "$(_lnt_file_value "$_lnt_published_state" font)" = mix ] && \
+        [ "$(_lnt_file_value "$_lnt_published_state" requestId)" = "$_lnt_request" ] || return 1
+    _lnt_receipt_root="${LUOSHU_TASK_SCOPE_TMPDIR:-$_lnt_module/.luoshu-state/tmp}"
+    [ ! -L "$_lnt_receipt_root" ] || return 1
+    _lnt_receipt_parent=$(CDPATH= cd -P -- "$_lnt_receipt_root" 2>/dev/null && pwd) || return 1
+    case "$_lnt_receipt_parent/" in "$_lnt_module/.luoshu-state/tmp/"*) ;; *) return 1 ;; esac
+    _lnt_receipt_tmp=$(mktemp "$_lnt_receipt_parent/mix-commit-receipt.XXXXXX") || return 1
+    # The receipt participates in the same rollback snapshot as NEXT and the
+    # selected font. Readers use it only after the journal has been resolved.
+    if ! {
+        printf 'font=mix\nrequestId=%s\nbootId=%s\n' "$_lnt_request" "$_lnt_boot"
+        for _lnt_role in cjk latin digit; do
+            printf '%s=%s\n' "$_lnt_role" "$(_lnt_file_value "$_lnt_published_state" "$_lnt_role")"
+        done
+    } > "$_lnt_receipt_tmp" || ! mv -f "$_lnt_receipt_tmp" "$_lnt_config/mix-commit.conf"; then
+        rm -f "$_lnt_receipt_tmp" 2>/dev/null || true
+        return 1
     fi
     return 0
 }

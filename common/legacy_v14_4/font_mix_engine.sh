@@ -66,8 +66,24 @@ read_conf() {
 
 write_task() {
     _task="$1"; _state="$2"; _message="$3"; _cjk="$4"; _latin="$5"; _digit="$6"; _started="$7"; _finished="$8"
+    _ltw_task="$1"
+    _ltw_request="${LUOSHU_MIX_REQUEST_ID:-}"
+    _ltw_committed=''
+    if [ -n "$_ltw_request" ] && [ "$(sed -n 's/^task=//p' "$TASK_FILE" 2>/dev/null | head -n1)" = "$_ltw_task" ] &&
+       [ "$(sed -n 's/^requestId=//p' "$TASK_FILE" 2>/dev/null | head -n1)" = "$_ltw_request" ]; then
+        _ltw_existing=$(sed -n 's/^committedRequestId=//p' "$TASK_FILE" 2>/dev/null | head -n1)
+        [ "$_ltw_existing" != "$_ltw_request" ] || _ltw_committed="$_ltw_request"
+    fi
+    _ltw_real="${LUOSHU_REAL_MODDIR:-$MODDIR}"
+    if [ ! -e "$_ltw_real/.luoshu-state/backup/next-transaction" ] &&
+       [ ! -L "$_ltw_real/.luoshu-state/backup/next-transaction" ] &&
+       [ -n "$_ltw_request" ] && [ "$(sed -n 's/^font=//p' "$_ltw_real/config/mix-commit.conf" 2>/dev/null | head -n1)" = mix ] &&
+       [ "$(sed -n 's/^requestId=//p' "$_ltw_real/config/mix-commit.conf" 2>/dev/null | head -n1)" = "$_ltw_request" ]; then
+        _ltw_committed="$_ltw_request"
+    fi
     _tmp="$TASK_FILE.tmp.$$"
     {
+        printf 'requestId=%s\ncommittedRequestId=%s\n' "$_ltw_request" "$_ltw_committed"
         printf 'task=%s\n' "$_task"
         printf 'state=%s\n' "$_state"
         printf 'message=%s\n' "$_message"

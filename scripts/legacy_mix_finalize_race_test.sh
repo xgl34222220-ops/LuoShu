@@ -12,7 +12,9 @@ trap cleanup EXIT HUP INT TERM
 
 MODULE="$TMP/module"
 mkdir -p "$MODULE/common" "$MODULE/config"
-for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+mkdir -p "$MODULE/common/legacy_v14_4"
+cp "$ROOT/common/legacy_v14_4/payload_clone.sh" "$MODULE/common/legacy_v14_4/payload_clone.sh"
+for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py font_next_transaction.sh font_switch_lock.sh; do
     cp "$ROOT/common/$helper" "$MODULE/common/$helper"
 done
 export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
@@ -132,6 +134,7 @@ grep -q '"latinWeight":420' "$TMP/config-fast.out"
 # its next-boot payload is actually committed, and polling must never run setup_runtime.
 cat > "$MODULE/config/axes_task.conf" <<'EOF_RUNNING'
 task=axes-fast
+requestId=request-b
 state=running
 message=正在后台生成
 cjk=CjkFast
@@ -157,8 +160,40 @@ MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-commit.out"
 grep -q '"state":"success"' "$TMP/status-commit.out"
 grep -q '"percent":100' "$TMP/status-commit.out"
 
+# Completion belongs to the task's own publish, even after the boot consumes
+# NEXT or a later direct selection replaces it. This history must not keep the
+# App at 99% or claim another request's currently mounted generation.
+grep -q '^requestId=request-b$' "$MODULE/config/mix-commit.conf"
+if grep -q '^committedRequestId=' "$MODULE/config/axes_task.conf"; then
+    echo 'status must not overwrite task metadata while a new request can start' >&2
+    exit 1
+fi
+cp "$MODULE/config/font-payload-next.conf" "$TMP/committed-next-state"
+rm -f "$MODULE/config/font-payload-next.conf"
+MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-consumed.out"
+grep -q '"state":"success"' "$TMP/status-consumed.out"
+grep -q '"liveApplied":false' "$TMP/status-consumed.out"
+printf 'font=other\nrequestId=later-request\n' > "$MODULE/config/font-payload-next.conf"
+MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-superseded.out"
+grep -q '"state":"success"' "$TMP/status-superseded.out"
+grep -q '"liveApplied":false' "$TMP/status-superseded.out"
+cp "$TMP/committed-next-state" "$MODULE/config/font-payload-next.conf"
+sed -i '/^committedRequestId=/d' "$MODULE/config/axes_task.conf"
+
+# A new request cannot borrow the previous generation's durable completion.
+printf 'requestId=request-c\n' > "$MODULE/config/mix-stage-next.conf"
+sed -i 's/^requestId=request-b$/requestId=request-c/' "$MODULE/config/axes_task.conf"
+printf 'state=failed\nmessage=新一代提交失败\n' > "$MODULE/config/mix-finalize-state.conf"
+MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-new-failed.out"
+grep -q '"state":"failed"' "$TMP/status-new-failed.out"
+grep -q '新一代提交失败' "$TMP/status-new-failed.out"
+rm -f "$MODULE/config/mix-stage-next.conf"
+sed -i 's/^requestId=request-c$/requestId=request-b/' "$MODULE/config/axes_task.conf"
+
 rm -rf "$MODULE/.luoshu-payload-next"
 rm -f "$MODULE/config/font-payload-next.conf"
+sed -i 's/^requestId=request-b$/requestId=request-d/' "$MODULE/config/axes_task.conf"
+printf 'requestId=request-d\n' > "$MODULE/config/mix-stage-next.conf"
 cat > "$MODULE/config/mix-finalize-state.conf" <<'EOF_FINALIZE_FAIL'
 state=failed
 message=提交校验失败

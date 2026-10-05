@@ -206,8 +206,10 @@ status_json() {
     _live_request=$(read_prop "$_live_file" requestId)
     if [ -n "$_current_boot" ] && [ "$_live_boot" = "$_current_boot" ] &&
        [ "$(read_prop "$_live_file" state)" = mounted ] &&
-       [ ! -e "$MODDIR/config/font-live-transaction.conf" ]; then
-        case "$_mount_state" in mounted|idle)
+       [ ! -e "$MODDIR/config/font-live-transaction.conf" ] &&
+       [ ! -L "$MODDIR/config/font-live-transaction.conf" ]; then
+        if { [ "$_live_font" = default ] && [ "$_mount_state" = idle ]; } ||
+           { [ -n "$_live_font" ] && [ "$_live_font" != default ] && [ "$_mount_state" = mounted ]; }; then
             _effective_active="$_live_font"
             if [ "$_live_font" = "$_active" ] && [ -n "$_live_request" ] &&
                [ "$(read_prop "$_live_file" requestId)" = "$(read_prop "$MODDIR/config/font-payload-next.conf" requestId)" ]; then
@@ -217,8 +219,7 @@ status_json() {
                 else _font_effect_state=live-mounted
                 fi
             fi
-            ;;
-        esac
+        fi
     fi
     if [ "$_live_applied" != true ] && [ "$_reboot_required" != true ]; then
         case "$_font_effect_state" in system|verified) _activation=boot-verified ;; *) _activation=unverified ;; esac

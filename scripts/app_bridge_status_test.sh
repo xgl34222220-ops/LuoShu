@@ -76,6 +76,38 @@ assert_status unknown pending stale-verification
 touch "$CONFIG/text_reboot_required.conf"
 assert_status unknown pending-reboot ''
 
+# Live status requires this boot, the selected request, and settled mounting.
+BOOT=$(cat /proc/sys/kernel/random/boot_id)
+printf 'state=mounted\nfont=DemoFont\nrequestId=req-live\nbootId=%s\n' "$BOOT" > "$CONFIG/font-live.conf"
+printf 'requestId=req-live\nfont=DemoFont\n' > "$CONFIG/font-payload-next.conf"
+assert_status DemoFont live-mounted ''
+printf 'state=idle\n' > "$CONFIG/self-mount.conf"
+assert_status unknown pending-reboot ''
+printf 'state=mounted\n' > "$CONFIG/self-mount.conf"
+ln -s "$TMP/no-journal" "$CONFIG/font-live-transaction.conf"
+assert_status unknown pending-reboot ''
+rm -f "$CONFIG/font-live-transaction.conf"
+printf 'pending\n' > "$CONFIG/font-live-transaction.conf"
+assert_status unknown pending-reboot ''
+rm -f "$CONFIG/font-live-transaction.conf"
+printf 'requestId=req-new\nfont=DemoFont\n' > "$CONFIG/font-payload-next.conf"
+assert_status DemoFont pending-reboot ''
+printf 'state=mounted\nfont=DemoFont\nrequestId=req-live\nbootId=old-boot\n' > "$CONFIG/font-live.conf"
+assert_status unknown pending-reboot ''
+printf 'default\n' > "$CONFIG/active_font.conf"
+assert_status unknown pending-reboot ''
+printf 'state=mounted\nfont=default\nrequestId=req-default\nbootId=%s\n' "$BOOT" > "$CONFIG/font-live.conf"
+printf 'state=idle\n' > "$CONFIG/self-mount.conf"
+printf 'requestId=req-default\nfont=default\n' > "$CONFIG/font-payload-next.conf"
+assert_status default system ''
+
+# No selected task means startup must not launch either heavy controller.
+for controller in font_mix_controller.sh font_switch_task.sh; do
+    printf '#!/bin/sh\nprintf unexpected >> "%s"\nexit 1\n' "$TMP/controller-called" > "$MODULE/common/$controller"
+done
+MODDIR="$MODULE" sh "$MODULE/common/app_bridge.sh" status >/dev/null 2>>"$TMP/request-cleanup.stderr"
+[ ! -e "$TMP/controller-called" ]
+
 [ "$(readlink "$CONFIG")" = '.luoshu-state/config' ]
 "$HOST_PYTHON" - "$MODULE/.luoshu-state/tasks" <<'PY'
 import json
@@ -84,7 +116,7 @@ import sys
 
 tasks = Path(sys.argv[1])
 proofs = list(tasks.glob('request-*.pid.cleanup.json'))
-assert len(proofs) == 8, proofs
+assert len(proofs) == 17, proofs
 for path in proofs:
     proof = json.loads(path.read_text())
     assert proof['cleaned'] and not proof['leftoverPids'] and proof['result'] == 0, proof

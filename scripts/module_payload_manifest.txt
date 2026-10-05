@@ -139,3 +139,6 @@ uninstall.sh
 action.sh
 boot-completed.sh
 magic
+common/font_next_transaction.sh
+common/font_live_switch.sh
+common/font_live_payload.py

@@ -19,7 +19,7 @@ mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs" "$PUBLIC_DIR/fonts" \
 cp "$ROOT/common/font_manager.sh" "$MODDIR/common/font_manager.sh"
 cp "$ROOT/common/legacy_v14_4_switch.sh" "$MODDIR/common/legacy_v14_4_switch.sh"
 cp "$ROOT/common/font_switch_lock.sh" "$MODDIR/common/font_switch_lock.sh"
-for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py font_next_transaction.sh; do
     cp "$ROOT/common/$helper" "$MODDIR/common/$helper"
 done
 printf 'id=LuoShu\n' > "$MODDIR/module.prop"

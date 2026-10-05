@@ -8,7 +8,7 @@ MOD="$TMP/module"
 CFG="$MOD/config"
 mkdir -p "$CFG" "$MOD/common" "$TMP/public/fonts"
 for helper in font_active_state.sh font_manager.sh multiweight_mix_task.sh weighted_mix_task.sh \
-    task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py background_task.sh font_switch_lock.sh; do
+    task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py background_task.sh font_switch_lock.sh font_next_transaction.sh; do
     cp "$ROOT/common/$helper" "$MOD/common/$helper"
 done
 mkdir -p "$MOD/common/legacy_v14_4"

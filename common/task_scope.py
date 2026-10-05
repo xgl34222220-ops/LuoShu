@@ -233,7 +233,7 @@ def cleanup(worker, pidfile, allow_handoff):
                     # An outer supervisor can reap a nested supervisor before
                     # its own finally block; publish the verified cleanup here.
                     report = dict(schema='task-cleanup-v2', task=child['task'], pid=child['pid'],
-                                  start=child['start'], boot=child['boot'], result=143,
+                                  start=child['start'], boot=child['boot'], namespace=child['namespace'], result=143,
                                   cleaned=True, reason='parent-cleanup', leftoverPids=[],
                                   handoffTasks=[], handoffOwners=[])
                     atomic(child['pidfile'] + '.cleanup.json', json.dumps(report, sort_keys=True) + '\n')
@@ -359,7 +359,7 @@ def run(args):
             result = 125
         report = dict(schema='task-cleanup-v2', task=args.task, result=result, reason=reason,
                       cleaned=not proof['leftoverPids'] and not proof['cleanupErrors'], boot=BOOT, pid=record['pid'],
-                      start=record['start'], durationSeconds=round(time.monotonic() - started, 3), **proof)
+                      start=record['start'], namespace=SELF_NS, durationSeconds=round(time.monotonic() - started, 3), **proof)
         if published:
             atomic(str(pidfile) + '.cleanup.json', json.dumps(report, sort_keys=True) + '\n')
             if report['cleaned']:
@@ -388,9 +388,11 @@ def cancel(pidfile, task):
                 raise ValueError('invalid cleanup proof')
             task = task or proof.get('task', '')
             clean = (proof.get('task') == task and proof.get('boot') == BOOT and
+                     proof.get('namespace', SELF_NS) == SELF_NS and
                      proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors'))
             if record:
-                clean = clean and all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot'))
+                clean = clean and record.get('namespace') == SELF_NS and \
+                        all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot'))
             elif Path(str(pidfile) + '.owner.json').exists():
                 clean = False
             elif any(Path(str(pidfile) + suffix).exists() for suffix in ('', '.task', '.start', '.boot', '.ready')):
@@ -433,6 +435,7 @@ def cancel(pidfile, task):
         if not isinstance(proof, dict):
             raise ValueError('invalid cleanup proof')
         clean = (not same_process(record) and proof.get('cleaned') is True and
+                 proof.get('namespace', SELF_NS) == SELF_NS and
                  not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
                  all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot')))
         for child in proof.get('handoffOwners', []):
@@ -450,11 +453,51 @@ def cleaned(pidfile, task):
         proof = json.loads(Path(str(pidfile) + '.cleanup.json').read_text())
         record = read_owner(pidfile)
         return bool(proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
-                    proof.get('task') == task and proof.get('boot') == BOOT and not same_process(record) and
+                    proof.get('task') == task and proof.get('boot') == BOOT and proof.get('namespace', SELF_NS) == SELF_NS and
+                    not same_process(record) and
                     (record or not Path(str(pidfile) + '.owner.json').exists()) and
-                    (not record or all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot'))))
+                    (not record or record.get('namespace') == SELF_NS and
+                     all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot'))))
     except (OSError, ValueError, TypeError, AttributeError):
         return False
+
+
+def settled(pidfile):
+    """Read-only slot inspection: cleanup proof, safe absence, or old boot."""
+    record = read_owner(pidfile)
+    if same_process(record):
+        return 3
+    if record and record.get('boot') and record['boot'] != BOOT:
+        return 0
+    if not record:
+        if Path(str(pidfile) + '.owner.json').exists():
+            return 125
+        if any(Path(str(pidfile) + suffix).exists() for suffix in ('', '.task', '.start', '.boot', '.ready')):
+            try:
+                saved_boot = Path(str(pidfile) + '.boot').read_text().strip()
+                return 0 if saved_boot and saved_boot != BOOT else 125
+            except OSError:
+                return 125
+    proof_path = Path(str(pidfile) + '.cleanup.json')
+    if not proof_path.exists():
+        return 125 if record else 0
+    try:
+        proof = json.loads(proof_path.read_text())
+        if not isinstance(proof, dict):
+            return 125
+        if not record and proof.get('boot') and proof['boot'] != BOOT:
+            return 0
+        if not cleaned(pidfile, record['task'] if record else proof.get('task', '')):
+            return 125
+        for child in proof.get('handoffOwners', []):
+            if read_owner(child['pidfile']) == child:
+                if same_process(child):
+                    return 3
+                if child.get('boot') == BOOT and not cleaned(child['pidfile'], child['task']):
+                    return 125
+        return 0
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return 125
 
 
 def legacy_cancel(pidfile, module):
@@ -561,7 +604,7 @@ def main():
     runner.add_argument('--parent-watch', action='store_true')
     runner.add_argument('--request', action='store_true')
     runner.add_argument('command', nargs=argparse.REMAINDER)
-    for name in ('alive', 'cancel', 'cleaned'):
+    for name in ('alive', 'cancel', 'cleaned', 'settled'):
         child = commands.add_parser(name)
         child.add_argument('pidfile')
         child.add_argument('task', nargs='?', default='')
@@ -616,6 +659,8 @@ def main():
         return 0 if same_process(record) and (not args.task or record['task'] == args.task) else 1
     if args.action == 'cleaned':
         return 0 if cleaned(args.pidfile, args.task) else 1
+    if args.action == 'settled':
+        return settled(args.pidfile)
     result, code = cancel(args.pidfile, args.task)
     print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
     return code

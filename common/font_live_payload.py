@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Copy immutable live generations without sharing writable source inodes."""
+import fcntl
 import hashlib
 import json
 import os
@@ -106,6 +107,15 @@ def prepare(source, cache, boot, temporary):
 
 if __name__ == "__main__":
     try:
+        if sys.argv[1:2] == ['--lock-exec']:
+            lock = Path(sys.argv[2])
+            if lock.is_symlink():
+                raise ValueError('unsafe live lock')
+            descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.set_inheritable(descriptor, True)
+            os.environ['LUOSHU_LIVE_LOCK_FD'] = str(descriptor)
+            os.execvp(sys.argv[3], sys.argv[3:])
         print(prepare(*sys.argv[1:]))
     except (OSError, ValueError, TypeError) as error:
         print(str(error), file=sys.stderr)

@@ -22,6 +22,7 @@ _device_font_inventory_target
 _dfpr_anchor_lines
 _dfpr_prepare_dynamic_state
 _font_anchor
+_lfrp_payload_root
 _luoshu_config_weight_source
 _luoshu_font_config_specs
 _luoshu_magic_mount_present
@@ -121,6 +122,14 @@ ALLOW
 # common/util_functions.sh. The isolated v14.4 switch backend sources this safety-only file after its
 # old utility layer, preserving PID/starttime/boot-id/token concurrency protection without importing
 # the v4 device-template / slot / XML font generation pipeline.
+#
+# The explicit current-boot switch sources frozen font_runtime_policy.sh first,
+# then replaces only its payload-root resolver with an immutable cache generation.
+# Boot callers keep their original resolver. Pin the exact two defining files.
+printf '%s\n' common/font_live_switch.sh common/font_runtime_policy.sh > "$TMP/live-root-expected"
+grep -l '^_lfrp_payload_root()' "$ROOT"/common/*.sh "$ROOT"/*.sh | \
+    sed "s|$ROOT/||" | sort > "$TMP/live-root-actual"
+cmp -s "$TMP/live-root-expected" "$TMP/live-root-actual" || fail '当前启动负载解析器出现未登记的覆盖'
 
 : > "$TMP/defs"
 for f in "$ROOT"/common/*.sh "$ROOT"/*.sh; do

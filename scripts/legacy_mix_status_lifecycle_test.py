@@ -21,7 +21,8 @@ class MixStatusLifecycleTest(unittest.TestCase):
         self.config = self.module / 'config'
         self.config.mkdir(parents=True)
         (self.module / 'common').mkdir()
-        for name in ('background_task.sh','task_scope.sh','task_scope.py','runtime_paths.sh','runtime_paths_lock.py'):
+        for name in ('background_task.sh','task_scope.sh','task_scope.py','runtime_paths.sh','runtime_paths_lock.py',
+                     'font_next_transaction.sh','font_switch_lock.sh'):
             (self.module / 'common' / name).symlink_to(ROOT / 'common' / name)
         self.task_file = self.config / 'axes_task.conf'
         self.boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
@@ -69,17 +70,18 @@ class MixStatusLifecycleTest(unittest.TestCase):
         Path(str(path) + '.boot').write_text((boot or self.boot) + '\n')
         return process, path
 
-    def test_dead_worker_is_failed_and_metadata_is_preserved(self):
+    def test_bare_dead_pid_without_cleanup_proof_preserves_ownership_evidence(self):
         path = self.tasks / 'axes_worker.pid'
         path.write_text('99999999\n')
         Path(str(path) + '.task').write_text('axes-stale\n')
         data = self.call()['data']
-        self.assertEqual((data['state'], data['progress']['percent']), ('failed', 100))
+        self.assertEqual((data['state'], data['progress']['percent']), ('cleanup-pending', 100))
         self.assertEqual(data['cjk'], '测试字体')
         saved = self.task_file.read_text()
         self.assertIn('root=/preserve-this-cache\n', saved)
         self.assertIn('childTask=mix-child\n', saved)
-        self.assertFalse(path.exists())
+        self.assertEqual(path.read_text(), '99999999\n')
+        self.assertEqual(Path(str(path) + '.task').read_text(), 'axes-stale\n')
 
     def test_home_reconcile_also_releases_dead_task(self):
         self.assertEqual(self.call('reconcile'), {'status': 'ok'})
@@ -101,20 +103,20 @@ class MixStatusLifecycleTest(unittest.TestCase):
                 self.write_task(state=state, started=int(time.time()))
                 self.assertEqual(self.call()['data']['state'], state)
 
-    def test_previous_boot_pid_is_rejected_without_killing_process(self):
+    def test_inconsistent_boot_sidecar_cannot_release_unproved_owner(self):
         process, _ = self.worker(boot='previous-boot')
-        self.assertEqual(self.call()['data']['state'], 'failed')
+        self.assertEqual(self.call()['data']['state'], 'cleanup-pending')
         self.assertIsNone(process.poll())
 
     def test_reused_pid_with_other_task_preserves_its_sidecars(self):
         process, path = self.worker(task='axes-new')
-        self.assertEqual(self.call()['data']['state'], 'failed')
+        self.assertEqual(self.call()['data']['state'], 'running')
         self.assertIsNone(process.poll())
         self.assertEqual(Path(str(path) + '.task').read_text(), 'axes-new\n')
 
     def test_task_prefix_is_not_the_same_worker(self):
         process, _ = self.worker(task='axes-stale-new', sidecar_task='axes-stale')
-        self.assertEqual(self.call()['data']['state'], 'failed')
+        self.assertEqual(self.call()['data']['state'], 'cleanup-pending')
         self.assertIsNone(process.poll())
 
     def test_new_request_during_reconcile_is_not_overwritten(self):
@@ -127,6 +129,61 @@ class MixStatusLifecycleTest(unittest.TestCase):
         self.env['PATH'] = f'{directory}:{self.env["PATH"]}'
         self.call('reconcile')
         self.assertIn('task=axes-new\nstate=queued\n', self.task_file.read_text())
+
+    def test_old_version_completed_history_survives_boot_consumed_next_without_claiming_live(self):
+        self.write_task(state='success')
+        process, path = self.worker()
+        process.terminate(); process.communicate(timeout=6)
+        proof = json.loads(Path(str(path) + '.cleanup.json').read_text())
+        self.assertTrue(proof['cleaned'])
+        # Older controllers had no per-task publish request marker. A later
+        # font-live entry cannot turn that historical task into a live claim.
+        (self.config / 'font-live.conf').write_text('state=mounted\nfont=mix\nrequestId=later-request\nbootId=' + self.boot + '\n')
+        (self.config / 'self-mount.conf').write_text('state=mounted\n')
+        data = self.call()['data']
+        self.assertEqual(data['state'], 'success')
+        self.assertEqual(data['progress']['percent'], 100)
+        self.assertFalse(data['liveApplied'])
+        self.assertEqual(data['activation'], 'pending-reboot')
+
+    def completed_receipt(self):
+        self.write_task(state='success')
+        with self.task_file.open('a') as task:
+            task.write('requestId=request-receipt\n')
+        process, path = self.worker()
+        process.terminate(); process.communicate(timeout=6)
+        self.assertTrue(json.loads(Path(str(path) + '.cleanup.json').read_text())['cleaned'])
+        (self.config / 'mix-commit.conf').write_text('font=mix\nrequestId=request-receipt\n')
+        return self.task_file.read_bytes()
+
+    def test_receipt_history_after_consumed_and_superseded_next_is_read_only(self):
+        before = self.completed_receipt()
+        for next_state in (None, 'font=other\nrequestId=later-request\n'):
+            with self.subTest(next_state=next_state):
+                if next_state is not None:
+                    (self.config / 'font-payload-next.conf').write_text(next_state)
+                data = self.call()['data']
+                self.assertEqual((data['state'], data['progress']['percent']), ('success', 100))
+                self.assertFalse(data['liveApplied'])
+                self.assertEqual(self.task_file.read_bytes(), before)
+
+    def test_settled_success_with_journal_created_after_reconcile_requires_cleanup(self):
+        before = self.completed_receipt()
+        directory = Path(self.temp.name) / 'bin'
+        directory.mkdir()
+        sed = directory / 'sed'
+        sed.write_text('#!/bin/sh\n'
+                       'if [ "$2" = "s/^requestId=//p" ] && '
+                       '[ "$3" = "$MODDIR/config/mix-commit.conf" ]; then\n'
+                       '  mkdir -p "$MODDIR/.luoshu-state/backup/next-transaction"\n'
+                       'fi\nexec /bin/sed "$@"\n')
+        sed.chmod(0o755)
+        self.env['PATH'] = f'{directory}:{self.env["PATH"]}'
+        data = self.call()['data']
+        self.assertTrue((self.module / '.luoshu-state/backup/next-transaction').exists())
+        self.assertEqual(data['state'], 'cleanup-pending')
+        self.assertFalse(data['liveApplied'])
+        self.assertEqual(self.task_file.read_bytes(), before)
 
 
 if __name__ == '__main__':

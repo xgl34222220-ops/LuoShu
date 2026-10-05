@@ -18,6 +18,32 @@ ACTIVE="$LUOSHU_CONFIG_DIR/active_font.conf"
 BOOT=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
 value() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 result() { printf '{"liveApplied":%s,"activation":"%s","reason":"%s"}\n' "$1" "$2" "$3"; }
+# Explicit cleanup runs after the original task's complete process proof.
+# Hold the canonical selection lock in this outer shell across namespace entry.
+_recover_lock_held=false
+if [ "${1:-}" = recover ]; then
+    . "$MODDIR/common/font_switch_lock.sh" || exit 126
+    . "$MODDIR/common/font_next_transaction.sh" || exit 126
+    _recover_lock="$MODDIR/.font_switch.lock"
+    luoshu_font_lock_acquire "$_recover_lock" "$$" || { result false pending-reboot recovery-lock-unavailable; exit 1; }
+    _recover_lock_held=true
+    trap 'luoshu_font_lock_release "$_recover_lock" "$$" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    luoshu_next_transaction_recover "$MODDIR" || { result false pending-reboot next-transaction-cleanup-required; exit 1; }
+    [ ! -e "$LUOSHU_BACKUP_DIR/next-transaction" ] && [ ! -L "$LUOSHU_BACKUP_DIR/next-transaction" ] || {
+        result false pending-reboot next-transaction-cleanup-required; exit 1;
+    }
+    if [ ! -e "$JOURNAL" ] && [ ! -L "$JOURNAL" ]; then result false pending-reboot live-cleaned; exit 0; fi
+fi
+enter_live_namespace() {
+    if [ "$_recover_lock_held" = true ]; then
+        "$@"
+        exit $?
+    fi
+    exec "$@"
+}
 if [ "${1:-}" != entered ]; then
     _mode="${1:-apply}"
     _self_ns=$(readlink /proc/self/ns/mnt 2>/dev/null)
@@ -26,22 +52,38 @@ if [ "${1:-}" != entered ]; then
         result false pending-reboot namespace-unavailable; exit 1
     fi
     if [ "$_self_ns" = "$_init_ns" ]; then
-        exec sh "$0" entered "$_mode"
+        enter_live_namespace sh "$0" entered "$_mode"
     elif command -v nsenter >/dev/null 2>&1; then
-        exec nsenter -t 1 -m -- sh "$0" entered "$_mode"
+        enter_live_namespace nsenter -t 1 -m -- sh "$0" entered "$_mode"
     elif command -v toybox >/dev/null 2>&1; then
-        exec toybox nsenter -t 1 -m -- sh "$0" entered "$_mode"
+        enter_live_namespace toybox nsenter -t 1 -m -- sh "$0" entered "$_mode"
     elif command -v busybox >/dev/null 2>&1; then
-        exec busybox nsenter -t 1 -m -- sh "$0" entered "$_mode"
+        enter_live_namespace busybox nsenter -t 1 -m -- sh "$0" entered "$_mode"
     fi
     result false pending-reboot namespace-enter-failed; exit 1
 fi
 [ "$(readlink /proc/self/ns/mnt 2>/dev/null)" = "$(readlink /proc/1/ns/mnt 2>/dev/null)" ] && \
     [ -n "$BOOT" ] || { result false pending-reboot namespace-mismatch; exit 1; }
-. "$MODDIR/common/font_switch_lock.sh" || exit 126
+PYROOT="$MODDIR/common/python"
 LIVE_LOCK="$LUOSHU_TASKS_DIR/font-live.lock"
-luoshu_font_lock_acquire "$LIVE_LOCK" "$$" || { result false pending-reboot live-transaction-busy; exit 1; }
-trap 'luoshu_font_lock_release "$LIVE_LOCK" "$$" >/dev/null 2>&1 || true' EXIT
+_live_python() {
+    if [ -n "${LUOSHU_LIVE_PAYLOAD_PYTHON:-}" ]; then
+        "$LUOSHU_LIVE_PAYLOAD_PYTHON" "$MODDIR/common/font_live_payload.py" "$@"
+    else
+        PYTHONHOME="$PYROOT" PYTHONPATH="$PYROOT/lib/python3.14" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYROOT/bin/luoshu-python" "$MODDIR/common/font_live_payload.py" "$@"
+    fi
+}
+# Kernel ownership survives namespace entry and releases after SIGKILL; no
+# PID lease can keep a dead switch locked for minutes.
+if [ -z "${LUOSHU_LIVE_LOCK_FD:-}" ]; then
+    _live_python --lock-exec "$LIVE_LOCK" sh "$0" entered "${2:-apply}"
+    exit $?
+fi
+case "$LUOSHU_LIVE_LOCK_FD" in ''|*[!0-9]*) result false pending-reboot live-lock-invalid; exit 1 ;; esac
+[ "$(readlink "/proc/self/fd/$LUOSHU_LIVE_LOCK_FD" 2>/dev/null)" = "$LIVE_LOCK" ] || \
+    { result false pending-reboot live-lock-invalid; exit 1; }
 . "$MODDIR/common/mount_compat.sh" || { result false pending-reboot mount-runtime-missing; exit 1; }
 type luoshu_private_self_mount_ensure >/dev/null 2>&1 || { result false pending-reboot mount-runtime-missing; exit 1; }
 _lfrp_payload_root() { printf '%s\n' "$SOURCE"; }
@@ -95,10 +137,14 @@ signal_exit() {
     exit "$_signal_rc"
 }
 recover_live() {
-    [ ! -e "$JOURNAL" ] || [ ! -L "$JOURNAL" ] || return 1
-    [ -s "$JOURNAL" ] || return 0
+    [ ! -L "$JOURNAL" ] || return 1
+    [ -e "$JOURNAL" ] || return 0
+    [ -f "$JOURNAL" ] && [ -s "$JOURNAL" ] || return 1
     [ "$(value "$JOURNAL" schema)" = luoshu-live-transaction-v1 ] || return 1
-    if [ "$(value "$JOURNAL" bootId)" != "$BOOT" ]; then
+    _journal_boot=$(value "$JOURNAL" bootId)
+    [ -n "$_journal_boot" ] || return 1
+    case "$(value "$JOURNAL" oldLivePresent)" in true|false) ;; *) return 1 ;; esac
+    if [ "$_journal_boot" != "$BOOT" ]; then
         rm -f "$JOURNAL" "$OLD_LIVE_STATE"; return $?
     fi
     OLD_SOURCE=$(value "$JOURNAL" oldSource)
@@ -129,15 +175,8 @@ if [ "$(value "$LIVE_STATE" bootId)" = "$BOOT" ] && [ "$(value "$LIVE_STATE" sta
     _previous=$(value "$LIVE_STATE" source)
     if safe_source "$_previous"; then OLD_SOURCE="$_previous"; OLD_FONT=$(value "$LIVE_STATE" font); fi
 fi
-PYROOT="$MODDIR/common/python"
 _COPY_TMP="$LUOSHU_TASK_SCOPE_TMPDIR/live-generation-$$"
-if [ -n "${LUOSHU_LIVE_PAYLOAD_PYTHON:-}" ]; then
-    SOURCE=$("$LUOSHU_LIVE_PAYLOAD_PYTHON" "$MODDIR/common/font_live_payload.py" "$NEXT" "$LIVE_CACHE" "$BOOT" "$_COPY_TMP")
-else
-    SOURCE=$(PYTHONHOME="$PYROOT" PYTHONPATH="$PYROOT/lib/python3.14" \
-        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$PYROOT/bin/luoshu-python" "$MODDIR/common/font_live_payload.py" "$NEXT" "$LIVE_CACHE" "$BOOT" "$_COPY_TMP")
-fi
+SOURCE=$(_live_python "$NEXT" "$LIVE_CACHE" "$BOOT" "$_COPY_TMP")
 safe_source "$SOURCE" || { result false pending-reboot live-copy-failed; exit 1; }
 if [ "$OLD_SOURCE" != "$SOURCE" ] || ! live_visible; then
     _journal_tmp="$LUOSHU_TASK_SCOPE_TMPDIR/live-transaction-state"

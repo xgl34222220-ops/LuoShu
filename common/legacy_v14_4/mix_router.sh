@@ -43,6 +43,11 @@ json_escape_router() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+mix_transaction_pending() {
+    [ -e "$REALMOD/config/font-live-transaction.conf" ] || [ -L "$REALMOD/config/font-live-transaction.conf" ] || \
+    [ -e "$REALMOD/.luoshu-state/backup/next-transaction" ] || [ -L "$REALMOD/.luoshu-state/backup/next-transaction" ]
+}
+
 # The App reads this on every entry to the combination page.  Building the entire
 # compatibility runtime just to read three small config files can exceed the App's
 # 25-second Root timeout while another worker owns the filesystem, which surfaced
@@ -74,55 +79,108 @@ mix_config_json_fast() {
         "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
 }
 
-# Reconcile only the detached axes controller used by the App. Its PID sidecars
-# include task and boot identity; the older base engine's bare PID does not.
-# This runs without setting up a runtime, reading fonts or touching payloads.
+# Inspect every controller/engine/monitor slot without signalling processes.
+# 0 = proved cleanup, 1 = safe absence without a terminal proof, 3 = live,
+# 125 = unconfirmed cleanup. Successful work always requires a matching proof.
+mix_scope_state_fast() (
+    _mssf_file="$1"; _mssf_task=$(read_value "$1" task)
+    _mssf_child=$(read_value "$1" childTask); [ -n "$_mssf_child" ] || _mssf_child="$_mssf_task"
+    _mssf_root="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}"
+    . "$REALMOD/common/background_task.sh" || return 125
+    _mssf_live=0; _mssf_unknown=0; _mssf_exact=0
+    for _mssf_slot in "axes_worker.pid|$_mssf_task" "auto_multiweight_worker.pid|$_mssf_task" \
+        "mix_worker.pid|$_mssf_child" "mix-monitor-$_mssf_child.pid|$_mssf_child.monitor"; do
+        _mssf_pidfile="$_mssf_root/${_mssf_slot%%|*}"; _mssf_expected="${_mssf_slot#*|}"
+        sh "$(luoshu_scope_runner)" settled "$_mssf_pidfile" >/dev/null 2>&1
+        _mssf_rc=$?
+        case "$_mssf_rc" in 0) ;; 3) _mssf_live=1; continue ;; *) _mssf_unknown=1; continue ;; esac
+        if [ "$_mssf_exact" -eq 0 ]; then
+            if sh "$(luoshu_scope_runner)" cleaned "$_mssf_pidfile" "$_mssf_expected" >/dev/null 2>&1; then
+                _mssf_exact=1
+            else
+                # Previous-boot registrations/proofs have no surviving tasks.
+                _mssf_boot=$(cat "$_mssf_pidfile.boot" 2>/dev/null | tr -d '\r\n')
+                _mssf_saved_task=$(cat "$_mssf_pidfile.task" 2>/dev/null | tr -d '\r\n')
+                if [ -z "$_mssf_boot" ] && grep -Fq '"task": "'"$_mssf_expected"'"' "$_mssf_pidfile.cleanup.json" 2>/dev/null; then
+                    _mssf_boot=$(sed -n 's/.*"boot": "\([^"]*\)".*/\1/p' "$_mssf_pidfile.cleanup.json" 2>/dev/null)
+                    _mssf_saved_task="$_mssf_expected"
+                fi
+                if [ "$_mssf_saved_task" = "$_mssf_expected" ] && [ -n "$_mssf_boot" ] && \
+                   [ "$_mssf_boot" != "$(luoshu_current_boot_id)" ]; then _mssf_exact=1; fi
+            fi
+        fi
+    done
+    [ "$_mssf_live" -eq 0 ] || return 3
+    [ "$_mssf_unknown" -eq 0 ] || return 125
+    [ "$_mssf_exact" -eq 1 ] || [ "$(read_value "$_mssf_file" cleanupConfirmed)" = true ] || return 1
+    return 0
+)
+
+# Reconcile task metadata only: no runtime links, font reads or payload changes.
 mix_reconcile_fast() (
     _mrf_file="$REALMOD/config/axes_task.conf"
+    [ -s "$_mrf_file" ] || _mrf_file="$REALMOD/config/mix_task.conf"
     [ -s "$_mrf_file" ] || return 0
     _mrf_snapshot=$(cat "$_mrf_file" 2>/dev/null) || return 0
     _mrf_state=$(read_value "$_mrf_file" state)
-    case "$_mrf_state" in queued|running) ;; *) return 0 ;; esac
+    case "$_mrf_state" in queued|running|success|failed|cleanup-pending) ;; *) return 0 ;; esac
     _mrf_task=$(read_value "$_mrf_file" task)
     [ -n "$_mrf_task" ] || return 0
     [ -f "$REALMOD/common/background_task.sh" ] || return 0
     . "$REALMOD/common/background_task.sh"
-    mix_worker_alive_fast() {
-        for _mwaf_file in "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/axes_worker.pid" \
-            "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/auto_multiweight_worker.pid"; do
-            luoshu_task_pid_alive "$_mwaf_file" "$_mrf_task" || continue
-            return 0
-        done
-        return 1
-    }
-    mix_worker_alive_fast && return 0
+    mix_scope_state_fast "$_mrf_file"; _mrf_scope=$?
+    [ "$_mrf_scope" -ne 3 ] || return 0
     _mrf_started=$(read_value "$_mrf_file" started)
     _mrf_now=$(date +%s 2>/dev/null) || return 0
     case "$_mrf_now" in ''|*[!0-9]*) return 0 ;; esac
     case "$_mrf_started" in
         ''|*[!0-9]*) _mrf_started=$(stat -c '%Y' "$_mrf_file" 2>/dev/null) ;;
     esac
-    case "$_mrf_started" in ''|*[!0-9]*) return 0 ;; esac
+    case "$_mrf_started" in ''|*[!0-9]*) _mrf_started=0 ;; esac
     # The queued record precedes the detached worker and its sidecar writes.
     # Preserve that startup window, including a worker already marked running.
     _mrf_age=$((_mrf_now - _mrf_started))
-    [ "$_mrf_age" -ge 20 ] 2>/dev/null || return 0
+    case "$_mrf_state" in queued|running)
+        [ "$_mrf_age" -ge 20 ] 2>/dev/null || return 0 ;;
+    esac
+    _mrf_terminal=$(read_value "$_mrf_file" terminalState)
+    _mrf_message=$(read_value "$_mrf_file" message)
+    _mrf_terminal_message=$(read_value "$_mrf_file" terminalMessage)
+    _mrf_confirmed=false
+    if [ "$_mrf_scope" -eq 125 ] || mix_transaction_pending; then
+        case "$_mrf_state" in success|failed) _mrf_terminal="$_mrf_state"; _mrf_terminal_message="$_mrf_message" ;; esac
+        [ -n "$_mrf_terminal" ] || _mrf_terminal=failed
+        _mrf_new=cleanup-pending; _mrf_message='字体组合任务清理尚未确认，请刷新重试'
+    elif [ "$_mrf_scope" -eq 1 ] && { [ "$_mrf_state" = success ] || \
+         { [ "$_mrf_state" = cleanup-pending ] && [ "$_mrf_terminal" = success ]; }; }; then
+        [ "$_mrf_state" != success ] || _mrf_terminal_message="$_mrf_message"
+        _mrf_new=cleanup-pending; _mrf_terminal=success
+        _mrf_message='字体组合任务清理尚未确认，请刷新重试'
+    else
+        _mrf_confirmed=true
+        case "$_mrf_state" in
+            success|failed)
+                [ "$_mrf_scope" -ne 0 ] || return 0
+                _mrf_new="$_mrf_state" ;;
+            cleanup-pending) _mrf_new="${_mrf_terminal:-failed}"; _mrf_message="${_mrf_terminal_message:-字体组合进程已退出，任务子进程已回收}" ;;
+            *) _mrf_new=failed; _mrf_message='字体组合进程已退出，任务子进程已回收' ;;
+        esac
+        _mrf_terminal=''; _mrf_terminal_message=''
+    fi
     _mrf_tmp="${_mrf_file}.reconcile.$$"
-    printf '%s\n' "$_mrf_snapshot" | awk -F '=' -v now="$_mrf_now" '
-        $1 != "state" && $1 != "message" && $1 != "percent" && $1 != "finished" {print}
-        END {print "state=failed"; print "message=字体组合后台进程已退出，任务已自动释放，请重新应用";
-             print "percent=100"; print "finished=" now}' > "$_mrf_tmp" || return 0
+    printf '%s\n' "$_mrf_snapshot" | awk -F '=' -v now="$_mrf_now" -v state="$_mrf_new" -v message="$_mrf_message" \
+        -v terminal="$_mrf_terminal" -v terminal_message="$_mrf_terminal_message" -v confirmed="$_mrf_confirmed" '
+        $1 != "state" && $1 != "message" && $1 != "percent" && $1 != "finished" &&
+        $1 != "terminalState" && $1 != "terminalMessage" && $1 != "cleanupConfirmed" {print}
+        END {print "state=" state; print "message=" message; print "percent=100"; print "finished=" now;
+             print "terminalState=" terminal; print "terminalMessage=" terminal_message; print "cleanupConfirmed=" confirmed}' > "$_mrf_tmp" || return 0
     # A new request or worker may have arrived while the lightweight checks ran.
     # Do not publish a stale failure over its task record or erase its sidecars.
-    if [ "$(cat "$_mrf_file" 2>/dev/null)" != "$_mrf_snapshot" ] || mix_worker_alive_fast; then
+    if [ "$(cat "$_mrf_file" 2>/dev/null)" != "$_mrf_snapshot" ]; then
         rm -f "$_mrf_tmp" 2>/dev/null || true
         return 0
     fi
     mv -f "$_mrf_tmp" "$_mrf_file" 2>/dev/null || { rm -f "$_mrf_tmp"; return 0; }
-    for _mrf_pid_file in "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/axes_worker.pid" \
-        "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/auto_multiweight_worker.pid"; do
-        luoshu_clear_task_pid "$_mrf_pid_file" "$_mrf_task"
-    done
 )
 
 mix_status_json_fast() {
@@ -140,15 +198,13 @@ mix_status_json_fast() {
         return 0
     fi
     _state=$(read_value "$_task_file" state)
+    _status_original_state="$_state"
+    _status_scope=''
     _status_child=$(read_value "$_task_file" childTask)
     [ -n "$_status_child" ] || _status_child="$_task"
-    case "$_state" in success|failed)
-        . "$REALMOD/common/background_task.sh"
-        if luoshu_task_pid_alive "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/axes_worker.pid" "$_task" || \
-           luoshu_task_pid_alive "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/auto_multiweight_worker.pid" "$_task" || \
-           luoshu_task_pid_alive "${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/mix-monitor-$_status_child.pid" "$_status_child.monitor"; then
-            _state=running
-        fi
+    case "$_state" in success|failed|cleanup-pending)
+        mix_scope_state_fast "$_task_file"; _status_scope=$?
+        case "$_status_scope" in 0) ;; 3) _state=running ;; *) _state=cleanup-pending ;; esac
         ;;
     esac
     _message=$(read_value "$_task_file" message)
@@ -156,12 +212,32 @@ mix_status_json_fast() {
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
 
     if [ "$_state" = success ]; then
+        _task_request=$(read_value "$_task_file" requestId)
+        _task_committed=$(read_value "$_task_file" committedRequestId)
+        _task_receipt="$REALMOD/config/mix-commit.conf"
+        if [ -n "$_task_request" ] && [ "$(read_value "$_task_receipt" font)" = mix ] && \
+           [ "$(read_value "$_task_receipt" requestId)" = "$_task_request" ] && ! mix_transaction_pending; then
+            _task_committed="$_task_request"
+        fi
         _next_font=$(read_value "$NEXT_STATE" font)
-        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ]; then
+        _next_request=$(read_value "$NEXT_STATE" requestId)
+        _stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
+        _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
+        if [ -n "$_task_request" ] && [ "$_task_committed" = "$_task_request" ]; then
+            # This task's publish was already proved. Its historical completion
+            # survives the next boot consuming NEXT, or a later selection.
+            _percent=100
+        elif [ -z "$_task_request" ] && [ -z "$_stage_request" ] && [ ! -e "$MIX_STAGE" ] && [ ! -L "$MIX_STAGE" ]; then
+            # Older installed controllers persisted terminal success after their
+            # finalize step, but had no per-task request field. Keep this proven
+            # history terminal; it cannot assert a current live activation.
+            _percent=100
+        elif [ -n "$_task_request" ] && [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ] && \
+           [ "$_task_request" = "$_next_request" ] && \
+           { [ -z "$_stage_request" ] || [ "$_stage_request" = "$_next_request" ]; }; then
             _percent=100
         else
-            _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
-            _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
             if [ "$_finalize_state" = failed ]; then
                 _state=failed
                 _message="${_finalize_message:-复合字体负载提交失败}"
@@ -177,17 +253,41 @@ mix_status_json_fast() {
     _live_applied=false; _activation=pending-reboot
     _live_file="$REALMOD/config/font-live.conf"
     _live_request=$(read_value "$_live_file" requestId)
+    _task_request=$(read_value "$_task_file" requestId)
     _next_request=$(read_value "$NEXT_STATE" requestId)
     _current_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
-    if [ "$_state" = success ] && [ ! -e "$REALMOD/config/font-live-transaction.conf" ] && \
-       [ ! -L "$REALMOD/config/font-live-transaction.conf" ] && [ -n "$_live_request" ] && \
-       [ "$_live_request" = "$_next_request" ] && [ "$(read_value "$_live_file" bootId)" = "$_current_boot" ] && \
-       [ "$(read_value "$_live_file" font)" = mix ] && [ "$(read_value "$_live_file" state)" = mounted ]; then
+    if [ "$_state" = success ] && ! mix_transaction_pending && [ -n "$_live_request" ] && \
+       [ "$_live_request" = "$_task_request" ] && [ "$_live_request" = "$_next_request" ] && \
+       [ "$(read_value "$_live_file" bootId)" = "$_current_boot" ] && \
+       [ "$(read_value "$_live_file" font)" = mix ] && [ "$(read_value "$_live_file" state)" = mounted ] && \
+       [ "$(read_value "$REALMOD/config/self-mount.conf" state)" = mounted ]; then
         _live_applied=true; _activation=live-mounted
         _message='当前启动已挂载新字体，重启后完整生效'
     fi
-    if [ -e "$REALMOD/config/font-live-transaction.conf" ] || [ -L "$REALMOD/config/font-live-transaction.conf" ]; then
-        _state=cleanup-pending; _message='等待恢复上次字体挂载事务，请刷新后重试'
+    if mix_transaction_pending; then
+        _status_active=false
+        [ "$_status_scope" != 3 ] || _status_active=true
+        case "$_status_original_state" in queued|running)
+            if [ -z "$_status_scope" ]; then
+                mix_scope_state_fast "$_task_file"; _status_scope=$?
+            fi
+            if [ "$_status_scope" -eq 3 ]; then
+                _status_active=true
+            elif [ "$_status_scope" -eq 1 ]; then
+                # The queued record can precede supervisor registration. Keep
+                # only this original startup grace, never derived running99.
+                _status_started=$(read_value "$_task_file" started)
+                _status_now=$(date +%s 2>/dev/null)
+                case "$_status_started:$_status_now" in *[!0-9:]*|:*) ;; *)
+                    [ $((_status_now - _status_started)) -ge 20 ] 2>/dev/null || _status_active=true ;;
+                esac
+            fi
+            ;;
+        esac
+        if [ "$_status_active" != true ]; then
+            _state=cleanup-pending; _message='等待恢复上次字体挂载事务，请刷新后重试'
+            _live_applied=false; _activation=pending-reboot
+        fi
     fi
     _cjk=$(read_value "$_task_file" cjk)
     _latin=$(read_value "$_task_file" latin)
@@ -289,6 +389,14 @@ prepare_mix_stage() {
     [ -n "$_previous" ] || _previous=default
     _previous_legacy=false
     [ -f "$LEGACY_MODE" ] && _previous_legacy=true
+    # ACTIVE is the pending user selection, not necessarily this boot's source.
+    # Retain the original boot baseline across default -> mix and repeated mixes.
+    if [ -s "$NEXT_STATE" ]; then
+        _queued_previous=$(read_value "$NEXT_STATE" previousFont)
+        _queued_legacy=$(read_value "$NEXT_STATE" previousLegacy)
+        [ -n "$_queued_previous" ] && _previous="$_queued_previous"
+        [ "$_queued_legacy" = true ] && _previous_legacy=true || _previous_legacy=false
+    fi
     _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$$"
     {
         printf 'requestId=%s\n' "$_request"
@@ -388,6 +496,36 @@ write_next_selection() {
     return 0
 }
 
+mark_mix_request_committed() {
+    _commit_request=$(read_value "$NEXT_STATE" requestId)
+    [ -n "$_commit_request" ] && [ "$(read_value "$NEXT_STATE" font)" = mix ] || return 1
+    _receipt="$REALMOD/config/mix-commit.conf"
+    _receipt_tmp="$LUOSHU_TMP_DIR/mix-commit-receipt-$$"
+    {
+        printf 'font=mix\nrequestId=%s\nbootId=%s\n' "$_commit_request" "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+        for _commit_role in cjk latin digit; do
+            printf '%s=%s\n' "$_commit_role" "$(read_value "$NEXT_STATE" "$_commit_role")"
+        done
+    } > "$_receipt_tmp" && mv -f "$_receipt_tmp" "$_receipt" || return 1
+    for _commit_task in "$REALMOD/config/axes_task.conf" "$REALMOD/config/mix_task.conf"; do
+        [ -s "$_commit_task" ] || continue
+        [ "$(read_value "$_commit_task" requestId)" = "$_commit_request" ] || continue
+        _commit_snapshot=$(cat "$_commit_task") || return 1
+        _commit_tmp="$LUOSHU_TMP_DIR/mix-task-commit-$$"
+        printf '%s\n' "$_commit_snapshot" | awk -F '=' -v request="$_commit_request" '
+            $1 != "committedRequestId" { print }
+            END { print "committedRequestId=" request }' > "$_commit_tmp" || return 1
+        # A live outer worker may still publish its success. Its task writer
+        # also consults the receipt; do not overwrite a concurrent new record.
+        if [ "$(cat "$_commit_task")" = "$_commit_snapshot" ]; then
+            mv -f "$_commit_tmp" "$_commit_task" || return 1
+        else
+            rm -f "$_commit_tmp" 2>/dev/null || true
+        fi
+    done
+    return 0
+}
+
 commit_mix_stage_if_needed() {
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
@@ -397,6 +535,7 @@ commit_mix_stage_if_needed() {
         _next_request=$(read_value "$NEXT_STATE" requestId)
         if [ "$_next_font" = mix ]; then
             if [ ! -s "$MIX_STAGE_STATE" ] || { [ -n "$_stage_request" ] && [ "$_next_request" = "$_stage_request" ]; }; then
+                mark_mix_request_committed || return 1
                 rm -rf "$MIX_STAGE" 2>/dev/null || true
                 rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
                 return 0
@@ -404,20 +543,37 @@ commit_mix_stage_if_needed() {
         fi
     fi
 
+    _narrow_recovered=false
+    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ] && [ ! -d "$MIX_STAGE" ]; then
+        _recover_manifest="$NEXT_PAYLOAD/.luoshu-mix-generation.conf"
+        _recover_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        [ -n "$_recover_request" ] && [ "$(read_value "$_recover_manifest" requestId)" = "$_recover_request" ] || return 1
+        for _recover_role in cjk latin digit; do
+            [ "$(read_value "$_recover_manifest" "$_recover_role")" = "$(read_value "$MIX_STAGE_STATE" "$_recover_role")" ] || return 1
+        done
+        [ -n "$(read_value "$_recover_manifest" compositeHash)" ] || return 1
+        # Preserve the renamed payload through the same new transaction. A
+        # mismatched generation is never reused merely because its name is mix.
+        luoshu_clone_payload_entry "$NEXT_PAYLOAD" "$MIX_STAGE" || return 1
+        _narrow_recovered=true
+    fi
     stage_has_fonts || return 1
     stage_generation_matches || return 1
-    complete_hyperos_stage || return 1
-    complete_coloros_stage || return 1
+    if [ "$_narrow_recovered" != true ]; then
+        complete_hyperos_stage || return 1
+        complete_coloros_stage || return 1
+    fi
     write_next_state || return 1
     if ! luoshu_next_transaction_begin "$REALMOD" "$MIX_STAGE" "$STAGED_NEXT_STATE"; then
         rm -f "$STAGED_NEXT_STATE" 2>/dev/null || true
         return 1
     fi
     rm -f "$STAGED_NEXT_STATE" 2>/dev/null || true
-    if ! write_next_selection || ! write_legacy_mix_mode || ! luoshu_next_transaction_commit "$REALMOD"; then
+    if ! write_next_selection || ! write_legacy_mix_mode || ! luoshu_next_transaction_mix_receipt "$REALMOD" || ! luoshu_next_transaction_commit "$REALMOD"; then
         luoshu_next_transaction_rollback "$REALMOD" >/dev/null 2>&1 || true
         return 1
     fi
+    mark_mix_request_committed || return 1
     rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
     printf '[%s] legacy composite staged for next boot: mix\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG_FILE" 2>/dev/null || true
@@ -567,34 +723,64 @@ if [ "$_cmd" = cancel ]; then
     [ -n "$_cancel_task" ] || { printf '{"status":"error","message":"缺少任务身份"}\n'; exit 2; }
     . "$REALMOD/common/background_task.sh"
     _cancel_current=$(read_value "$REALMOD/config/axes_task.conf" task)
+    [ -n "$_cancel_current" ] || _cancel_current=$(read_value "$REALMOD/config/mix_task.conf" task)
     if [ -n "$_cancel_current" ] && [ "$_cancel_current" != "$_cancel_task" ]; then
         printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"absent"}}\n' "$(json_escape_router "$_cancel_task")"
         exit 0
     fi
     _cancel_rc=0
+    _cancel_conf="$REALMOD/config/axes_task.conf"
+    [ -s "$_cancel_conf" ] || _cancel_conf="$REALMOD/config/mix_task.conf"
+    _cancel_child=$(read_value "$_cancel_conf" childTask); [ -n "$_cancel_child" ] || _cancel_child="$_cancel_task"
     for _cancel_pid in axes_worker auto_multiweight_worker; do
         _cancel_file="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/$_cancel_pid.pid"
-        [ "$(cat "$_cancel_file.task" 2>/dev/null)" != "$_cancel_task" ] || \
+        if [ "$(cat "$_cancel_file.task" 2>/dev/null)" = "$_cancel_task" ]; then
             luoshu_stop_task_pid "$_cancel_file" "$_cancel_task" >/dev/null || _cancel_rc=125
+        else
+            sh "$(luoshu_scope_runner)" settled "$_cancel_file" >/dev/null 2>&1 || _cancel_rc=125
+        fi
     done
-    if [ "$_cancel_rc" -eq 0 ] && { [ -e "$REALMOD/config/font-live-transaction.conf" ] || [ -L "$REALMOD/config/font-live-transaction.conf" ]; }; then
+    # A dead outer worker cannot vouch for the engine/monitor it registered.
+    # Inspect/cancel those exact task slots too, including interrupted handoff.
+    for _cancel_slot in "mix_worker.pid|$_cancel_child" "mix-monitor-$_cancel_child.pid|$_cancel_child.monitor"; do
+        _cancel_file="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/${_cancel_slot%%|*}"
+        _cancel_expected="${_cancel_slot#*|}"
+        if [ "$(cat "$_cancel_file.task" 2>/dev/null)" = "$_cancel_expected" ]; then
+            luoshu_stop_task_pid "$_cancel_file" "$_cancel_expected" >/dev/null || _cancel_rc=125
+        else
+            sh "$(luoshu_scope_runner)" settled "$_cancel_file" >/dev/null 2>&1 || _cancel_rc=125
+        fi
+    done
+    if [ "$_cancel_rc" -eq 0 ]; then
+        mix_scope_state_fast "$_cancel_conf"; _cancel_scope=$?
+        case "$_cancel_scope" in
+            0) ;;
+            1) _cancel_state=$(read_value "$_cancel_conf" state)
+               _cancel_terminal=$(read_value "$_cancel_conf" terminalState)
+               [ "$_cancel_state" != success ] && [ "$_cancel_terminal" != success ] || _cancel_rc=125 ;;
+            *) _cancel_rc=125 ;;
+        esac
+    fi
+    if [ "$_cancel_rc" -eq 0 ] && mix_transaction_pending; then
         MODDIR="$REALMOD" sh "$(luoshu_scope_runner)" request-run "mix-live-recover-$$-$(date +%s)" 30 -- \
             sh "$REALMOD/common/font_live_switch.sh" recover >/dev/null 2>&1 || _cancel_rc=125
-        [ ! -e "$REALMOD/config/font-live-transaction.conf" ] && [ ! -L "$REALMOD/config/font-live-transaction.conf" ] || _cancel_rc=125
+        ! mix_transaction_pending || _cancel_rc=125
     fi
     if [ "$_cancel_rc" -eq 0 ]; then
         # Nested engine/monitor scopes are cancelled by their owning worker;
         # never remove a completed or queued next-boot payload here.
-        _cancel_conf="$REALMOD/config/axes_task.conf"
         _cancel_state=$(read_value "$_cancel_conf" state)
-        case "$_cancel_state" in queued|running)
+        case "$_cancel_state" in queued|running|cleanup-pending)
             sed -e 's/^state=.*/state=failed/' -e 's/^message=.*/message=字体组合已取消，任务子进程已回收/' \
                 -e 's/^percent=.*/percent=100/' -e "s/^finished=.*/finished=$(date +%s)/" \
-                "$_cancel_conf" > "$_cancel_conf.cancel.$$" && mv -f "$_cancel_conf.cancel.$$" "$_cancel_conf"
+                -e '/^cleanupConfirmed=/d' -e '/^terminalState=/d' -e '/^terminalMessage=/d' \
+                "$_cancel_conf" > "$_cancel_conf.cancel.$$" && \
+                printf 'cleanupConfirmed=true\n' >> "$_cancel_conf.cancel.$$" && mv -f "$_cancel_conf.cancel.$$" "$_cancel_conf"
             ;;
         esac
         printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"cancelled"}}\n' "$(json_escape_router "$_cancel_task")"
     else
+        mix_reconcile_fast
         printf '{"status":"error","data":{"task":"%s","cleaned":false},"message":"任务收尾未完成"}\n' "$(json_escape_router "$_cancel_task")"
     fi
     exit "$_cancel_rc"
@@ -619,6 +805,17 @@ if [ "$_cmd" = status ]; then
 fi
 case "$_cmd" in
     start)
+        mix_reconcile_fast
+        _start_conf="$REALMOD/config/axes_task.conf"
+        [ -s "$_start_conf" ] || _start_conf="$REALMOD/config/mix_task.conf"
+        _start_state=$(read_value "$_start_conf" state)
+        case "$_start_state" in queued|running|cleanup-pending)
+            printf '{"status":"error","message":"已有字体组合任务正在运行或等待清理，请刷新重试"}\n'; exit 1 ;;
+        esac
+        mix_scope_state_fast "$_start_conf"; _start_scope=$?
+        case "$_start_scope" in 0|1) ;; *)
+            printf '{"status":"error","message":"上一字体组合任务清理尚未确认，请刷新重试"}\n'; exit 1 ;;
+        esac
         prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'
             exit 1

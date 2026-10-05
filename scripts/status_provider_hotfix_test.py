@@ -53,6 +53,9 @@ class HotfixTest(unittest.TestCase):
 
     def test_mix_reconcile_never_rewrites_live_runtime_or_payload(self):
         self.copy('legacy_v14_4/mix_router.sh')
+        for name in ('font_next_transaction.sh', 'font_switch_lock.sh', 'task_scope.sh',
+                     'task_scope.py', 'runtime_paths.sh', 'runtime_paths_lock.py'):
+            self.copy(name)
         self.run_shell(self.common / 'legacy_v14_4/mix_router.sh', 'reconcile')
         self.assertFalse((self.module / '.legacy-v14-runtime').exists())
         self.assertFalse((self.module / '.luoshu-payload').exists())

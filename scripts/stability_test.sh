@@ -18,7 +18,7 @@ cp "$ROOT/common/font_switch_task.sh" "$MODULE/common/font_switch_task.sh"
 cp "$ROOT/common/font_mix_controller.sh" "$MODULE/common/font_mix_controller.sh"
 cp "$ROOT/common/legacy_v14_4/mix_router.sh" "$MODULE/common/legacy_v14_4/mix_router.sh"
 cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
-for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
+for helper in background_task.sh task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py font_next_transaction.sh font_switch_lock.sh; do
     cp "$ROOT/common/$helper" "$MODULE/common/$helper"
 done
 cp "$ROOT/module.prop" "$MODULE/module.prop"
@@ -35,6 +35,9 @@ message=字体已准备
 started=100
 finished=101
 EOT
+# A terminal label alone cannot prove that a font task retired its descendants.
+# Complete a real isolated scope before testing its read-only terminal query.
+MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" run --pid-file "$MODULE/.luoshu-state/tasks/switch_task_worker.pid" --task test-task --timeout 3 -- sh -c ':' >/dev/null
 TASK=$(MODDIR="$MODULE" sh "$MODULE/common/font_switch_task.sh" status test-task)
 printf '%s' "$TASK" | grep -q '"state":"success"'
 test ! -e "$TMP/manager-called"
@@ -68,6 +71,7 @@ digit=DIN C
 started=100
 finished=101
 EOT
+MODDIR="$MODULE" sh "$MODULE/common/task_scope.sh" run --pid-file "$MODULE/.luoshu-state/tasks/mix_worker.pid" --task mix-task --timeout 3 -- sh -c ':' >/dev/null
 MIX=$(MODDIR="$MODULE" sh "$MODULE/common/font_mix_controller.sh" status mix-task)
 printf '%s' "$MIX" | grep -q '"cjk":"中文甲"'
 test ! -e "$TMP/manager-called"

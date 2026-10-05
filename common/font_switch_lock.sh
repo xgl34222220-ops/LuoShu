@@ -78,8 +78,160 @@ luoshu_font_lock_created() {
     fi
 }
 
+# A canonical owner PID can be hidden by a Root/PID namespace. Capture the
+# independently verified supervisor identity while the command is still alive,
+# then accept only its final descendant-cleanup proof when that owner disappears.
+# Python is needed only for acquisition inside a scope or a dead scoped owner;
+# the normal live-owner check and unassociated legacy locks stay shell-only.
+luoshu_font_lock_scope_recorded() {
+    _lflsr_path="$1"
+    [ ! -d "$_lflsr_path" ] || _lflsr_path="$_lflsr_path/pid"
+    grep -q '^scope_' "$_lflsr_path" 2>/dev/null
+}
+
+luoshu_font_lock_scope_identity() (
+    _lflsi_action="$1"
+    _lflsi_module="${LUOSHU_REAL_MODDIR:-${MODULE_DIR:-${MODDIR:-}}}"
+    [ -n "$_lflsi_module" ] || return 1
+    _lflsi_python="${LUOSHU_TASK_SCOPE_PYTHON:-$_lflsi_module/common/python/bin/luoshu-python}"
+    command -v "$_lflsi_python" >/dev/null 2>&1 || return 1
+    if [ -z "${LUOSHU_TASK_SCOPE_PYTHON:-}" ]; then
+        PYTHONHOME="$_lflsi_module/common/python"
+        PYTHONPATH="$PYTHONHOME/lib/python3.14:$PYTHONHOME/lib/python3.14/site-packages"
+        LD_LIBRARY_PATH="$PYTHONHOME/lib:$PYTHONHOME/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+        export PYTHONHOME PYTHONPATH LD_LIBRARY_PATH
+    fi
+    "$_lflsi_python" - "$_lflsi_action" "$_lflsi_module" "${2:-}" "${3:-}" <<'PY' 2>/dev/null
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import sys
+
+try:
+    action, module_text, lock_text, expected_text = sys.argv[1:]
+    module = Path(module_text).resolve(strict=True)
+    state = module / '.luoshu-state'
+    assert not state.is_symlink()
+    allowed = (state / 'tasks', state / 'config')
+    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    namespace = os.readlink('/proc/self/ns/pid')
+
+    def owned_path(value):
+        path = Path(value)
+        assert path.is_absolute() and not any(c in value for c in '\n\r|')
+        assert not path.is_symlink()
+        path = path.resolve()
+        assert path.name.endswith('.pid') and path.parent in allowed
+        assert not path.parent.is_symlink()
+        assert all(str(root.resolve()) == str(root) for root in allowed if root.exists())
+        return path
+
+    def load(path):
+        assert not path.is_symlink() and path.stat().st_size <= 65536
+        value = json.loads(path.read_text())
+        assert isinstance(value, dict)
+        return value
+
+    def fields(record):
+        assert type(record['pid']) is int and record['pid'] > 1
+        assert isinstance(record['start'], str) and record['start'].isdigit()
+        assert re.fullmatch(r'[A-Za-z0-9_.-]{1,160}', record['task'])
+        assert record['boot'] == boot
+        return (record['task'], str(record['pid']), record['start'], record['boot'])
+
+    if action == 'capture':
+        path = owned_path(os.environ['LUOSHU_TASK_SCOPE_PIDFILE'])
+        owner = load(Path(str(path) + '.owner.json'))
+        task, pid, start, saved_boot = fields(owner)
+        assert os.environ['LUOSHU_TASK_SCOPE_TASK'] == task
+        assert os.environ['LUOSHU_TASK_SCOPE_PID'] == pid
+        assert owned_path(owner['pidfile']) == path
+        assert owner['namespace'] == namespace
+        for suffix, expected in (('', pid), ('.task', task), ('.start', start), ('.boot', saved_boot)):
+            sidecar = Path(str(path) + suffix)
+            assert not sidecar.is_symlink() and sidecar.read_text().strip() == expected
+        proc_pid = owner['procPid']
+        assert type(proc_pid) is int and proc_pid > 1
+        proc_root = Path('/proc') / str(proc_pid)
+        stat = (proc_root / 'stat').read_text().rsplit(') ', 1)[1].split()
+        assert stat[0] != 'Z' and stat[19] == start
+        assert os.readlink(proc_root / 'ns/pid') == namespace
+        local_pid = str(proc_pid)
+        for line in (proc_root / 'status').read_text().splitlines():
+            if line.startswith('NSpid:'):
+                local_pid = line.split()[-1]
+        assert local_pid == pid
+        # The shell invoking this reader must actually descend from the saved
+        # supervisor, rather than borrowing another live task's environment.
+        ancestor = int(os.readlink('/proc/self'))
+        visited = set()
+        while ancestor != proc_pid:
+            assert ancestor > 1 and ancestor not in visited and len(visited) < 1024
+            visited.add(ancestor)
+            tail = (Path('/proc') / str(ancestor) / 'stat').read_text().rsplit(') ', 1)[1].split()
+            ancestor = int(tail[1])
+        for key, value in (('pidfile', str(path)), ('task', task), ('pid', pid),
+                           ('start', start), ('boot', saved_boot), ('namespace', namespace)):
+            print('scope_' + key + '=' + value)
+    elif action == 'cleaned':
+        lock = Path(lock_text)
+        record_path = lock / 'pid' if lock.is_dir() else lock
+        lines = record_path.read_text().splitlines()[1:]
+        values = {}
+        for line in lines:
+            if '=' in line:
+                key, value = line.split('=', 1)
+                assert key not in values
+                values[key] = value
+        path = owned_path(values['scope_pidfile'])
+        expected = (values['scope_task'], values['scope_pid'], values['scope_start'], values['scope_boot'])
+        proof = load(Path(str(path) + '.cleanup.json'))
+        assert proof.get('schema') == 'task-cleanup-v2' and fields(proof) == expected
+        assert values['scope_namespace'] == namespace and proof.get('namespace') == namespace
+        assert proof.get('cleaned') is True
+        assert all(proof.get(key) == [] for key in ('leftoverPids', 'cleanupErrors', 'handoffTasks', 'handoffOwners'))
+        # A replacement registration or a supervisor that has not yet cleared
+        # its ownership must never be retired using a preceding proof.
+        assert not any(Path(str(path) + suffix).exists() or Path(str(path) + suffix).is_symlink()
+                       for suffix in ('', '.owner.json', '.task', '.start', '.boot', '.ready'))
+    elif action == 'reap':
+        lock = Path(lock_text)
+        assert not lock.is_symlink()
+        lock = lock.parent.resolve(strict=True) / lock.name
+        assert lock == module / '.font_switch.lock'
+        tasks = allowed[0]
+        assert tasks.is_dir() and not tasks.is_symlink() and tasks.resolve() == tasks
+        # One stable kernel-lock inode serializes stale removers. It stays in
+        # the centralized tasks tree; process exit/SIGKILL releases the lock.
+        guard = tasks / 'font-switch-reap.lock'
+        descriptor = os.open(guard, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            record_path = lock / 'pid'
+            assert not record_path.is_symlink()
+            assert record_path.read_text().rstrip('\n') == expected_text
+            record_path.unlink()
+            (lock / '.init-observed').unlink(missing_ok=True)
+            lock.rmdir()
+        finally:
+            os.close(descriptor)
+    else:
+        raise ValueError('unknown scope action')
+except (AssertionError, OSError, ValueError, KeyError, TypeError, IndexError):
+    sys.exit(1)
+PY
+)
+
 luoshu_font_lock_recent_token() {
     _lfrt_path="$1"
+    if luoshu_font_lock_scope_recorded "$_lfrt_path"; then
+        # A failed/unknown cleanup is not made safe by the passage of 480 s.
+        # The original namespace lease remains unchanged for legacy records.
+        luoshu_font_lock_scope_identity cleaned "$_lfrt_path" && return 1
+        return 0
+    fi
     _lfrt_token="$(luoshu_font_lock_token "$_lfrt_path")"
     [ -n "$_lfrt_token" ] || return 1
     _lfrt_created="$(luoshu_font_lock_created "$_lfrt_path")"
@@ -137,6 +289,9 @@ luoshu_font_lock_active() {
 luoshu_font_lock_reap_stale() {
     _lfls_path="${1:-$MODULE_DIR/.font_switch.lock}"
     [ -e "$_lfls_path" ] || return 0
+    _lfls_record_path="$_lfls_path"
+    [ ! -d "$_lfls_path" ] || _lfls_record_path="$_lfls_path/pid"
+    _lfls_original_record="$(cat "$_lfls_record_path" 2>/dev/null)"
     luoshu_font_lock_active "$_lfls_path" && return 1
     if [ -d "$_lfls_path" ] && [ ! -s "$_lfls_path/pid" ]; then
         _lfls_observed="$_lfls_path/.init-observed"
@@ -150,6 +305,17 @@ luoshu_font_lock_reap_stale() {
         [ -e "$_lfls_path" ] || return 0
         luoshu_font_lock_active "$_lfls_path" && return 1
     fi
+    # Another contender may have retired the old directory and acquired a new
+    # token while identity/proof inspection ran. Do not remove its new record.
+    [ "$(cat "$_lfls_record_path" 2>/dev/null)" = "$_lfls_original_record" ] || return 1
+    case "$_lfls_original_record" in
+        *scope_pidfile=*)
+            # A second stale observer must recheck under the same kernel lock,
+            # rather than deleting a new acquisition at this pathname.
+            luoshu_font_lock_scope_identity reap "$_lfls_path" "$_lfls_original_record"
+            return $?
+            ;;
+    esac
     if [ -d "$_lfls_path" ]; then
         rm -f "$_lfls_path/pid" "$_lfls_path/.init-observed" 2>/dev/null || true
         rmdir "$_lfls_path" 2>/dev/null
@@ -166,6 +332,14 @@ luoshu_font_lock_acquire() {
     _lfla_boot="$(luoshu_current_boot_id 2>/dev/null)"
     _lfla_created="$(date +%s 2>/dev/null)"
     case "$_lfla_created" in ''|*[!0-9]*) _lfla_created=0 ;; esac
+    _lfla_scope=''
+    if [ -n "${LUOSHU_TASK_SCOPE_PIDFILE:-}${LUOSHU_TASK_SCOPE_TASK:-}${LUOSHU_TASK_SCOPE_PID:-}" ]; then
+        [ -n "${LUOSHU_TASK_SCOPE_PIDFILE:-}" ] && [ -n "${LUOSHU_TASK_SCOPE_TASK:-}" ] && \
+            [ -n "${LUOSHU_TASK_SCOPE_PID:-}" ] || return 1
+        # A scoped task cannot silently downgrade an unverified association to
+        # the legacy namespace lease. Only genuinely unscoped callers use it.
+        _lfla_scope="$(luoshu_font_lock_scope_identity capture 2>/dev/null)" || return 1
+    fi
     _lfla_attempt=0
     while [ "$_lfla_attempt" -lt 6 ]; do
         _lfla_tmp="$(mktemp "${_lfla_path}.owner.XXXXXX" 2>/dev/null)" || return 1
@@ -176,6 +350,7 @@ luoshu_font_lock_acquire() {
             [ -n "$_lfla_boot" ] && printf 'boot_id=%s\n' "$_lfla_boot"
             printf 'token=%s\n' "$_lfla_token"
             printf 'created=%s\n' "$_lfla_created"
+            [ -z "$_lfla_scope" ] || printf '%s\n' "$_lfla_scope"
         } > "$_lfla_tmp" 2>/dev/null || { rm -f "$_lfla_tmp" 2>/dev/null || true; return 1; }
         chmod 0600 "$_lfla_tmp" 2>/dev/null || true
         if mkdir "$_lfla_path" 2>/dev/null; then
