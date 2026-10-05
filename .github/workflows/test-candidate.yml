@@ -53,7 +53,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core build-essential pkg-config xz-utils libharfbuzz-dev libpng-dev libbrotli-dev zlib1g-dev libbz2-dev >/dev/null
 
       - uses: actions/cache@v4
         with:
@@ -65,6 +65,45 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
+
+      # Keep the layout verifier on the same FreeType as the original Ubuntu
+      # 24.04 build. Jammy's 2.11.1 lacks the HVAR no-variation sentinel support
+      # required by the existing variable-font layout gate.
+      # This is a host-only dependency and is never bundled into the module.
+      - name: Prepare pinned layout renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/freetype-2.13.2.tar.xz"
+          prefix="$RUNNER_TEMP/luoshu-freetype-2.13.2"
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 \
+            https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.xz -o "$archive" || \
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 \
+            https://download-mirror.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.xz -o "$archive"
+          printf '12991c4e55c506dd7f9b765933e62fd2be2e06d421505d7950a132e4f1bb484d  %s\n' "$archive" | sha256sum -c -
+          tar -xJf "$archive" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/freetype-2.13.2"
+          ./configure --prefix="$prefix" --enable-shared --disable-static \
+            --with-zlib=yes --with-bzip2=yes --with-png=yes --with-harfbuzz=yes --with-brotli=yes >/dev/null
+          make -j2 >/dev/null
+          make install >/dev/null
+          export LD_LIBRARY_PATH="$prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          printf 'LD_LIBRARY_PATH=%s\n' "$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+          python3 - "$prefix" <<'PY'
+          import ctypes as C
+          import ctypes.util
+          from pathlib import Path
+          import sys
+          api = C.CDLL(ctypes.util.find_library('freetype'))
+          library = C.c_void_p()
+          assert api.FT_Init_FreeType(C.byref(library)) == 0
+          version = [C.c_int() for _ in range(3)]
+          api.FT_Library_Version(library, *(C.byref(value) for value in version))
+          assert tuple(value.value for value in version) == (2, 13, 2)
+          assert str(Path(sys.argv[1]).resolve() / 'lib/libfreetype.so') in Path('/proc/self/maps').read_text()
+          assert api.FT_Done_FreeType(library) == 0
+          print('Verified isolated host FreeType 2.13.2')
+          PY
 
       - name: Run source checks
         shell: bash
