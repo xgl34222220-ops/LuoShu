@@ -34,7 +34,7 @@ import font_role_shadow
 import luoshu_merge
 import luoshu_payload as payload_format
 
-ENGINE_REVISION = 3
+ENGINE_REVISION = 4
 REPORT_SCHEMA = "luoshu-engine-report-v1"
 REPLACE_ROLES = {"ui-sans", "cjk", "latin", "clock", "numeric"}
 COMPOSITE_ROLES = ("cjk", "latin", "digit")
@@ -43,6 +43,13 @@ LATIN_LETTERS = frozenset(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 DIGITS = frozenset(map(ord, "0123456789"))
 MIN_HAN = 3000
 USE_TYPO_METRICS = 1 << 7
+PARTIAL_SYSTEM_TEXT = {
+    "NotoSerif-Regular.ttf": "serif", "NotoSerif-Bold.ttf": "serif",
+    "NotoSerif-Italic.ttf": "serif", "NotoSerif-BoldItalic.ttf": "serif",
+    "DroidSansMono.ttf": "monospace", "CutiveMono.ttf": "serif-monospace",
+    "ComingSoon.ttf": "casual", "DancingScript-Regular.ttf": "cursive",
+    "DancingScript-Bold.ttf": "cursive",
+}
 
 
 class EngineError(RuntimeError):
@@ -332,6 +339,68 @@ class Target:
     face_count: int
     metrics: dict[str, Any]
     refs: list[dict[str, Any]]
+    partial_stock: Path | None = None
+
+
+def is_partial_text_slot(path: str, slot: dict[str, Any]) -> bool:
+    """A known standard system text file with matching explicit XML semantics.
+
+    Protected roles stay protected. This narrowly scoped exception replaces
+    only proved text glyphs and does not authorize other OEM/fallback files.
+    """
+    if str(Path(path).parent) != "/system/fonts":
+        return False
+    family = PARTIAL_SYSTEM_TEXT.get(Path(path).name)
+    if family is None:
+        return False
+    allowed_aliases = {
+        "serif": {"serif", "serif-bold", "times", "times new roman", "palatino", "georgia",
+                  "baskerville", "goudy", "fantasy", "itc stone serif"},
+        "monospace": {"monospace", "sans-serif-monospace", "monaco"},
+        "serif-monospace": {"serif-monospace", "courier", "courier new"},
+        "casual": {"casual"}, "cursive": {"cursive"},
+    }
+    if any(str(alias).lower() not in allowed_aliases[family] for alias in slot.get("families") or []):
+        return False
+    refs = [ref for ref in slot.get("xmlRefs") or [] if isinstance(ref, dict)]
+    if not refs:
+        return False
+    for ref in refs:
+        attrs = ref.get("familyAttributes") or {}
+        if str(ref.get("family") or ref.get("familyNormalized") or "").lower() != family \
+                or attrs.get("lang") or ref.get("fallbackFor") or attrs.get("fallbackFor") \
+                or int(ref.get("index") or 0) != 0 \
+                or ref.get("resolvedPath") not in {None, "", path}:
+            return False
+    return True
+
+
+def _partial_stock_file(path: str, stock_paths: dict[str, Path]) -> Path | None:
+    explicit = stock_paths.get(path)
+    if explicit is not None and explicit.is_file():
+        return explicit
+    from luoshu_diagnostics import _snapshot_file
+    lower = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
+    return _snapshot_file(path, lower / "lower", lower_layout=True)
+
+
+def _partial_stock_reason(path: Path) -> str:
+    try:
+        if _collection_count(path) != 1:
+            return "partial-stock-collection-unsupported"
+        with TTFont(str(path), lazy=False) as font:
+            if any(tag in font for tag in ("fvar", "gvar", "HVAR", "VVAR", "CFF2")):
+                return "partial-stock-variable-unsupported"
+            if "glyf" not in font:
+                return "partial-stock-outline-unsupported"
+            if luoshu_merge.partial_point_layout(font):
+                return "partial-stock-point-layout-unsupported"
+            cmap = font.getBestCmap() or {}
+            if not LATIN_LETTERS <= cmap.keys() or not DIGITS <= cmap.keys():
+                return "partial-stock-text-incomplete"
+    except Exception:
+        return "partial-stock-unreadable"
+    return ""
 
 
 def _italic_style(value: Any) -> bool:
@@ -461,13 +530,35 @@ def plan_targets(
         if not isinstance(slot, dict):
             continue
         role = str((role_slots.get(path) or {}).get("role") or "unknown-protected")
+        partial_stock = None
+        if role in {"serif", "monospace", "special-fallback"} and is_partial_text_slot(path, slot):
+            partial_stock = _partial_stock_file(path, stock_paths)
+            reason = _partial_stock_reason(partial_stock) if partial_stock is not None \
+                else "partial-stock-base-missing"
+            if reason:
+                kept[path] = reason
+                continue
+            partial_metrics = _read_metrics(partial_stock)
+            weight = int(slot.get("weight") or partial_metrics.get("weightClass") or 400)
+            if sources.mode == "single":
+                face = _pick(sources.faces["single"], weight,
+                             _italic_style(slot.get("style")) or "italic" in Path(path).name.lower())[0]
+                complete = face.latin == 52 and face.digits == 10
+            else:
+                complete = sources._role_pick("latin", weight)[0].latin == 52 \
+                    and sources._role_pick("digit", weight)[0].digits == 10
+            if not complete:
+                kept[path] = "partial-source-text-incomplete"
+                continue
         metrics = slot.get("metrics") if isinstance(slot.get("metrics"), dict) else {}
-        coverage = _coverage(slot)
+        if partial_stock is not None:
+            metrics = partial_metrics
+        coverage = metrics.get("coverage") or {} if partial_stock is not None else _coverage(slot)
         has_han = bool(coverage.get("hasHan")) or int(coverage.get("hanCount") or 0) > 0
         has_latin = bool(coverage.get("hasLatin")) or int(coverage.get("latinCount") or 0) > 0
         if role == "unknown-protected" and has_han and has_latin:
             role = "broad-text"
-        elif role not in REPLACE_ROLES:
+        elif role not in REPLACE_ROLES and partial_stock is None:
             continue
         if path.startswith("/data/"):
             kept[path] = "dynamic-font"
@@ -493,6 +584,7 @@ def plan_targets(
             face_count=_face_count(path, slot, stock_paths),
             metrics=metrics,
             refs=[dict(ref) for ref in slot.get("xmlRefs") or [] if isinstance(ref, dict)],
+            partial_stock=partial_stock,
         ))
     return targets, kept
 
@@ -554,6 +646,61 @@ class Builder:
         self.deadline = deadline
         self.used: set[Path] = set()
         self.stats = {"instancesBuilt": 0, "instancesCached": 0, "outputsBuilt": 0, "outputsCached": 0}
+        self.full_hashes: dict[Path, str] = {}
+
+    def partial_output(self, target: Target) -> tuple[Path, dict[str, Any]]:
+        """A static stock base with a narrow text import; original XML stays valid."""
+        assert target.partial_stock is not None
+        picks = {}
+        for role in ("latin", "digit"):
+            picks[role] = (_pick(self.sources.faces["single"], target.weight, target.italic)
+                           if self.sources.mode == "single" else self.sources._role_pick(role, target.weight))
+        def digest(path: Path) -> str:
+            if path not in self.full_hashes:
+                self.full_hashes[path] = payload_format._sha256(path)
+            return self.full_hashes[path]
+        key = _canonical({"mode": "partial-stock", "rev": ENGINE_REVISION,
+                          "stock": digest(target.partial_stock),
+                          "sources": {role: {"sha256": digest(face.path), "index": face.index,
+                                             "location": location} for role, (face, location) in picks.items()}})
+        path = self.cache / f"partial-{key[:32]}.ttf"
+        metadata = path.with_suffix(".json")
+        self.used.update((path, metadata))
+        if path.is_file() and metadata.is_file():
+            self.stats["outputsCached"] += 1
+            return path, json.loads(metadata.read_text(encoding="utf-8"))
+        _deadline_check(self.deadline)
+        font = TTFont(str(target.partial_stock), lazy=False, recalcBBoxes=False, recalcTimestamp=False)
+        layout_bytes = {tag: font.reader[tag] for tag in ("GSUB", "GPOS", "GDEF", "BASE") if tag in font}
+        imported = {}
+        temp = path.with_suffix(".part")
+        try:
+            for role, (face, location) in picks.items():
+                # Pin every source axis before drawing. Old gvar point counts
+                # and phantom metrics must never be interpreted after import.
+                imported[role] = _instantiate(face, location)
+            details = luoshu_merge.import_partial_text(font, imported)
+            # Reading OpenType tables for ownership/point safety can normalize
+            # their serialization. Original GIDs never move, so retain their
+            # exact stock bytes as well as their semantics.
+            from fontTools.ttLib.tables.DefaultTable import DefaultTable
+            for tag, data in layout_bytes.items():
+                preserved = DefaultTable(tag)
+                preserved.data = data
+                font[tag] = preserved
+            for tag in ("DSIG", "LTSH", "hdmx", "VDMX"):
+                if tag in font:
+                    del font[tag]
+            font.save(str(temp))
+            os.replace(temp, path)
+            metadata.write_text(json.dumps(details, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        finally:
+            font.close()
+            for source in imported.values():
+                source.close()
+            temp.unlink(missing_ok=True)
+        self.stats["outputsBuilt"] += 1
+        return path, details
 
     def _base_path(self, kind: str, weight: int, italic: bool) -> tuple[Path, str]:
         if kind == "variable" and self.sources.mode == "single":
@@ -844,6 +991,20 @@ def build(
         for position, target in enumerate(targets, 1):
             if progress:
                 progress(position, len(targets), Path(target.path).name)
+            if target.partial_stock is not None:
+                main, details = builder.partial_output(target)
+                if not details["latinGlyphsReplaced"] and not details["digitGlyphsReplaced"]:
+                    kept[target.path] = "partial-no-safe-text-glyphs"
+                    continue
+                logical = payload_format._safe_logical(target.path)
+                rel = payload_format._payload_relative(logical)
+                _place(main, stage / rel)
+                files[target.path] = _file_record(target.path, str(rel), stage / rel, "physical-font")
+                # No NodeAction: stock family/index/axis/PostScriptName nodes
+                # retain their original semantics and original glyph IDs.
+                replaced.append({"path": target.path, "role": target.role, "mode": "partial-stock",
+                                 "variable": False, "faces": 1, **details})
+                continue
             line = _line_metrics(target)
             italic_variable = sources.variable_face(True)
             upright_variable = sources.variable_face(False)

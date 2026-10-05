@@ -9,7 +9,9 @@ the baseline. The output keeps one complete cmap.
 from __future__ import annotations
 
 import math
+import copy
 import statistics
+import unicodedata
 from typing import Iterable
 
 from fontTools.pens.basePen import NullPen
@@ -131,17 +133,18 @@ def _clear_metric_variations(font: TTFont, glyph_name: str) -> None:
             mapping.mapping[glyph_name] = NO_VARIATION_INDEX
 
 
-def _draw(glyph_set, name: str, pen, scale: float, shift: float) -> None:
+def _draw(glyph_set, name: str, pen, scale: float, shift: float,
+          x_scale: float | None = None, x_shift: float = 0.0) -> None:
     recorder = DecomposingRecordingPen(glyph_set)
     glyph_set[name].draw(recorder)
-    recorder.replay(TransformPen(pen, (scale, 0, 0, scale, 0, shift)))
+    recorder.replay(TransformPen(pen, (scale if x_scale is None else x_scale, 0, 0, scale, x_shift, shift)))
 
 
 def _replace_glyf(base: TTFont, src_kind: str, glyph_set, base_name: str, src_name: str,
-                  scale: float, shift: float) -> None:
+                  scale: float, shift: float, x_scale: float | None = None, x_shift: float = 0.0) -> None:
     pen = TTGlyphPen(None)
     _draw(glyph_set, src_name, Cu2QuPen(pen, max_err=max(0.5, base["head"].unitsPerEm / 2000),
-                                        reverse_direction=src_kind in {"cff", "cff2"}), scale, shift)
+                                        reverse_direction=src_kind in {"cff", "cff2"}), scale, shift, x_scale, x_shift)
     glyph = pen.glyph()
     base["glyf"][base_name] = glyph
     glyph.recalcBounds(base["glyf"])
@@ -153,7 +156,8 @@ def _replace_glyf(base: TTFont, src_kind: str, glyph_set, base_name: str, src_na
 
 
 def _replace_cff(base: TTFont, src_kind: str, glyph_set, base_name: str, src_name: str,
-                 scale: float, shift: float, width: int) -> None:
+                 scale: float, shift: float, width: int,
+                 x_scale: float | None = None, x_shift: float = 0.0) -> None:
     tag = "CFF " if "CFF " in base else "CFF2"
     cff = base[tag].cff
     top = cff.topDictIndex[0]
@@ -162,7 +166,7 @@ def _replace_cff(base: TTFont, src_kind: str, glyph_set, base_name: str, src_nam
     is_cff2 = tag == "CFF2"
     pen = T2CharStringPen(None if is_cff2 else width, None, CFF2=is_cff2)
     _draw(glyph_set, src_name, Qu2CuPen(pen, max_err=max(0.5, base["head"].unitsPerEm / 2000),
-                                        all_cubic=True, reverse_direction=src_kind == "glyf"), scale, shift)
+                                        all_cubic=True, reverse_direction=src_kind == "glyf"), scale, shift, x_scale, x_shift)
     charstring = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
     if selector is not None:
         charstring.fdSelectIndex = selector
@@ -217,6 +221,256 @@ def import_glyphs(base: TTFont, src: TTFont, role: str, location: dict[str, floa
     if replaced < len(required):
         raise MergeError(f"{'英文' if role == 'latin' else '数字'}替换数量异常（仅 {replaced} 个）")
     return replaced
+
+
+# A protected system text face keeps its scripts and symbols. This deliberately
+# excludes combining marks, currencies and the letterlike-symbol range used by
+# the full composite importer.
+PARTIAL_TEXT_CODEPOINTS = frozenset(
+    {point for span in (range(0x41, 0x7B), range(0xC0, 0x250), range(0x1E00, 0x1F00),
+                       range(0xFB00, 0xFB07), range(0xFF21, 0xFF5B)) for point in span
+     if unicodedata.category(chr(point)).startswith("L")
+     and "LATIN" in unicodedata.name(chr(point), "")}
+    | set(range(0x30, 0x3A)) | set(range(0xFF10, 0xFF1A))
+    | set(map(ord, " !\"'(),-./:;?_"))
+)
+
+
+def _unicode_aliases(font: TTFont) -> dict[str, set[int]]:
+    aliases: dict[str, set[int]] = {}
+    for table in font["cmap"].tables:
+        if table.isUnicode():
+            for point, name in (getattr(table, "cmap", None) or {}).items():
+                aliases.setdefault(name, set()).add(point)
+        # A UVS non-default mapping also owns the glyph, even when getBestCmap
+        # does not expose it. Protect it rather than inferring its semantics.
+        if table.format == 14:
+            for pairs in (getattr(table, "uvsDict", None) or {}).values():
+                for point, name in pairs:
+                    if name is not None:
+                        aliases.setdefault(name, set()).add(-1)
+    return aliases
+
+
+def _gsub_tables(font: TTFont):
+    if "GSUB" not in font or font["GSUB"].table.LookupList is None:
+        return
+    for lookup in font["GSUB"].table.LookupList.Lookup:
+        for table in lookup.SubTable:
+            yield table.ExtSubTable if lookup.LookupType == 7 else table
+
+
+def partial_point_layout(font: TTFont) -> bool:
+    """Point-index anchors cannot be retained on a newly drawn target glyph.
+
+    Fail closed for the whole partial face rather than guessing which nested
+    coverage associates an AnchorFormat2/GDEF point reference with a target.
+    """
+    seen: set[int] = set()
+    def visit(value) -> bool:
+        if isinstance(value, (str, int, float, bytes, type(None))) or id(value) in seen:
+            return False
+        seen.add(id(value))
+        if any(hasattr(value, field) for field in ("AnchorPoint", "CaretValuePoint", "PointIndex", "BaseCoordPoint")):
+            return True
+        children = value.values() if isinstance(value, dict) else value \
+            if isinstance(value, (list, tuple)) else vars(value).values() if hasattr(value, "__dict__") else []
+        return any(visit(child) for child in children)
+    return any(visit(font[tag].table) for tag in ("GPOS", "GDEF", "BASE") if tag in font)
+
+
+def partial_ligatures(font: TTFont) -> dict[tuple[int, ...], str]:
+    """Unambiguous Latin ligatures, keyed by the Unicode input sequence.
+
+    A common sequence with several feature-specific outputs is kept stock;
+    matching an arbitrary stylistic alternative would misidentify the glyph.
+    """
+    aliases = _unicode_aliases(font)
+    inputs = {name: next(iter(points)) for name, points in aliases.items()
+              if len(points) == 1 and points <= PARTIAL_TEXT_CODEPOINTS}
+    choices: dict[tuple[int, ...], set[str]] = {}
+    for table in _gsub_tables(font):
+        for first, ligatures in (getattr(table, "ligatures", None) or {}).items():
+            for ligature in ligatures:
+                names = [first, *ligature.Component]
+                if all(name in inputs for name in names) \
+                        and not aliases.get(ligature.LigGlyph, set()) - PARTIAL_TEXT_CODEPOINTS:
+                    sequence = tuple(inputs[name] for name in names)
+                    # Punctuation/numerals do not prove a text ligature.
+                    if all(unicodedata.category(chr(point)).startswith("L") for point in sequence):
+                        choices.setdefault(sequence, set()).add(ligature.LigGlyph)
+    return {sequence: next(iter(names)) for sequence, names in choices.items() if len(names) == 1}
+
+
+def _partial_layout_protected(font: TTFont, plans: dict[str, tuple[str, str]],
+                              source_ligatures: dict[tuple[int, ...], str]) -> set[str]:
+    """Protect outputs with any unproved producer, including contextual calls."""
+    if "GSUB" not in font or font["GSUB"].table.LookupList is None:
+        return set()
+    lookups = font["GSUB"].table.LookupList.Lookup
+    referenced: set[int] = set()
+    seen: set[int] = set()
+    def visit(value):
+        if isinstance(value, (str, int, float, bytes, type(None))):
+            return
+        if id(value) in seen:
+            return
+        seen.add(id(value))
+        if value.__class__.__name__ == "SubstLookupRecord" and hasattr(value, "LookupListIndex"):
+            referenced.add(int(value.LookupListIndex))
+        for item in value if isinstance(value, (list, tuple)) else vars(value).values() \
+                if hasattr(value, "__dict__") else []:
+            visit(item)
+    visit(font["GSUB"].table)
+    aliases = _unicode_aliases(font)
+    inputs = {name: next(iter(points)) for name, points in aliases.items()
+              if len(points) == 1 and points <= PARTIAL_TEXT_CODEPOINTS}
+    protected: set[str] = set()
+    rules = []
+    for index, lookup in enumerate(lookups):
+        for subtable in lookup.SubTable:
+            table = subtable.ExtSubTable if lookup.LookupType == 7 else subtable
+            emitted = set()
+            for output in (getattr(table, "mapping", None) or {}).values():
+                emitted.update([output] if isinstance(output, str) else output)
+            for outputs in (getattr(table, "alternates", None) or {}).values():
+                emitted.update(outputs)
+            emitted.update(getattr(table, "Substitute", None) or [])
+            protected.update(emitted & plans.keys())
+            for first, ligatures in (getattr(table, "ligatures", None) or {}).items():
+                for ligature in ligatures:
+                    names = [first, *ligature.Component]
+                    sequence = tuple(inputs[name] for name in names) if all(name in inputs for name in names) else ()
+                    safe = bool(sequence) and index not in referenced \
+                        and all(unicodedata.category(chr(point)).startswith("L") for point in sequence) \
+                        and plans.get(ligature.LigGlyph) == ("latin", source_ligatures.get(sequence))
+                    rules.append((names, ligature.LigGlyph, safe))
+    # A ligature fed by an unproved substitution is unproved too.
+    while True:
+        added = {output for names, output, safe in rules
+                 if output in plans and (not safe or any(name in protected for name in names))}
+        if added <= protected:
+            break
+        protected.update(added)
+    return protected
+
+
+def import_partial_text(base: TTFont, sources: dict[str, TTFont]) -> dict:
+    """Replace only proved text glyphs in a static stock face, preserving cells.
+
+    Existing glyph IDs, cmap and layout tables stay in place. A shared Unicode
+    alias protects a glyph. Original component glyphs get hidden copies so
+    retained composite outlines, point order and instructions stay unchanged.
+    """
+    if "glyf" not in base or any(tag in base for tag in ("fvar", "gvar", "HVAR", "VVAR", "CFF2")):
+        raise MergeError("保护字体的局部替换只支持静态原厂基底")
+    if partial_point_layout(base):
+        raise MergeError("保护字体含字形点索引定位，不能安全局部替换")
+    for role, source in sources.items():
+        if not REQUIRED[role] <= (source.getBestCmap() or {}).keys():
+            raise MergeError(f"保护字体局部替换的{role}源缺少必要字符")
+    aliases = _unicode_aliases(base)
+    cmap = base.getBestCmap() or {}
+    plans: dict[str, tuple[str, str]] = {}
+    for point in sorted(PARTIAL_TEXT_CODEPOINTS):
+        role = "digit" if point in DIGIT_CODEPOINTS else "latin"
+        source_cmap = sources[role].getBestCmap() or {}
+        name, source_name = cmap.get(point), source_cmap.get(point)
+        if name and source_name:
+            prior = plans.get(name)
+            item = (role, source_name)
+            # Different source aliases for one base glyph are ambiguous.
+            if prior is None or prior == item:
+                plans[name] = item
+            else:
+                aliases.setdefault(name, set()).add(-1)
+    base_ligatures = partial_ligatures(base)
+    source_ligatures = partial_ligatures(sources["latin"])
+    for sequence, name in base_ligatures.items():
+        if sequence in source_ligatures:
+            item = ("latin", source_ligatures[sequence])
+            if name in plans and plans[name] != item:
+                aliases.setdefault(name, set()).add(-1)
+            else:
+                plans[name] = item
+    protected = {name for name in plans if aliases.get(name, set()) - PARTIAL_TEXT_CODEPOINTS}
+    layout_protected = _partial_layout_protected(base, plans, source_ligatures)
+    protected.update(layout_protected)
+    clone_names: dict[str, str] = {}
+    # Retained composites must keep the original component outlines. Append
+    # private copies without moving any original glyph ID; this also keeps
+    # AnchorFormat2 point indices and composite hint instructions intact.
+    if "glyf" in base:
+        order = list(base.getGlyphOrder())
+        changed = plans.keys() - protected
+        needed = {component.glyphName for name in order if base["glyf"][name].isComposite()
+                  for component in base["glyf"][name].components if component.glyphName in changed}
+        for name in sorted(needed):
+            clone = f"luoshu.stock.{name}"
+            while clone in base["glyf"]:
+                clone += ".copy"
+            clone_names[name] = clone
+            base["glyf"][clone] = copy.deepcopy(base["glyf"][name])
+            base["hmtx"].metrics[clone] = base["hmtx"].metrics[name]
+            if "vmtx" in base:
+                base["vmtx"].metrics[clone] = base["vmtx"].metrics[name]
+            order.append(clone)
+        base.setGlyphOrder(order)
+        for name in order:
+            glyph = base["glyf"][name]
+            if glyph.isComposite():
+                for component in glyph.components:
+                    component.glyphName = clone_names.get(component.glyphName, component.glyphName)
+    counts = {"latin": 0, "digit": 0, "ligatures": 0}
+    glyph_sets = {role: font.getGlyphSet() for role, font in sources.items()}
+    transforms = {role: _role_transform(base, font, glyph_sets[role], role)
+                  for role, font in sources.items()}
+    ligature_names = set(base_ligatures.values())
+    for name, (role, source_name) in sorted(plans.items()):
+        if name in protected:
+            continue
+        source = sources[role]
+        glyph_set = glyph_sets[role]
+        scale, shift = transforms[role]
+        advance, old_lsb = base["hmtx"].metrics[name]
+        pen = BoundsPen(glyph_set)
+        glyph_set[source_name].draw(pen)
+        x_scale, x_shift = scale, 0.0
+        if pen.bounds is not None:
+            left, _bottom, right, _top = pen.bounds
+            # Keep the original cell advance, including a monospace cell. Fit
+            # a wide user glyph horizontally and center it within that cell.
+            if advance > 0 and right > left:
+                x_scale = min(scale, advance / (right - left))
+                x_shift = (advance - (right - left) * x_scale) / 2 - left * x_scale
+        if outline_kind(base) == "glyf":
+            _replace_glyf(base, outline_kind(source), glyph_set, name, source_name,
+                          scale, shift, x_scale, x_shift)
+            lsb = base["glyf"][name].xMin if pen.bounds is not None else old_lsb
+            glyph = base["glyf"][name]
+            if base["maxp"].tableVersion == 0x10000:
+                base["maxp"].maxPoints = max(base["maxp"].maxPoints, len(glyph.coordinates))
+                base["maxp"].maxContours = max(base["maxp"].maxContours, glyph.numberOfContours)
+        else:
+            _replace_cff(base, outline_kind(source), glyph_set, name, source_name,
+                         scale, shift, advance, x_scale, x_shift)
+            lsb = int(round(pen.bounds[0] * x_scale + x_shift)) if pen.bounds else old_lsb
+        base["hmtx"].metrics[name] = (advance, lsb)
+        counts[role] += 1
+        counts["ligatures"] += int(name in ligature_names)
+    return {"latinGlyphsReplaced": counts["latin"], "digitGlyphsReplaced": counts["digit"],
+            "asciiLettersReplaced": sum(cmap.get(point) in plans and cmap.get(point) not in protected
+                                        for point in REQUIRED["latin"]),
+            "asciiDigitsReplaced": sum(cmap.get(point) in plans and cmap.get(point) not in protected
+                                       for point in REQUIRED["digit"]),
+            "ligatureGlyphsReplaced": counts["ligatures"],
+            "protectedSharedGlyphs": sorted(protected),
+            "protectedLayoutGlyphs": sorted(layout_protected),
+            "retainedComponentClones": len(clone_names),
+            "clonedGlyphCount": len(clone_names), "originalGlyphOrderPreservedPrefix": True,
+            "preservedLigatureGlyphs": sorted(ligature_names - (plans.keys() - protected)),
+            "layoutCoverage": "matched-latin-ligatures; other substitutions retain stock",
+            "advancePolicy": "retain-stock-cell"}
 
 
 # ------------------------------------------------------------ variable import

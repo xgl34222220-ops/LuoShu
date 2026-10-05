@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "common"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import dataclasses
+import errno
+from unittest import mock
 
 import font_role_shadow
 import luoshu_engine
@@ -23,9 +25,207 @@ import font_fixtures as composite
 import font_fixtures as fixture
 
 
+def process_font_evidence(temp: Path) -> None:
+    """Maps evidence must retain unknown sources without calling them rendered fonts."""
+    import luoshu_diagnostics
+
+    proc = temp / "proc"
+    maps = "\n".join((
+        "1000-2000 r--p 00000000 fd:00 11 /system/fonts/Roboto-Regular.ttf",
+        "2000-3000 r--p 00001000 fd:00 12 /data/user/0/com.example.fontconsumer/cache/Latin.ttf (deleted)",
+        "3000-4000 r--p 00002000 fd:00 13 /data/app/com.example.fontconsumer/base.apk",
+        "4000-5000 r--p 00000000 fd:00 14 /data/user/0/com.example.fontconsumer/files/fonts/opaque-cache",
+        "5000-6000 r--p 00000000 00:01 15 /memfd:font-buffer (deleted)",
+        "6000-7000 r--p 00000000 00:00 0 [anon:font-cache]",
+        "7000-8000 r--p 00000000 00:01 16 /memfd:jit-cache (deleted)",
+        "8000-9000 rw-p 00000000 00:00 0",
+        "9000-a000 r--p 00000000 fd:00 17 /data/user/0/com.example.fontconsumer/files/chat.db",
+        "a000-b000 r--p 00000000 fd:00 18 /data/user/0/com.example.fontconsumer/cache/web.woff2",
+        "b000-c000 r--p 00000000 fd:00 11 /system/fonts/Roboto-Regular.ttf",
+        "c000-d000 r--p 00000000 invalid-device 99 /system/fonts/Invalid.ttf",
+        "d000-e000 r--p 00000000 fd:01 11 /system/fonts/Roboto-Regular.ttf",
+        "e000-f000 r--p 00000000 fd:00 19 /data/user/0/com.example.fontconsumer/cache/opaque-font-cache",
+    )) + "\n"
+    for pid, name in ((101, "com.example.fontconsumer"), (102, "com.example.denied"),
+                      (103, "com.example.exited"), (104, "com.example.hidden"),
+                      (105, ""), (106, "com.example.noobservedfont")):
+        entry = proc / str(pid)
+        entry.mkdir(parents=True)
+        (entry / "cmdline").write_bytes(name.encode() + b"\0private-argument-not-exported\0")
+        if pid != 103:
+            (entry / "maps").write_text(maps if pid == 101 else "1000-2000 rw-p 00000000 00:00 0\n")
+    real_open, real_read = Path.open, Path.read_bytes
+
+    def maps_open(path: Path, *args, **kwargs):
+        if path == proc / "102/maps":
+            raise PermissionError(errno.EACCES, "permission denied")
+        return real_open(path, *args, **kwargs)
+
+    def cmdline_read(path: Path):
+        if path == proc / "104/cmdline":
+            raise PermissionError(errno.EACCES, "permission denied")
+        return real_read(path)
+
+    with mock.patch.object(Path, "open", maps_open), mock.patch.object(Path, "read_bytes", cmdline_read):
+        observed = luoshu_diagnostics._process_fonts(proc)
+    rows = {row["pid"]: row for row in observed["processes"]}
+    fonts = rows[101]["fonts"]
+    assert any(row.get("deleted") and row["inode"] == "12" for row in fonts), "deleted font mapping was dropped"
+    assert observed["capturedAt"] <= observed["finishedAt"]
+    assert observed["renderingVerified"] is False
+    assert rows[101]["mapsStatus"] == "read"
+    assert rows[101]["fontSourceStatus"] == "unconfirmed"
+    assert rows[101]["apkMaps"] == [{"path": "/data/app/com.example.fontconsumer/base.apk", "device": "fd:00", "inode": "13", "offset": "00002000"}]
+    assert {row["inode"] for row in rows[101]["fontCandidates"]} == {"14", "15", "0", "19"}
+    assert {row["kind"] for row in rows[101]["fontCandidates"]} == {"font-cache-path", "font-named-memory"}
+    assert "apk-font-use-unconfirmed" in rows[101]["unknownSources"]
+    assert "opaque-or-memory-font-use-unconfirmed" in rows[101]["unknownSources"]
+    assert any(row["path"].endswith("web.woff2") for row in fonts)
+    roboto_maps = [row for row in fonts if row["inode"] == "11"]
+    assert len(roboto_maps) == 2 and {row["device"] for row in roboto_maps} == {"fd:00", "fd:01"}, "maps identity lost the device or retained duplicates"
+    serialized = json.dumps(observed)
+    assert "chat.db" not in serialized and "jit-cache" not in serialized
+    assert "invalid-device" not in serialized
+    assert "private-argument" not in serialized
+    assert rows[102]["mapsStatus"] == "unavailable" and rows[102]["mapsError"] == "EACCES"
+    assert rows[103]["mapsStatus"] == "unavailable" and rows[103]["mapsError"] == "ENOENT"
+    assert "maps-unavailable" in rows[102]["unknownSources"]
+    assert observed["processReadErrors"] == [{"pid": 104, "reason": "cmdline-unavailable", "error": "EACCES"}]
+    assert 105 not in rows, "empty kernel cmdline became an inferred app"
+    assert rows[106]["mapsStatus"] == "read" and rows[106]["fonts"] == []
+    assert "no-font-source-observed" in rows[106]["unknownSources"]
+    assert {row["process"] for row in observed["processes"]} == {
+        "com.example.fontconsumer", "com.example.denied", "com.example.exited", "com.example.noobservedfont"}
+    assert observed["observedProcessNames"] == sorted(row["process"] for row in observed["processes"])
+    assert observed["namedProcessCount"] == 4 and observed["cmdlineUnreadableCount"] == 1
+    with mock.patch.object(Path, "open", maps_open), mock.patch.object(Path, "read_bytes", cmdline_read), \
+            mock.patch.object(luoshu_diagnostics, "PROCESS_MAP_LIMIT", 1), \
+            mock.patch.object(luoshu_diagnostics, "PROCESS_EVIDENCE_LIMIT", 3), \
+            mock.patch.object(luoshu_diagnostics, "PROCESS_READ_ERROR_LIMIT", 0):
+        limited = luoshu_diagnostics._process_fonts(proc)
+    assert limited["truncated"] and len(limited["processes"]) == 3
+    assert limited["namedProcessCount"] == 4 and limited["processReadErrorsTruncated"]
+    assert limited["processes"][0]["mapsTruncated"] == {"fonts": True, "apkMaps": False, "fontCandidates": True}
+    assert "map-evidence-truncated" in limited["processes"][0]["unknownSources"]
+    missing_proc = luoshu_diagnostics._process_fonts(temp / "absent-proc")
+    assert missing_proc["procStatus"] == "unavailable" and missing_proc["procError"] == "ENOENT"
+
+    class InterruptedMaps:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def __iter__(self):
+            yield maps.splitlines()[0]
+            raise OSError(errno.EIO, "maps read interrupted")
+
+    def interrupted_open(path: Path, *args, **kwargs):
+        return InterruptedMaps() if path == proc / "101/maps" else maps_open(path, *args, **kwargs)
+
+    with mock.patch.object(Path, "open", interrupted_open), mock.patch.object(Path, "read_bytes", cmdline_read):
+        interrupted = luoshu_diagnostics._process_fonts(proc)
+    partial = next(row for row in interrupted["processes"] if row["pid"] == 101)
+    assert partial["mapsStatus"] == "partial" and partial["mapsError"] == "EIO"
+    assert len(partial["fonts"]) == 1 and "maps-partially-read" in partial["unknownSources"]
+
+
+def latin_ligature_evidence(temp: Path) -> None:
+    import luoshu_diagnostics
+    from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    from fontTools.ttLib import TTFont
+
+    source = temp / "Ligature.ttf"
+    fixture.make_font(source, family="Ligature Source")
+    with TTFont(source) as font:
+        for name in ("f_i", "unused_nontext"):
+            pen = TTGlyphPen(None)
+            # Keep these inside every ASCII glyph's bounds, so the extrema
+            # safeguard cannot accidentally retain the unencoded ligature.
+            pen.moveTo((80, 0))
+            pen.lineTo((400, 0))
+            pen.lineTo((400, 400))
+            pen.lineTo((80, 400))
+            pen.closePath()
+            font["glyf"].glyphs[name] = pen.glyph()
+            font["hmtx"].metrics[name] = (560, 80)
+        font.setGlyphOrder([*font.getGlyphOrder(), "f_i", "unused_nontext"])
+        addOpenTypeFeaturesFromString(font, "feature liga { sub u0066 u0069 by f_i; } liga;")
+        font.save(source)
+    hollow = temp / "LigatureHollow.ttf"
+    luoshu_diagnostics._hollow(source, hollow, luoshu_diagnostics._keep_codepoints())
+    with TTFont(source) as original, TTFont(hollow) as result:
+        assert result["glyf"]["f_i"].numberOfContours > 0, "Latin GSUB ligature was hollowed"
+        assert result["glyf"]["f_i"].getCoordinates(result["glyf"]) == original["glyf"]["f_i"].getCoordinates(original["glyf"])
+        assert result["glyf"]["unused_nontext"].numberOfContours == 0, "unreferenced glyph was unnecessarily retained"
+
+
+def partial_stock_evidence(temp: Path) -> None:
+    import luoshu_diagnostics
+
+    directory = temp / "partial"
+    directory.mkdir()
+    moddir = directory / "module"
+    config = moddir / "config"
+    (config / "luoshu-engine-build").mkdir(parents=True)
+    (moddir / "module.prop").write_text("id=LuoShu\nversion=test\nversionCode=1\n")
+    (config / "active_font.conf").write_text("mix\n")
+    slots = {}
+    stock_files = {}
+    for name, family in (("Roboto-Regular.ttf", "sans-serif"), ("NotoSerif-Regular.ttf", "serif"),
+                         ("NotoSerif-Bold.ttf", "serif"), ("DroidSansMono.ttf", "monospace")):
+        stock = directory / name
+        fixture.make_font(stock, family="Stock " + family)
+        logical = "/system/fonts/" + name
+        slots[logical] = fixture.slot_from_stock(logical, stock, family=family,
+            source_xml="/system/etc/fonts.xml", declared=name)
+        stock_files[logical] = stock
+    large = stock_files["/system/fonts/NotoSerif-Bold.ttf"]
+    with large.open("ab") as handle:
+        handle.write(b"\0" * (luoshu_diagnostics.SMALL_PRESERVED_LIMIT + 1))
+    topology = {"schema": "device-font-topology-v1", "state": "ready", "slots": slots}
+    (config / "device_font_topology.json").write_text(json.dumps(topology))
+    roles, _shadow = font_role_shadow.build(topology)
+    (config / "device_font_roles.json").write_text(json.dumps(roles))
+    # This is a real old-report shape: only the UI file was replaced. The
+    # eligible protected text bases must still be available to the new replay.
+    report = {"replaced": [{"path": "/system/fonts/Roboto-Regular.ttf", "role": "ui-sans"}],
+              "keptStock": [], "sources": {}}
+    (config / "luoshu-engine-build/report.json").write_text(json.dumps(report))
+    wanted = {path: action for path, _role, action in luoshu_diagnostics._wanted_slots(config)}
+    assert wanted.get("/system/fonts/NotoSerif-Regular.ttf") == "partial-stock", "old build report lost the eligible serif stock base"
+    assert wanted.get("/system/fonts/DroidSansMono.ttf") == "partial-stock"
+    lower = directory / "lower-root"
+    (lower / "lower/system-fonts").mkdir(parents=True)
+    for logical, stock in stock_files.items():
+        shutil.copy(stock, lower / "lower/system-fonts" / Path(logical).name)
+    output = directory / "lite.zip"
+    luoshu_diagnostics.export(moddir, output, lower)
+    with zipfile.ZipFile(output) as archive:
+        index = json.loads(archive.read("index.json"))
+        for logical in ("/system/fonts/NotoSerif-Regular.ttf", "/system/fonts/DroidSansMono.ttf"):
+            record = index["stock"][logical]
+            assert record["action"] == "partial-stock" and record["hollow"] is False
+            assert archive.read(record["file"]) == stock_files[logical].read_bytes(), "partial stock was not kept byte for byte"
+        assert "/system/fonts/NotoSerif-Bold.ttf" not in index["stock"]
+        assert {"path": "/system/fonts/NotoSerif-Bold.ttf", "reason": "partial-stock-too-large",
+                "bytes": large.stat().st_size} in index["stockSkipped"]
+        assert index["stock"]["/system/fonts/Roboto-Regular.ttf"]["hollow"] is True
+    luoshu_diagnostics.export(moddir, directory / "full.zip", lower, full=True)
+    with zipfile.ZipFile(directory / "full.zip") as archive:
+        index = json.loads(archive.read("index.json"))
+        record = index["stock"]["/system/fonts/NotoSerif-Bold.ttf"]
+        assert record["hollow"] is False and archive.read(record["file"]) == large.read_bytes()
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-diag-") as raw:
         temp = Path(raw)
+        process_font_evidence(temp)
+        latin_ligature_evidence(temp)
+        partial_stock_evidence(temp)
         topology, _roles, stocks, xml_map = composite.build_device(temp / "device")
         moddir = temp / "module"
         config = moddir / "config"

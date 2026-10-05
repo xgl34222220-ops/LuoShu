@@ -12,10 +12,12 @@ tools/replay_diagnostics.py replays a bundle on the host.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import posixpath
+import re
 import struct
 import subprocess
 import sys
@@ -194,17 +196,27 @@ def _wanted_slots(config: Path, full: bool = False) -> list[tuple[str, str, str]
     """Returns (logical path, role, action) of every slot worth replaying.
 
     Engine v3 takes line metrics from the topology, so a lite bundle only needs
-    the stock files the last build replaced (collection face counts); hollowing
-    every text font took too long on phones with large OEM font sets."""
+    the stock files the last build replaced (collection face counts), plus the
+    small protected text bases admitted by the current partial-text policy.
+    Hollowing every text font took too long on large OEM font sets."""
+    # The engine itself imports this module's snapshot resolver. Import the
+    # policy only when collecting, after both modules have finished loading.
+    from luoshu_engine import is_partial_text_slot
     report = _load(config / "luoshu-engine-build" / "report.json")
+    topology = _load(config / "device_font_topology.json")
+    roles = _load(config / "device_font_roles.json").get("slots") or {}
+    partial = [(logical, str((roles.get(logical) or {}).get("role") or ""), "partial-stock")
+               for logical, slot in sorted((topology.get("slots") or {}).items())
+               if isinstance(slot, dict) and is_partial_text_slot(logical, slot)]
     replaced = [item for item in report.get("replaced") or [] if item.get("path")]
     if replaced and not full:
         # Kept-stock slots too, so a replay can see why they were kept.
         kept = [item for item in report.get("keptStock") or [] if item.get("path")]
-        return [(str(item["path"]), str(item.get("role") or ""), "replace") for item in replaced] + \
+        wanted = [(str(item["path"]), str(item.get("role") or ""), "replace") for item in replaced] + \
             [(str(item["path"]), "", "kept") for item in kept]
-    topology = _load(config / "device_font_topology.json")
-    roles = _load(config / "device_font_roles.json").get("slots") or {}
+        # A previous engine report did not list these protected faces. Keep
+        # them for a faithful replay of the newly admitted partial routes.
+        return list({item[0]: item for item in [*wanted, *partial]}.values())
     shadow = _load(config / "device_font_shadow_plan.json").get("slots") or {}
     targeted: set[str] = {str(item["path"]) for item in replaced}
     for plan_path in sorted((config / "universal-font-plans").glob("*.json")):
@@ -217,6 +229,8 @@ def _wanted_slots(config: Path, full: bool = False) -> list[tuple[str, str, str]
             continue
         role = str((roles.get(logical) or {}).get("role") or "")
         action = str((shadow.get(logical) or {}).get("action") or "")
+        if is_partial_text_slot(logical, slot):
+            action = "partial-stock"
         if role in SKIPPED_ROLES and logical not in targeted:
             continue
         result.append((logical, role, action))
@@ -244,7 +258,7 @@ def _keep_codepoints() -> set[int]:
     import luoshu_merge
     keep = set(range(0x20, 0x7F)) | set(range(0xA0, 0x180))
     keep.update(luoshu_merge.LATIN_CODEPOINTS, luoshu_merge.DIGIT_CODEPOINTS,
-                font_coverage.CJK_COMMON, font_coverage.PUNCTUATION)
+                luoshu_merge.PARTIAL_TEXT_CODEPOINTS, font_coverage.CJK_COMMON, font_coverage.PUNCTUATION)
     for points in template.PROBE_GROUPS.values():
         keep.update(points)
     return keep
@@ -252,8 +266,12 @@ def _keep_codepoints() -> set[int]:
 
 def _hollow_face(font: Any, keep_points: set[int]) -> None:
     from fontTools.ttLib.tables._g_l_y_f import Glyph
+    from luoshu_merge import partial_ligatures
     cmap = font.getBestCmap() or {}
     keep = {".notdef"} | {name for point, name in cmap.items() if point in keep_points}
+    # Partial text substitution also draws these unencoded GSUB outputs. Keep
+    # only the same unambiguous Latin/text sequences admitted by the merger.
+    keep.update(partial_ligatures(font).values())
     if "glyf" in font:
         glyf = font["glyf"]
         # Keep the glyphs that set the font's extreme bounds, read from each
@@ -345,8 +363,11 @@ def _write_tail(bundle: zipfile.ZipFile, path: Path, name: str) -> None:
         bundle.writestr(name, handle.read())
 
 
-FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".otc", ".font")
+FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".otc", ".font", ".woff", ".woff2")
 THEME_FONT_DIR = Path("/data/system/theme/fonts")
+PROCESS_EVIDENCE_LIMIT = 400
+PROCESS_MAP_LIMIT = 256
+PROCESS_READ_ERROR_LIMIT = 100
 
 
 def _stat_text(path: Path) -> dict[str, Any]:
@@ -357,33 +378,132 @@ def _stat_text(path: Path) -> dict[str, Any]:
     return {"dev": info.st_dev, "inode": info.st_ino, "bytes": info.st_size}
 
 
+def _read_error(error: OSError) -> str:
+    return errno.errorcode.get(error.errno, type(error).__name__)
+
+
+def _font_map_candidate(path: str) -> str | None:
+    """Retain explicitly font-named maps; never label every anonymous map a font."""
+    lower = path.lower()
+    if lower.startswith(("/memfd:", "memfd:", "[anon:", "[anon_shmem:")):
+        if re.search(r"(?<![a-z0-9])fonts?(?![a-z0-9])", lower):
+            return "font-named-memory"
+        return None
+    if not lower.startswith("/data/"):
+        return None
+    parts = lower.split("/")
+    font_dirs = {"font", "fonts", "fontcache", "font-cache", "font_cache"}
+    if any(part in font_dirs or re.match(r"^fonts?[-_](?:cache|preview|download)", part)
+           for part in parts[:-1]) or re.search(r"(?<![a-z0-9])fonts?(?![a-z0-9])", parts[-1]):
+        return "font-cache-path"
+    return None
+
+
 def _process_fonts(proc: Path = Path("/proc")) -> dict[str, Any]:
-    """Which font files every running app actually has mapped (path + inode),
-    and what the HyperOS theme font is in its namespace. Shows directly whether
-    an app renders a LuoShu output, a stock file or its own bundled font."""
-    processes: list[dict[str, Any]] = []
-    for entry in sorted(proc.iterdir(), key=lambda item: item.name) if proc.is_dir() else []:
+    """Read process map metadata, without opening any app assets or private files.
+
+    A mapped font path or APK is evidence of a possible source, not proof of the
+    Typeface used for a particular screen. Unknown, deleted and unreadable views
+    remain explicit so a system-font map cannot hide the missing app evidence.
+    """
+    snapshot: dict[str, Any] = {
+        "schema": "luoshu-process-fonts-v2", "capturedAt": int(time.time()),
+        "renderingVerified": False, "processes": [], "processReadErrors": [],
+        "procStatus": "read", "truncated": False,
+    }
+    processes = snapshot["processes"]
+    named_processes = 0
+    unreadable_names = 0
+    try:
+        entries = sorted((item for item in proc.iterdir() if item.name.isdigit()),
+                         key=lambda item: int(item.name))
+    except OSError as error:
+        snapshot.update(procStatus="unavailable", procError=_read_error(error),
+                        finishedAt=int(time.time()), observedProcessNames=[])
+        return snapshot
+    for entry in entries:
         if not entry.name.isdigit():
             continue
         try:
             name = (entry / "cmdline").read_bytes().split(b"\0", 1)[0].decode("utf-8", "replace")
-        except OSError:
+        except OSError as error:
+            unreadable_names += 1
+            if len(snapshot["processReadErrors"]) < PROCESS_READ_ERROR_LIMIT:
+                snapshot["processReadErrors"].append({"pid": int(entry.name),
+                    "reason": "cmdline-unavailable", "error": _read_error(error)})
             continue
         if not name or name.startswith("/") or "." not in name and name not in {"system_server", "zygote", "zygote64"}:
             continue
-        fonts: dict[str, str] = {}
+        named_processes += 1
+        if len(processes) >= PROCESS_EVIDENCE_LIMIT:
+            continue
+        fonts: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        apks: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        candidates: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        map_limits = {"fonts": False, "apkMaps": False, "fontCandidates": False}
+        maps_status, maps_error = "read", None
+        lines_seen = 0
         try:
             with (entry / "maps").open("r", encoding="utf-8", errors="replace") as handle:
                 for line in handle:
+                    lines_seen += 1
                     parts = line.split(None, 5)
-                    if len(parts) == 6 and parts[5].strip().lower().endswith(FONT_SUFFIXES):
-                        fonts[parts[5].strip()] = parts[4]
-        except OSError:
-            continue
+                    if len(parts) != 6 or not parts[4].isdigit() \
+                            or not re.fullmatch(r"[0-9a-fA-F]+", parts[2]) \
+                            or not re.fullmatch(r"[0-9a-fA-F]+:[0-9a-fA-F]+", parts[3]):
+                        continue
+                    path = parts[5].strip()
+                    deleted = path.endswith(" (deleted)")
+                    if deleted:
+                        path = path[:-len(" (deleted)")]
+                    record: dict[str, Any] = {"path": path, "device": parts[3], "inode": parts[4], "offset": parts[2]}
+                    if deleted:
+                        record["deleted"] = True
+                    kind = None
+                    if path.lower().endswith(FONT_SUFFIXES):
+                        group, field = fonts, "fonts"
+                    elif path.lower().endswith(".apk"):
+                        group, field = apks, "apkMaps"
+                    elif (kind := _font_map_candidate(path)) is not None:
+                        record["kind"] = kind
+                        group, field = candidates, "fontCandidates"
+                    else:
+                        continue
+                    key = (path, parts[3], parts[4], parts[2])
+                    if key in group or len(group) < PROCESS_MAP_LIMIT:
+                        group[key] = record
+                    else:
+                        map_limits[field] = True
+        except OSError as error:
+            maps_status = "partial" if lines_seen else "unavailable"
+            maps_error = _read_error(error)
         theme = _stat_text(entry / "root" / str(THEME_FONT_DIR).lstrip("/") / "Roboto-Regular.ttf")
-        processes.append({"pid": int(entry.name), "process": name, "theme": theme,
-                          "fonts": [{"path": path, "inode": inode} for path, inode in sorted(fonts.items())]})
-    return {"processes": processes[:400], "truncated": len(processes) > 400}
+        unknown = ["rendered-typeface-not-observed"]
+        if apks:
+            unknown.append("apk-font-use-unconfirmed")
+        if candidates:
+            unknown.append("opaque-or-memory-font-use-unconfirmed")
+        if not fonts and not apks and not candidates:
+            unknown.append("no-font-source-observed")
+        if maps_status != "read":
+            unknown.append("maps-unavailable" if maps_status == "unavailable" else "maps-partially-read")
+        if any(map_limits.values()):
+            unknown.append("map-evidence-truncated")
+        row = {"pid": int(entry.name), "process": name, "theme": theme,
+               "mapsStatus": maps_status, "fontSourceStatus": "unconfirmed", "unknownSources": unknown,
+               "fonts": [fonts[key] for key in sorted(fonts)],
+               "apkMaps": [apks[key] for key in sorted(apks)],
+               "fontCandidates": [candidates[key] for key in sorted(candidates)]}
+        if maps_error is not None:
+            row["mapsError"] = maps_error
+        if any(map_limits.values()):
+            row["mapsTruncated"] = map_limits
+        processes.append(row)
+    snapshot.update(finishedAt=int(time.time()), observedProcessNames=sorted({row["process"] for row in processes}),
+                    truncated=named_processes > len(processes), namedProcessCount=named_processes,
+                    cmdlineUnreadableCount=unreadable_names,
+                    processReadErrorsTruncated=unreadable_names > len(snapshot["processReadErrors"]))
+    return snapshot
 
 
 def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> dict[str, Any]:
@@ -463,6 +583,9 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
                 continue
             origin, actual = found
             size = actual.stat().st_size
+            if not full and action == "partial-stock" and size > SMALL_PRESERVED_LIMIT:
+                index["stockSkipped"].append({"path": logical, "reason": "partial-stock-too-large", "bytes": size})
+                continue
             if action == "preserve" and size > SMALL_PRESERVED_LIMIT:
                 index["stockSkipped"].append({"path": logical, "reason": "preserved-large", "bytes": size})
                 continue
@@ -471,7 +594,10 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
                 continue
             name = "stock" + logical
             try:
-                hollow = _add_font(bundle, actual, name, scratch, keep_points)
+                # A partial output retains the stock's other glyphs and their
+                # component dependencies. Hollowing its base would change the
+                # merger's safety decisions and cannot faithfully replay it.
+                hollow = _add_font(bundle, actual, name, None if action == "partial-stock" else scratch, keep_points)
             except (OSError, ValueError) as error:  # one unreadable slot must not lose the bundle
                 index["stockSkipped"].append({"path": logical, "reason": f"error:{type(error).__name__}: {error}"[:200]})
                 continue
