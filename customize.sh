@@ -31,8 +31,35 @@ fi
 # Keep installer scratch and migrated preferences in the same owned tree.
 # Compatibility cores keep their stable config/log paths through relative links.
 if [ -f "$_lc_paths" ]; then
+    # Root managers normalize extracted files to 0644 before sourcing this file.
+    # Migration already needs Python, before the delegated core restores modes.
+    # Restore only that bundled executable's existing intended mode, never a
+    # symlink target. Host-only regression fixtures may supply an explicit Python.
+    if [ -z "${LUOSHU_RUNTIME_PATHS_PYTHON:-}" ]; then
+        for _lc_runtime_path in "$MODPATH" "$MODPATH/common" \
+            "$MODPATH/common/python" "$MODPATH/common/python/bin" \
+            "$MODPATH/common/python/bin/luoshu-python"; do
+            if [ -L "$_lc_runtime_path" ]; then
+                abort '洛书内置 Python 路径异常，未继续安装，已有文件已保留'
+                return 1 2>/dev/null || exit 1
+            fi
+        done
+        _lc_python="$MODPATH/common/python/bin/luoshu-python"
+        if [ ! -f "$_lc_python" ]; then
+            abort '缺少洛书内置 Python，安装包不完整，已有文件已保留'
+            return 1 2>/dev/null || exit 1
+        fi
+        if ! chmod 0755 "$_lc_python" || [ ! -x "$_lc_python" ]; then
+            abort '洛书内置 Python 执行权限准备失败，已有文件已保留'
+            return 1 2>/dev/null || exit 1
+        fi
+    fi
     . "$_lc_paths"
-    if ! luoshu_runtime_paths_init "$MODPATH"; then
+    if luoshu_runtime_paths_init "$MODPATH"; then
+        :
+    else
+        _lc_paths_rc=$?
+        ui_print "! 运行目录初始化未完成（错误码 $_lc_paths_rc），请查看上方 Python 或路径错误"
         abort '洛书运行目录整理失败，已有文件已保留'
         return 1 2>/dev/null || exit 1
     fi

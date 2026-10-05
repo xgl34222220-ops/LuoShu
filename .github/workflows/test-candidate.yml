@@ -268,6 +268,9 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
+          # Test the delivered installer after the same 0644 normalization used
+          # by Root managers, without the migration helper's host-Python override.
+          sh scripts/installer_bootstrap_test.sh "$tmp"
           python3 scripts/stable111_rework_gate.py --zip "$module"
           python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/task_scope.py" "$tmp/common/runtime_paths_lock.py"
           sh -n "$tmp/customize.sh"
