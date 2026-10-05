@@ -77,6 +77,8 @@ jobs:
           archive="$RUNNER_TEMP/freetype-2.13.2.tar.xz"
           prefix="$RUNNER_TEMP/luoshu-freetype-2.13.2"
           curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 \
+            https://downloads.sourceforge.net/project/freetype/freetype2/2.13.2/freetype-2.13.2.tar.xz -o "$archive" || \
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 \
             https://download.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.xz -o "$archive" || \
           curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 \
             https://download-mirror.savannah.gnu.org/releases/freetype/freetype-2.13.2.tar.xz -o "$archive"
