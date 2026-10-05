@@ -52,10 +52,16 @@ def main() -> int:
         assert "正在生成字体" in progress.read_text(encoding="utf-8")
         rc, out = sh(moddir, "stage", "OtherFont")
         assert rc != 0, "stage must refuse a build for another family"
-        rc, out = sh(moddir, "stage", "UserSans")
+        # HyperOS theme font: the stage builds its replacement for the boot-time bind.
+        theme = temp / "theme" / "Roboto-Regular.ttf"
+        theme.parent.mkdir()
+        fixture.make_font(theme, family="Theme Stub")
+        rc, out = sh(moddir, "stage", "UserSans", env={"LUOSHU_THEME_FONT_TARGET": str(theme)})
         assert rc == 0 and '"pipeline":"luoshu-engine-v3"' in out, out
         next_root = moddir / ".luoshu-payload-next"
         manifest = json.loads((next_root / ".luoshu-runtime/deployment/deployment.json").read_text(encoding="utf-8"))
+        view = config / "hyperos-theme-font-early" / (manifest["deploymentId"].split(":", 1)[1][:32] + ".ttf")
+        assert view.is_file() and view.stat().st_size > theme.stat().st_size, list(view.parent.glob("*"))
         payload_format.validate_payload_integrity(manifest, next_root)
         state = dict(line.split("=", 1) for line in
                      (config / "universal-font-next.conf").read_text(encoding="utf-8").splitlines())

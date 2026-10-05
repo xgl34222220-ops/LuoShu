@@ -266,6 +266,47 @@ def _write_tail(bundle: zipfile.ZipFile, path: Path, name: str) -> None:
         bundle.writestr(name, handle.read())
 
 
+FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".otc", ".font")
+THEME_FONT_DIR = Path("/data/system/theme/fonts")
+
+
+def _stat_text(path: Path) -> dict[str, Any]:
+    try:
+        info = path.stat()
+    except OSError:
+        return {}
+    return {"dev": info.st_dev, "inode": info.st_ino, "bytes": info.st_size}
+
+
+def _process_fonts(proc: Path = Path("/proc")) -> dict[str, Any]:
+    """Which font files every running app actually has mapped (path + inode),
+    and what the HyperOS theme font is in its namespace. Shows directly whether
+    an app renders a LuoShu output, a stock file or its own bundled font."""
+    processes: list[dict[str, Any]] = []
+    for entry in sorted(proc.iterdir(), key=lambda item: item.name) if proc.is_dir() else []:
+        if not entry.name.isdigit():
+            continue
+        try:
+            name = (entry / "cmdline").read_bytes().split(b"\0", 1)[0].decode("utf-8", "replace")
+        except OSError:
+            continue
+        if not name or name.startswith("/") or "." not in name and name not in {"system_server", "zygote", "zygote64"}:
+            continue
+        fonts: dict[str, str] = {}
+        try:
+            with (entry / "maps").open("r", encoding="utf-8", errors="replace") as handle:
+                for line in handle:
+                    parts = line.split(None, 5)
+                    if len(parts) == 6 and parts[5].strip().lower().endswith(FONT_SUFFIXES):
+                        fonts[parts[5].strip()] = parts[4]
+        except OSError:
+            continue
+        theme = _stat_text(entry / "root" / str(THEME_FONT_DIR).lstrip("/") / "Roboto-Regular.ttf")
+        processes.append({"pid": int(entry.name), "process": name, "theme": theme,
+                          "fonts": [{"path": path, "inode": inode} for path, inode in sorted(fonts.items())]})
+    return {"processes": processes[:400], "truncated": len(processes) > 400}
+
+
 def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> dict[str, Any]:
     config = moddir / "config"
     keep_points = None if full else _keep_codepoints()
@@ -316,6 +357,22 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
         dump = Path(os.environ.get("LUOSHU_VERIFY_STATE_ROOT", "/data/adb/luoshu/runtime-verify")) / "font-manager.txt"
         if dump.is_file():
             _write_tail(bundle, dump, "runtime/font-manager.txt")
+        try:
+            fonts_seen = _process_fonts()
+            fonts_seen["themeGlobal"] = _stat_text(THEME_FONT_DIR / "Roboto-Regular.ttf")
+            fonts_seen["themeViews"] = {path.name: _stat_text(path) for path in
+                                        sorted((config / "hyperos-theme-font-early").glob("*.ttf"))}
+            fonts_seen["themeViews"].update({path.name: _stat_text(path) for path in
+                                             sorted((config / "hyperos-theme-font").glob("*.ttf"))})
+            bundle.writestr("runtime/process-fonts.json", json.dumps(fonts_seen, ensure_ascii=False, indent=1))
+        except Exception as error:  # evidence only; never fail the bundle over it
+            bundle.writestr("runtime/process-fonts.json", json.dumps({"error": str(error)}))
+        for path in sorted(THEME_FONT_DIR.glob("*")) if THEME_FONT_DIR.is_dir() else []:
+            try:
+                if path.is_file() and path.stat().st_size <= SMALL_PRESERVED_LIMIT:
+                    bundle.write(path, f"theme/{path.name}")
+            except OSError:
+                pass
         for path in sorted((moddir / "logs").glob("*.log")) if (moddir / "logs").is_dir() else []:
             _write_tail(bundle, path, f"logs/{path.name}")
 

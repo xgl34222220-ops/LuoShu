@@ -63,6 +63,10 @@ run_manager() {
   rm -f "$TMP/system-mounted" "$TMP/system-rollback"
   rm -rf "$TMP/state"; mkdir -p "$TMP/state"
   printf 'stock\n' > "$VISIBLE/data/fonts/files/runtime.ttf"
+  # HyperOS theme font view built at stage time, keyed by deployment id.
+  mkdir -p "$VISIBLE/data/system/theme/fonts" "$MOD/config/hyperos-theme-font-early"
+  printf 'theme-stub\n' > "$VISIBLE/data/system/theme/fonts/Roboto-Regular.ttf"
+  printf 'theme-view\n' > "$MOD/config/hyperos-theme-font-early/test.ttf"
   MODDIR="$MOD" MODULE_DIR="$MOD" CONFIG_DIR="$MOD/config" \
   LUOSHU_PYTHON=python3 \
   LUOSHU_UNIVERSAL_TEST_MANAGER="$manager" \
@@ -78,6 +82,8 @@ run_manager() {
   cmp -s "$MOD/.luoshu-payload/.luoshu-dynamic/test.ttf" "$VISIBLE/data/fonts/files/runtime.ttf"
   grep -q "^manager=$manager$" "$MOD/config/universal-font-mount.conf"
   grep -q "^stage=$hook$" "$MOD/config/universal-font-mount.conf"
+  cmp -s "$MOD/config/hyperos-theme-font-early/test.ttf" "$VISIBLE/data/system/theme/fonts/Roboto-Regular.ttf"
+  grep -q 'data/system/theme/fonts/Roboto-Regular.ttf' "$TMP/state/theme.mounts"
 }
 
 echo "PHASE7_MOUNT Magisk"

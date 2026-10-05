@@ -11,6 +11,9 @@ RUNTIME_CONF="$CONFIG_DIR/universal-font-runtime.conf"
 MOUNT_STATE="$CONFIG_DIR/universal-font-mount.conf"
 STATE_ROOT="${LUOSHU_UNIVERSAL_MOUNT_STATE_ROOT:-/data/adb/luoshu/universal-mount}"
 DYNAMIC_LIST="$STATE_ROOT/dynamic.mounts"
+THEME_TARGET="${LUOSHU_THEME_FONT_TARGET:-/data/system/theme/fonts/Roboto-Regular.ttf}"
+THEME_EARLY_DIR="$CONFIG_DIR/hyperos-theme-font-early"
+THEME_LIST="$STATE_ROOT/theme.mounts"
 
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -199,6 +202,37 @@ _ufmr_apply_dynamic() {
     return 0
 }
 
+# HyperOS theme font: bound in the global namespace at the mount stage, before
+# zygote/system_server, so every process (SystemUI, launcher, apps) inherits it.
+# The view was built when the font was applied (luoshu_engine.sh stage).
+_ufmr_theme_bind() {
+    _ufmr_theme_id=$(_ufmr_value "$RUNTIME_CONF" deploymentId | sed 's/^sha256://' | cut -c1-32)
+    _ufmr_theme_view="$THEME_EARLY_DIR/$_ufmr_theme_id.ttf"
+    [ -n "$_ufmr_theme_id" ] && [ -s "$_ufmr_theme_view" ] || return 0
+    _ufmr_theme_target=$(_ufmr_visible_target "$THEME_TARGET")
+    [ -f "$_ufmr_theme_target" ] && [ ! -L "$_ufmr_theme_target" ] || return 0
+    mkdir -p "$STATE_ROOT" 2>/dev/null || return 0
+    _ufmr_is_mounted "$_ufmr_theme_target" && return 0
+    _ufmr_mount --bind "$_ufmr_theme_view" "$_ufmr_theme_target" >/dev/null 2>&1 || \
+        _ufmr_mount -o bind "$_ufmr_theme_view" "$_ufmr_theme_target" >/dev/null 2>&1 || {
+            _ufmr_log "theme font bind failed target=$_ufmr_theme_target"
+            return 0
+        }
+    _ufmr_mount -o remount,bind,ro "$_ufmr_theme_target" >/dev/null 2>&1 || \
+        _ufmr_mount -o bind,remount,ro "$_ufmr_theme_target" >/dev/null 2>&1 || true
+    printf '%s\n' "$_ufmr_theme_target" > "$THEME_LIST" 2>/dev/null || true
+    _ufmr_log "theme font bound early view=${_ufmr_theme_view##*/} target=$_ufmr_theme_target"
+    return 0
+}
+
+_ufmr_theme_unbind() {
+    [ -s "$THEME_LIST" ] || return 0
+    while IFS= read -r _ufmr_theme_target; do
+        [ -n "$_ufmr_theme_target" ] && _ufmr_umount "$_ufmr_theme_target" >/dev/null 2>&1 || true
+    done < "$THEME_LIST"
+    : > "$THEME_LIST" 2>/dev/null || true
+}
+
 _ufmr_rollback_system() {
     if type _luoshu_atomic_rollback >/dev/null 2>&1 && type _luoshu_self_state_root >/dev/null 2>&1; then
         _ufmr_system_list="$(_luoshu_self_state_root)/mounts.list"
@@ -271,6 +305,7 @@ universal_font_mount_hook() {
     _ufmr_dynamic_count=$(wc -l < "$DYNAMIC_LIST" 2>/dev/null | tr -d '[:space:]')
     case "$_ufmr_dynamic_count" in ''|*[!0-9]*) _ufmr_dynamic_count=0 ;; esac
     _ufmr_write_state mounted "$_ufmr_manager" "$_ufmr_stage" "$_ufmr_dynamic_count" ''
+    _ufmr_theme_bind
     _ufmr_log "mounted deployment=$(_ufmr_value "$RUNTIME_CONF" deploymentId) manager=$_ufmr_manager stage=$_ufmr_stage dynamic=$_ufmr_dynamic_count"
     return 0
 }
@@ -279,6 +314,7 @@ case "${1:-hook}" in
     hook) universal_font_mount_hook "${2:-post-fs-data}" ;;
     service) exit 0 ;;
     rollback)
+        _ufmr_theme_unbind
         _ufmr_rollback_dynamic
         _ufmr_rollback_system
         _ufmr_write_state rolled-back "$(type luoshu_detect_root_manager >/dev/null 2>&1 && luoshu_detect_root_manager || echo unknown)" manual 0 manual
