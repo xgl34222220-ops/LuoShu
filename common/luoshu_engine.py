@@ -34,7 +34,10 @@ import font_role_shadow
 import luoshu_merge
 import luoshu_payload as payload_format
 
-ENGINE_REVISION = 4
+ENGINE_REVISION = 5
+# The full source/line-metric builder is unchanged from revision 4. Policy,
+# audit and guarded partial changes must not force expensive full rebuilds.
+FULL_OUTPUT_REVISION = 4
 REPORT_SCHEMA = "luoshu-engine-report-v1"
 REPLACE_ROLES = {"ui-sans", "cjk", "latin", "clock", "numeric"}
 COMPOSITE_ROLES = ("cjk", "latin", "digit")
@@ -43,13 +46,8 @@ LATIN_LETTERS = frozenset(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqr
 DIGITS = frozenset(map(ord, "0123456789"))
 MIN_HAN = 3000
 USE_TYPO_METRICS = 1 << 7
-PARTIAL_SYSTEM_TEXT = {
-    "NotoSerif-Regular.ttf": "serif", "NotoSerif-Bold.ttf": "serif",
-    "NotoSerif-Italic.ttf": "serif", "NotoSerif-BoldItalic.ttf": "serif",
-    "DroidSansMono.ttf": "monospace", "CutiveMono.ttf": "serif-monospace",
-    "ComingSoon.ttf": "casual", "DancingScript-Regular.ttf": "cursive",
-    "DancingScript-Bold.ttf": "cursive",
-}
+PARTIAL_TEXT_ROLES = {"serif", "monospace", "special-fallback"}
+PARTIAL_UNSUPPORTED_TABLES = {"COLR", "CPAL", "CBDT", "CBLC", "sbix", "SVG ", "EBDT", "EBLC"}
 
 
 class EngineError(RuntimeError):
@@ -258,8 +256,8 @@ class Sources:
     def variable_key(self) -> str:
         if self.mode == "single":
             face = self.variable_face(False)
-            return _canonical({"variable": face.identity if face else "", "rev": ENGINE_REVISION})
-        return _canonical({"variableComposite": self.identity(), "rev": ENGINE_REVISION})
+            return _canonical({"variable": face.identity if face else "", "rev": FULL_OUTPUT_REVISION})
+        return _canonical({"variableComposite": self.identity(), "rev": FULL_OUTPUT_REVISION})
 
     def build_variable_composite(self) -> TTFont:
         face = self._variable_glyf("cjk")
@@ -318,12 +316,12 @@ class Sources:
     def instance_key(self, weight: int, italic: bool) -> str:
         if self.mode == "single":
             face, location = _pick(self.faces["single"], weight, italic)
-            return _canonical({"face": face.identity, "location": location, "rev": ENGINE_REVISION})
+            return _canonical({"face": face.identity, "location": location, "rev": FULL_OUTPUT_REVISION})
         parts = {}
         for role in COMPOSITE_ROLES:
             face, location = self._role_pick(role, weight)
             parts[role] = {"face": face.identity, "location": location}
-        return _canonical({"composite": parts, "rev": ENGINE_REVISION})
+        return _canonical({"composite": parts, "rev": FULL_OUTPUT_REVISION})
 
 
 # ---------------------------------------------------------------- targets
@@ -342,37 +340,50 @@ class Target:
     partial_stock: Path | None = None
 
 
-def is_partial_text_slot(path: str, slot: dict[str, Any]) -> bool:
-    """A known standard system text file with matching explicit XML semantics.
+def _partial_path_supported(path: str) -> bool:
+    parts = path.split("/")
+    return len(parts) >= 4 and parts[0] == "" and parts[1] in payload_format.ALLOWED_PARTITIONS \
+        and parts[2] == "fonts" and all(part not in {"", ".", ".."} for part in parts[1:]) \
+        and str(Path(path)) == path
 
-    Protected roles stay protected. This narrowly scoped exception replaces
-    only proved text glyphs and does not authorize other OEM/fallback files.
+
+def _partial_protected_identity(path: str, slot: dict[str, Any]) -> bool:
+    # The classifier gives explicit monospace semantics priority. They must
+    # not accidentally authorize a named icon/emoji face for glyph imports.
+    text = " ".join([path, str(slot.get("slotName") or ""),
+                     *(str(value) for value in slot.get("families") or [])])
+    return font_role_shadow._contains_phrase(text, font_role_shadow.EMOJI_TOKENS) \
+        or font_role_shadow._contains_phrase(text, font_role_shadow.SYMBOL_TOKENS)
+
+
+def _partial_text_role(path: str, slot: dict[str, Any], role: str) -> bool:
+    if role in PARTIAL_TEXT_ROLES:
+        return True
+    if role != "numeric":
+        return False
+    # Coverage-only numeric classification precedes language fallbacks in
+    # the frozen classifier. A digit-only script fallback still needs its
+    # original script glyphs; it must use a guarded stock-base import instead
+    # of an ordinary whole-font replacement.
+    text = " ".join([path, *(str(value) for value in slot.get("families") or [])])
+    if font_role_shadow._contains_phrase(text, font_role_shadow.CLOCK_TOKENS + font_role_shadow.NUMERIC_TOKENS):
+        return False
+    semantics = font_role_shadow._xml_semantics(slot)
+    return font_role_shadow._language_kind(semantics["lang"]) == "special" or bool(semantics["fallbackFor"])
+
+
+def is_partial_text_slot(path: str, slot: dict[str, Any], role: str | None = None) -> bool:
+    """A protected text route eligible for inspection of its trusted stock bytes.
+
+    This is candidate admission, not font validation or permission to replace
+    the whole face. Names, language fallbacks and XML presence do not limit a
+    proven text role. Unknown fonts, symbols and emoji remain protected.
     """
-    if str(Path(path).parent) != "/system/fonts":
+    if not _partial_path_supported(path) or _partial_protected_identity(path, slot):
         return False
-    family = PARTIAL_SYSTEM_TEXT.get(Path(path).name)
-    if family is None:
-        return False
-    allowed_aliases = {
-        "serif": {"serif", "serif-bold", "times", "times new roman", "palatino", "georgia",
-                  "baskerville", "goudy", "fantasy", "itc stone serif"},
-        "monospace": {"monospace", "sans-serif-monospace", "monaco"},
-        "serif-monospace": {"serif-monospace", "courier", "courier new"},
-        "casual": {"casual"}, "cursive": {"cursive"},
-    }
-    if any(str(alias).lower() not in allowed_aliases[family] for alias in slot.get("families") or []):
-        return False
-    refs = [ref for ref in slot.get("xmlRefs") or [] if isinstance(ref, dict)]
-    if not refs:
-        return False
-    for ref in refs:
-        attrs = ref.get("familyAttributes") or {}
-        if str(ref.get("family") or ref.get("familyNormalized") or "").lower() != family \
-                or attrs.get("lang") or ref.get("fallbackFor") or attrs.get("fallbackFor") \
-                or int(ref.get("index") or 0) != 0 \
-                or ref.get("resolvedPath") not in {None, "", path}:
-            return False
-    return True
+    if role is None:
+        role = str(font_role_shadow._classification(path, slot).get("role") or "")
+    return _partial_text_role(path, slot, role)
 
 
 def _partial_stock_file(path: str, stock_paths: dict[str, Path]) -> Path | None:
@@ -384,19 +395,74 @@ def _partial_stock_file(path: str, stock_paths: dict[str, Path]) -> Path | None:
     return _snapshot_file(path, lower / "lower", lower_layout=True)
 
 
-def _partial_stock_reason(path: Path) -> str:
+def _diagnostic_hollow_stock(path: Path, logical: str) -> bool:
+    """Old lite diagnostic fonts have only a sidecar hollow marker.
+
+    An explicit replay map normally asserts complete original stock bytes.
+    When its enclosing diagnostic index says otherwise, refuse to preserve
+    already erased non-target outlines as if they were the original font.
+    """
+    if not logical:
+        return False
+    resolved = path.resolve()
+    for parent in list(path.parents)[:8]:
+        index_path = parent / "index.json"
+        if not index_path.is_file():
+            continue
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            item = (index.get("stock") or {}).get(logical)
+            if isinstance(item, dict) and item.get("file") \
+                    and (parent / str(item["file"])).resolve() == resolved:
+                return item.get("hollow") is True
+        except (OSError, ValueError, AttributeError):
+            continue
+    return False
+
+
+def _partial_stock_reason(path: Path, logical: str = "") -> str:
     try:
+        if _diagnostic_hollow_stock(path, logical):
+            return "partial-stock-hollow-base"
         if _collection_count(path) != 1:
             return "partial-stock-collection-unsupported"
         with TTFont(str(path), lazy=False) as font:
-            if any(tag in font for tag in ("fvar", "gvar", "HVAR", "VVAR", "CFF2")):
+            if "LSDG" in font:
+                return "partial-stock-hollow-base"
+            if "fvar" in font:
+                from luoshu_partial_variations import validate_variable_base
+                reason = validate_variable_base(font)
+                if reason:
+                    return reason
+            elif any(tag in font for tag in ("gvar", "HVAR", "VVAR", "CFF2")):
                 return "partial-stock-variable-unsupported"
-            if "glyf" not in font:
+            if "glyf" not in font or any(tag in font for tag in ("CFF ", "CFF2")):
                 return "partial-stock-outline-unsupported"
+            if any(tag in font for tag in PARTIAL_UNSUPPORTED_TABLES):
+                return "partial-stock-color-or-bitmap-unsupported"
+            if "MATH" in font:
+                return "partial-stock-math-layout-unsupported"
+            names = " ".join(record.toUnicode() for record in font["name"].names
+                             if record.nameID in {1, 4, 6, 16}) if "name" in font else ""
+            if font_role_shadow._contains_phrase(names, font_role_shadow.EMOJI_TOKENS) \
+                    or font_role_shadow._contains_phrase(names, font_role_shadow.SYMBOL_TOKENS):
+                return "partial-stock-protected-identity"
             if luoshu_merge.partial_point_layout(font):
                 return "partial-stock-point-layout-unsupported"
             cmap = font.getBestCmap() or {}
-            if not LATIN_LETTERS <= cmap.keys() or not DIGITS <= cmap.keys():
+            from fontTools.pens.boundsPen import BoundsPen
+            glyphs = font.getGlyphSet()
+            has_text_outline = False
+            for point in (LATIN_LETTERS | DIGITS) & cmap.keys():
+                name = cmap[point]
+                if name == ".notdef" or name not in glyphs:
+                    continue
+                pen = BoundsPen(glyphs)
+                glyphs[name].draw(pen)
+                if pen.bounds is not None:
+                    has_text_outline = True
+                    break
+            if not has_text_outline:
                 return "partial-stock-text-incomplete"
     except Exception:
         return "partial-stock-unreadable"
@@ -531,24 +597,49 @@ def plan_targets(
             continue
         role = str((role_slots.get(path) or {}).get("role") or "unknown-protected")
         partial_stock = None
-        if role in {"serif", "monospace", "special-fallback"} and is_partial_text_slot(path, slot):
+        if _partial_text_role(path, slot, role):
+            if not is_partial_text_slot(path, slot, role):
+                kept[path] = "partial-stock-protected-identity" if _partial_protected_identity(path, slot) \
+                    else "partial-stock-path-unsupported"
+                continue
             partial_stock = _partial_stock_file(path, stock_paths)
-            reason = _partial_stock_reason(partial_stock) if partial_stock is not None \
+            reason = _partial_stock_reason(partial_stock, path) if partial_stock is not None \
                 else "partial-stock-base-missing"
             if reason:
                 kept[path] = reason
                 continue
+            refs = [ref for ref in slot.get("xmlRefs") or [] if isinstance(ref, dict)]
+            try:
+                incompatible = int(slot.get("faceIndex") or 0) not in {-1, 0} \
+                    or any(int(ref.get("index") or 0) != 0 for ref in refs)
+            except (ValueError, TypeError):
+                incompatible = True
+            if incompatible:
+                kept[path] = "partial-stock-face-index-unsupported"
+                continue
+            if any(ref.get("resolvedPath") not in {None, "", path} for ref in refs):
+                kept[path] = "partial-stock-reference-mismatch"
+                continue
             partial_metrics = _read_metrics(partial_stock)
             weight = int(slot.get("weight") or partial_metrics.get("weightClass") or 400)
+            with TTFont(str(partial_stock), lazy=True) as stock_font:
+                variable_stock = "fvar" in stock_font
             if sources.mode == "single":
                 face = _pick(sources.faces["single"], weight,
                              _italic_style(slot.get("style")) or "italic" in Path(path).name.lower())[0]
                 complete = face.latin == 52 and face.digits == 10
+                fixed_sources = not face.axes
             else:
-                complete = sources._role_pick("latin", weight)[0].latin == 52 \
-                    and sources._role_pick("digit", weight)[0].digits == 10
+                latin_face = sources._role_pick("latin", weight)[0]
+                digit_face = sources._role_pick("digit", weight)[0]
+                complete = latin_face.latin == 52 and digit_face.digits == 10
+                fixed_sources = all(not face.axes or sources.settings[role]["mode"] == "fixed"
+                                    for role, face in (("latin", latin_face), ("digit", digit_face)))
             if not complete:
                 kept[path] = "partial-source-text-incomplete"
+                continue
+            if variable_stock and not fixed_sources:
+                kept[path] = "partial-stock-variable-auto-source-unsupported"
                 continue
         metrics = slot.get("metrics") if isinstance(slot.get("metrics"), dict) else {}
         if partial_stock is not None:
@@ -563,7 +654,7 @@ def plan_targets(
         if path.startswith("/data/"):
             kept[path] = "dynamic-font"
             continue
-        if sources.mode == "single":
+        if sources.mode == "single" and partial_stock is None:
             if has_han and not sources.has_han:
                 kept[path] = "source-has-no-han"
                 continue
@@ -679,7 +770,13 @@ class Builder:
                 # Pin every source axis before drawing. Old gvar point counts
                 # and phantom metrics must never be interpreted after import.
                 imported[role] = _instantiate(face, location)
-            details = luoshu_merge.import_partial_text(font, imported)
+            variable_stock = "fvar" in font
+            if variable_stock:
+                from luoshu_partial_variations import import_variable_partial
+                details = import_variable_partial(font, imported)
+            else:
+                details = luoshu_merge.import_partial_text(font, imported)
+            details["stockVariable"] = variable_stock
             # Reading OpenType tables for ownership/point safety can normalize
             # their serialization. Original GIDs never move, so retain their
             # exact stock bytes as well as their semantics.
@@ -706,7 +803,7 @@ class Builder:
         if kind == "variable" and self.sources.mode == "single":
             face = self.sources.variable_face(italic)
             assert face is not None
-            key = _canonical({"variable": face.identity, "rev": ENGINE_REVISION})
+            key = _canonical({"variable": face.identity, "rev": FULL_OUTPUT_REVISION})
             return face.path, key
         key = self.sources.variable_key() if kind == "variable" else self.sources.instance_key(weight, italic)
         path = self.cache / f"inst-{key[:32]}.ttf"
@@ -740,7 +837,7 @@ class Builder:
                 face = self.sources.variable_face(italic)
                 index = face.index if face else 0
             bases.append((base, key, index))
-        out_key = _canonical({"bases": [key for _, key, _ in bases], "line": line, "rev": ENGINE_REVISION})
+        out_key = _canonical({"bases": [key for _, key, _ in bases], "line": line, "rev": FULL_OUTPUT_REVISION})
         suffix = ".ttc" if len(bases) > 1 else ".ttf"
         path = self.cache / f"out-{out_key[:32]}{suffix}"
         self.used.add(path)
@@ -916,6 +1013,7 @@ def build(
     if not any(target.role in {"ui-sans", "broad-text"} for target in targets):
         raise EngineError("没有可替换的系统界面字体，当前字体未改变")
     builder = Builder(sources, cache_dir, deadline)
+    source_coverage_by_output: dict[Path, dict[str, Any]] = {}
 
     # Every (target, weight, italic) the device asks for.
     xml_weights: dict[str, set[tuple[int, bool]]] = {}
@@ -1003,7 +1101,7 @@ def build(
                 # No NodeAction: stock family/index/axis/PostScriptName nodes
                 # retain their original semantics and original glyph IDs.
                 replaced.append({"path": target.path, "role": target.role, "mode": "partial-stock",
-                                 "variable": False, "faces": 1, **details})
+                                 "variable": bool(details.get("stockVariable")), "faces": 1, **details})
                 continue
             line = _line_metrics(target)
             italic_variable = sources.variable_face(True)
@@ -1048,8 +1146,11 @@ def build(
             _place(main, stage / rel)
             files[target.path] = _file_record(target.path, str(rel), stage / rel, "physical-font")
             node_actions[target.path] = actions
+            if main not in source_coverage_by_output:
+                source_coverage_by_output[main] = _output_source_coverage(main)
             replaced.append({"path": target.path, "role": target.role,
-                             "variable": variable, "faces": len(specs)})
+                             "variable": variable, "faces": len(specs),
+                             "sourceCoverage": source_coverage_by_output[main]})
 
         def action_for(logical: str, weight: int, italic: bool) -> NodeAction | None:
             per_target = node_actions.get(logical)
@@ -1092,7 +1193,28 @@ def build(
         "stats": builder.stats,
         "seconds": round(time.monotonic() - started, 2),
     }
+    from luoshu_coverage_audit import build_audit
+    report["coverageAudit"] = build_audit(topology, roles, replaced, kept)
     return manifest, report
+
+
+def _output_source_coverage(path: Path) -> dict[str, Any]:
+    """Minimum source mapping coverage across the generated output faces.
+
+    Full outputs are generated from the selected source faces. Inspect those
+    bytes instead of treating the original stock slot's coverage as evidence
+    that the requested source characters were present in every output face.
+    """
+    count = _collection_count(path)
+    coverage = []
+    for index in range(count):
+        with TTFont(str(path), fontNumber=index, lazy=True) as font:
+            cmap = font.getBestCmap() or {}
+            coverage.append((sum(point in cmap and cmap[point] != ".notdef" for point in LATIN_LETTERS),
+                             sum(point in cmap and cmap[point] != ".notdef" for point in DIGITS)))
+    return {"asciiLetters": min(value[0] for value in coverage),
+            "asciiDigits": min(value[1] for value in coverage),
+            "faces": count, "basis": "generated-output-cmap-minimum"}
 
 
 def _file_record(logical: str, rel: str, path: Path, kind: str, source_xml: str = "") -> dict[str, Any]:

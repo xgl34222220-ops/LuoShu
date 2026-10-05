@@ -31,12 +31,25 @@ SCHEMA = "luoshu-engine-diagnostic-v1"
 STOCK_TOTAL_LIMIT = 600 * 1024 * 1024
 SOURCE_TOTAL_LIMIT = 400 * 1024 * 1024
 SMALL_PRESERVED_LIMIT = 2 * 1024 * 1024
+ORIGINAL_TEXT_FILE_LIMIT = 64 * 1024 * 1024
+ORIGINAL_TEXT_TOTAL_LIMIT = 160 * 1024 * 1024
+KNOWN_TEXT_STOCK_ROLES = {"ui-sans", "cjk", "latin", "clock", "numeric", "serif", "monospace", "special-fallback"}
+STOCK_PROBE_BYTE_LIMIT = 128 * 1024 * 1024
+STOCK_PROBE_TABLE_LIMIT = 4 * 1024 * 1024
+STOCK_PROBE_FACE_LIMIT = 16
+STOCK_PROBE_COLLECTION_LIMIT = 4096
+STOCK_PROBE_CMAP_POINT_LIMIT = 500000
+STOCK_PROBE_TIME_LIMIT = 30
+HOLLOW_MARKER_TAG = "LSDG"
+HOLLOW_MARKER_DATA = b"luoshu-diagnostic-hollow-v1\n"
 CONFIG_FILE_LIMIT = 8 * 1024 * 1024
 LOG_TAIL_BYTES = 512 * 1024
 RECENT_PROFILES = 3
-# Lite bundles (default) hollow every font: all tables, glyph order, metrics,
+# Lite bundles hollow ordinary replacement/source fonts: tables, order, metrics,
 # cmap and variation data stay, but only the glyphs the engine actually
 # inspects or copies (probes, Latin, digits, punctuation) keep outlines.
+# Protected text bases stay whole within their dedicated budget for faithful
+# partial replay. Unknown stock still has the conservative small-file limit.
 SKIPPED_ROLES = {"emoji", "symbol-icon"}
 CONFIG_DIRS = (
     "font-config-source",
@@ -193,30 +206,21 @@ def _snapshot_file(logical: str, root: Path, *, lower_layout: bool) -> Path | No
 
 
 def _wanted_slots(config: Path, full: bool = False) -> list[tuple[str, str, str]]:
-    """Returns (logical path, role, action) of every slot worth replaying.
+    """Select trusted text/unknown stock without relying on the last report.
 
-    Engine v3 takes line metrics from the topology, so a lite bundle only needs
-    the stock files the last build replaced (collection face counts), plus the
-    small protected text bases admitted by the current partial-text policy.
-    Hollowing every text font took too long on large OEM font sets."""
+    Every topology path is audited separately, including excluded paths. Lite
+    exports keep protected text bases whole within a bounded budget and probe
+    large ones' cmap/axes
+    without loading their outlines. An old replacement report is never a
+    complete inventory of possible English/digit routes.
+    """
     # The engine itself imports this module's snapshot resolver. Import the
     # policy only when collecting, after both modules have finished loading.
-    from luoshu_engine import is_partial_text_slot
+    from luoshu_engine import _partial_path_supported, _partial_protected_identity, is_partial_text_slot
     report = _load(config / "luoshu-engine-build" / "report.json")
     topology = _load(config / "device_font_topology.json")
     roles = _load(config / "device_font_roles.json").get("slots") or {}
-    partial = [(logical, str((roles.get(logical) or {}).get("role") or ""), "partial-stock")
-               for logical, slot in sorted((topology.get("slots") or {}).items())
-               if isinstance(slot, dict) and is_partial_text_slot(logical, slot)]
-    replaced = [item for item in report.get("replaced") or [] if item.get("path")]
-    if replaced and not full:
-        # Kept-stock slots too, so a replay can see why they were kept.
-        kept = [item for item in report.get("keptStock") or [] if item.get("path")]
-        wanted = [(str(item["path"]), str(item.get("role") or ""), "replace") for item in replaced] + \
-            [(str(item["path"]), "", "kept") for item in kept]
-        # A previous engine report did not list these protected faces. Keep
-        # them for a faithful replay of the newly admitted partial routes.
-        return list({item[0]: item for item in [*wanted, *partial]}.values())
+    replaced = [item for item in report.get("replaced") or [] if isinstance(item, dict) and item.get("path")]
     shadow = _load(config / "device_font_shadow_plan.json").get("slots") or {}
     targeted: set[str] = {str(item["path"]) for item in replaced}
     for plan_path in sorted((config / "universal-font-plans").glob("*.json")):
@@ -227,17 +231,251 @@ def _wanted_slots(config: Path, full: bool = False) -> list[tuple[str, str, str]
     for logical, slot in sorted((topology.get("slots") or {}).items()):
         if not isinstance(slot, dict):
             continue
-        role = str((roles.get(logical) or {}).get("role") or "")
+        role = str((roles.get(logical) or {}).get("role") or "unknown-protected")
         action = str((shadow.get(logical) or {}).get("action") or "")
-        if is_partial_text_slot(logical, slot):
-            action = "partial-stock"
-        if role in SKIPPED_ROLES and logical not in targeted:
+        if not _partial_path_supported(logical) or role in SKIPPED_ROLES or _partial_protected_identity(logical, slot):
             continue
+        if is_partial_text_slot(logical, slot, role):
+            action = "partial-stock"
+        elif role == "unknown-protected":
+            action = "audit-stock"
+        elif logical in targeted:
+            action = "replace"
+        elif role in KNOWN_TEXT_STOCK_ROLES:
+            action = "preserve"
         result.append((logical, role, action))
     # Targets first, then non-preserved slots, then the preserved rest.
     rank = {"replace": 1, "conditional": 1, "specialized": 1, "review": 2}
     result.sort(key=lambda item: (0 if item[0] in targeted else rank.get(item[2], 3), item[0]))
     return result
+
+
+def _stock_coverage_audit(config: Path, wanted: list[tuple[str, str, str]]) -> dict[str, dict[str, Any]]:
+    """Account for every topology path; an absent probe never means zero glyphs."""
+    from luoshu_engine import _partial_path_supported, _partial_protected_identity
+    topology = _load(config / "device_font_topology.json").get("slots") or {}
+    roles = _load(config / "device_font_roles.json").get("slots") or {}
+    selected = {logical: (role, action) for logical, role, action in wanted}
+    result: dict[str, dict[str, Any]] = {}
+    for logical, slot in sorted(topology.items()):
+        role = str((roles.get(logical) or {}).get("role") or "unknown-protected")
+        record: dict[str, Any] = {"role": role, "selected": False, "probeStatus": "not-probed",
+                                  "faceCount": None, "faces": []}
+        if logical in selected:
+            record["action"] = selected[logical][1]
+        else:
+            reason = "invalid-topology-slot" if not isinstance(slot, dict) else \
+                "unsupported-system-font-path" if not _partial_path_supported(logical) else \
+                "excluded-emoji-or-symbol" if role in SKIPPED_ROLES or _partial_protected_identity(logical, slot) else \
+                "not-selected"
+            record.update(probeStatus="excluded", skippedReason=reason)
+        result[logical] = record
+    return result
+
+
+def _original_stock_skip_reason(audit: dict[str, Any], role: str,
+                                size: int, text_total: int) -> str | None:
+    """Bound complete bases independently from hollow replay samples."""
+    if audit.get("probeStatus") != "probed" or not audit.get("faces") or \
+            any(face.get("status") != "probed" or face.get("hollowMarker") for face in audit["faces"]):
+        return "original-stock-metadata-unproved"
+    known_text = role in KNOWN_TEXT_STOCK_ROLES
+    if not known_text:
+        return "audit-stock-too-large" if size > SMALL_PRESERVED_LIMIT else None
+    if size > SMALL_PRESERVED_LIMIT and not any(
+            (face.get("asciiLetters") or 0) > 0 or (face.get("asciiDigits") or 0) > 0 for face in audit["faces"]):
+        return "original-stock-ascii-text-unproved"
+    if size > ORIGINAL_TEXT_FILE_LIMIT:
+        return "original-text-file-limit"
+    if text_total + size > ORIGINAL_TEXT_TOTAL_LIMIT:
+        return "original-text-total-limit"
+    return None
+
+
+def _probe_stock_coverage(path: Path, budget: dict[str, Any]) -> dict[str, Any]:
+    """Read bounded sfnt metadata only; never load glyf/CFF/gvar outlines."""
+    from fontTools.ttLib import TTFont
+    result: dict[str, Any] = {"probeStatus": "unavailable", "faceCount": None, "faces": [],
+                              "metadataBytes": 0}
+    if time.monotonic() >= budget["deadline"]:
+        result["probeReason"] = "metadata-time-limit"
+        return result
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            header = stream.read(12)
+            if len(header) < 12:
+                raise ValueError("truncated-font-header")
+            collection = header[:4] == b"ttcf"
+            count = struct.unpack(">I", header[8:12])[0] if collection else 1
+            result["container"] = "collection" if collection else "sfnt"
+            result["faceCount"] = count
+            if not count or count > STOCK_PROBE_COLLECTION_LIMIT:
+                result["probeReason"] = "collection-directory-limit"
+                return result
+            if collection:
+                directory = stream.read(4 * min(count, STOCK_PROBE_FACE_LIMIT))
+                if len(directory) != 4 * min(count, STOCK_PROBE_FACE_LIMIT):
+                    raise ValueError("truncated-collection-directory")
+                offsets = struct.unpack(">" + "I" * min(count, STOCK_PROBE_FACE_LIMIT), directory)
+            else:
+                offsets = (0,)
+            for number, offset in enumerate(offsets):
+                face: dict[str, Any] = {"index": number, "status": "unavailable",
+                                         "asciiLetters": None, "asciiDigits": None, "axes": None}
+                result["faces"].append(face)
+                if time.monotonic() >= budget["deadline"]:
+                    face["reason"] = "metadata-time-limit"
+                    break
+                try:
+                    if offset > size - 12:
+                        raise ValueError("face-directory-out-of-bounds")
+                    stream.seek(offset)
+                    sfnt = stream.read(12)
+                    table_count = struct.unpack(">H", sfnt[4:6])[0]
+                    if table_count > 128:
+                        face["reason"] = "face-table-count-limit"
+                        continue
+                    table_bytes = stream.read(table_count * 16)
+                    if len(table_bytes) != table_count * 16:
+                        raise ValueError("truncated-face-directory")
+                    tables = {}
+                    for number_table in range(table_count):
+                        tag, _checksum, table_offset, length = struct.unpack(">4sIII", table_bytes[number_table * 16:(number_table + 1) * 16])
+                        if table_offset > size or length > size - table_offset:
+                            raise ValueError("font-table-out-of-bounds")
+                        tables[tag.decode("latin-1")] = length
+                    face["format"] = "TrueType" if "glyf" in tables else "CFF2" if "CFF2" in tables else \
+                        "CFF" if "CFF " in tables else "unknown"
+                    face["variable"] = "fvar" in tables
+                    face["hollowMarker"] = HOLLOW_MARKER_TAG in tables
+                    metadata_size = 12 + table_count * 16 + sum(tables.get(tag, 0) for tag in ("cmap", "fvar", "maxp"))
+                    if any(tables.get(tag, 0) > STOCK_PROBE_TABLE_LIMIT for tag in ("cmap", "fvar", "maxp")):
+                        face["reason"] = "metadata-table-size-limit"
+                        continue
+                    if budget["bytes"] + metadata_size > STOCK_PROBE_BYTE_LIMIT:
+                        face["reason"] = "metadata-byte-limit"
+                        continue
+                    budget["bytes"] += metadata_size
+                    result["metadataBytes"] += metadata_size
+                    font = TTFont(str(path), fontNumber=number, lazy=True, recalcBBoxes=False, recalcTimestamp=False)
+                    try:
+                        # cmap normally asks post/CFF for glyph names. Synthetic
+                        # names let metadata probes avoid loading any outlines.
+                        font.setGlyphOrder([f"g{glyph}" for glyph in range(font["maxp"].numGlyphs)])
+                        points: set[int] = set()
+                        if "cmap" in font:
+                            if not _bounded_cmap(font.getTableData("cmap")):
+                                face["reason"] = "metadata-cmap-expansion-limit"
+                                continue
+                            for table in font["cmap"].tables:
+                                if table.isUnicode() and table.format != 14:
+                                    points.update(table.cmap)
+                        axes = []
+                        if "fvar" in font:
+                            variation_data = font.getTableData("fvar")
+                            if len(variation_data) < 16 or struct.unpack_from(">H", variation_data, 8)[0] > 64 \
+                                    or struct.unpack_from(">H", variation_data, 12)[0] > 1024:
+                                face["reason"] = "metadata-axis-count-limit"
+                                continue
+                            for axis in font["fvar"].axes[:16]:
+                                axes.append({"tag": axis.axisTag, "min": axis.minValue,
+                                             "default": axis.defaultValue, "max": axis.maxValue})
+                            if len(font["fvar"].axes) > 16:
+                                face["axesTruncated"] = True
+                        face.update(status="probed", asciiLetters=sum(point in points for point in
+                                    range(65, 91)) + sum(point in points for point in range(97, 123)),
+                                    asciiDigits=sum(point in points for point in range(48, 58)), axes=axes)
+                    finally:
+                        font.close()
+                except Exception as error:  # malformed metadata must not lose other paths
+                    face["reason"] = f"metadata-error:{type(error).__name__}:{error}"[:200]
+            if count > STOCK_PROBE_FACE_LIMIT:
+                result["facesTruncated"] = True
+                result["probeReason"] = "metadata-face-count-limit"
+            completed = sum(face["status"] == "probed" for face in result["faces"])
+            result["probeStatus"] = "probed" if completed == count else "partial" if completed else "unavailable"
+    except (OSError, ValueError, struct.error) as error:
+        result["probeReason"] = f"metadata-error:{type(error).__name__}:{error}"[:200]
+    return result
+
+
+def _bounded_cmap(data: bytes) -> bool:
+    """Reject malformed/huge cmap expansions before fontTools allocates maps."""
+    try:
+        count = struct.unpack_from(">H", data, 2)[0]
+        if count > 128 or len(data) < 4 + count * 8:
+            return False
+        points = 0
+        seen: set[int] = set()
+        for index in range(count):
+            platform, encoding, offset = struct.unpack_from(">HHI", data, 4 + index * 8)
+            # fontTools decompiles all subtables, including non-Unicode ones.
+            # Validate their expansions too before asking for Unicode coverage.
+            if offset in seen:
+                continue
+            seen.add(offset)
+            fmt = struct.unpack_from(">H", data, offset)[0]
+            if fmt in {12, 13}:
+                groups = struct.unpack_from(">I", data, offset + 12)[0]
+                if groups > STOCK_PROBE_CMAP_POINT_LIMIT or offset + 16 + groups * 12 > len(data):
+                    return False
+                for group in range(groups):
+                    start, end, _glyph = struct.unpack_from(">III", data, offset + 16 + group * 12)
+                    if start > end or end > 0x10FFFF:
+                        return False
+                    points += end - start + 1
+                    if points > STOCK_PROBE_CMAP_POINT_LIMIT:
+                        return False
+            elif fmt == 4:
+                segments = struct.unpack_from(">H", data, offset + 6)[0] // 2
+                if offset + 16 + segments * 8 > len(data):
+                    return False
+                for segment in range(segments):
+                    end = struct.unpack_from(">H", data, offset + 14 + segment * 2)[0]
+                    start = struct.unpack_from(">H", data, offset + 16 + segments * 2 + segment * 2)[0]
+                    if start > end:
+                        return False
+                    points += end - start + 1
+            elif fmt in {6, 10}:
+                points += struct.unpack_from(">H" if fmt == 6 else ">I", data,
+                                             offset + (8 if fmt == 6 else 16))[0]
+            elif fmt == 0:
+                points += 256
+            elif fmt == 2:
+                points += 65536  # legacy two-byte encoding has a finite domain
+            elif fmt == 14:
+                selectors = struct.unpack_from(">I", data, offset + 6)[0]
+                if selectors > 256 or offset + 10 + selectors * 11 > len(data):
+                    return False
+                for selector in range(selectors):
+                    record = offset + 10 + selector * 11
+                    default, nondefault = struct.unpack_from(">II", data, record + 3)
+                    if default:
+                        ranges = struct.unpack_from(">I", data, offset + default)[0]
+                        if ranges > STOCK_PROBE_CMAP_POINT_LIMIT or offset + default + 4 + ranges * 4 > len(data):
+                            return False
+                        for number_range in range(ranges):
+                            location = offset + default + 4 + number_range * 4
+                            start = int.from_bytes(data[location:location + 3], "big")
+                            additional = data[location + 3]
+                            if start + additional > 0x10FFFF:
+                                return False
+                            points += additional + 1
+                            if points > STOCK_PROBE_CMAP_POINT_LIMIT:
+                                return False
+                    if nondefault:
+                        mappings = struct.unpack_from(">I", data, offset + nondefault)[0]
+                        if offset + nondefault + 4 + mappings * 5 > len(data):
+                            return False
+                        points += mappings
+            else:
+                return False  # unsupported Unicode formats remain explicitly unknown
+            if points > STOCK_PROBE_CMAP_POINT_LIMIT:
+                return False
+        return True
+    except (struct.error, IndexError):
+        return False
 
 
 def _recent_sources(config: Path) -> list[dict[str, Any]]:
@@ -265,6 +503,7 @@ def _keep_codepoints() -> set[int]:
 
 
 def _hollow_face(font: Any, keep_points: set[int]) -> None:
+    from fontTools.ttLib.tables.DefaultTable import DefaultTable
     from fontTools.ttLib.tables._g_l_y_f import Glyph
     from luoshu_merge import partial_ligatures
     cmap = font.getBestCmap() or {}
@@ -317,6 +556,12 @@ def _hollow_face(font: Any, keep_points: set[int]) -> None:
             charstring = strings[name]
             charstring.decompile()
             charstring.program = [] if tag == "CFF2" else ["endchar"]
+    # Hollow files are evidence/replay samples, never valid original bases for
+    # partial replacement. Keep this marker inside every sfnt/TTC face so it
+    # survives a rename, extraction, or loss of the diagnostic index.
+    marker = DefaultTable(HOLLOW_MARKER_TAG)
+    marker.data = HOLLOW_MARKER_DATA
+    font[HOLLOW_MARKER_TAG] = marker
 
 
 def _hollow(source: Path, target: Path, keep_points: set[int]) -> None:
@@ -510,6 +755,8 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
     config = moddir / "config"
     keep_points = None if full else _keep_codepoints()
     active = _active_font(config)
+    wanted = _wanted_slots(config, full)
+    coverage_audit = _stock_coverage_audit(config, wanted)
     # The live /system/fonts view is LuoShu's overlay while a font is active.
     live_ok = active in {"", "default"}
     index: dict[str, Any] = {
@@ -521,6 +768,7 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
         "activeFont": active,
         "stock": {},
         "stockSkipped": [],
+        "stockCoverageAudit": coverage_audit,
         "sources": {},
         "sourcesSkipped": [],
     }
@@ -556,6 +804,7 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
         dump = Path(os.environ.get("LUOSHU_VERIFY_STATE_ROOT", "/data/adb/luoshu/runtime-verify")) / "font-manager.txt"
         if dump.is_file():
             _write_tail(bundle, dump, "runtime/font-manager.txt")
+        fonts_seen: dict[str, Any] = {}
         try:
             fonts_seen = _process_fonts()
             fonts_seen["themeGlobal"] = _stat_text(THEME_FONT_DIR / "Roboto-Regular.ttf")
@@ -576,20 +825,54 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
             _write_tail(bundle, path, f"logs/{path.name}")
 
         stock_total = 0
-        for logical, role, action in _wanted_slots(config, full):
-            found = _resolve_stock(logical, lower_root, live_ok)
+        original_text_total = 0
+        probe_budget = {"bytes": 0, "deadline": time.monotonic() + STOCK_PROBE_TIME_LIMIT}
+        for logical, audit in coverage_audit.items():
+            if audit["probeStatus"] == "excluded":
+                index["stockSkipped"].append({"path": logical, "reason": audit["skippedReason"]})
+        observed_paths = {str(record.get("path") or "") for process in fonts_seen.get("processes") or []
+                          for record in process.get("fonts") or []}
+        # A maps observation only prioritizes source evidence collection; it
+        # does not confirm which font rendered a particular string.
+        wanted.sort(key=lambda item: (item[0] not in observed_paths,
+                    0 if item[1] in KNOWN_TEXT_STOCK_ROLES else 1, item[0]))
+        prepared_stocks: list[tuple[str, str, str, str, Path, int]] = []
+        for logical, role, action in wanted:
+            audit = coverage_audit[logical]
+            try:
+                found = _resolve_stock(logical, lower_root, live_ok)
+            except OSError as error:
+                reason = f"snapshot-unreadable:{_read_error(error)}"
+                audit.update(probeStatus="unavailable", skippedReason=reason)
+                index["stockSkipped"].append({"path": logical, "reason": reason})
+                continue
             if found is None:
+                audit.update(probeStatus="unavailable", skippedReason="no-stock-snapshot")
                 index["stockSkipped"].append({"path": logical, "reason": "no-stock-snapshot"})
                 continue
             origin, actual = found
-            size = actual.stat().st_size
-            if not full and action == "partial-stock" and size > SMALL_PRESERVED_LIMIT:
-                index["stockSkipped"].append({"path": logical, "reason": "partial-stock-too-large", "bytes": size})
+            try:
+                size = actual.stat().st_size
+            except OSError as error:
+                reason = f"snapshot-unreadable:{_read_error(error)}"
+                audit.update(probeStatus="unavailable", skippedReason=reason)
+                index["stockSkipped"].append({"path": logical, "reason": reason})
                 continue
-            if action == "preserve" and size > SMALL_PRESERVED_LIMIT:
-                index["stockSkipped"].append({"path": logical, "reason": "preserved-large", "bytes": size})
+            audit.update(origin=origin, bytes=size)
+            audit.update(_probe_stock_coverage(actual, probe_budget))
+            prepared_stocks.append((logical, role, action, origin, actual, size))
+        # Probe every source before hashing/compressing full originals, so a
+        # large copy does not consume the bounded metadata inspection time.
+        for logical, role, action, origin, actual, size in prepared_stocks:
+            audit = coverage_audit[logical]
+            original = action in {"partial-stock", "audit-stock", "preserve"}
+            reason = _original_stock_skip_reason(audit, role, size, original_text_total) if not full and original else None
+            if reason is not None:
+                audit["skippedReason"] = reason
+                index["stockSkipped"].append({"path": logical, "reason": reason, "bytes": size})
                 continue
             if stock_total + size > STOCK_TOTAL_LIMIT:
+                audit["skippedReason"] = "size-limit"
                 index["stockSkipped"].append({"path": logical, "reason": "size-limit", "bytes": size})
                 continue
             name = "stock" + logical
@@ -597,15 +880,34 @@ def export(moddir: Path, output: Path, lower_root: Path, full: bool = False) -> 
                 # A partial output retains the stock's other glyphs and their
                 # component dependencies. Hollowing its base would change the
                 # merger's safety decisions and cannot faithfully replay it.
-                hollow = _add_font(bundle, actual, name, None if action == "partial-stock" else scratch, keep_points)
+                hollow = _add_font(bundle, actual, name, None if original else scratch, keep_points)
+                digest = _sha256(actual)
             except (OSError, ValueError) as error:  # one unreadable slot must not lose the bundle
-                index["stockSkipped"].append({"path": logical, "reason": f"error:{type(error).__name__}: {error}"[:200]})
+                reason = f"error:{type(error).__name__}: {error}"[:200]
+                audit["skippedReason"] = reason
+                index["stockSkipped"].append({"path": logical, "reason": reason})
                 continue
             stock_total += size
+            if original and role in KNOWN_TEXT_STOCK_ROLES:
+                original_text_total += size
             index["stock"][logical] = {
                 "file": name, "origin": origin, "role": role, "action": action,
-                "bytes": size, "sha256": _sha256(actual), "hollow": hollow,
+                "bytes": size, "sha256": digest, "hollow": hollow,
             }
+            audit.update(selected=True, file=name, hollow=hollow)
+        index["stockCoverageAuditSummary"] = {
+            "pathCount": len(coverage_audit), "selectedCount": len(index["stock"]),
+            "probedCount": sum(row["probeStatus"] == "probed" for row in coverage_audit.values()),
+            "partialCount": sum(row["probeStatus"] == "partial" for row in coverage_audit.values()),
+            "unknownCount": sum(row["probeStatus"] in {"unavailable", "not-probed"} for row in coverage_audit.values()),
+            "excludedCount": sum(row["probeStatus"] == "excluded" for row in coverage_audit.values()),
+            "metadataBytes": probe_budget["bytes"], "metadataByteLimit": STOCK_PROBE_BYTE_LIMIT,
+            "metadataFaceLimit": STOCK_PROBE_FACE_LIMIT, "metadataTimeLimitSeconds": STOCK_PROBE_TIME_LIMIT,
+            "originalTextBytes": original_text_total, "originalTextFileLimit": ORIGINAL_TEXT_FILE_LIMIT,
+            "originalTextTotalLimit": ORIGINAL_TEXT_TOTAL_LIMIT, "originalTextLimitApplied": not full,
+            "stockBytes": stock_total, "stockTotalLimit": STOCK_TOTAL_LIMIT,
+            "capturePriority": "observed-system-maps-then-known-text-semantics",
+        }
 
         source_total = 0
         for item in _recent_sources(config):

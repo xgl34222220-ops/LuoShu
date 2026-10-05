@@ -165,6 +165,8 @@ jobs:
             common/luoshu_engine.py \
             common/luoshu_engine.sh \
             common/luoshu_merge.py \
+            common/luoshu_coverage_audit.py \
+            common/luoshu_partial_variations.py \
             common/luoshu_payload.py \
             common/luoshu_verify.py \
             common/universal_mount_runtime.sh \
@@ -188,7 +190,7 @@ jobs:
           unzip -p "$module" common/font_archive_export.sh | grep -q '归档目标目录不受信任'
           unzip -p "$module" common/font_archive_export.sh | grep -q '1073741824'
           unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
-                    unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 5'
+          unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 6'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'stockFontUniqueFileCount'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'themeOverrideRoots'
           unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'
@@ -214,6 +216,8 @@ jobs:
             "$tmp/common/font_role_shadow.py" \
             "$tmp/common/luoshu_engine.py" \
             "$tmp/common/luoshu_merge.py" \
+            "$tmp/common/luoshu_coverage_audit.py" \
+            "$tmp/common/luoshu_partial_variations.py" \
             "$tmp/common/luoshu_payload.py" \
             "$tmp/common/luoshu_verify.py" \
             "$tmp/common/universal_font_runtime_verify.py"

@@ -396,6 +396,12 @@ def import_partial_text(base: TTFont, sources: dict[str, TTFont]) -> dict:
     protected = {name for name in plans if aliases.get(name, set()) - PARTIAL_TEXT_CODEPOINTS}
     layout_protected = _partial_layout_protected(base, plans, source_ligatures)
     protected.update(layout_protected)
+    # Composite USE_MY_METRICS advances can come from a component rather
+    # than this glyph's own hmtx/HVAR. Redrawing it as a simple glyph would
+    # silently change FreeType/Android advances even when hmtx is retained.
+    metric_protected = {name for name in plans if base["glyf"][name].isComposite()
+                        and any(component.flags & 0x0200 for component in base["glyf"][name].components)}
+    protected.update(metric_protected)
     clone_names: dict[str, str] = {}
     # Retained composites must keep the original component outlines. Append
     # private copies without moving any original glyph ID; this also keeps
@@ -459,6 +465,8 @@ def import_partial_text(base: TTFont, sources: dict[str, TTFont]) -> dict:
         counts[role] += 1
         counts["ligatures"] += int(name in ligature_names)
     return {"latinGlyphsReplaced": counts["latin"], "digitGlyphsReplaced": counts["digit"],
+            "asciiLettersBefore": sum(point in cmap for point in REQUIRED["latin"]),
+            "asciiDigitsBefore": sum(point in cmap for point in REQUIRED["digit"]),
             "asciiLettersReplaced": sum(cmap.get(point) in plans and cmap.get(point) not in protected
                                         for point in REQUIRED["latin"]),
             "asciiDigitsReplaced": sum(cmap.get(point) in plans and cmap.get(point) not in protected
@@ -466,8 +474,11 @@ def import_partial_text(base: TTFont, sources: dict[str, TTFont]) -> dict:
             "ligatureGlyphsReplaced": counts["ligatures"],
             "protectedSharedGlyphs": sorted(protected),
             "protectedLayoutGlyphs": sorted(layout_protected),
+            "protectedMetricGlyphs": sorted(metric_protected),
             "retainedComponentClones": len(clone_names),
             "clonedGlyphCount": len(clone_names), "originalGlyphOrderPreservedPrefix": True,
+            "clonedGlyphSources": {clone: name for name, clone in clone_names.items()},
+            "replacedGlyphNames": sorted(plans.keys() - protected),
             "preservedLigatureGlyphs": sorted(ligature_names - (plans.keys() - protected)),
             "layoutCoverage": "matched-latin-ligatures; other substitutions retain stock",
             "advancePolicy": "retain-stock-cell"}

@@ -21,7 +21,7 @@ ROLE_SCHEMA = "device-font-roles-v1"
 PLAN_SCHEMA = "device-font-shadow-plan-v1"
 # Revision 2: OEM UI families (mipro, sysfont, oplus-sans ...) and Mitype clocks.
 # Revision 3: decorative families and und-<Script> fallbacks stay protected.
-ROLE_REVISION = 4
+ROLE_REVISION = 6
 PLAN_REVISION = 1
 
 PROTECTED_ROLES = {"emoji", "symbol-icon", "serif", "monospace", "special-fallback"}
@@ -32,12 +32,13 @@ EMOJI_TOKENS = (
     "emoji", "emojione", "twemoji", "noto-color-emoji", "notocoloremoji",
 )
 SYMBOL_TOKENS = (
-    "symbol", "icon", "material", "dingbat", "math", "music", "awesome",
-    "glyph", "weather", "fontello", "barcode", "qrcode", "braille",
+    "symbol", "symbols", "icon", "icons", "material", "dingbat", "dingbats", "math", "music", "awesome",
+    "glyph", "glyphs", "glyphicons", "fontawesome", "materialicons", "materialsymbols",
+    "notosanssymbols", "weather", "fontello", "barcode", "qrcode", "braille",
 )
 CLOCK_TOKENS = (
     "clock", "clockopia", "lockscreen", "lock-screen", "numeral",
-    "mitype",
+    "mitype", "miclock",
 )
 NUMERIC_TOKENS = ("numeric", "number-font", "numberfont", "digit-font", "digitfont")
 MONO_FAMILIES = (
@@ -54,6 +55,8 @@ CJK_TOKENS = (
     "hans", "hant", "zh-cn", "zh-tw", "zh-hk", "zh-hans", "zh-hant",
     "cjk-sc", "cjk-tc", "notosanssc", "notosanstc", "sourcehansans",
     "sourcehan-sans-sc", "sourcehan-sans-tc", "droidsansfallback",
+    "noto-sans-sc", "noto-sans-tc", "sourcehansanssc", "sourcehansanstc", "sourcehansanscn",
+    "source-han-sans-sc", "source-han-sans-tc", "source-han-sans-cn",
 )
 LATIN_TOKENS = ("latin", "latn")
 CJK_LANG_PREFIXES = ("zh", "cmn", "yue", "wuu", "hak", "nan", "hans", "hant")
@@ -92,8 +95,25 @@ def _tokens(value: str) -> set[str]:
 
 
 def _contains_phrase(haystack: str, phrases: tuple[str, ...]) -> bool:
-    value = normalize(haystack)
-    return any(normalize(phrase) in value for phrase in phrases)
+    """Match actual name components, including standard CamelCase names.
+
+    A bare substring treated Gothi(cOn)e as an icon identity, and Parabolic as
+    Arabic. Keep both the original spelling (NotoSansSC) and CamelCase parts
+    (Noto / Sans / Symbols), but never match inside an unrelated component.
+    Emoji identity stays conservative even inside an unknown joined brand;
+    false text replacement there would corrupt emoji rather than leave text.
+    """
+    split = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1-\2", haystack)
+    split = re.sub(r"([a-z0-9])([A-Z])", r"\1-\2", split)
+    values = {normalize(haystack), normalize(split)}
+    for phrase in phrases:
+        needle = normalize(phrase)
+        if needle == "emoji" and needle in normalize(haystack):
+            return True
+        if needle and any(re.search(r"(?<![a-z0-9])" + re.escape(needle) + r"(?:[0-9]+)?(?![a-z0-9])", value)
+                          for value in values):
+            return True
+    return False
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -135,6 +155,11 @@ def _xml_refs(slot: dict[str, Any]) -> list[dict[str, Any]]:
 def _xml_semantics(slot: dict[str, Any]) -> dict[str, list[str]]:
     result = {"lang": [], "variant": [], "fallbackFor": []}
     for ref in _xml_refs(slot):
+        # Android also declares fallbackFor on the <font> node itself.
+        # Missing family attributes must not discard that routing boundary.
+        fallback = str(ref.get("fallbackFor") or "").strip()
+        if fallback and fallback not in result["fallbackFor"]:
+            result["fallbackFor"].append(fallback)
         attrs = ref.get("familyAttributes")
         if not isinstance(attrs, dict):
             continue
@@ -231,7 +256,7 @@ def _explicit_mono_family(families: list[str]) -> bool:
 def _code_mono_identity(path: str, families: list[str]) -> bool:
     if _explicit_mono_family(families):
         return True
-    filename = normalize(Path(path).name)
+    filename = Path(path).name
     # OEM clock faces (MiClockMono, MitypeClockMono) are tabular clock digits,
     # not code fonts; an explicit XML monospace family still wins above.
     if _contains_phrase(filename, ("mitypemono", "mitype-mono")) or _contains_phrase(filename, CLOCK_TOKENS):
@@ -283,7 +308,7 @@ def _is_special_script(text: str) -> bool:
 
 def _is_cjk_identity(text: str) -> bool:
     normalized = normalize(text)
-    if _contains_phrase(normalized, CJK_TOKENS):
+    if _contains_phrase(text, CJK_TOKENS):
         return True
     tokens = _tokens(normalized)
     return bool(tokens.intersection({"cjk", "han", "chinese"}))

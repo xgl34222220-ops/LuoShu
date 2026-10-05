@@ -540,13 +540,17 @@ def test_partial_protection_and_missing_stock(temp: Path) -> None:
     assert item["asciiLettersReplaced"] == 51 and "u0041" in item["protectedSharedGlyphs"], item
     with TTFont(str(stock)) as before, TTFont(str(payload / logical.lstrip("/"))) as after:
         assert _coords(before, "u0041") == _coords(after, "u0041"), "symbol alias must stay stock"
-    # Neither a protected role alone nor a misleading filename grants a full
-    # replacement. The existing role-policy preservation stays unchanged.
+    # Language semantics and ROM filenames do not restrict text candidates.
+    # This only admits trusted stock inspection, never a whole-face rewrite.
     bad_slot = copy.deepcopy(slot)
     bad_slot["xmlRefs"][0]["familyAttributes"]["lang"] = "und-Arab"
-    assert not engine.is_partial_text_slot(logical, bad_slot)
-    assert not engine.is_partial_text_slot("/system/fonts/VendorMono.ttf", slot)
+    assert engine.is_partial_text_slot(logical, bad_slot)
+    assert engine.is_partial_text_slot("/system/fonts/VendorMono.ttf", slot)
     assert engine.is_partial_text_slot(logical, slot)
+    assert not engine.is_partial_text_slot("/data/fonts/NotoSerif-Regular.ttf", slot)
+    icon_slot = copy.deepcopy(slot)
+    icon_slot["families"] = ["monospace", "Material Icons"]
+    assert not engine.is_partial_text_slot(logical, icon_slot)
     with patch.dict(os.environ, {"LUOSHU_SELF_MOUNT_STATE_ROOT": str(temp / "missing-lower")}):
         _manifest, missing, _payload = run(temp, "partial-missing", topology, spec, xml_map)
     assert {"path": logical, "reason": "partial-stock-base-missing"} in missing["keptStock"]
@@ -630,6 +634,20 @@ def test_partial_real_component_fonts(temp: Path) -> None:
         stock = case / filename; shutil.copyfile(source, stock)
         _partial_slot(topology, stock, logical, family)
         spec = _mix_spec(case, "fixed")
+        with TTFont(str(stock)) as original:
+            has_math = "MATH" in original
+        if has_math:
+            _manifest, guarded, guarded_payload = run(case, "partial-math-guard", topology, spec,
+                                                       xml_map, {logical: stock})
+            assert {"path": logical, "reason": "partial-stock-math-layout-unsupported"} in guarded["keptStock"]
+            assert not (guarded_payload / logical.lstrip("/")).exists()
+            # The complete host original is now explicitly unsupported. Its
+            # copied non-math fixture still exercises all prior component,
+            # GID, script, layout and advance assertions without hiding that
+            # change in eligibility or claiming real-device evidence.
+            with TTFont(str(stock)) as non_math_fixture:
+                del non_math_fixture["MATH"]
+                non_math_fixture.save(str(stock))
         _manifest, report, payload = run(case, "partial-real", topology, spec, xml_map, {logical: stock})
         item = next(item for item in report["replaced"] if item["path"] == logical)
         assert item["asciiLettersReplaced"] == 52 and item["asciiDigitsReplaced"] == 10, item
@@ -656,8 +674,328 @@ def test_partial_real_component_fonts(temp: Path) -> None:
                 assert before["hmtx"].metrics[name][0] == after["hmtx"].metrics[name][0], (filename, name)
                 if name not in changed:
                     assert _coords(before, name) == _coords(after, name), (filename, name)
-        print(f"partial host font: {filename} Latin={item['asciiLettersReplaced']} digits={item['asciiDigitsReplaced']} "
+        label = "host-derived non-math fixture" if has_math else "host font"
+        print(f"partial {label}: {filename} Latin={item['asciiLettersReplaced']} digits={item['asciiDigitsReplaced']} "
               f"clones={item['clonedGlyphCount']} retained outlines/layout/advances PASS")
+
+
+def test_generic_partial_text_routes(temp: Path) -> None:
+    cases = (
+        ("/product/fonts/OemText.ttf", "serif", {"lang": "und-Arab"}, True),
+        ("/vendor/fonts/brand/VendorMonoText.ttf", "vendor-monospace", {}, False),
+        ("/system_ext/fonts/RomCasual.ttf", "casual", {"fallbackFor": "sans-serif", "lang": "ja,ko"}, True),
+        ("/cust/fonts/BrandCursive.ttf", "cursive", {}, False),
+    )
+    for number, (logical, family, attributes, with_xml) in enumerate(cases):
+        case = temp / str(number); case.mkdir()
+        topology, _stocks, xml_map = device(case)
+        stock = _partial_stock(case)
+        slot = _partial_slot(topology, stock, logical, family)
+        slot.pop("metrics")
+        node = None
+        if with_xml:
+            slot["xmlRefs"][0]["familyAttributes"] = dict(attributes)
+            node = ET.Element("family", {"name": family, **attributes})
+            ET.SubElement(node, "font", {"weight": "400", "style": "normal"}).text = Path(logical).name
+            original = ET.parse(xml_map[FONTS_XML])
+            original.getroot().append(node)
+            original.write(xml_map[FONTS_XML], encoding="unicode")
+        else:
+            slot["xmlRefs"] = []
+        assert engine.is_partial_text_slot(logical, slot), (logical, family)
+        _manifest, report, payload = run(case, "generic-partial", topology, _mix_spec(case, "fixed"),
+                                         xml_map, {logical: stock})
+        item = next(item for item in report["replaced"] if item["path"] == logical)
+        assert item["mode"] == "partial-stock" and item["asciiLettersReplaced"] == 52
+        assert item["asciiDigitsReplaced"] == 10 and not item["variable"]
+        with TTFont(str(stock), recalcBBoxes=False) as before, \
+                TTFont(str(payload / logical.lstrip("/")), recalcBBoxes=False) as after:
+            assert after.getBestCmap() == before.getBestCmap()
+            assert after.getGlyphOrder()[:len(before.getGlyphOrder())] == before.getGlyphOrder()
+            assert _coords(after, "retained") == _coords(before, "retained"), "other-script composite"
+            assert _coords(after, "B.alt") == _coords(before, "B.alt"), "unmatched stylistic output"
+            assert after.reader["GSUB"] == before.reader["GSUB"]
+            assert after.reader["GPOS"] == before.reader["GPOS"]
+            assert all(after["hmtx"].metrics[name][0] == advance
+                       for name, (advance, _lsb) in before["hmtx"].metrics.items())
+        if node is not None:
+            rendered = ET.parse(payload / FONTS_XML.lstrip("/")).getroot()
+            assert ET.tostring(rendered.find(f"family[@name='{family}']")) == ET.tostring(node)
+
+    # A Latin-only source may patch a protected multilingual stock font: its
+    # retained Han/other scripts do not need to be supplied by the donor.
+    case = temp / "latin-only"; case.mkdir()
+    topology, _stocks, xml_map = device(case)
+    stock = _partial_stock(case)
+    with TTFont(str(stock), recalcBBoxes=False) as font:
+        for table in font["cmap"].tables:
+            if table.isUnicode():
+                table.cmap[0x4E00] = "retained"
+        font.save(str(stock))
+    logical = "/product/fonts/LocalizedSerif.ttf"
+    _partial_slot(topology, stock, logical, "serif")["xmlRefs"] = []
+    source = case / "LatinOnly.ttf"; fixture.make_font(source, family="Latin Only")
+    _manifest, report, payload = run(case, "partial-latin-only", topology,
+                                     {"mode": "single", "files": [str(source)]}, xml_map, {logical: stock})
+    assert any(item["path"] == logical and item["mode"] == "partial-stock" for item in report["replaced"])
+    with TTFont(str(stock)) as before, TTFont(str(payload / logical.lstrip("/"))) as after:
+        assert _coords(after, after.getBestCmap()[0x4E00]) == _coords(before, before.getBestCmap()[0x4E00])
+
+
+def test_generic_partial_trust_and_unsupported(temp: Path) -> None:
+    from fontTools.ttLib.tables.DefaultTable import DefaultTable
+    topology, _stocks, xml_map = device(temp)
+    logical = "/product/fonts/OemSerif.ttf"
+    stock = _partial_stock(temp)
+    slot = _partial_slot(topology, stock, logical, "serif")
+    slot["xmlRefs"] = []
+    spec = _mix_spec(temp, "fixed")
+
+    def reason(name: str, source: Path, expected: str, modified_slot: dict | None = None,
+               target_path: str = logical):
+        modified = copy.deepcopy(topology)
+        modified["slots"].pop(logical)
+        modified["slots"][target_path] = copy.deepcopy(modified_slot or slot)
+        _manifest, report, payload = run(temp, name, modified, spec, xml_map, {target_path: source})
+        assert {"path": target_path, "reason": expected} in report["keptStock"], report["keptStock"]
+        assert not any(item["path"] == target_path for item in report["replaced"])
+        if engine._partial_path_supported(target_path):
+            assert not (payload / target_path.lstrip("/")).exists()
+
+    for number, path in enumerate(("/data/fonts/OemSerif.ttf", "/system/fonts/../OemSerif.ttf",
+                                    "/system//fonts/OemSerif.ttf", "/cache/fonts/OemSerif.ttf",
+                                    "/product/fonts/./OemSerif.ttf", "/product/fonts/sub//OemSerif.ttf")):
+        assert not engine.is_partial_text_slot(path, slot)
+        reason(f"bad-path-{number}", stock, "partial-stock-path-unsupported", target_path=path)
+
+    mismatch = copy.deepcopy(slot)
+    mismatch["xmlRefs"] = [{"resolvedPath": "/product/fonts/Another.ttf"}]
+    reason("mismatch", stock, "partial-stock-reference-mismatch", mismatch)
+    indexed = copy.deepcopy(slot); indexed["faceIndex"] = 1
+    reason("single-index", stock, "partial-stock-face-index-unsupported", indexed)
+
+    cff = temp / "CffBase.otf"; fixture.make_font(cff, family="Text Serif", cff=True)
+    reason("cff-base", cff, "partial-stock-outline-unsupported")
+    unreadable = temp / "Unreadable.ttf"; unreadable.write_bytes(b"not-a-font")
+    reason("unreadable", unreadable, "partial-stock-unreadable")
+    empty = temp / "EmptyLetter.ttf"; shutil.copyfile(stock, empty)
+    from fontTools.ttLib.tables._g_l_y_f import Glyph
+    with TTFont(str(empty)) as font:
+        for point in engine.LATIN_LETTERS | engine.DIGITS:
+            font["glyf"][font.getBestCmap()[point]] = Glyph()
+        font.save(str(empty))
+    reason("empty-letter", empty, "partial-stock-text-incomplete")
+
+    for tag, expected in (("COLR", "partial-stock-color-or-bitmap-unsupported"),
+                          ("MATH", "partial-stock-math-layout-unsupported"),
+                          ("LSDG", "partial-stock-hollow-base")):
+        tagged = temp / f"{tag}.ttf"; shutil.copyfile(stock, tagged)
+        with TTFont(str(tagged)) as font:
+            table = DefaultTable(tag); table.data = b"luoshu-guard-fixture"
+            font[tag] = table; font.save(str(tagged))
+        reason(f"tag-{tag}", tagged, expected)
+
+    disguised = temp / "Disguised.ttf"; fixture.make_font(disguised, family="Material Icons")
+    reason("font-name-symbol", disguised, "partial-stock-protected-identity")
+    icon_slot = copy.deepcopy(slot); icon_slot["families"] = ["monospace", "Material Icons"]
+    reason("slot-symbol", stock, "partial-stock-protected-identity", icon_slot)
+
+    archive = temp / "old-lite"; archived = archive / "stock/product/fonts/OemSerif.ttf"
+    archived.parent.mkdir(parents=True); shutil.copyfile(stock, archived)
+    (archive / "index.json").write_text(json.dumps({"stock": {
+        logical: {"file": "stock/product/fonts/OemSerif.ttf", "hollow": True}}}))
+    reason("old-hollow-index", archived, "partial-stock-hollow-base")
+    (archive / "index.json").write_text(json.dumps({"stock": {
+        logical: {"file": "stock/product/fonts/OemSerif.ttf", "hollow": False}}}))
+    assert engine._partial_stock_reason(archived, logical) == "", "complete archived originals remain valid"
+
+    # The lower snapshot, never an active absolute alias target, proves stock.
+    lower_root = temp / "lower-state"
+    product = lower_root / "lower/product-fonts"; vendor = lower_root / "lower/vendor-fonts"
+    product.mkdir(parents=True); vendor.mkdir()
+    (product / "OemSerif.ttf").symlink_to("/vendor/fonts/Original.ttf")
+    shutil.copyfile(stock, vendor / "Original.ttf")
+    with patch.dict(os.environ, {"LUOSHU_SELF_MOUNT_STATE_ROOT": str(lower_root)}):
+        assert engine._partial_stock_file(logical, {}) == vendor / "Original.ttf"
+        (product / "OemSerif.ttf").unlink()
+        (product / "OemSerif.ttf").symlink_to("/data/fonts/active.ttf")
+        assert engine._partial_stock_file(logical, {}) is None
+        _manifest, report, _payload = run(temp, "unsafe-live-alias", topology, spec, xml_map)
+        assert {"path": logical, "reason": "partial-stock-base-missing"} in report["keptStock"]
+
+
+def test_generic_partial_subset_text(temp: Path) -> None:
+    # Script-specific fonts can supply ASCII digits without Latin. Requiring
+    # 62 characters in the stock base would leave those digits untouched.
+    for number, kept_letters in enumerate((set(), {ord("A")})):
+        case = temp / str(number); case.mkdir()
+        topology, _stocks, xml_map = device(case)
+        stock = _partial_stock(case)
+        with TTFont(str(stock), recalcBBoxes=False) as font:
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    for point in engine.LATIN_LETTERS - kept_letters:
+                        table.cmap.pop(point, None)
+            font.save(str(stock))
+        logical = "/product/fonts/VendorArabicText.ttf"
+        slot = _partial_slot(topology, stock, logical, "vendor-text")
+        slot["xmlRefs"][0]["familyAttributes"]["lang"] = "und-Arab"
+        assert engine.is_partial_text_slot(logical, slot)
+        _manifest, report, payload = run(case, "partial-subset", topology, _mix_spec(case, "fixed"),
+                                         xml_map, {logical: stock})
+        item = next(item for item in report["replaced"] if item["path"] == logical)
+        assert item["mode"] == "partial-stock" and item["asciiDigitsReplaced"] == 10
+        assert item["asciiLettersReplaced"] == len(kept_letters)
+        audit = next(item for item in report["coverageAudit"]["paths"] if item["path"] == logical)
+        assert audit["presentAsciiComplete"] is True and audit["asciiComplete"] is False
+        assert audit["retainedPresentAscii"] == {"letters": 0, "digits": 0}
+        with TTFont(str(stock), recalcBBoxes=False) as before, \
+                TTFont(str(payload / logical.lstrip("/")), recalcBBoxes=False) as after:
+            assert after.getBestCmap() == before.getBestCmap(), "no source-only Latin coverage introduced"
+            assert _coords(after, "retained") == _coords(before, "retained")
+            assert _coords(after, "fi") == _coords(before, "fi"), "unproved substitution remains stock"
+            assert after.reader["GSUB"] == before.reader["GSUB"] and after.reader["GPOS"] == before.reader["GPOS"]
+            for point in engine.DIGITS:
+                name = before.getBestCmap()[point]
+                assert _coords(after, name) != _coords(before, name), f"digit U+{point:04X}"
+                assert after["hmtx"].metrics[name][0] == before["hmtx"].metrics[name][0]
+
+
+def test_generic_partial_uvs_ownership(temp: Path) -> None:
+    from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+    topology, _stocks, xml_map = device(temp)
+    stock = _partial_stock(temp)
+    with TTFont(str(stock), recalcBBoxes=False) as font:
+        variation = CmapSubtable.newSubtable(14)
+        variation.platformID, variation.platEncID, variation.language = 0, 5, 0
+        variation.cmap = {}
+        variation.uvsDict = {0xFE0F: [(0x0041, None), (0x0628, "u0042")]}
+        font["cmap"].tables.append(variation)
+        font.save(str(stock))
+    logical = "/vendor/fonts/LocalizedSerif.ttf"
+    _partial_slot(topology, stock, logical, "serif")["xmlRefs"] = []
+    _manifest, report, payload = run(temp, "partial-uvs", topology, _mix_spec(temp, "fixed"),
+                                     xml_map, {logical: stock})
+    item = next(item for item in report["replaced"] if item["path"] == logical)
+    assert item["asciiLettersBefore"] == 52 and item["asciiLettersReplaced"] == 51
+    assert item["asciiDigitsReplaced"] == 10 and "u0042" in item["protectedSharedGlyphs"]
+    audit = next(item for item in report["coverageAudit"]["paths"] if item["path"] == logical)
+    assert audit["presentAsciiComplete"] is False
+    assert audit["retainedPresentAscii"] == {"letters": 1, "digits": 0}
+    with TTFont(str(stock), recalcBBoxes=False) as before, \
+            TTFont(str(payload / logical.lstrip("/")), recalcBBoxes=False) as after:
+        assert _coords(before, "u0042") == _coords(after, "u0042"), "Arabic UVS shared glyph remains original"
+        old_uvs = [table.uvsDict for table in before["cmap"].tables if table.format == 14]
+        new_uvs = [table.uvsDict for table in after["cmap"].tables if table.format == 14]
+        assert old_uvs == new_uvs
+
+
+def test_generic_partial_inherited_metrics(temp: Path) -> None:
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+    topology, _stocks, xml_map = device(temp)
+    stock = _partial_stock(temp)
+    with TTFont(str(stock), recalcBBoxes=False) as font:
+        pen = TTGlyphPen(font.getGlyphSet())
+        pen.addComponent("u0043", (1, 0, 0, 1, 0, 0))
+        glyph = pen.glyph()
+        glyph.components[0].flags |= 0x0200  # USE_MY_METRICS
+        font["glyf"]["u0041"] = glyph
+        glyph.recalcBounds(font["glyf"])
+        # The own hmtx value deliberately differs from the inherited cell.
+        # Retaining own hmtx while redrawing a simple A would be incorrect.
+        font["hmtx"].metrics["u0041"] = (900, 40)
+        font.save(str(stock))
+    logical = "/product/fonts/InheritedSerif.ttf"
+    _partial_slot(topology, stock, logical, "serif")["xmlRefs"] = []
+    _manifest, report, payload = run(temp, "inherited-metrics", topology, _mix_spec(temp, "fixed"),
+                                     xml_map, {logical: stock})
+    item = next(item for item in report["replaced"] if item["path"] == logical)
+    assert item["asciiLettersReplaced"] == 51 and item["asciiDigitsReplaced"] == 10
+    assert item["protectedMetricGlyphs"] == ["u0041"] and "u0041" not in item["replacedGlyphNames"]
+    with TTFont(str(stock), recalcBBoxes=False) as before, \
+            TTFont(str(payload / logical.lstrip("/")), recalcBBoxes=False) as after:
+        assert after["glyf"]["u0041"].isComposite(), "inherited-metric target must retain its composite semantics"
+        component = after["glyf"]["u0041"].components[0]
+        assert component.flags & 0x0200
+        assert item["clonedGlyphSources"][component.glyphName] == "u0043"
+        assert after["hmtx"].metrics[component.glyphName] == before["hmtx"].metrics["u0043"]
+        assert after["hmtx"].metrics["u0041"] == before["hmtx"].metrics["u0041"] == (900, 40)
+        assert _coords(after, "u0041") == _coords(before, "u0041")
+        assert _coords(after, "u0043") != _coords(before, "u0043"), "other safe text glyph is still replaced"
+
+
+def test_policy_revision_reuses_full_output_cache(temp: Path) -> None:
+    topology, _stocks, xml_map = device(temp)
+    stock = _partial_stock(temp)
+    logical = "/system/fonts/DroidSansMono.ttf"
+    _partial_slot(topology, stock, logical, "monospace")
+    spec = _mix_spec(temp, "fixed")
+    with patch.object(engine, "ENGINE_REVISION", 4):
+        _manifest, old_report, old_payload = run(temp, "rev4", topology, spec, xml_map, {logical: stock})
+    old_full_files = {item["path"]: payload_format._sha256(old_payload / item["path"].lstrip("/"))
+                      for item in old_report["replaced"] if item.get("mode") != "partial-stock"}
+    old_partial_cache = set((temp / "cache").glob("partial-*.ttf"))
+    _manifest, report, payload = run(temp, "rev5", topology, spec, xml_map, {logical: stock})
+    assert report["engineRevision"] == 5 and engine.FULL_OUTPUT_REVISION == 4
+    assert report["stats"]["instancesBuilt"] == 0 and report["stats"]["outputsBuilt"] == 1, report["stats"]
+    assert report["stats"]["outputsCached"] == len(old_full_files), report["stats"]
+    assert not old_partial_cache & set((temp / "cache").glob("partial-*.ttf")), "partial outputs use revision 5"
+    assert all(payload_format._sha256(payload / path.lstrip("/")) == digest
+               for path, digest in old_full_files.items()), "full output bytes stay unchanged"
+    for item in report["replaced"]:
+        if item.get("mode") != "partial-stock":
+            assert item["sourceCoverage"]["asciiLetters"] == 52 and item["sourceCoverage"]["asciiDigits"] == 10
+            assert item["sourceCoverage"]["faces"] == item["faces"]
+
+
+def test_generic_partial_fixed_variable_route(temp: Path) -> None:
+    import luoshu_partial_variations_test as variable_fixture
+    topology, _stocks, xml_map = device(temp)
+    stock = variable_fixture._fixture(temp, implicit=True)
+    logical = "/product/fonts/VendorCursiveVF.ttf"
+    slot = _partial_slot(topology, stock, logical, "cursive")
+    slot["xmlRefs"][0]["familyAttributes"]["lang"] = "ja,ko"
+    spec = _mix_spec(temp, "fixed")
+    _manifest, unsupported, _payload = run(temp, "auto-vf-donor", topology, spec, xml_map, {logical: stock})
+    assert {"path": logical, "reason": "partial-stock-variable-auto-source-unsupported"} in unsupported["keptStock"]
+    fixed = copy.deepcopy(spec)
+    fixed["roles"]["latin"]["mode"] = "fixed"
+    fixed["roles"]["latin"]["axes"] = {"wght": 700}
+    _manifest, report, payload = run(temp, "fixed-vf-donor", topology, fixed, xml_map, {logical: stock})
+    item = next(item for item in report["replaced"] if item["path"] == logical)
+    assert item["mode"] == "partial-stock" and item["variable"] and item["stockVariable"]
+    assert item["asciiLettersBefore"] == item["asciiLettersReplaced"] == 52
+    assert item["asciiDigitsBefore"] == item["asciiDigitsReplaced"] == 10
+    with TTFont(str(stock), recalcBBoxes=False, recalcTimestamp=False) as before, \
+            TTFont(str(payload / logical.lstrip("/")), recalcBBoxes=False, recalcTimestamp=False) as after:
+        variable_fixture._verify(before, after, item)
+    _manifest, cached, _payload = run(temp, "fixed-vf-cached", topology, fixed, xml_map, {logical: stock})
+    assert cached["stats"]["outputsBuilt"] == 0
+    assert next(item for item in cached["replaced"] if item["path"] == logical)["variable"]
+
+
+def test_full_output_coverage_uses_all_generated_faces(temp: Path) -> None:
+    topology, _stocks, xml_map = device(temp)
+    regular, bold = temp / "Regular.ttf", temp / "Bold.ttf"
+    fixture.make_cjk_font(regular, family="User Regular")
+    fixture.make_cjk_font(bold, family="User Bold")
+    with TTFont(str(bold)) as font:
+        font["OS/2"].usWeightClass = 700
+        for table in font["cmap"].tables:
+            if table.isUnicode():
+                table.cmap.pop(ord("A"), None)
+                table.cmap.pop(ord("0"), None)
+        font.save(str(bold))
+    _manifest, report, payload = run(temp, "coverage-faces", topology,
+                                     {"mode": "single", "files": [str(regular), str(bold)]}, xml_map)
+    item = next(item for item in report["replaced"] if item["path"] == ROBOTO)
+    coverage = item["sourceCoverage"]
+    assert coverage["asciiLetters"] == 51 and coverage["asciiDigits"] == 9, coverage
+    assert coverage["faces"] == item["faces"] == 2, "minimum includes requested bold face"
+    with TTCollection(str(payload / ROBOTO.lstrip("/"))) as collection:
+        maps = [font.getBestCmap() for font in collection.fonts]
+        assert any(ord("A") in cmap and ord("0") in cmap for cmap in maps)
+        assert any(ord("A") not in cmap and ord("0") not in cmap for cmap in maps)
 
 
 def main() -> int:
@@ -667,7 +1005,13 @@ def main() -> int:
                      test_composite_fullwidth_latin, test_latin_only,
                      test_collection_and_protected, test_no_ui_target, test_metrics_from_stock_file,
                      test_stock_alias_uses_lower_only, test_partial_system_text,
-                     test_partial_protection_and_missing_stock, test_partial_real_component_fonts):
+                     test_partial_protection_and_missing_stock, test_partial_real_component_fonts,
+                     test_generic_partial_text_routes, test_generic_partial_trust_and_unsupported,
+                     test_generic_partial_subset_text, test_generic_partial_uvs_ownership,
+                     test_generic_partial_inherited_metrics,
+                     test_policy_revision_reuses_full_output_cache,
+                     test_generic_partial_fixed_variable_route,
+                     test_full_output_coverage_uses_all_generated_faces):
             sub = temp / test.__name__
             sub.mkdir()
             test(sub)

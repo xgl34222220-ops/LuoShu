@@ -124,13 +124,14 @@ def main() -> int:
                             "slotName": "Roboto-Regular.ttf",
                             "source": "xml",
                             "sourceXmls": ["/system/etc/fonts.xml"],
-                            "metrics": {"unitsPerEm": 2048},
+                            "metrics": {"unitsPerEm": 2048, "coverage": {"latinCount": 0, "digitCount": 0}},
                         },
                         "/product/fonts/UiCondensed.ttf": {
                             "partition": "product",
                             "slotName": "UiCondensed.ttf",
                             "source": "xml",
                             "sourceXmls": ["/product/etc/fonts_customization.xml"],
+                            "metrics": {"coverage": {}},
                         },
                         "/system_ext/fonts/OemUi-Regular.ttf": {
                             "partition": "system_ext",
@@ -214,6 +215,8 @@ FontManagerService:
         assert payload["summary"]["slotCount"] == 5
         assert payload["summary"]["legacyUiSlotCount"] == 3
         assert payload["summary"]["physicalFontCount"] == 5
+        assert payload["summary"]["measuredCoverageSlotCount"] == 1
+        assert payload["summary"]["unknownCoverageSlotCount"] == 4
         assert payload["summary"]["familyCount"] == 4
         assert payload["summary"]["edgeCount"] == 4
         assert payload["summary"]["partitionCount"] == 3
@@ -232,10 +235,14 @@ FontManagerService:
         assert roboto["runtimeEvidence"]["mount"] is True
         assert roboto["metrics"]["unitsPerEm"] == 2048
         assert roboto["legacyReplaceable"] is True
+        assert roboto["coverageState"] == "measured"
+        assert roboto["metrics"]["coverage"]["latinCount"] == 0
 
         oem = payload["slots"]["/system_ext/fonts/OemUi-Regular.ttf"]
         assert oem["families"] == []
         assert oem["runtimeEvidence"]["fontManager"] is False
+        assert oem["coverageState"] == "unknown"
+        assert "metrics" not in oem
 
         emoji = payload["slots"]["/system/fonts/NotoColorEmoji.ttf"]
         assert emoji["families"] == ["emoji"]

@@ -6,6 +6,8 @@ on:
       - common/luoshu_engine.py
       - common/luoshu_engine.sh
       - common/luoshu_merge.py
+      - common/luoshu_coverage_audit.py
+      - common/luoshu_partial_variations.py
       - common/luoshu_payload.py
       - common/luoshu_verify.py
       - common/luoshu_diagnostics.py
@@ -23,6 +25,8 @@ on:
       - android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/home/HomeContractTest.kt
       - scripts/font_fixtures.py
       - scripts/luoshu_engine_test.py
+      - scripts/luoshu_coverage_audit_test.py
+      - scripts/luoshu_partial_variations_test.py
       - scripts/luoshu_engine_bridge_test.py
       - scripts/luoshu_verify_test.py
       - scripts/luoshu_diagnostics_test.py
@@ -64,6 +68,7 @@ jobs:
           set -eu
           python3 -m py_compile \
             common/luoshu_engine.py common/luoshu_merge.py common/luoshu_payload.py \
+            common/luoshu_coverage_audit.py common/luoshu_partial_variations.py \
             common/luoshu_verify.py common/luoshu_diagnostics.py
           for file in common/luoshu_engine.sh common/universal_font_cutover.sh common/universal_composite.sh \
             common/universal_next_boot.sh common/universal_font_runtime_verify.sh common/next_boot_payload.sh \
@@ -72,6 +77,8 @@ jobs:
           done
 
           python3 scripts/luoshu_engine_test.py
+          python3 scripts/luoshu_coverage_audit_test.py
+          python3 scripts/luoshu_partial_variations_test.py
           python3 scripts/luoshu_engine_bridge_test.py
           python3 scripts/luoshu_verify_test.py
           python3 scripts/luoshu_diagnostics_test.py

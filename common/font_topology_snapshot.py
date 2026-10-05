@@ -370,6 +370,15 @@ def build_topology(
                 merged_families.append(family)
         entry["families"] = sorted(merged_families)
         entry["legacyReplaceable"] = path in raw_slots
+        metrics = entry.get("metrics")
+        coverage = metrics.get("coverage") if isinstance(metrics, dict) else None
+        # Path discovery alone has no cmap evidence. Do not turn unmeasured
+        # protected faces into an apparently measured zero-coverage result.
+        measured = isinstance(coverage, dict) and all(
+            type(coverage.get(key)) is int and 0 <= coverage[key] <= maximum
+            for key, maximum in (("latinCount", 52), ("digitCount", 10))
+        )
+        entry["coverageState"] = "measured" if measured else "unknown"
         entry["runtimeEvidence"] = {
             "fontManager": path in manager_slots,
             "mount": path in mount_slots,
@@ -417,6 +426,10 @@ def build_topology(
             "slotCount": len(normalized_slots),
             "legacyUiSlotCount": len(raw_slots),
             "physicalFontCount": len(normalized_slots),
+            "measuredCoverageSlotCount": sum(entry["coverageState"] == "measured"
+                                             for entry in normalized_slots.values()),
+            "unknownCoverageSlotCount": sum(entry["coverageState"] == "unknown"
+                                            for entry in normalized_slots.values()),
             "familyCount": len(normalized_families),
             "edgeCount": len(edges),
             "partitionCount": len(partitions),

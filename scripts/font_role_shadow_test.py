@@ -169,6 +169,37 @@ def main() -> int:
             ),
         }
 
+        font_fallback = slot("FontLevelFallback.ttf", ["fallback"], latin=True, digits=True)
+        font_fallback["xmlRefs"] = [{"family": "fallback", "fallbackFor": "serif"}]
+        slots["/system/fonts/FontLevelFallback.ttf"] = font_fallback
+
+        # Gothi(cOn)e crosses two unrelated name components. Neither an icon
+        # substring nor ara(b) in Parabolic is semantic evidence of a symbol or
+        # unsupported-script font. Actual cmap evidence can still identify text.
+        for name in ("DelaGothicOne.otf", "DelaGothicOne-HZ.otf", "Lexicon-Regular.ttf", "Parabolic-Regular.ttf"):
+            slots["/product/fonts/" + name] = slot(name, [], latin=True, digits=True)
+        unknown_dela = {"slotName": "DelaGothicOne-Unmeasured.otf", "families": [], "source": "physical-scan"}
+        slots["/product/fonts/DelaGothicOne-Unmeasured.otf"] = unknown_dela
+        slots["/product/fonts/DelaGothicOne-Clock.otf"] = slot(
+            "DelaGothicOne-Clock.otf", ["miclock-dela-gothic-one"], latin=True, digits=True,
+        )
+        # Genuine dedicated font identities remain protected, whether the ROM
+        # spells them in CamelCase, lowercase compounds or with separators.
+        icons = (
+            "NotoSansSymbols2-Regular.ttf", "NotoSansSymbols-Regular.ttf",
+            "MaterialIcons-Regular.ttf", "MaterialSymbols.ttf", "FontAwesome.ttf",
+            "fontawesome-webfont.ttf", "materialicons-regular.ttf", "Glyphicons-Halflings.ttf",
+            "AppIcons.ttf", "App-Icons_Regular.ttf", "NotoSansMath-Regular.ttf",
+        )
+        for name in icons:
+            slots["/system/fonts/" + name] = slot(name, [], latin=True, digits=True)
+        for name in ("myemojiMono.ttf", "brandemojibold.ttf", "NotoColorEmojiFlags.ttf"):
+            slots["/system/fonts/" + name] = slot(name, [], latin=True, digits=True)
+        cjk_names = ("SourceHanSansSC-Regular.otf", "SourceHanSansTC-Regular.otf", "SourceHanSansCN.otf",
+                     "sourcehansanssc-Regular.otf", "NotoSansSC-Regular.otf", "NotoSansTC-Regular.otf")
+        for name in cjk_names:
+            slots["/system/fonts/" + name] = slot(name, [], han=True, latin=True, digits=True)
+
         topology.write_text(
             json.dumps(
                 {
@@ -248,10 +279,33 @@ def main() -> int:
 
         assert role("/system/fonts/MaterialSymbols.ttf") == "symbol-icon"
         assert action("/system/fonts/MaterialSymbols.ttf") == "preserve"
+        for name in icons:
+            path = "/system/fonts/" + name
+            assert role(path) == "symbol-icon", (path, role_map["slots"][path])
+            assert action(path) == "preserve"
+        for name in ("DelaGothicOne.otf", "DelaGothicOne-HZ.otf", "Lexicon-Regular.ttf", "Parabolic-Regular.ttf"):
+            path = "/product/fonts/" + name
+            assert role(path) == "latin", (path, role_map["slots"][path])
+            assert action(path) == "conditional"
+            assert role_map["slots"][path]["evidence"]["coverage"]["latinCount"] == 52
+        assert role("/product/fonts/DelaGothicOne-Unmeasured.otf") == "unknown-protected"
+        assert action("/product/fonts/DelaGothicOne-Unmeasured.otf") == "review"
+        assert role("/product/fonts/DelaGothicOne-Clock.otf") == "clock"
+        for name in ("myemojiMono.ttf", "brandemojibold.ttf", "NotoColorEmojiFlags.ttf"):
+            path = "/system/fonts/" + name
+            assert role(path) == "emoji", (path, role_map["slots"][path])
+            assert action(path) == "preserve"
+        for name in cjk_names:
+            path = "/system/fonts/" + name
+            assert role(path) == "cjk", (path, role_map["slots"][path])
+            assert action(path) == "conditional"
 
         assert role("/system/fonts/MysteryFallback.otf") == "special-fallback"
         assert action("/system/fonts/MysteryFallback.otf") == "preserve"
         assert "xml-language-special-fallback" in role_map["slots"]["/system/fonts/MysteryFallback.otf"]["reasons"]
+        assert role("/system/fonts/FontLevelFallback.ttf") == "special-fallback"
+        assert action("/system/fonts/FontLevelFallback.ttf") == "preserve"
+        assert role_map["slots"]["/system/fonts/FontLevelFallback.ttf"]["evidence"]["xmlSemantics"]["fallbackFor"] == ["serif"]
 
         assert role("/vendor/fonts/MysteryBroad.ttf") == "unknown-protected"
         assert action("/vendor/fonts/MysteryBroad.ttf") == "review"
@@ -292,11 +346,11 @@ def main() -> int:
             if item["role"] == "unknown-protected":
                 assert item["action"] == "review"
 
-        assert shadow["summary"]["actionCounts"]["preserve"] == 11
-        assert shadow["summary"]["actionCounts"]["specialized"] == 5
-        assert shadow["summary"]["actionCounts"]["conditional"] == 4
+        assert shadow["summary"]["actionCounts"]["preserve"] == 25
+        assert shadow["summary"]["actionCounts"]["specialized"] == 6
+        assert shadow["summary"]["actionCounts"]["conditional"] == 14
         assert shadow["summary"]["actionCounts"]["replace"] == 4
-        assert shadow["summary"]["actionCounts"]["review"] == 1
+        assert shadow["summary"]["actionCounts"]["review"] == 2
 
         validated = run(
             [

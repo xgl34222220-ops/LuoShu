@@ -20,7 +20,7 @@ import device_font_template as template
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, stock_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 5
+SCANNER_REVISION = 6
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 XML_GRAPH_SCHEMA = "device-font-xml-graph-v1"
 METRICS_REVISION = 3
@@ -82,13 +82,7 @@ THEME_FONT_ROOTS = (
     Path("/data/oplus/uxres/theme"),
     Path("/data/skin/fonts"),
 )
-XML_PATTERNS = (
-    "fonts.xml",
-    "font_fallback.xml",
-    "fonts_customization.xml",
-    "fonts*.xml",
-    "font_fallback*.xml",
-)
+FONT_CONFIG_ROOTS = {"familyset", "fonts-modification"}
 
 
 def _is_ui_family(name: str) -> bool:
@@ -112,17 +106,63 @@ def _is_ui_family(name: str) -> bool:
         if prefix != "sans-serif"
     )
 
+def _trusted_xml_file(path: Path, roots: list[tuple[str, Path, Path]]) -> Path | None:
+    """Follow OEM XML aliases through captured etc views, never the live file."""
+    trusted = [actual.resolve() for _partition, _logical, actual in roots if actual.is_dir()]
+    current = path
+    visited: set[Path] = set()
+    for _attempt in range(40):
+        if current in visited:
+            return None
+        visited.add(current)
+        if current.is_symlink():
+            target = Path(os.readlink(current))
+            current = target if target.is_absolute() else current.parent / target
+            # Stock /system/etc/fonts.xml may point at an absolute
+            # /system_ext/etc/hyper_fonts.xml. Resolve it within the matching
+            # lower/mirror etc directory, not the currently mounted live path.
+            if target.is_absolute():
+                for _partition, logical, actual in roots:
+                    if current.is_relative_to(logical):
+                        current = actual / current.relative_to(logical)
+                        break
+            continue
+        resolved = current.resolve()
+        if not any(resolved.is_relative_to(root) for root in trusted):
+            return None
+        return resolved if resolved.is_file() else None
+    return None
+
+
 def _discover_xml_sources(etc_roots: Iterable[tuple[str, Path, Path]]) -> list[tuple[str, Path, Path]]:
+    """Discover font configurations by their schema in the trusted etc views.
+
+    OEM names such as mi_fonts_customization.xml and hyper_fonts.xml do not
+    match AOSP filename prefixes. Inspect only direct XML children of supplied
+    stock etc roots, and reject links outside all of those trusted roots.
+    """
+    roots = list(etc_roots)
     discovered: dict[str, tuple[str, Path, Path]] = {}
-    for partition, logical_root, actual_root in etc_roots:
+    for partition, logical_root, actual_root in roots:
         if not actual_root.is_dir():
             continue
-        for pattern in XML_PATTERNS:
-            for actual in actual_root.glob(pattern):
-                if not actual.is_file():
+        for actual in actual_root.iterdir():
+            if actual.suffix.lower() != ".xml":
+                continue
+            try:
+                trusted_file = _trusted_xml_file(actual, roots)
+                if trusted_file is None:
+                    continue
+                document = ET.parse(trusted_file)
+                root = document.getroot()
+                if base._local_name(root.tag) not in FONT_CONFIG_ROOTS:
+                    continue
+                if not any(base._local_name(node.tag) in {"family", "alias"} for node in root):
                     continue
                 logical = logical_root / actual.relative_to(actual_root)
-                discovered[str(logical)] = (partition, logical, actual)
+                discovered[str(logical)] = (partition, logical, trusted_file)
+            except (OSError, ET.ParseError, RuntimeError):
+                continue
     return [discovered[key] for key in sorted(discovered)]
 
 def _merge_families(target: dict[str, list[str]], source: dict[str, list[str]]) -> None:
@@ -173,54 +213,64 @@ def _parse_full_xml_graph(
     """Capture every XML font reference without changing legacy UI-slot semantics."""
     refs: list[dict[str, Any]] = []
     aliases: list[dict[str, str]] = []
-    seen_refs: set[tuple[str, str, str, int, str, str]] = set()
+    seen_refs: set[str] = set()
     seen_aliases: set[tuple[str, str, str]] = set()
 
     for partition, logical_xml, actual_xml in xml_sources:
         preferred = [root for root in font_roots if root.partition == partition]
         ordered_roots = preferred + [root for root in font_roots if root.partition != partition]
         try:
-            parsed_refs = template.parse_xml(actual_xml)
-        except (OSError, ET.ParseError):
-            parsed_refs = []
-
-        for ref in parsed_refs:
-            resolved_path = ""
-            if ref.declared:
-                resolved = base._resolve_file(ref.declared, ordered_roots)
-                if resolved is not None:
-                    resolved_root, resolved_actual = resolved
-                    resolved_path = base._logical_path(resolved_root, resolved_actual)
-            key = (
-                str(logical_xml),
-                template.normalize(ref.family),
-                ref.declared or ref.postscript_name,
-                int(ref.index),
-                str(ref.style),
-                str(ref.axes),
-            )
-            if key in seen_refs:
-                continue
-            seen_refs.add(key)
-            refs.append({
-                "sourceXml": str(logical_xml),
-                "sourcePartition": partition,
-                "family": ref.family,
-                "familyNormalized": template.normalize(ref.family),
-                "familyAttributes": dict(ref.family_attrs),
-                "declared": ref.declared,
-                "postScriptName": ref.postscript_name,
-                "weight": int(ref.weight),
-                "style": ref.style,
-                "index": int(ref.index),
-                "axes": ref.axes,
-                "resolvedPath": resolved_path,
-            })
-
-        try:
             document = ET.parse(actual_xml)
         except (OSError, ET.ParseError):
             continue
+        parents = template.element_parents(document.getroot())
+        for family in document.getroot().iter():
+            if base._local_name(family.tag) != "family":
+                continue
+            name, attributes = template.effective_family_context(family, parents)
+            for font in family:
+                if base._local_name(font.tag) != "font":
+                    continue
+                declared = (font.text or "").strip()
+                postscript = (font.get("postScriptName") or font.get("name") or "").strip()
+                if not declared and not postscript:
+                    continue
+                resolved_path = ""
+                resolved = base._resolve_file(declared, ordered_roots) if declared else None
+                if resolved is not None:
+                    resolved_root, resolved_actual = resolved
+                    resolved_path = base._logical_path(resolved_root, resolved_actual)
+                try:
+                    weight = int(font.get("weight") or 400)
+                except ValueError:
+                    weight = 400
+                try:
+                    index = max(0, int(font.get("index") or 0))
+                except ValueError:
+                    index = 0
+                axes = [dict(axis.attrib) for axis in font if base._local_name(axis.tag) == "axis"]
+                item = {
+                    "sourceXml": str(logical_xml),
+                    "sourcePartition": partition,
+                    "family": name,
+                    "familyNormalized": template.normalize(name),
+                    "familyAttributes": dict(attributes),
+                    "declared": declared,
+                    "postScriptName": postscript,
+                    "weight": weight,
+                    "style": str(font.get("style") or "normal").lower(),
+                    "index": index,
+                    "axes": font.get("axis") or font.get("axes") or "",
+                    "axisSettings": axes,
+                    "fallbackFor": font.get("fallbackFor") or "",
+                    "resolvedPath": resolved_path,
+                }
+                # Identical references are redundant. Weight, locale, axes and
+                # fallback semantics are distinct contracts for the same file.
+                key = json.dumps(item, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                if key not in seen_refs:
+                    seen_refs.add(key)
+                    refs.append(item)
         for node in document.getroot().iter():
             if base._local_name(node.tag) != "alias":
                 continue
@@ -859,7 +909,8 @@ def scan(args: Any) -> int:
         else:
             valid_existing = existing_for_scan
     upgrade = valid_existing is not None and (
-        not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
+        int(valid_existing.get("scannerRevision", 0) or 0) != SCANNER_REVISION
+        or not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
     )
     try:
         return _scan_current_roots(args, build_key, fingerprint, display_id, valid_existing, upgrade, probe)

@@ -95,6 +95,8 @@ common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
 common/luoshu_diagnostics.py
+common/luoshu_coverage_audit.py
+common/luoshu_partial_variations.py
 common/luoshu_engine.py
 common/luoshu_engine.sh
 common/luoshu_merge.py

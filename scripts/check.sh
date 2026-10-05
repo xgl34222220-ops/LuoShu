@@ -32,6 +32,8 @@ python3 -m py_compile \
   "$ROOT/common/font_web_convert.py" \
   "$ROOT/common/luoshu_engine.py" \
   "$ROOT/common/luoshu_merge.py" \
+  "$ROOT/common/luoshu_coverage_audit.py" \
+  "$ROOT/common/luoshu_partial_variations.py" \
   "$ROOT/common/luoshu_payload.py" \
   "$ROOT/common/luoshu_verify.py" \
   "$ROOT/common/font_inventory.py"
@@ -43,6 +45,7 @@ for file in \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_web_convert.py common/universal_next_boot.sh common/universal_mount_runtime.sh common/font_inventory.py \
   common/luoshu_engine.py common/luoshu_engine.sh common/luoshu_merge.py common/luoshu_payload.py common/luoshu_verify.py \
+  common/luoshu_coverage_audit.py common/luoshu_partial_variations.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -278,6 +281,8 @@ FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf'
 sh "$ROOT/scripts/universal_composite_bridge_test.sh"
 python3 "$ROOT/scripts/luoshu_diagnostics_test.py"
 python3 "$ROOT/scripts/luoshu_engine_test.py"
+python3 "$ROOT/scripts/luoshu_coverage_audit_test.py"
+python3 "$ROOT/scripts/luoshu_partial_variations_test.py"
 python3 "$ROOT/scripts/luoshu_engine_bridge_test.py"
 python3 "$ROOT/scripts/luoshu_verify_test.py"
 sh "$ROOT/scripts/universal_mount_runtime_test.sh"

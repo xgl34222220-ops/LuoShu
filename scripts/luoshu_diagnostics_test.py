@@ -157,6 +157,7 @@ def latin_ligature_evidence(temp: Path) -> None:
     hollow = temp / "LigatureHollow.ttf"
     luoshu_diagnostics._hollow(source, hollow, luoshu_diagnostics._keep_codepoints())
     with TTFont(source) as original, TTFont(hollow) as result:
+        assert result.getTableData("LSDG") == luoshu_diagnostics.HOLLOW_MARKER_DATA
         assert result["glyf"]["f_i"].numberOfContours > 0, "Latin GSUB ligature was hollowed"
         assert result["glyf"]["f_i"].getCoordinates(result["glyf"]) == original["glyf"]["f_i"].getCoordinates(original["glyf"])
         assert result["glyf"]["unused_nontext"].numberOfContours == 0, "unreferenced glyph was unnecessarily retained"
@@ -209,9 +210,8 @@ def partial_stock_evidence(temp: Path) -> None:
             record = index["stock"][logical]
             assert record["action"] == "partial-stock" and record["hollow"] is False
             assert archive.read(record["file"]) == stock_files[logical].read_bytes(), "partial stock was not kept byte for byte"
-        assert "/system/fonts/NotoSerif-Bold.ttf" not in index["stock"]
-        assert {"path": "/system/fonts/NotoSerif-Bold.ttf", "reason": "partial-stock-too-large",
-                "bytes": large.stat().st_size} in index["stockSkipped"]
+        bold = index["stock"]["/system/fonts/NotoSerif-Bold.ttf"]
+        assert bold["hollow"] is False and archive.read(bold["file"]) == large.read_bytes()
         assert index["stock"]["/system/fonts/Roboto-Regular.ttf"]["hollow"] is True
     luoshu_diagnostics.export(moddir, directory / "full.zip", lower, full=True)
     with zipfile.ZipFile(directory / "full.zip") as archive:
@@ -220,12 +220,225 @@ def partial_stock_evidence(temp: Path) -> None:
         assert record["hollow"] is False and archive.read(record["file"]) == large.read_bytes()
 
 
+def global_stock_audit_evidence(temp: Path) -> None:
+    """Old reports must not hide unknown, fallback, collection or missing routes."""
+    import luoshu_diagnostics
+    from fontTools.ttLib import TTCollection, TTFont
+    import struct
+    import time
+
+    directory = temp / "global-audit"
+    directory.mkdir()
+    moddir = directory / "module"
+    config = moddir / "config"
+    (config / "luoshu-engine-build").mkdir(parents=True)
+    (moddir / "module.prop").write_text("id=LuoShu\nversion=test\nversionCode=1\n")
+    (config / "active_font.conf").write_text("mix\n")
+    stocks = {}
+    slots = {}
+    roles = {}
+    for logical, family, role in (
+        ("/system/fonts/Roboto-Regular.ttf", "sans-serif", "ui-sans"),
+        ("/vendor/fonts/nested/OrdinaryMystery.ttf", "", "unknown-protected"),
+        ("/product/fonts/UnknownText.ttf", "", "unknown-protected"),
+        ("/product/fonts/LargeUnknown.ttf", "", "unknown-protected"),
+        ("/system/fonts/LargeSerif.ttf", "serif", "serif"),
+        ("/system/fonts/EmojiMono.ttf", "monospace", "monospace"),
+        ("/system/fonts/Symbol.ttf", "", "symbol-icon"),
+        ("/system/fonts/Missing.ttf", "", "unknown-protected"),
+        ("/system/fonts/Unreadable.ttf", "", "unknown-protected"),
+        ("/data/user/0/private/Hidden.ttf", "", "unknown-protected"),
+    ):
+        source = directory / Path(logical).name
+        fixture.make_font(source, family="Stock " + (family or "Mystery"))
+        if logical.endswith("/LargeUnknown.ttf"):
+            with source.open("r+b") as handle:
+                handle.truncate(luoshu_diagnostics.SMALL_PRESERVED_LIMIT + 1)
+        if logical.endswith("/LargeSerif.ttf"):
+            # A valid small sfnt plus a sparse trailing region exercises the
+            # actual 64 MiB boundary without building huge glyph fixtures.
+            with source.open("r+b") as handle:
+                handle.truncate(luoshu_diagnostics.ORIGINAL_TEXT_FILE_LIMIT + 1)
+        stocks[logical] = source
+        slots[logical] = fixture.slot_from_stock(logical, source, family=family,
+            source_xml=None, declared=source.name)
+        roles[logical] = {"role": role}
+    cjk_source = directory / "CJK.ttf"
+    composite.make_cjk_font(cjk_source, family="Multiscript CJK", variable=True)
+    logical_cjk = "/system/fonts/NotoSansCJK-Variable.ttc"
+    cjk_collection = directory / "NotoSansCJK-Variable.ttc"
+    collection = TTCollection()
+    collection.fonts = [TTFont(cjk_source), TTFont(cjk_source)]
+    collection.save(cjk_collection)
+    collection.close()
+    with cjk_collection.open("ab") as handle:
+        handle.write(b"\0" * (luoshu_diagnostics.SMALL_PRESERVED_LIMIT + 1))
+    stocks[logical_cjk] = cjk_collection
+    slots[logical_cjk] = fixture.slot_from_stock(logical_cjk, cjk_collection, family="",
+        source_xml="/system/etc/fonts.xml", declared=cjk_collection.name)
+    slots[logical_cjk]["xmlRefs"][0]["familyAttributes"] = {"lang": "und-Zsye,zh-Hans"}
+    roles[logical_cjk] = {"role": "special-fallback"}
+    (config / "device_font_topology.json").write_text(json.dumps({"slots": slots}))
+    (config / "device_font_roles.json").write_text(json.dumps({"slots": roles}))
+    (config / "luoshu-engine-build/report.json").write_text(json.dumps({
+        "replaced": [{"path": "/system/fonts/Roboto-Regular.ttf", "role": "ui-sans"},
+                     {"path": "/system/fonts/Symbol.ttf", "role": "symbol-icon"}],
+        # Even a stale report targeting a symbol never authorizes its export.
+        "keptStock": [{"path": "/system/fonts/Symbol.ttf"}], "sources": {},
+    }))
+    lower = directory / "lower-root"
+    for logical, source in stocks.items():
+        if logical.startswith("/data/") or logical.endswith("/Missing.ttf"):
+            continue
+        parts = Path(logical).parts
+        target = lower / "lower" / (parts[1] + "-fonts") / Path(*parts[3:])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source, target)
+    real_open = Path.open
+    denied = lower / "lower/system-fonts/Unreadable.ttf"
+
+    def guarded_open(path: Path, *args, **kwargs):
+        assert "/data/user/" not in str(path), "diagnostic read App private content"
+        if path == denied:
+            raise PermissionError(errno.EACCES, "test snapshot permission denied")
+        return real_open(path, *args, **kwargs)
+
+    output = directory / "lite.zip"
+    with mock.patch.object(Path, "open", guarded_open):
+        luoshu_diagnostics.export(moddir, output, lower)
+    with zipfile.ZipFile(output) as archive:
+        index = json.loads(archive.read("index.json"))
+        audit = index["stockCoverageAudit"]
+        assert set(audit) == set(slots), "audit lost an unselected topology path"
+        assert index["stockCoverageAuditSummary"]["pathCount"] == len(slots)
+        for logical in ("/vendor/fonts/nested/OrdinaryMystery.ttf", "/product/fonts/UnknownText.ttf"):
+            row = audit[logical]
+            assert row["selected"] and row["probeStatus"] == "probed", row
+            assert row["faces"][0]["asciiLetters"] == 52 and row["faces"][0]["asciiDigits"] == 10
+            assert row["action"] == "audit-stock" and row["hollow"] is False
+            assert archive.read(row["file"]) == stocks[logical].read_bytes()
+        cjk_audit = audit[logical_cjk]
+        assert cjk_audit["selected"] and cjk_audit["hollow"] is False
+        assert archive.read(cjk_audit["file"]) == cjk_collection.read_bytes()
+        assert cjk_audit["probeStatus"] == "probed" and cjk_audit["faceCount"] == 2
+        for face in cjk_audit["faces"]:
+            assert face["asciiLetters"] == 52 and face["asciiDigits"] == 10, face
+            assert face["format"] == "TrueType" and face["variable"]
+            assert face["axes"] == [{"tag": "wght", "min": 100.0, "default": 400.0, "max": 900.0}]
+        huge = audit["/system/fonts/LargeSerif.ttf"]
+        assert huge["probeStatus"] == "probed" and huge["faces"][0]["asciiLetters"] == 52
+        assert not huge["selected"] and huge["skippedReason"] == "original-text-file-limit"
+        unknown = audit["/product/fonts/LargeUnknown.ttf"]
+        assert unknown["probeStatus"] == "probed" and unknown["faces"][0]["asciiDigits"] == 10
+        assert not unknown["selected"] and unknown["skippedReason"] == "audit-stock-too-large"
+        capture_summary = index["stockCoverageAuditSummary"]
+        assert capture_summary["originalTextBytes"] == cjk_collection.stat().st_size
+        assert capture_summary["originalTextFileLimit"] == 64 * 1024 * 1024
+        assert capture_summary["originalTextTotalLimit"] == 160 * 1024 * 1024
+        assert capture_summary["originalTextLimitApplied"] is True
+        for logical in ("/system/fonts/EmojiMono.ttf", "/system/fonts/Symbol.ttf"):
+            row = audit[logical]
+            assert row["probeStatus"] == "excluded" and row["skippedReason"] == "excluded-emoji-or-symbol"
+            assert row["faceCount"] is None and row["faces"] == [] and not row["selected"]
+            assert logical not in index["stock"]
+        assert audit["/data/user/0/private/Hidden.ttf"]["skippedReason"] == "unsupported-system-font-path"
+        missing = audit["/system/fonts/Missing.ttf"]
+        assert missing["probeStatus"] == "unavailable" and missing["faceCount"] is None and missing["faces"] == []
+        denied_audit = audit["/system/fonts/Unreadable.ttf"]
+        assert denied_audit["probeStatus"] == "unavailable" and not denied_audit["selected"]
+        assert "PermissionError" in denied_audit["probeReason"]
+        assert len(index["stockSkipped"]) == len(slots) - len(index["stock"])
+    luoshu_diagnostics.export(moddir, directory / "full.zip", lower, full=True)
+    with zipfile.ZipFile(directory / "full.zip") as archive:
+        index = json.loads(archive.read("index.json"))
+        row = index["stock"][logical_cjk]
+        assert row["hollow"] is False and archive.read(row["file"]) == cjk_collection.read_bytes()
+        huge = index["stock"]["/system/fonts/LargeSerif.ttf"]
+        assert huge["hollow"] is False and archive.getinfo(huge["file"]).file_size == luoshu_diagnostics.ORIGINAL_TEXT_FILE_LIMIT + 1
+        with archive.open(huge["file"]) as font, stocks["/system/fonts/LargeSerif.ttf"].open("rb") as original:
+            assert font.read(256) == original.read(256)
+        assert index["stockCoverageAuditSummary"]["originalTextLimitApplied"] is False
+
+    # Lower the dedicated total only to keep this integration fixture small;
+    # it exercises selection after a successful metadata probe, not a mock
+    # selection result. File and archive budgets remain independently active.
+    with mock.patch.object(luoshu_diagnostics, "ORIGINAL_TEXT_TOTAL_LIMIT", luoshu_diagnostics.SMALL_PRESERVED_LIMIT):
+        luoshu_diagnostics.export(moddir, directory / "total-limited.zip", lower)
+    with zipfile.ZipFile(directory / "total-limited.zip") as archive:
+        index = json.loads(archive.read("index.json"))
+        row = index["stockCoverageAudit"][logical_cjk]
+        assert row["probeStatus"] == "probed" and row["faces"][0]["asciiLetters"] == 52
+        assert not row["selected"] and row["skippedReason"] == "original-text-total-limit"
+        assert index["stockCoverageAuditSummary"]["originalTextBytes"] == 0
+        assert "/vendor/fonts/nested/OrdinaryMystery.ttf" in index["stock"]
+    with mock.patch.object(luoshu_diagnostics, "STOCK_PROBE_FACE_LIMIT", 1):
+        luoshu_diagnostics.export(moddir, directory / "faces-limited.zip", lower)
+    with zipfile.ZipFile(directory / "faces-limited.zip") as archive:
+        index = json.loads(archive.read("index.json"))
+        row = index["stockCoverageAudit"][logical_cjk]
+        assert row["probeStatus"] == "partial" and row["faces"][0]["asciiLetters"] == 52
+        assert not row["selected"] and row["skippedReason"] == "original-stock-metadata-unproved"
+    with mock.patch.object(luoshu_diagnostics, "STOCK_TOTAL_LIMIT", luoshu_diagnostics.SMALL_PRESERVED_LIMIT):
+        luoshu_diagnostics.export(moddir, directory / "stock-limited.zip", lower, full=True)
+    with zipfile.ZipFile(directory / "stock-limited.zip") as archive:
+        index = json.loads(archive.read("index.json"))
+        row = index["stockCoverageAudit"][logical_cjk]
+        assert row["probeStatus"] == "probed" and not row["selected"] and row["skippedReason"] == "size-limit"
+        assert index["stockCoverageAuditSummary"]["stockBytes"] <= luoshu_diagnostics.SMALL_PRESERVED_LIMIT
+
+    def budget():
+        return {"bytes": 0, "deadline": time.monotonic() + 60}
+
+    # Probing metadata must not read any post/glyf/CFF/gvar outline table.
+    original_getitem = TTFont.__getitem__
+
+    def metadata_getitem(font, tag):
+        assert tag not in {"post", "glyf", "gvar", "CFF ", "CFF2"}, tag
+        return original_getitem(font, tag)
+
+    with mock.patch.object(TTFont, "__getitem__", metadata_getitem):
+        metadata = luoshu_diagnostics._probe_stock_coverage(cjk_collection, budget())
+        assert metadata["probeStatus"] == "probed", metadata
+    with mock.patch.object(luoshu_diagnostics, "STOCK_PROBE_FACE_LIMIT", 1):
+        metadata = luoshu_diagnostics._probe_stock_coverage(cjk_collection, budget())
+        assert metadata["faceCount"] == 2 and metadata["probeStatus"] == "partial"
+        assert metadata["facesTruncated"] and metadata["probeReason"] == "metadata-face-count-limit"
+        assert len(metadata["faces"]) == 1 and metadata["faces"][0]["asciiLetters"] == 52
+    with mock.patch.object(luoshu_diagnostics, "STOCK_PROBE_BYTE_LIMIT", 0):
+        metadata = luoshu_diagnostics._probe_stock_coverage(cjk_collection, budget())
+        assert metadata["probeStatus"] == "unavailable"
+        assert all(face["reason"] == "metadata-byte-limit" and face["asciiLetters"] is None for face in metadata["faces"])
+    metadata = luoshu_diagnostics._probe_stock_coverage(cjk_collection, {"bytes": 0, "deadline": 0})
+    assert metadata["probeStatus"] == "unavailable" and metadata["probeReason"] == "metadata-time-limit"
+    malformed = directory / "UnboundedCollection.ttc"
+    malformed.write_bytes(b"ttcf\0\x01\0\0" + struct.pack(">I", luoshu_diagnostics.STOCK_PROBE_COLLECTION_LIMIT + 1))
+    metadata = luoshu_diagnostics._probe_stock_coverage(malformed, budget())
+    assert metadata["probeReason"] == "collection-directory-limit" and metadata["faces"] == []
+    # A huge declared cmap range must be refused before dictionary expansion.
+    cmap = struct.pack(">HHHHI", 0, 1, 3, 10, 12) + struct.pack(">HHIII", 12, 0, 28, 0, 1) + struct.pack(">III", 0, 0xFFFFFFFF, 0)
+    assert not luoshu_diagnostics._bounded_cmap(cmap)
+    hollow_collection = directory / "HollowCollection.ttc"
+    luoshu_diagnostics._hollow(cjk_collection, hollow_collection, luoshu_diagnostics._keep_codepoints())
+    with TTCollection(hollow_collection) as fonts:
+        assert len(fonts.fonts) == 2
+        assert all(font.getTableData("LSDG") == luoshu_diagnostics.HOLLOW_MARKER_DATA for font in fonts.fonts)
+    metadata = luoshu_diagnostics._probe_stock_coverage(hollow_collection, budget())
+    assert all(face["hollowMarker"] for face in metadata["faces"])
+    assert luoshu_diagnostics._original_stock_skip_reason(metadata, "special-fallback",
+        hollow_collection.stat().st_size, 0) == "original-stock-metadata-unproved"
+    no_ascii = {"probeStatus": "probed", "faces": [{"status": "probed", "asciiLetters": 0,
+        "asciiDigits": 0, "hollowMarker": False}]}
+    assert luoshu_diagnostics._original_stock_skip_reason(no_ascii, "special-fallback",
+        luoshu_diagnostics.SMALL_PRESERVED_LIMIT + 1, 0) == "original-stock-ascii-text-unproved"
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory(prefix="luoshu-diag-") as raw:
         temp = Path(raw)
         process_font_evidence(temp)
         latin_ligature_evidence(temp)
         partial_stock_evidence(temp)
+        global_stock_audit_evidence(temp)
         topology, _roles, stocks, xml_map = composite.build_device(temp / "device")
         moddir = temp / "module"
         config = moddir / "config"
