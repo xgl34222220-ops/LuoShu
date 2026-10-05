@@ -173,8 +173,12 @@ jobs:
           variant=Debug
           if [[ -n "$LUOSHU_KEYSTORE_FILE" ]]; then variant=Release; fi
           if ! gradle --no-daemon --stacktrace ":app:lint$variant" :app:testDebugUnitTest ":app:assemble$variant" >"$log" 2>&1; then
+            echo 'Gradle 编译错误摘要：' >&2
+            grep -nE '(^e: | error: |FAILURE:|What went wrong|Execution failed for task|Could not resolve|Could not find)' "$log" >&2 || true
             echo 'Gradle 构建失败，输出最后 180 行：' >&2
             tail -n 180 "$log" >&2
+            mkdir -p ../dist
+            cp -f "$log" ../dist/gradle-build.log
             exit 1
           fi
 

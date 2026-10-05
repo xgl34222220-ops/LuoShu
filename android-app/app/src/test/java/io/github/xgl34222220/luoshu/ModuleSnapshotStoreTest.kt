@@ -32,7 +32,7 @@ class ModuleSnapshotStoreTest {
     @Test
     fun persistedDisplayOmitsRuntimeEvidence() {
         val json = JSONObject(encodeModuleDisplay(ModuleSnapshot(version = "v2.0.0", versionCode = 70000)))
-        assertEquals(setOf("schema", "version", "versionCode", "activeFont"), json.keySet())
+        assertEquals(setOf("schema", "version", "versionCode", "activeFont"), json.keys().asSequence().toSet())
     }
 
     @Test
