@@ -486,8 +486,12 @@ prepare_mix_config() {
 
 commit_mix_config() {
     mv -f "$MIX_CONF_TMP" "$MIX_CONF" 2>/dev/null || return 1
-    mv -f "$ACTIVE_CONF_TMP" "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
-    mv -f "$REBOOT_CONF_TMP" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || return 1
+    if [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" = 1 ]; then
+        rm -f "$ACTIVE_CONF_TMP" "$REBOOT_CONF_TMP" 2>/dev/null || return 1
+    else
+        mv -f "$ACTIVE_CONF_TMP" "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
+        mv -f "$REBOOT_CONF_TMP" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || return 1
+    fi
     printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
     chmod 0644 "$MIX_CONF" "$ACTIVE_FONT_CONF" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     return 0
@@ -496,7 +500,7 @@ commit_mix_config() {
 apply_mix() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
-    [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
+    [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" = 1 ] || [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
     luoshu_font_lock_acquire "$LOCK_FILE" "$$" || { set_mix_error '字体正在切换中'; return 2; }
     trap cleanup_mix_process EXIT
     trap 'exit 129' HUP
@@ -603,7 +607,7 @@ case "${1:-status}" in
             printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'
             exit 0
         fi
-        if [ -f "$TEXT_REBOOT_REQUIRED" ]; then
+        if [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" != 1 ] && [ -f "$TEXT_REBOOT_REQUIRED" ]; then
             printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'
             exit 0
         fi

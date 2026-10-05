@@ -32,6 +32,8 @@ python3 -m py_compile \
   "$ROOT/common/font_inventory.py"
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
+python3 "$ROOT/scripts/apk_packaging_metadata_test.py"
+sh "$ROOT/scripts/font_next_transaction_test.sh"
 sh "$ROOT/scripts/runtime_paths_test.sh"
 python3 "$ROOT/scripts/task_scope_test.py"
 python3 "$ROOT/scripts/legacy_font_task_lifecycle_test.py"
@@ -69,6 +71,7 @@ for file in \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontMetadataInspector.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ModuleSnapshotStore.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt \
@@ -82,6 +85,7 @@ for file in \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/NativeImportControlsTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModelTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/home/HomeContractTest.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/ModuleSnapshotStoreTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettingsTest.kt; do
   test -f "$ROOT/$file"
 done

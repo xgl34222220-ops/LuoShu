@@ -31,6 +31,9 @@ REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/mix-stage-finalize.lock"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
+. "$REALMOD/common/font_next_transaction.sh" || exit 126
+. "$REALMOD/common/font_switch_lock.sh" || exit 126
+FINALIZE_FONT_LOCK="$REALMOD/.font_switch.lock"
 
 read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
@@ -171,17 +174,32 @@ mix_status_json_fast() {
         fi
     fi
 
+    _live_applied=false; _activation=pending-reboot
+    _live_file="$REALMOD/config/font-live.conf"
+    _live_request=$(read_value "$_live_file" requestId)
+    _next_request=$(read_value "$NEXT_STATE" requestId)
+    _current_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    if [ "$_state" = success ] && [ ! -e "$REALMOD/config/font-live-transaction.conf" ] && \
+       [ ! -L "$REALMOD/config/font-live-transaction.conf" ] && [ -n "$_live_request" ] && \
+       [ "$_live_request" = "$_next_request" ] && [ "$(read_value "$_live_file" bootId)" = "$_current_boot" ] && \
+       [ "$(read_value "$_live_file" font)" = mix ] && [ "$(read_value "$_live_file" state)" = mounted ]; then
+        _live_applied=true; _activation=live-mounted
+        _message='当前启动已挂载新字体，重启后完整生效'
+    fi
+    if [ -e "$REALMOD/config/font-live-transaction.conf" ] || [ -L "$REALMOD/config/font-live-transaction.conf" ]; then
+        _state=cleanup-pending; _message='等待恢复上次字体挂载事务，请刷新后重试'
+    fi
     _cjk=$(read_value "$_task_file" cjk)
     _latin=$(read_value "$_task_file" latin)
     _digit=$(read_value "$_task_file" digit)
     _cjk_axes=$(read_value "$_task_file" cjkAxes); [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
     _latin_axes=$(read_value "$_task_file" latinAxes); [ -n "$_latin_axes" ] || _latin_axes=wght=400
     _digit_axes=$(read_value "$_task_file" digitAxes); [ -n "$_digit_axes" ] || _digit_axes=wght=400
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"rebootRequired":true,"liveApplied":%s,"activation":"%s","progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape_router "$_task")" "$(json_escape_router "$_state")" "$(json_escape_router "$_message")" \
         "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
         "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
-        "$(json_escape_router "$_message")" "$_percent"
+        "$_live_applied" "$_activation" "$(json_escape_router "$_message")" "$_percent"
 }
 
 force_link() {
@@ -340,7 +358,7 @@ write_next_state() {
     [ -s "$_generation_manifest" ] || _generation_manifest="$NEXT_PAYLOAD/.luoshu-mix-generation.conf"
     [ -n "$_previous" ] || _previous=default
     [ "$_previous_legacy" = true ] || _previous_legacy=false
-    _tmp="${NEXT_STATE}.tmp.$$"
+    _tmp="$LUOSHU_TMP_DIR/mix-next-state-$$"
     {
         printf 'state=prepared\n'
         printf 'font=mix\n'
@@ -352,9 +370,11 @@ write_next_state() {
         printf 'previousLegacy=%s\n' "$_previous_legacy"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_tmp" 2>/dev/null || return 1
-    mv -f "$_tmp" "$NEXT_STATE" 2>/dev/null || return 1
-    chmod 0644 "$NEXT_STATE" 2>/dev/null || true
+    STAGED_NEXT_STATE="$_tmp"
+    return 0
+}
 
+write_next_selection() {
     printf 'mix\n' > "$ACTIVE_CONF" 2>/dev/null || return 1
     chmod 0644 "$ACTIVE_CONF" 2>/dev/null || true
     _boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
@@ -384,23 +404,18 @@ commit_mix_stage_if_needed() {
         fi
     fi
 
-    # Recover a process killed after the stage directory was atomically renamed
-    # but before its small state file was committed. MIX_STAGE_STATE is retained
-    # until both pieces are durable, so the next status poll can finish the commit.
-    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ]; then
-        write_next_state || return 1
-        rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
-        return 0
-    fi
-
     stage_has_fonts || return 1
     stage_generation_matches || return 1
     complete_hyperos_stage || return 1
     complete_coloros_stage || return 1
-    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
-    mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
-    if ! write_next_state; then
-        mv "$NEXT_PAYLOAD" "$MIX_STAGE" 2>/dev/null || true
+    write_next_state || return 1
+    if ! luoshu_next_transaction_begin "$REALMOD" "$MIX_STAGE" "$STAGED_NEXT_STATE"; then
+        rm -f "$STAGED_NEXT_STATE" 2>/dev/null || true
+        return 1
+    fi
+    rm -f "$STAGED_NEXT_STATE" 2>/dev/null || true
+    if ! write_next_selection || ! write_legacy_mix_mode || ! luoshu_next_transaction_commit "$REALMOD"; then
+        luoshu_next_transaction_rollback "$REALMOD" >/dev/null 2>&1 || true
         return 1
     fi
     rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
@@ -445,7 +460,7 @@ write_legacy_mix_mode() {
     _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
     {
         printf 'enabled=true\ncore=v14.4.0\nfont=mix\npipeline=atomic-next-boot-composite\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
+    } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || return 1
     chmod 0600 "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
 }
 
@@ -454,15 +469,34 @@ finalize_mix_stage() {
         printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
         return 1
     fi
-    commit_mix_stage_if_needed
-    _commit_rc=$?
-    finalize_lock_release >/dev/null 2>&1 || true
-    if [ "$_commit_rc" -ne 0 ]; then
+    _finalize_wait=0
+    while ! luoshu_font_lock_acquire "$FINALIZE_FONT_LOCK" "$$"; do
+        _finalize_wait=$((_finalize_wait + 1))
+        if [ "$_finalize_wait" -ge 20 ]; then
+            finalize_lock_release >/dev/null 2>&1 || true
+            printf '{"status":"error","message":"已有字体事务正在提交，请稍后重试"}\n'
+            return 1
+        fi
+        sleep 1
+    done
+    trap 'luoshu_next_transaction_rollback "$REALMOD" >/dev/null 2>&1 || true; luoshu_font_lock_release "$FINALIZE_FONT_LOCK" "$$" >/dev/null 2>&1 || true; finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    if ! luoshu_next_transaction_recover "$REALMOD" || ! commit_mix_stage_if_needed; then
         printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
         return 1
     fi
-    write_legacy_mix_mode
-    printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"pipeline":"atomic-next-boot-composite"}}\n'
+    _live_result=$(MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REALMOD/common/font_live_switch.sh" 2>> "$LOG_FILE")
+    _live_applied=false; _activation=pending-reboot
+    if printf '%s\n' "$_live_result" | grep -q '"liveApplied":true'; then
+        _live_applied=true; _activation=live-mounted
+    fi
+    printf '[LIVE-SWITCH] %s\n' "$_live_result" >> "$LOG_FILE" 2>/dev/null || true
+    luoshu_font_lock_release "$FINALIZE_FONT_LOCK" "$$" >/dev/null 2>&1 || true
+    finalize_lock_release >/dev/null 2>&1 || true
+    trap - EXIT HUP INT TERM
+    printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"liveApplied":%s,"activation":"%s","pipeline":"atomic-next-boot-composite"}}\n' "$_live_applied" "$_activation"
     return 0
 }
 
@@ -543,6 +577,11 @@ if [ "$_cmd" = cancel ]; then
         [ "$(cat "$_cancel_file.task" 2>/dev/null)" != "$_cancel_task" ] || \
             luoshu_stop_task_pid "$_cancel_file" "$_cancel_task" >/dev/null || _cancel_rc=125
     done
+    if [ "$_cancel_rc" -eq 0 ] && { [ -e "$REALMOD/config/font-live-transaction.conf" ] || [ -L "$REALMOD/config/font-live-transaction.conf" ]; }; then
+        MODDIR="$REALMOD" sh "$(luoshu_scope_runner)" request-run "mix-live-recover-$$-$(date +%s)" 30 -- \
+            sh "$REALMOD/common/font_live_switch.sh" recover >/dev/null 2>&1 || _cancel_rc=125
+        [ ! -e "$REALMOD/config/font-live-transaction.conf" ] && [ ! -L "$REALMOD/config/font-live-transaction.conf" ] || _cancel_rc=125
+    fi
     if [ "$_cancel_rc" -eq 0 ]; then
         # Nested engine/monitor scopes are cancelled by their owning worker;
         # never remove a completed or queued next-boot payload here.
@@ -599,6 +638,7 @@ setup_runtime "$_payload" || {
     [ "$_cmd" != start ] || { rm -rf "$MIX_STAGE" 2>/dev/null || true; rm -f "$MIX_STAGE_STATE" 2>/dev/null || true; }
     exit 1
 }
+export LUOSHU_CONTINUOUS_SWITCH=1
 export LUOSHU_REAL_MODDIR="$REALMOD"
 export LUOSHU_MIX_REQUEST_ID="$(read_value "$MIX_STAGE_STATE" requestId)"
 export LUOSHU_MIX_MANIFEST="$MIX_MANIFEST"

@@ -51,6 +51,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
@@ -168,12 +169,13 @@ internal fun LuoShuAppShell(
     var pickerSlot by remember { mutableStateOf<MixSlot?>(null) }
 
     LaunchedEffect(Unit) {
+        // Draw the home shell before starting Root authorization or module IO.
+        withFrameNanos { }
         viewModel.refresh()
-        features.refreshSystemWeight()
     }
     LaunchedEffect(page) {
         when (page) {
-            AppPage.Home -> features.refreshSystemWeight()
+            AppPage.Home -> Unit
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
@@ -192,10 +194,7 @@ internal fun LuoShuAppShell(
 
     val homeActions = remember(viewModel, features) {
         HomeActions(
-            refresh = {
-                viewModel.refresh()
-                features.refreshSystemWeight()
-            },
+            refresh = viewModel::refresh,
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
             openLogs = {
@@ -205,8 +204,6 @@ internal fun LuoShuAppShell(
             openSettings = { page = AppPage.Settings },
             restoreDefault = { restoreDefault = true },
             reboot = viewModel::rebootDevice,
-            previewSystemWeight = features::previewSystemWeight,
-            resetSystemWeight = features::resetSystemWeight,
         )
     }
     val libraryActions = remember(viewModel) {
@@ -364,7 +361,7 @@ internal fun LuoShuAppShell(
                             CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
                                 HomeRoute(
                                     style = appearance.uiStyle,
-                                    state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                    state = viewModel.snapshot.toHomeUiState(),
                                     actions = homeActions,
                                 )
                             }

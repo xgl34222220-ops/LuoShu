@@ -107,7 +107,8 @@ internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
     }.orEmpty()
     return FontLibraryUiState(
         loading = fontLoading || fontRefreshing,
-        operationBusy = operationBusy || mixState.busy,
+        operationBusy = operationBusy || mixState.busy || snapshot.loading || snapshot.statusCached ||
+            !snapshot.installed || !snapshot.rootGranted,
         query = searchQuery,
         error = fontError.ifBlank { failedSwitchMessage },
         operationMessage = if (failedSwitchMessage.isBlank()) operationMessage else "",

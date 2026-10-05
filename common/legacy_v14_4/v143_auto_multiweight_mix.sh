@@ -313,8 +313,10 @@ save_mix_config() {
         printf 'isolation=auto-multiweight-v1\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
-    printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
-    printf 'font=mix\ntime=%s\n' "$(date +%s)" >"$REBOOT_CONF" 2>/dev/null || return 1
+    if [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" != 1 ]; then
+        printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
+        printf 'font=mix\ntime=%s\n' "$(date +%s)" >"$REBOOT_CONF" 2>/dev/null || return 1
+    fi
     sed -i '/^LuoShuAutoMix$/d' "$CONFIG_DIR/recent_fonts.conf" 2>/dev/null || true
     chmod 0644 "$MIX_CONF" "$AXES_CONF" "$ACTIVE_CONF" "$REBOOT_CONF" 2>/dev/null || true
 }
@@ -423,7 +425,7 @@ start_mix() {
         sh "$FALLBACK_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes"
         return
     fi
-    [ ! -f "$REBOOT_CONF" ] || {
+    [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" = 1 ] || [ ! -f "$REBOOT_CONF" ] || {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'
         return
     }

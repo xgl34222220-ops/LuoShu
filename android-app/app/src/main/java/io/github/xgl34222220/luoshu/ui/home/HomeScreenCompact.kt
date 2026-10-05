@@ -30,19 +30,16 @@ import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -65,7 +62,6 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
-import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -78,6 +74,7 @@ internal fun HomeScreenCompact(
     state: HomeUiState,
     actions: HomeActions,
     trustContent: @Composable () -> Unit,
+    onDeviceDetailsExpanded: (Boolean) -> Unit = {},
 ) {
     val tokens = LocalMiuixTokens.current
     val scheme = MaterialTheme.colorScheme
@@ -86,7 +83,8 @@ internal fun HomeScreenCompact(
     val textSecondary = tokens.textSecondary
     val shape = RoundedCornerShape(24.dp)
     var deviceDetailsExpanded by rememberSaveable { mutableStateOf(false) }
-    val canChange = state.moduleInstalled && state.rootGranted && !state.taskRunning
+    LaunchedEffect(deviceDetailsExpanded) { onDeviceDetailsExpanded(deviceDetailsExpanded) }
+    val canChange = state.moduleInstalled && state.rootGranted && !state.loading && !state.taskRunning
     val next = nextStepFor(state, actions)
 
     LazyColumn(
@@ -143,6 +141,7 @@ internal fun HomeScreenCompact(
                                         !state.moduleInstalled -> "等待模块"
                                         !state.rootGranted -> "需要授权"
                                         state.taskRunning -> "正在处理"
+                                        state.liveApplied -> "当前启动已挂载"
                                         state.rebootRequired -> "等待重启"
                                         else -> "模块已连接"
                                     },
@@ -193,7 +192,7 @@ internal fun HomeScreenCompact(
                                 null, LuoShuIconTokens.StatusGlyph,
                                 tint = if (failed) scheme.error else scheme.primary,
                             )
-                            Text(if (state.rebootRequired && !state.taskRunning) "重启后生效" else state.taskTitle,
+                            Text(if (state.rebootRequired && !state.taskRunning) "重启后完整生效" else state.taskTitle,
                                 modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
                                 color = if (failed) scheme.onErrorContainer else textPrimary)
                             if (state.taskRunning) Text("${state.taskProgress.coerceIn(0, 100)}%", color = scheme.primary,
@@ -207,6 +206,14 @@ internal fun HomeScreenCompact(
                             progress = { state.taskProgress.coerceIn(0, 100) / 100f },
                             modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
                         )
+                        if (state.liveApplied && state.rebootRequired && !state.taskRunning) {
+                            TextButton(
+                                onClick = actions.reboot,
+                                enabled = canChange && state.rebootRequired,
+                            ) {
+                                Text("立即重启")
+                            }
+                        }
                     }
                 }
             }
@@ -221,9 +228,6 @@ internal fun HomeScreenCompact(
                         Modifier.weight(1f))
                 }
             }
-        }
-        item(key = "weight") {
-            SystemWeightCard(state.systemWeight.copy(applying = state.systemWeight.applying || state.taskRunning), actions, cardColor, textPrimary, textSecondary, shape)
         }
         item(key = "device-details") {
             Surface(shape = shape, color = cardColor) {
@@ -308,6 +312,20 @@ private data class HomeNextStep(
 )
 
 private fun nextStepFor(state: HomeUiState, actions: HomeActions): HomeNextStep = when {
+    state.taskRunning -> HomeNextStep(
+        title = "字体任务正在处理",
+        description = state.taskMessage.ifBlank { "可以离开 App，后台任务会继续运行" },
+        actionLabel = "查看任务",
+        icon = Icons.Rounded.Description,
+        onClick = actions.openLogs,
+    )
+    state.loading -> HomeNextStep(
+        title = "先浏览字体",
+        description = "正在核实模块状态，可以先打开字体库浏览与预览",
+        actionLabel = "打开字体库",
+        icon = Icons.Rounded.FontDownload,
+        onClick = actions.openFontLibrary,
+    )
     !state.moduleInstalled || !state.rootGranted -> HomeNextStep(
         title = "连接洛书模块",
         description = "安装模块并授予 Root 权限后才能应用全局字体",
@@ -315,12 +333,12 @@ private fun nextStepFor(state: HomeUiState, actions: HomeActions): HomeNextStep 
         icon = Icons.Rounded.Refresh,
         onClick = actions.refresh,
     )
-    state.taskRunning -> HomeNextStep(
-        title = "字体任务正在处理",
-        description = state.taskMessage.ifBlank { "可以离开 App，后台任务会继续运行" },
-        actionLabel = "查看任务",
-        icon = Icons.Rounded.Description,
-        onClick = actions.openLogs,
+    state.liveApplied && state.rebootRequired -> HomeNextStep(
+        title = "当前启动已挂载",
+        description = "可以继续切换字体；完整重启后统一生效",
+        actionLabel = "继续切换字体",
+        icon = Icons.Rounded.FontDownload,
+        onClick = actions.openFontLibrary,
     )
     state.rebootRequired -> HomeNextStep(
         title = "字体已经准备完成",
@@ -410,86 +428,6 @@ private fun CompactStatusCell(
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
             )
-        }
-    }
-}
-
-@Composable
-private fun SystemWeightCard(
-    weight: HomeWeightUiState,
-    actions: HomeActions,
-    cardColor: Color,
-    textPrimary: Color,
-    textSecondary: Color,
-    shape: RoundedCornerShape,
-) {
-    Card(
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        LuoShuGlyph(
-                            imageVector = Icons.Rounded.Speed,
-                            contentDescription = null,
-                            size = LuoShuIconTokens.StatusGlyph,
-                            opticalScale = .96f,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("全局粗细微调", color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text("不修改字体文件，可随时恢复", color = textSecondary, fontSize = 12.sp)
-                }
-                Text(
-                    if (weight.loading) "读取中" else weight.weight.toString(),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Spacer(Modifier.height(8.dp))
-            when {
-                weight.loading -> LuoShuLoadingSkeleton(
-                    Modifier.fillMaxWidth().height(12.dp),
-                    shape = RoundedCornerShape(999.dp),
-                )
-                !weight.supported -> Text(
-                    weight.error.ifBlank { "当前系统不支持全局粗细微调" },
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 12.sp,
-                )
-                else -> {
-                    Slider(
-                        value = weight.weight.toFloat(),
-                        onValueChange = actions.previewSystemWeight,
-                        enabled = !weight.applying,
-                        valueRange = weight.min.toFloat()..weight.max.toFloat(),
-                        steps = (((weight.max - weight.min) / weight.step) - 1).coerceAtLeast(0),
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            weight.error.ifBlank { weight.message },
-                            modifier = Modifier.weight(1f),
-                            color = if (weight.error.isNotBlank()) MaterialTheme.colorScheme.error else textSecondary,
-                            fontSize = 12.sp,
-                            maxLines = 2,
-                        )
-                        TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) {
-                            Text("恢复原始")
-                        }
-                    }
-                }
-            }
         }
     }
 }

@@ -73,6 +73,7 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$LEGACY_DIR/payload_clone.sh" ] && . "$LEGACY_DIR/payload_clone.sh"
+. "$MODDIR/common/font_next_transaction.sh" || exit 126
 HYPEROS_COMPAT="$LEGACY_DIR/hyperos_full_coverage.sh"
 [ -f "$HYPEROS_COMPAT" ] && . "$HYPEROS_COMPAT"
 
@@ -430,10 +431,10 @@ cleanup_stale_stages() {
     done
 }
 
-trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup' EXIT
-trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 129' HUP
-trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 130' INT
-trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 143' TERM
+trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup' EXIT
+trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 129' HUP
+trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 130' INT
+trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 143' TERM
 
 find_text_font_file() {
     _wanted="$1"
@@ -611,35 +612,20 @@ resolve_previous_state() {
 
 prepare_next_payload() {
     _font="$1"; _previous="$2"; _previous_legacy="$3"
-    _next_tmp="${NEXT_STATE}.tmp.$$"
-    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
-    rm -f "$NEXT_STATE" 2>/dev/null || true
-    if ! mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD" 2>/dev/null; then
-        return 1
-    fi
-    STAGE_PAYLOAD=""
+    _next_tmp="$LUOSHU_TASK_SCOPE_TMPDIR/font-payload-next-state"
     {
-        printf 'state=prepared\n'
-        printf 'font=%s\n' "$_font"
-        printf 'previousFont=%s\n' "$_previous"
-        printf 'previousLegacy=%s\n' "$_previous_legacy"
+        printf 'state=prepared\nfont=%s\n' "$_font"
+        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-${LUOSHU_SWITCH_REQUEST_ID:-safe-$$-$(date +%s)}}"
+        printf 'previousFont=%s\npreviousLegacy=%s\n' "$_previous" "$_previous_legacy"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } > "$_next_tmp" 2>/dev/null || {
-        rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
-        return 1
-    }
-    mv -f "$_next_tmp" "$NEXT_STATE" 2>/dev/null || {
-        rm -rf "$NEXT_PAYLOAD" "$_next_tmp" 2>/dev/null || true
-        return 1
-    }
+    } > "$_next_tmp" 2>/dev/null || return 1
+    luoshu_next_transaction_begin "$MODDIR" "$STAGE_PAYLOAD" "$_next_tmp" || return 1
+    STAGE_PAYLOAD=""
     chmod 0644 "$NEXT_STATE" 2>/dev/null || true
     return 0
 }
 
-cancel_next_payload() {
-    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
-    rm -f "$NEXT_STATE" 2>/dev/null || true
-}
+cancel_next_payload() { luoshu_next_transaction_rollback "$MODDIR"; }
 
 write_runtime_state() {
     _font="$1"
@@ -766,6 +752,7 @@ switch_font() {
 
     progress 20 '正在获取字体切换锁'
     lock_acquire || return 1
+    luoshu_next_transaction_recover "$MODDIR" || { safe_error '上一字体事务尚未完成清理，请稍后重试'; return 1; }
     cleanup_stale_stages
     resolve_previous_state
 
@@ -821,11 +808,29 @@ switch_font() {
         return 1
     fi
 
+    if ! luoshu_next_transaction_commit "$MODDIR"; then
+        cancel_next_payload
+        safe_error '字体事务提交失败，已恢复上次字体选择'
+        return 1
+    fi
+    progress 99 '正在挂载当前启动字体；已有字体缓存将在重启后完整更新'
+    _live_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_live_switch.sh" 2>> "$LOG_FILE")
+    _live_applied=false
+    _activation=pending-reboot
+    if printf '%s\n' "$_live_result" | grep -q '"liveApplied":true'; then
+        _live_applied=true
+        _activation=live-mounted
+    fi
+    printf '[LIVE-SWITCH] %s\n' "$_live_result" >> "$LOG_FILE" 2>/dev/null || true
     printf '%s\n' "$_active_label" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
-    progress 100 '字体已准备完成，完整重启后生效'
-    printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"core":"physical-safe-v1","pipeline":"next-boot-stage"}}\n' \
-        "$(json_escape "$_active_label")"
+    if [ "$_live_applied" = true ]; then
+        progress 100 '当前启动已挂载新字体，重启后完整生效'
+    else
+        progress 100 '字体已准备完成，完整重启后生效'
+    fi
+    printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"liveApplied":%s,"activation":"%s","core":"physical-safe-v1","pipeline":"next-boot-stage"}}\n' \
+        "$(json_escape "$_active_label")" "$_live_applied" "$_activation"
     return 0
 }
 

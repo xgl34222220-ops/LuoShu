@@ -456,7 +456,7 @@ start_mix() {
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || {
         printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'; return
     }
-    [ ! -f "$TEXT_REBOOT_REQUIRED" ] || {
+    [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" = 1 ] || [ ! -f "$TEXT_REBOOT_REQUIRED" ] || {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return
     }
     if [ -s "$WORKER_PID" ]; then

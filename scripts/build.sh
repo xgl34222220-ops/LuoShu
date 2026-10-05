@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ASSERT_APP_PACKAGE="${LUOSHU_APP_PACKAGE:-}"
+ASSERT_APP_VERSION_CODE="${LUOSHU_APP_VERSION_CODE:-}"
 . "$ROOT/scripts/version.sh"
 VERSION="$LUOSHU_ARTIFACT_VERSION"
 OUT="$ROOT/dist"
@@ -23,11 +25,16 @@ sh "$ROOT/scripts/check.sh"
   exit 65
 }
 
-APP_PACKAGE="${LUOSHU_APP_PACKAGE:-}"
-APP_VERSION_CODE="${LUOSHU_APP_VERSION_CODE:-}"
 if command -v apkanalyzer >/dev/null 2>&1; then
-  [ -n "$APP_PACKAGE" ] || APP_PACKAGE=$(apkanalyzer manifest application-id "$APP_APK" 2>/dev/null || true)
-  [ -n "$APP_VERSION_CODE" ] || APP_VERSION_CODE=$(apkanalyzer manifest version-code "$APP_APK" 2>/dev/null || true)
+  APP_PACKAGE=$(apkanalyzer manifest application-id "$APP_APK" 2>/dev/null) || {
+    echo 'Unable to read APK package name with apkanalyzer.' >&2; exit 66;
+  }
+  APP_VERSION_CODE=$(apkanalyzer manifest version-code "$APP_APK" 2>/dev/null) || {
+    echo 'Unable to read APK versionCode with apkanalyzer.' >&2; exit 66;
+  }
+else
+  APP_PACKAGE="$ASSERT_APP_PACKAGE"
+  APP_VERSION_CODE="${ASSERT_APP_VERSION_CODE:-$EXPECTED_VERSION_CODE}"
 fi
 [ -n "$APP_PACKAGE" ] || {
   echo 'Unable to read APK package name. Install apkanalyzer or set LUOSHU_APP_PACKAGE.' >&2
@@ -39,6 +46,15 @@ case "$APP_VERSION_CODE" in
     exit 66
     ;;
 esac
+[ -z "$ASSERT_APP_PACKAGE" ] || [ "$APP_PACKAGE" = "$ASSERT_APP_PACKAGE" ] || {
+  echo "APK package assertion mismatch: expected $ASSERT_APP_PACKAGE, got $APP_PACKAGE" >&2; exit 68;
+}
+if [ -n "$ASSERT_APP_VERSION_CODE" ]; then
+  case "$ASSERT_APP_VERSION_CODE" in *[!0-9]*) echo 'LUOSHU_APP_VERSION_CODE must be an integer.' >&2; exit 66 ;; esac
+  [ "$APP_VERSION_CODE" -eq "$ASSERT_APP_VERSION_CODE" ] || {
+    echo "APK versionCode assertion mismatch: expected $ASSERT_APP_VERSION_CODE, got $APP_VERSION_CODE" >&2; exit 67;
+  }
+fi
 [ "$APP_VERSION_CODE" -eq "$EXPECTED_VERSION_CODE" ] || {
   echo "APK versionCode mismatch: expected $EXPECTED_VERSION_CODE, got $APP_VERSION_CODE" >&2
   exit 67

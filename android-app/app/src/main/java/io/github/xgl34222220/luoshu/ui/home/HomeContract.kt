@@ -2,24 +2,11 @@ package io.github.xgl34222220.luoshu.ui.home
 
 import androidx.compose.runtime.Immutable
 import io.github.xgl34222220.luoshu.ModuleSnapshot
-import io.github.xgl34222220.luoshu.SystemWeightState
-
-@Immutable
-data class HomeWeightUiState(
-    val loading: Boolean = true,
-    val supported: Boolean = false,
-    val weight: Int = 400,
-    val min: Int = 300,
-    val max: Int = 700,
-    val step: Int = 10,
-    val applying: Boolean = false,
-    val message: String = "正在读取系统字体粗细…",
-    val error: String = "",
-)
 
 @Immutable
 data class HomeUiState(
     val loading: Boolean = false,
+    val statusCached: Boolean = false,
     val version: String = "检测中…",
     val currentFont: String = "系统默认字体",
     val rootGranted: Boolean = false,
@@ -32,8 +19,8 @@ data class HomeUiState(
     val taskMessage: String = "暂无后台字体任务",
     val taskProgress: Int = 0,
     val rebootRequired: Boolean = false,
+    val liveApplied: Boolean = false,
     val error: String = "",
-    val systemWeight: HomeWeightUiState = HomeWeightUiState(),
 )
 
 @Immutable
@@ -45,44 +32,42 @@ data class HomeActions(
     val openSettings: () -> Unit = {},
     val restoreDefault: () -> Unit,
     val reboot: () -> Unit,
-    val previewSystemWeight: (Float) -> Unit,
-    val resetSystemWeight: () -> Unit,
 )
 
-internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiState {
-    val running = taskState == "running" || taskState == "queued"
+internal fun ModuleSnapshot.toHomeUiState(): HomeUiState {
+    val running = taskState in setOf("running", "queued", "waiting-cleanup", "cleanup-pending")
+    val verifiedConnection = !loading && !statusCached
     return HomeUiState(
-        loading = loading,
+        loading = loading || statusCached,
+        statusCached = statusCached,
         version = version,
-        currentFont = effectiveLabel,
-        rootGranted = rootGranted,
-        rootManager = rootManager,
-        moduleInstalled = installed,
+        currentFont = if (statusCached) "$activeLabel（上次记录，正在核实）" else effectiveLabel,
+        rootGranted = verifiedConnection && rootGranted,
+        rootManager = if (verifiedConnection) rootManager else "核实中…",
+        moduleInstalled = verifiedConnection && installed,
         mountEngine = mountEngine,
-        mountHealthy = installed && mountState != "failed" &&
+        mountHealthy = verifiedConnection && installed && mountState != "failed" &&
             (activeFont in setOf("", "default") || rebootRequired || mountState == "mounted"),
         taskRunning = running,
         taskTitle = when {
+            taskState in setOf("waiting-cleanup", "cleanup-pending") -> "等待字体任务清理"
             running -> "字体任务执行中"
+            statusCached -> "正在核实模块状态"
+            loading -> "正在连接字体引擎"
             effectFailed -> "字体未生效"
             installed && rootGranted -> "字体引擎已就绪"
             installed -> "模块已连接"
             else -> "正在等待模块连接"
         },
-        taskMessage = if (effectFailed) effectFailureMessage else taskMessage,
+        taskMessage = when {
+            running -> taskMessage
+            statusCached -> "已显示上次记录，可以先浏览字体；正在核实当前权限与挂载状态"
+            effectFailed -> effectFailureMessage
+            else -> taskMessage
+        },
         taskProgress = taskProgress,
-        rebootRequired = rebootRequired,
+        rebootRequired = verifiedConnection && rebootRequired,
+        liveApplied = verifiedConnection && liveApplied,
         error = error,
-        systemWeight = HomeWeightUiState(
-            loading = weight.loading,
-            supported = weight.supported,
-            weight = weight.weight,
-            min = weight.min,
-            max = weight.max,
-            step = weight.step,
-            applying = weight.applying,
-            message = weight.message,
-            error = weight.error,
-        ),
     )
 }

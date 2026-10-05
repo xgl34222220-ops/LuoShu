@@ -1,7 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import io.github.xgl34222220.luoshu.ModuleSnapshot
-import io.github.xgl34222220.luoshu.SystemWeightState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,7 +20,7 @@ class HomeContractTest {
             mountState = "failed",
             taskState = "success",
             taskMessage = "字体已准备",
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertEquals("系统默认字体（DemoFont未生效）", state.currentFont)
         assertEquals("字体未生效", state.taskTitle)
@@ -39,7 +38,7 @@ class HomeContractTest {
             effectiveFont = "DemoFont",
             fontEffectState = "verified",
             mountState = "mounted",
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertEquals("DemoFont", state.currentFont)
         assertEquals("字体引擎已就绪", state.taskTitle)
@@ -54,7 +53,7 @@ class HomeContractTest {
             effectiveFont = "unknown",
             fontEffectState = "pending-reboot",
             rebootRequired = true,
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertEquals("DemoFont（等待完整重启）", state.currentFont)
     }
@@ -68,9 +67,113 @@ class HomeContractTest {
             fontEffectState = "failed",
             verificationReason = "dynamic-config-overridden",
             mountState = "mounted",
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertTrue(state.taskMessage.contains("动态字体配置"))
         assertTrue(state.taskMessage.contains("系统字体"))
+    }
+
+    @Test
+    fun cachedSnapshotShowsPreviousFontWithoutAuthorizingRootActions() {
+        val state = ModuleSnapshot(
+            loading = false,
+            statusCached = true,
+            installed = true,
+            rootGranted = true,
+            rootManager = "Magisk",
+            activeFont = "DemoFont",
+            effectiveFont = "DemoFont",
+            fontEffectState = "verified",
+            mountState = "mounted",
+            rebootRequired = true,
+            liveApplied = true,
+        ).toHomeUiState()
+
+        assertTrue(state.loading)
+        assertTrue(state.statusCached)
+        assertEquals("DemoFont（上次记录，正在核实）", state.currentFont)
+        assertEquals("正在核实模块状态", state.taskTitle)
+        assertFalse(state.rootGranted)
+        assertFalse(state.moduleInstalled)
+        assertFalse(state.mountHealthy)
+        assertFalse(state.rebootRequired)
+        assertFalse(state.liveApplied)
+    }
+
+    @Test
+    fun cachedCompositeFontUsesTheReadablePreviousLabel() {
+        val state = ModuleSnapshot(statusCached = true, activeFont = "mix").toHomeUiState()
+
+        assertEquals("完整复合字体（上次记录，正在核实）", state.currentFont)
+    }
+
+    @Test
+    fun waitingCleanupRemainsBusyEvenWhenFontGenerationIsFinished() {
+        val state = ModuleSnapshot(
+            loading = false,
+            installed = true,
+            rootGranted = true,
+            taskState = "waiting-cleanup",
+            taskMessage = "任务进程尚未确认退出",
+            taskProgress = 100,
+        ).toHomeUiState()
+
+        assertTrue(state.taskRunning)
+        assertEquals("等待字体任务清理", state.taskTitle)
+        assertEquals("任务进程尚未确认退出", state.taskMessage)
+    }
+
+    @Test
+    fun loadingCannotAuthorizeRootActionsFromThePreviousSnapshot() {
+        val state = ModuleSnapshot(
+            loading = true,
+            installed = true,
+            rootGranted = true,
+            mountState = "mounted",
+            rebootRequired = true,
+        ).toHomeUiState()
+
+        assertTrue(state.loading)
+        assertFalse(state.rootGranted)
+        assertFalse(state.moduleInstalled)
+        assertFalse(state.mountHealthy)
+        assertFalse(state.rebootRequired)
+    }
+
+    @Test
+    fun canonicalCleanupPendingStateRemainsBusy() {
+        val state = ModuleSnapshot(
+            loading = false,
+            installed = true,
+            rootGranted = true,
+            taskState = "cleanup-pending",
+            taskMessage = "等待确认任务进程全部退出",
+            taskProgress = 100,
+        ).toHomeUiState()
+
+        assertTrue(state.taskRunning)
+        assertEquals("等待字体任务清理", state.taskTitle)
+        assertEquals("等待确认任务进程全部退出", state.taskMessage)
+    }
+
+    @Test
+    fun liveMountPreservesBothCurrentBootAndFullRebootStatus() {
+        val state = ModuleSnapshot(
+            loading = false,
+            installed = true,
+            rootGranted = true,
+            activeFont = "DemoFont",
+            effectiveFont = "DemoFont",
+            fontEffectState = "live-mounted",
+            liveApplied = true,
+            rebootRequired = true,
+            mountState = "mounted",
+        ).toHomeUiState()
+
+        assertTrue(state.liveApplied)
+        assertTrue(state.rebootRequired)
+        assertTrue(state.mountHealthy)
+        assertEquals("DemoFont（当前启动已挂载，重启后完整生效）", state.currentFont)
+        assertFalse(state.taskRunning)
     }
 }

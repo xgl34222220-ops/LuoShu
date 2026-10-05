@@ -60,24 +60,31 @@ fun HomeRoute(
     var stockScanBusy by remember { mutableStateOf(false) }
     var stockScanMessage by remember { mutableStateOf("") }
     var stockScanError by remember { mutableStateOf(false) }
+    var deviceDetailsExpanded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(
         state.moduleInstalled,
+        deviceDetailsExpanded,
+        showTrustDetails,
+        showAcceptanceGuide,
         state.currentFont,
         state.rebootRequired,
         state.taskRunning,
         trustRefreshGeneration,
     ) {
-        if (!state.moduleInstalled) {
+        if (!state.moduleInstalled || !state.rootGranted || state.loading || state.statusCached) {
             trustState = DeviceTrustState(loading = false, error = "请先安装洛书模块")
             return@LaunchedEffect
         }
 
+        // The collapsed home card needs no second Root request or polling worker.
+        if (!deviceDetailsExpanded && !showTrustDetails && !showAcceptanceGuide) return@LaunchedEffect
+
         var latest = loadDeviceTrustState()
         trustState = latest
         var attempt = 0
-        while (latest.level == DeviceTrustLevel.PENDING && attempt < 9 && !state.taskRunning) {
+        while (latest.level == DeviceTrustLevel.PENDING && attempt < 9 && !state.taskRunning && !state.rebootRequired) {
             delay(5_000L)
             latest = loadDeviceTrustState()
             trustState = latest
@@ -89,6 +96,7 @@ fun HomeRoute(
         style = style,
         state = state,
         actions = actions,
+        onDeviceDetailsExpanded = { deviceDetailsExpanded = it },
         trustContent = {
             if (state.moduleInstalled) {
                 Column(Modifier.fillMaxWidth()) {

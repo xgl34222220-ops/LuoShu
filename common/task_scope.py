@@ -271,6 +271,13 @@ def run(args):
         return 3
     if same_process(read_owner(pidfile)):
         return 3
+    # A dead supervisor does not prove that its adopted descendants exited.
+    # Reconcile the exact prior registration while still holding its launch
+    # lock, before replacing any identity or cleanup evidence.
+    _, previous_code = cancel(pidfile, '')
+    if previous_code:
+        print('TASK-SCOPE: previous task cleanup is unconfirmed; task refused', file=sys.stderr)
+        return previous_code
     Path(str(pidfile) + '.cleanup.json').unlink(missing_ok=True)
     libc = ctypes.CDLL(None, use_errno=True)
     if libc.prctl(36, 1, 0, 0, 0) != 0:
@@ -365,25 +372,54 @@ def cancel(pidfile, task):
     record = read_owner(pidfile)
     if record and task and record.get('task') != task:
         return {'status': 'error', 'data': {'task': task, 'cleaned': False}, 'message': '任务身份不匹配'}, 3
+    task = task or (record.get('task', '') if record else '')
     if not same_process(record):
-        clean = True
+        # A full reboot ends every process belonging to that registration. Do
+        # not require an EXIT proof from a supervisor killed by the old boot.
+        previous_boot = bool(record and record.get('boot') and record['boot'] != BOOT)
+        if previous_boot:
+            clear_owner(pidfile, record)
+            return {'status': 'ok', 'data': {'task': task, 'token': task,
+                    'cleaned': True, 'state': 'previous-boot'}}, 0
+        clean = False
         try:
             proof = json.loads(Path(str(pidfile) + '.cleanup.json').read_text())
-            if proof.get('task') != task:
-                proof = {}
-            clean = proof.get('cleaned', True) is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors')
+            if not isinstance(proof, dict):
+                raise ValueError('invalid cleanup proof')
+            task = task or proof.get('task', '')
+            clean = (proof.get('task') == task and proof.get('boot') == BOOT and
+                     proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors'))
             if record:
                 clean = clean and all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot'))
+            elif Path(str(pidfile) + '.owner.json').exists():
+                clean = False
+            elif any(Path(str(pidfile) + suffix).exists() for suffix in ('', '.task', '.start', '.boot', '.ready')):
+                clean = False
+            elif proof.get('boot') and proof['boot'] != BOOT:
+                clean = proof.get('task') == task
             # The submission may have finished just before App cancellation,
             # before its response/task id reached the caller.
-            for child in proof.get('handoffOwners', []):
-                if read_owner(child['pidfile']) == child:
-                    _, code = cancel(child['pidfile'], child['task'])
-                    clean = clean and code == 0
-        except (OSError, ValueError, KeyError):
-            if record and record.get('boot') == BOOT or record is None and (
-                    Path(str(pidfile) + '.owner.json').exists() or Path(str(pidfile) + '.cleanup.json').exists()):
-                clean = False
+            if clean:
+                for child in proof.get('handoffOwners', []):
+                    if read_owner(child['pidfile']) == child:
+                        _, code = cancel(child['pidfile'], child['task'])
+                        clean = clean and code == 0
+        except FileNotFoundError:
+            # Fresh slots have no registration. Legacy sidecars may be safely
+            # retired only when their boot identity predates this boot.
+            evidence = [Path(str(pidfile) + suffix) for suffix in ('', '.owner.json', '.task', '.start', '.boot', '.ready')]
+            clean = not any(path.exists() for path in evidence)
+            if not clean and record is None and not Path(str(pidfile) + '.owner.json').exists():
+                try:
+                    saved_boot = Path(str(pidfile) + '.boot').read_text().strip()
+                    clean = bool(saved_boot and saved_boot != BOOT)
+                    if clean:
+                        for path in evidence:
+                            path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        except (OSError, ValueError, KeyError, TypeError):
+            clean = False
         if record and clean:
             clear_owner(pidfile, record)
         return {'status': 'ok' if clean else 'error', 'data': {'task': task or '',
@@ -394,6 +430,8 @@ def cancel(pidfile, task):
         time.sleep(.04)
     try:
         proof = json.loads(Path(str(pidfile) + '.cleanup.json').read_text())
+        if not isinstance(proof, dict):
+            raise ValueError('invalid cleanup proof')
         clean = (not same_process(record) and proof.get('cleaned') is True and
                  not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
                  all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot')))
@@ -401,7 +439,7 @@ def cancel(pidfile, task):
             if read_owner(child['pidfile']) == child:
                 _, code = cancel(child['pidfile'], child['task'])
                 clean = clean and code == 0
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         clean = False
     return {'status': 'ok' if clean else 'error', 'data': {'task': record['task'], 'token': record['task'],
             'cleaned': clean, 'state': 'cancelled' if clean else 'cleanup-failed'}}, 0 if clean else 125
@@ -413,8 +451,9 @@ def cleaned(pidfile, task):
         record = read_owner(pidfile)
         return bool(proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
                     proof.get('task') == task and proof.get('boot') == BOOT and not same_process(record) and
+                    (record or not Path(str(pidfile) + '.owner.json').exists()) and
                     (not record or all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot'))))
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError, AttributeError):
         return False
 
 

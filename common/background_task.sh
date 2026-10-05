@@ -71,29 +71,19 @@ luoshu_clear_task_pid() {
     # A worker's terminal write occurs before the supervisor reaps descendants.
     # Only the supervisor may clear its live ownership record.
     [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$_lctp_pid_file" ] || return 0
-    if [ -f "${_lctp_pid_file}.owner.json" ]; then
-        # Do not erase evidence after an externally SIGKILLed supervisor.
-        luoshu_task_pid_alive "$_lctp_pid_file" "$_lctp_task" && return 0
-        sh "$(luoshu_scope_runner)" cancel "$_lctp_pid_file" "$_lctp_task" >/dev/null 2>&1
-        return $?
-    fi
+    # Do not erase evidence after an externally SIGKILLed supervisor, nor
+    # pre-scope sidecars from this boot without a proof of child cleanup.
+    luoshu_task_pid_alive "$_lctp_pid_file" "$_lctp_task" && return 0
     if [ -n "$_lctp_task" ] && [ -s "${_lctp_pid_file}.task" ] && [ "$(cat "${_lctp_pid_file}.task" 2>/dev/null)" != "$_lctp_task" ]; then
         return 0
     fi
-    rm -f "$_lctp_pid_file" "${_lctp_pid_file}.task" "${_lctp_pid_file}.boot" \
-        "${_lctp_pid_file}.start" "${_lctp_pid_file}.owner.json" "${_lctp_pid_file}.ready" 2>/dev/null || true
+    sh "$(luoshu_scope_runner)" cancel "$_lctp_pid_file" "$_lctp_task" >/dev/null 2>&1
 }
 
 luoshu_stop_task_pid() {
     _lstp_pid_file="$1"
     _lstp_task="${2:-$(cat "${_lstp_pid_file}.task" 2>/dev/null)}"
-    if [ -f "${_lstp_pid_file}.owner.json" ] || [ -f "${_lstp_pid_file}.cleanup.json" ]; then
-        sh "$(luoshu_scope_runner)" cancel "$_lstp_pid_file" "$_lstp_task"
-        return $?
-    fi
-    # Old records without persisted start time are stale, not kill authority.
-    luoshu_clear_task_pid "$_lstp_pid_file"
-    printf '{"status":"ok","data":{"task":"%s","cleaned":true,"state":"absent"}}\n' "$_lstp_task"
+    sh "$(luoshu_scope_runner)" cancel "$_lstp_pid_file" "$_lstp_task"
 }
 
 # Cancellation is rare: take one process-tree snapshot, rather than running a
@@ -154,8 +144,8 @@ luoshu_start_detached() {
     # Shell function variables are global on Android /system/bin/sh. Keep function-specific
     # names here: the old generic _task variable was cleared by luoshu_clear_task_pid(), so
     # every new worker wrote an empty .task sidecar and was falsely recovered as interrupted.
-    luoshu_clear_task_pid "$_lsd_pid_file"
-    rm -f "${_lsd_pid_file}.cleanup.json" 2>/dev/null || return 1
+    luoshu_clear_task_pid "$_lsd_pid_file" || return $?
+    # The supervisor replaces cleanup evidence only after its locked recheck.
 
     _lsd_runner=$(luoshu_scope_runner)
     [ -f "$_lsd_runner" ] || return 126

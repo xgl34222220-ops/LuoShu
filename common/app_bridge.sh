@@ -33,7 +33,6 @@ AXES_TASK_FILE="$MODDIR/config/axes_task.conf"
 SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
 TEXT_REBOOT_REQUIRED="$MODDIR/config/text_reboot_required.conf"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
-[ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
 
 json_escape() {
@@ -79,8 +78,14 @@ mount_engine() {
 select_task_file() {
     # queued/running is only trustworthy while its matching worker still exists.
     # Reconcile both controllers before selecting the one visible to the App.
-    [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true
-    [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true
+    _axes_before="$(read_prop "$AXES_TASK_FILE" state)"
+    _switch_before="$(read_prop "$SWITCH_TASK_FILE" state)"
+    case "$_axes_before" in queued|running|cleanup-pending)
+        [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true ;;
+    esac
+    case "$_switch_before" in queued|running|cleanup-pending)
+        [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true ;;
+    esac
     _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
     _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
     case "$_axes_state" in queued|running|cleanup-pending) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
@@ -136,6 +141,15 @@ status_json() {
     if [ -n "$_task_file" ]; then
         _task_id="$(read_prop "$_task_file" task)"
         _task_state="$(read_prop "$_task_file" state)"
+        # Controller status masks provisional terminal writes until its exact
+        # supervisor and any live mount transaction have settled.
+        _controller=''
+        case "$_task_type" in mix) _controller="$MIX_ENGINE" ;; switch) _controller="$FONT_SWITCH_TASK" ;; esac
+        if [ -f "$_controller" ]; then
+            _controller_json=$(MODDIR="$MODDIR" sh "$_controller" status "$_task_id" 2>/dev/null)
+            _controller_state=$(printf '%s\n' "$_controller_json" | sed -n 's/^.*"state"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+            case "$_controller_state" in queued|running|cleanup-pending|success|failed) _task_state="$_controller_state" ;; esac
+        fi
         _task_message="$(read_prop "$_task_file" message)"
         if [ "$_task_type" = mix ]; then
             _task_progress="$(read_prop "$_task_file" percent)"
@@ -154,7 +168,7 @@ status_json() {
 
     _effective_active='unknown'
     _font_effect_state='pending'
-    if [ "$_active" = default ]; then
+    if [ "$_active" = default ] && [ "$_reboot_required" != true ]; then
         _effective_active=default
         _font_effect_state=system
     elif [ "$_reboot_required" = true ]; then
@@ -183,13 +197,40 @@ status_json() {
         _font_effect_state=unverified
     fi
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    _live_applied=false
+    _activation=pending-reboot
+    _live_file="$MODDIR/config/font-live.conf"
+    _live_boot=$(read_prop "$_live_file" bootId)
+    _current_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    _live_font=$(read_prop "$_live_file" font)
+    _live_request=$(read_prop "$_live_file" requestId)
+    if [ -n "$_current_boot" ] && [ "$_live_boot" = "$_current_boot" ] &&
+       [ "$(read_prop "$_live_file" state)" = mounted ] &&
+       [ ! -e "$MODDIR/config/font-live-transaction.conf" ]; then
+        case "$_mount_state" in mounted|idle)
+            _effective_active="$_live_font"
+            if [ "$_live_font" = "$_active" ] && [ -n "$_live_request" ] &&
+               [ "$(read_prop "$_live_file" requestId)" = "$(read_prop "$MODDIR/config/font-payload-next.conf" requestId)" ]; then
+                _live_applied=true
+                _activation=live-mounted
+                if [ "$_active" = default ]; then _font_effect_state=system
+                else _font_effect_state=live-mounted
+                fi
+            fi
+            ;;
+        esac
+    fi
+    if [ "$_live_applied" != true ] && [ "$_reboot_required" != true ]; then
+        case "$_font_effect_state" in system|verified) _activation=boot-verified ;; *) _activation=unverified ;; esac
+    fi
+
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"liveApplied":%s,"activation":"%s","rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
         "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
         "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
         "$(json_escape "$_verification_state")" "$(json_escape "$_verification_mode")" \
         "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" "$(json_escape "$_mount_failed")" \
         "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
-        "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" \
+        "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" "$_live_applied" "$_activation" \
         "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"
 }
 

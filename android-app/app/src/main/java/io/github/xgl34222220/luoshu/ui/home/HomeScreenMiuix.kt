@@ -26,7 +26,6 @@ import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -38,10 +37,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,7 +53,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
-import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 
 @Composable
 fun HomeScreenMiuix(
@@ -132,14 +128,11 @@ fun HomeScreenMiuix(
             )
         }
 
-        item { MiuixSectionTitle("SYSTEM WEIGHT", "全局粗细微调", "向左更细，向右更粗") }
-        item { MiuixSystemWeightCard(state.systemWeight, actions) }
-
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = actions.restoreDefault,
-                    enabled = !state.taskRunning,
+                    enabled = state.moduleInstalled && state.rootGranted && !state.loading && !state.taskRunning,
                     modifier = Modifier.weight(1f).height(54.dp),
                     shape = RoundedCornerShape(20.dp),
                 ) {
@@ -147,7 +140,7 @@ fun HomeScreenMiuix(
                 }
                 Button(
                     onClick = actions.reboot,
-                    enabled = state.rebootRequired && !state.taskRunning,
+                    enabled = state.moduleInstalled && state.rootGranted && state.rebootRequired && !state.loading && !state.taskRunning,
                     modifier = Modifier.weight(1f).height(54.dp),
                     shape = RoundedCornerShape(20.dp),
                 ) {
@@ -337,81 +330,6 @@ private fun MiuixMetricCard(
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
             )
-        }
-    }
-}
-
-@Composable
-private fun MiuixSystemWeightCard(weight: HomeWeightUiState, actions: HomeActions) {
-    val tokens = LocalMiuixTokens.current
-    Card(
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(50.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Speed, null, tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-                Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("当前粗细", color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Text("不修改字体文件", color = tokens.textSecondary, fontSize = 10.sp)
-                }
-                Text(
-                    if (weight.loading) "读取中" else weight.weight.toString(),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 27.sp,
-                    fontWeight = FontWeight.Black,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            when {
-                weight.loading -> LuoShuLoadingSkeleton(
-                    Modifier.fillMaxWidth().height(12.dp),
-                    shape = RoundedCornerShape(999.dp),
-                )
-                !weight.supported -> Text(
-                    weight.error.ifBlank { "当前系统不支持全局粗细微调" },
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 11.sp,
-                )
-                else -> {
-                    Slider(
-                        value = weight.weight.toFloat(),
-                        onValueChange = actions.previewSystemWeight,
-                        enabled = !weight.applying,
-                        valueRange = weight.min.toFloat()..weight.max.toFloat(),
-                        steps = (((weight.max - weight.min) / weight.step) - 1).coerceAtLeast(0),
-                    )
-                    Row(Modifier.fillMaxWidth()) {
-                        Text("更细 ${weight.min}", color = tokens.textSecondary, fontSize = 10.sp)
-                        Spacer(Modifier.weight(1f))
-                        Text("标准 400", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f))
-                        Text("${weight.max} 更粗", color = tokens.textSecondary, fontSize = 10.sp)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            weight.error.ifBlank { weight.message },
-                            modifier = Modifier.weight(1f),
-                            color = if (weight.error.isNotBlank()) MaterialTheme.colorScheme.error else tokens.textSecondary,
-                            fontSize = 10.sp,
-                            maxLines = 2,
-                        )
-                        TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) {
-                            Text("恢复原始")
-                        }
-                    }
-                }
-            }
         }
     }
 }

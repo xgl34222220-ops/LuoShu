@@ -209,6 +209,84 @@ time.sleep(60)
         self.wait_for(lambda: os.waitpid(child, os.WNOHANG)[0] == child)
         self.assertIsNone(self.sentinel.poll())
 
+    def test_dead_supervisor_cannot_be_replaced_with_unproved_live_child(self):
+        ctypes.CDLL(None).prctl(36, 1, 0, 0, 0)
+        child_file = self.directory / 'unproved-child.json'
+        worker = ("import json,os,time; from pathlib import Path; "
+                  "p=Path('/proc/self/stat'); start=p.read_text().rsplit(') ',1)[1].split()[19]; "
+                  "Path(" + repr(str(child_file)) + ").write_text(json.dumps({'pid':os.getpid(),"
+                  "'proc':os.readlink('/proc/self'),'start':start})); time.sleep(60)")
+        supervisor = subprocess.Popen([sys.executable, str(PROGRAM), 'run', '--pid-file', str(self.pidfile),
+                                       '--task', 'unproved-task', '--timeout', '30', '--', sys.executable, '-c', worker],
+                                      env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(self.dispose, supervisor)
+        self.wait_for(child_file.exists)
+        child = json.loads(child_file.read_text())
+
+        def dispose_child():
+            try:
+                fields = Path('/proc', child['proc'], 'stat').read_text().rsplit(') ', 1)[1].split()
+                if fields[19] == child['start']:
+                    os.kill(child['pid'], signal.SIGKILL)
+                os.waitpid(child['pid'], 0)
+            except (FileNotFoundError, ProcessLookupError, ChildProcessError):
+                pass
+        self.addCleanup(dispose_child)
+        supervisor.kill(); supervisor.wait(timeout=2)
+        owner_path = Path(str(self.pidfile) + '.owner.json')
+        owner = json.loads(owner_path.read_text())
+        proof_path = Path(str(self.pidfile) + '.cleanup.json')
+        proof_path.write_text(json.dumps(dict(schema='task-cleanup-v2', cleaned=False,
+                                             leftoverPids=[child['pid']], cleanupErrors=[],
+                                             **{key: owner[key] for key in ('task', 'pid', 'start', 'boot')})))
+        evidence = {suffix: Path(str(self.pidfile) + suffix).read_bytes()
+                    for suffix in ('', '.owner.json', '.task', '.start', '.boot', '.cleanup.json')}
+        marker = self.directory / 'replacement-started'
+        replacement = subprocess.run([sys.executable, str(PROGRAM), 'run', '--pid-file', str(self.pidfile),
+                                      '--task', 'replacement-task', '--timeout', '5', '--', 'touch', str(marker)],
+                                     env=self.env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(replacement.returncode, 125, replacement.stderr)
+        self.assertFalse(marker.exists())
+
+        module = self.directory / 'launcher-module'; common = module / 'common'; common.mkdir(parents=True)
+        (module / 'module.prop').write_text('id=LuoShu\n')
+        for name in ('task_scope.sh', 'task_scope.py', 'runtime_paths.sh', 'runtime_paths_lock.py'):
+            (common / name).symlink_to(ROOT / 'common' / name)
+        launch_env = dict(self.env, MODDIR=str(module), LUOSHU_TASK_SCOPE_PYTHON=sys.executable,
+                          LUOSHU_RUNTIME_PATHS_PYTHON=sys.executable)
+        detached = subprocess.run(['sh', '-c', '. "$1"; luoshu_start_detached "$2" replacement-task "$3" touch "$4"',
+                                   'sh', str(ROOT / 'common/background_task.sh'), str(self.pidfile),
+                                   str(self.directory / 'replacement.log'), str(marker)],
+                                  env=launch_env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(detached.returncode, 125, detached.stderr)
+        self.assertFalse(marker.exists())
+        for suffix, before in evidence.items():
+            self.assertEqual(Path(str(self.pidfile) + suffix).read_bytes(), before, suffix + ' was overwritten')
+        self.assertTrue(Path('/proc', child['proc']).exists())
+        self.assertIsNone(self.sentinel.poll())
+
+    def test_sequential_scope_reuse_accepts_cleaned_slots_and_previous_boot(self):
+        for task in ('first-task', 'second-task', 'third-task'):
+            result = subprocess.run([sys.executable, str(PROGRAM), 'run', '--pid-file', str(self.pidfile),
+                                     '--task', task, '--timeout', '5', '--', 'sh', '-c', 'exit 0'],
+                                    env=self.env, capture_output=True, text=True, timeout=3)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            proof = json.loads(Path(str(self.pidfile) + '.cleanup.json').read_text())
+            self.assertEqual(proof['task'], task)
+            self.assertTrue(proof['cleaned'])
+        record = dict(task='previous-boot-task', pid=123, procPid=123, start='456',
+                      namespace=os.readlink('/proc/self/ns/pid'), boot='previous-boot')
+        for suffix, key in (('', 'pid'), ('.task', 'task'), ('.start', 'start'), ('.boot', 'boot')):
+            Path(str(self.pidfile) + suffix).write_text(str(record[key]))
+        Path(str(self.pidfile) + '.owner.json').write_text(json.dumps(record))
+        Path(str(self.pidfile) + '.cleanup.json').unlink()
+        result = subprocess.run([sys.executable, str(PROGRAM), 'run', '--pid-file', str(self.pidfile),
+                                 '--task', 'new-boot-task', '--timeout', '5', '--', 'sh', '-c', 'exit 0'],
+                                env=self.env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(Path(str(self.pidfile) + '.cleanup.json').read_text())['cleaned'])
+        self.assertIsNone(self.sentinel.poll())
+
     def test_temporary_cleanup_exception_preserves_owner_and_writes_failure_proof(self):
         injection = """import importlib.util, sys
 spec=importlib.util.spec_from_file_location('scope', sys.argv[1]); scope=importlib.util.module_from_spec(spec); spec.loader.exec_module(scope)
@@ -226,6 +304,14 @@ sys.exit(scope.main())
         self.assertEqual(proof['leftoverPids'], [])
         self.assertIn('fixture removal failed', proof['cleanupErrors'])
         self.assertTrue(Path(str(self.pidfile) + '.owner.json').exists())
+        evidence = {suffix: Path(str(self.pidfile) + suffix).read_bytes()
+                    for suffix in ('', '.owner.json', '.cleanup.json')}
+        retry = subprocess.run([sys.executable, str(PROGRAM), 'run', '--pid-file', str(self.pidfile),
+                                '--task', 'must-not-replace-failed-cleanup', '--timeout', '5', '--', 'sh', '-c', 'exit 0'],
+                               env=self.env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(retry.returncode, 125, retry.stderr)
+        for suffix, before in evidence.items():
+            self.assertEqual(Path(str(self.pidfile) + suffix).read_bytes(), before)
         self.assertIsNone(self.sentinel.poll())
 
     def test_module_cancel_preserves_unrelated_process_and_does_not_create_old_state(self):
@@ -276,6 +362,104 @@ sys.exit(scope.main())
                     self.assertTrue(finished, 'legacy adapter missed owned child ' + name + ': ' + result.stdout)
                 except ChildProcessError:
                     self.assertFalse(Path('/proc', child['proc']).exists())
+
+    def font_module(self):
+        module = self.directory / 'font-module'; common = module / 'common'; common.mkdir(parents=True)
+        (module / 'module.prop').write_text('id=LuoShu\n')
+        for name in ('task_scope.sh', 'task_scope.py', 'background_task.sh', 'runtime_paths.sh', 'runtime_paths_lock.py'):
+            (common / name).symlink_to(ROOT / 'common' / name)
+        manager = self.directory / 'font-manager.sh'
+        manager.write_text('#!/bin/sh\n' +
+                           'printf "%s\\n" "$LUOSHU_SWITCH_REQUEST_ID" > "$MODDIR/config/seen-request-id"\n' +
+                           'printf \'{"status":"ok","data":{"liveApplied":true,"activation":"live-mounted"}}\\n\'\n')
+        env = dict(self.env, MODDIR=str(module), LUOSHU_TASK_SCOPE_PYTHON=sys.executable,
+                   LUOSHU_RUNTIME_PATHS_PYTHON=sys.executable, LUOSHU_FONT_MANAGER=str(manager))
+        return module, env
+
+    def test_font_terminal_write_waits_for_supervisor_cleanup_failure(self):
+        module, env = self.font_module()
+        pidfile = module / '.luoshu-state/tasks/switch_task_worker.pid'
+        injection = """import importlib.util, sys
+spec=importlib.util.spec_from_file_location('scope', sys.argv[1]); scope=importlib.util.module_from_spec(spec); spec.loader.exec_module(scope)
+def fail(record): raise OSError('fixture root cleanup failed')
+scope.remove_temporary=fail
+sys.argv=sys.argv[1:]
+sys.exit(scope.main())
+"""
+        run = subprocess.run([sys.executable, '-c', injection, str(PROGRAM), 'run', '--pid-file', str(pidfile),
+                              '--task', 'font-proof-failure', '--timeout', '5', '--',
+                              'sh', str(ROOT / 'common/font_switch_task.sh'), 'run', 'font-proof-failure', 'custom', '1'],
+                             env=env, capture_output=True, text=True, timeout=7)
+        self.assertEqual(run.returncode, 125, run.stderr)
+        proof_before = Path(str(pidfile) + '.cleanup.json').read_bytes()
+        for action, argument in (('status', 'font-proof-failure'), ('start', 'other-font'), ('cancel', 'font-proof-failure')):
+            result = subprocess.run(['sh', str(ROOT / 'common/font_switch_task.sh'), action, argument],
+                                    env=env, capture_output=True, text=True, timeout=3)
+            response = json.loads(result.stdout)
+            if action == 'status':
+                self.assertEqual(response['data']['state'], 'cleanup-pending')
+            elif action == 'start':
+                self.assertEqual(response['status'], 'error')
+            else:
+                self.assertEqual(result.returncode, 125)
+                self.assertFalse(response['data']['cleaned'])
+        state = (module / 'config/switch_task.conf').read_text()
+        self.assertIn('task=font-proof-failure\n', state)
+        self.assertIn('state=cleanup-pending\n', state)
+        self.assertIn('terminalState=success\n', state)
+        self.assertEqual(Path(str(pidfile) + '.cleanup.json').read_bytes(), proof_before)
+        self.assertTrue(Path(str(pidfile) + '.owner.json').exists())
+        self.assertIsNone(self.sentinel.poll())
+
+    def test_font_live_journal_blocks_success_and_cancel_until_bounded_recovery(self):
+        module, env = self.font_module()
+        pidfile = module / '.luoshu-state/tasks/switch_task_worker.pid'
+        script = ROOT / 'common/font_switch_task.sh'
+        task = 'font-live-proof'
+        run = subprocess.run([sys.executable, str(PROGRAM), 'run', '--pid-file', str(pidfile), '--task', task,
+                              '--timeout', '5', '--', 'sh', str(script), 'run', task, 'custom', '1'],
+                             env=env, capture_output=True, text=True, timeout=7)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual((module / 'config/seen-request-id').read_text().strip(), task)
+        status = subprocess.run(['sh', str(script), 'status', task], env=env, capture_output=True, text=True, timeout=3)
+        data = json.loads(status.stdout)['data']
+        self.assertEqual(data['state'], 'success')
+        self.assertTrue(data['liveApplied'])
+        self.assertEqual(data['activation'], 'live-mounted')
+        journal = module / 'config/font-live-transaction.conf'; journal.write_text('pending\n')
+        helper = module / 'common/font_live_switch.sh'
+        helper.write_text('#!/bin/sh\n[ "$1" = recover ] || exit 1\n' +
+                          '[ -f "$MODDIR/config/recovery-enabled" ] || exit 1\n' +
+                          'rm -f "$MODDIR/config/font-live-transaction.conf"\n')
+        status = subprocess.run(['sh', str(script), 'status', task], env=env, capture_output=True, text=True, timeout=3)
+        data = json.loads(status.stdout)['data']
+        self.assertEqual(data['state'], 'cleanup-pending')
+        self.assertFalse(data['liveApplied'])
+        cancel = subprocess.run(['sh', str(script), 'cancel', task], env=env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(cancel.returncode, 125, cancel.stderr)
+        self.assertFalse(json.loads(cancel.stdout)['data']['cleaned'])
+        self.assertTrue(journal.exists())
+        start = subprocess.run(['sh', str(script), 'start', 'other-font'], env=env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(json.loads(start.stdout)['status'], 'error')
+        self.assertIn('task=' + task + '\n', (module / 'config/switch_task.conf').read_text())
+        (module / 'config/recovery-enabled').touch()
+        retry = subprocess.run(['sh', str(script), 'cancel', task], env=env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertTrue(json.loads(retry.stdout)['data']['cleaned'])
+        self.assertFalse(journal.exists())
+        self.assertIn('state=failed\n', (module / 'config/switch_task.conf').read_text())
+        next_run = subprocess.run(['sh', str(script), 'start', 'next-font'], env=env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(json.loads(next_run.stdout)['status'], 'ok', next_run.stderr)
+        next_task = json.loads(next_run.stdout)['data']['task']
+        self.wait_for(lambda: Path(str(pidfile) + '.cleanup.json').exists() and
+                      json.loads(Path(str(pidfile) + '.cleanup.json').read_text()).get('task') == next_task)
+        status = subprocess.run(['sh', str(script), 'status', next_task], env=env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(json.loads(status.stdout)['data']['state'], 'success')
+        for proof in (module / '.luoshu-state/tasks').glob('*.cleanup.json'):
+            self.assertTrue(json.loads(proof.read_text())['cleaned'], str(proof))
+        self.assertFalse(list((module / '.luoshu-state/tasks').glob('*.pid')))
+        self.assertFalse(list((module / '.luoshu-state/tmp').iterdir()))
+        self.assertIsNone(self.sentinel.poll())
 
     def test_font_switch_success_failure_and_cancel_wait_for_child_cleanup(self):
         module = self.directory / 'module'; common = module / 'common'; common.mkdir(parents=True)

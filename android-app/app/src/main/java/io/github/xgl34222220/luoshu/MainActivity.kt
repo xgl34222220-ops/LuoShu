@@ -6,6 +6,9 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
+import android.view.ViewTreeObserver
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -24,6 +27,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var openTaskCenter by mutableStateOf(false)
+    private var firstDrawListener: ViewTreeObserver.OnDrawListener? = null
     private val displayPerformanceController by lazy(LazyThreadSafetyMode.NONE) {
         DisplayPerformanceController(this)
     }
@@ -32,14 +36,46 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val activityStartedAt = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
-        requestImportNotificationPermission()
         observeDisplayPreference()
         setContent {
             if (openTaskCenter) TaskCenterHost() else LuoShuHost()
         }
+        observeFirstDraw(activityStartedAt)
+    }
+
+    private fun observeFirstDraw(startedAt: Long) {
+        val view = window.decorView
+        var reported = false
+        val listener = ViewTreeObserver.OnDrawListener {
+            if (!reported) {
+                reported = true
+                Log.i("LuoShuStartup", "activityFirstDrawMs=${SystemClock.elapsedRealtime() - startedAt}")
+                // Android forbids removing an OnDrawListener while dispatching onDraw.
+                view.post {
+                    removeFirstDrawListener()
+                    if (!isFinishing && !isDestroyed) requestImportNotificationPermission()
+                }
+            }
+        }
+        firstDrawListener = listener
+        view.viewTreeObserver.addOnDrawListener(listener)
+    }
+
+    private fun removeFirstDrawListener() {
+        firstDrawListener?.let { listener ->
+            val observer = window.decorView.viewTreeObserver
+            if (observer.isAlive) observer.removeOnDrawListener(listener)
+        }
+        firstDrawListener = null
+    }
+
+    override fun onDestroy() {
+        removeFirstDrawListener()
+        super.onDestroy()
     }
 
     override fun onStart() {
