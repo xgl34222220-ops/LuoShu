@@ -126,11 +126,14 @@ mix_scope_state_fast() (
     _mssf_live=0; _mssf_unknown=0; _mssf_exact=0
     for _mssf_slot in "axes_worker.pid|$_mssf_task" "auto_multiweight_worker.pid|$_mssf_task" \
         "mix_worker.pid|$_mssf_child" "mix-monitor-$_mssf_child.pid|$_mssf_child.monitor"; do
-        _mssf_pidfile="$_mssf_root/${_mssf_slot%%|*}"; _mssf_expected="${_mssf_slot#*|}"
+        # mksh treats an unescaped | as pattern alternation inside ${...}.
+        # Keep the delimiter literal so this never probes the tasks directory.
+        _mssf_name="${_mssf_slot%%\|*}"
+        _mssf_pidfile="$_mssf_root/$_mssf_name"; _mssf_expected="${_mssf_slot#*\|}"
         if [ "$_mssf_diagnostic" = diagnostic ]; then
             _mssf_output=$(sh "$(luoshu_scope_runner)" settled "$_mssf_pidfile" --diagnostic 2>&1)
             _mssf_rc=$?
-            [ "$_mssf_rc" -eq 0 ] || mix_scope_diagnostic "${_mssf_slot%%|*}" "$_mssf_rc" "$_mssf_output"
+            [ "$_mssf_rc" -eq 0 ] || mix_scope_diagnostic "$_mssf_name" "$_mssf_rc" "$_mssf_output"
         else
             sh "$(luoshu_scope_runner)" settled "$_mssf_pidfile" >/dev/null 2>&1
             _mssf_rc=$?
@@ -785,8 +788,8 @@ if [ "$_cmd" = cancel ]; then
     # A dead outer worker cannot vouch for the engine/monitor it registered.
     # Inspect/cancel those exact task slots too, including interrupted handoff.
     for _cancel_slot in "mix_worker.pid|$_cancel_child" "mix-monitor-$_cancel_child.pid|$_cancel_child.monitor"; do
-        _cancel_file="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/${_cancel_slot%%|*}"
-        _cancel_expected="${_cancel_slot#*|}"
+        _cancel_file="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/${_cancel_slot%%\|*}"
+        _cancel_expected="${_cancel_slot#*\|}"
         if [ "$(cat "$_cancel_file.task" 2>/dev/null)" = "$_cancel_expected" ]; then
             luoshu_stop_task_pid "$_cancel_file" "$_cancel_expected" >/dev/null || _cancel_rc=125
         else

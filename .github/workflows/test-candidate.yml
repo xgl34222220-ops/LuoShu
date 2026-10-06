@@ -53,7 +53,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core build-essential pkg-config xz-utils libharfbuzz-dev libpng-dev libbrotli-dev zlib1g-dev libbz2-dev >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv mksh fonts-noto-cjk fonts-dejavu-core build-essential pkg-config xz-utils libharfbuzz-dev libpng-dev libbrotli-dev zlib1g-dev libbz2-dev >/dev/null
 
       - uses: actions/cache@v4
         with:
@@ -126,6 +126,7 @@ jobs:
           set -eu
           PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages${PYTHONPATH:+:$PYTHONPATH}"
           export PYTHONPATH
+          python3 scripts/task_scope_mksh_test.py
           sh -x scripts/background_task_test.sh
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh
@@ -274,6 +275,7 @@ jobs:
           python3 scripts/task_scope_legacy_test.py "$tmp"
           python3 scripts/task_scope_namespace_test.py "$tmp"
           python3 scripts/task_scope_diagnostic_test.py "$tmp"
+          python3 scripts/task_scope_mksh_test.py "$tmp"
           python3 scripts/task_scope_namespace_lifecycle_test.py "$tmp"
           python3 scripts/installer_task_cleanup_test.py "$tmp"
           python3 scripts/stable111_rework_gate.py --zip "$module"
