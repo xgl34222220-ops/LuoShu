@@ -64,6 +64,7 @@ class LegacyOwnershipTests(unittest.TestCase):
             stack.enter_context(patch.object(Path, 'iterdir', lambda path: iter([Path('/proc/4000')]) if str(path) == '/proc' else REAL_ITERDIR(path)))
             stack.enter_context(patch.object(Path, 'read_bytes', read_bytes))
             stack.enter_context(patch.object(SCOPE, 'identity', lambda pid: self.record.copy() if self.live else None))
+            stack.enter_context(patch.object(SCOPE, '_status_fields', return_value={'Pid': '4000', 'Tgid': '4000', 'NSpid': '4000'}))
             stack.enter_context(patch.object(SCOPE, 'process_tree', return_value={}))
             stack.enter_context(patch.object(SCOPE, 'signal_record', side_effect=lambda record, number: self.signals.append((record['pid'], number))))
             stack.enter_context(patch.object(SCOPE, 'same_process', return_value=False))

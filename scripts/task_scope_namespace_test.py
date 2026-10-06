@@ -816,6 +816,204 @@ class NamespaceCompatibilityTests(unittest.TestCase):
         with fixture.active():
             self.assert_unknown(fixture, fixture.load())
 
+    def test_process_tree_does_not_read_unrelated_pid_namespace(self):
+        fixture = self.fixture()
+        fixture.add_process(1, parent=0)
+        fixture.add_process(TARGET_PID)
+        fixture.readlink_errors['/proc/1/ns/pid'] = PermissionError(errno.EACCES, 'unrelated PID 1 namespace denied')
+        with fixture.active():
+            scope = fixture.load()
+            with patch.object(scope, 'identity', wraps=scope.identity) as identity:
+                tree = scope.process_tree([SELF_PID])
+            self.assertEqual(set(tree), {TARGET_PID})
+            self.assertNotIn(1, [call.args[0] for call in identity.call_args_list])
+            self.assertNotIn('/proc/1/ns/pid', fixture.links)
+
+    def test_process_tree_rejects_unreadable_owned_namespace(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.readlink_errors[f'/proc/{TARGET_PID}/ns/pid'] = PermissionError(errno.EACCES, 'owned namespace denied')
+        with fixture.active():
+            scope = fixture.load()
+            with self.assertRaises(scope.IdentityUnavailable):
+                scope.process_tree([SELF_PID])
+
+    def test_process_tree_rejects_foreign_namespace_descendant(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID, namespace='pid:[foreign-child]')
+        with fixture.active():
+            scope = fixture.load()
+            with self.assertRaises(scope.IdentityUnavailable):
+                scope.process_tree([SELF_PID])
+
+    def test_process_tree_excludes_entire_handoff_subtree(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        fixture.add_process(4400, parent=SELF_PID, start='400')
+        for pid in (TARGET_PID, 4300):
+            fixture.readlink_errors[f'/proc/{pid}/ns/pid'] = PermissionError(errno.EACCES, 'excluded handoff namespace denied')
+        with fixture.active():
+            scope = fixture.load()
+            with patch.object(scope, 'identity', wraps=scope.identity) as identity:
+                tree = scope.process_tree([SELF_PID], excluded=[TARGET_PID])
+            self.assertEqual(set(tree), {4400})
+            self.assertTrue({TARGET_PID, 4300}.isdisjoint(call.args[0] for call in identity.call_args_list))
+
+    def assert_no_stale_tree(self, scope):
+        try:
+            tree = scope.process_tree([SELF_PID])
+        except scope.IdentityUnavailable:
+            return
+        self.assertEqual(tree, {}, 'stale intermediate ancestry must not authorize its former subtree')
+
+    def test_changed_intermediate_parent_does_not_authorize_old_tree(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            changed = False
+            def inspect(pid):
+                nonlocal changed
+                if pid == TARGET_PID and not changed:
+                    fixture.write(str(TARGET_PID) + '/stat', stat_text(TARGET_PID, 1, '200'))
+                    changed = True
+                return original(pid)
+            with patch.object(scope, 'identity', side_effect=inspect):
+                self.assert_no_stale_tree(scope)
+            self.assertTrue(changed, 'race fixture must have reached the selected parent')
+
+    def test_reused_intermediate_pid_does_not_authorize_new_tree(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            changed = False
+            def inspect(pid):
+                nonlocal changed
+                if pid == TARGET_PID and not changed:
+                    fixture.write(str(TARGET_PID) + '/stat', stat_text(TARGET_PID, 1, '999'))
+                    changed = True
+                return original(pid)
+            with patch.object(scope, 'identity', side_effect=inspect):
+                self.assert_no_stale_tree(scope)
+            self.assertTrue(changed, 'race fixture must have reached the selected parent')
+
+    def test_vanished_intermediate_does_not_authorize_surviving_subtree(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            changed = False
+            def inspect(pid):
+                nonlocal changed
+                if pid == TARGET_PID and not changed:
+                    shutil.rmtree(fixture.proc / str(TARGET_PID))
+                    changed = True
+                return original(pid)
+            with patch.object(scope, 'identity', side_effect=inspect):
+                self.assert_no_stale_tree(scope)
+            self.assertTrue(changed, 'race fixture must have reached the selected parent')
+
+    def test_intermediate_reused_after_identity_read_does_not_authorize_tree(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            changed = False
+            def inspect(pid):
+                nonlocal changed
+                if pid == 4300 and not changed:
+                    fixture.write(str(TARGET_PID) + '/stat', stat_text(TARGET_PID, 1, '999'))
+                    changed = True
+                return original(pid)
+            with patch.object(scope, 'identity', side_effect=inspect):
+                self.assert_no_stale_tree(scope)
+            self.assertTrue(changed, 'race fixture must have reached the selected child')
+
+    def test_continuously_changing_ancestry_is_bounded_and_rejected(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            calls = 0
+            def inspect(pid):
+                nonlocal calls
+                if pid == TARGET_PID:
+                    calls += 1
+                    self.assertLessEqual(calls, 12, 'ancestry retries must be bounded')
+                    fixture.write(str(TARGET_PID) + '/stat', stat_text(TARGET_PID, SELF_PID, str(200 + calls)))
+                return original(pid)
+            with patch.object(scope, 'identity', side_effect=inspect):
+                with self.assertRaises(scope.IdentityUnavailable):
+                    scope.process_tree([SELF_PID])
+
+    def test_legacy_prefilter_skips_unrelated_restricted_namespace(self):
+        fixture = self.fixture()
+        fixture.add_process(1, parent=0)
+        fixture.add_process(TARGET_PID, state='Z')
+        fixture.readlink_errors['/proc/1/ns/pid'] = PermissionError(errno.EACCES, 'unrelated PID 1 namespace denied')
+        pidfile, _ = self.register(fixture, legacy=True)
+        with fixture.active():
+            scope = fixture.load()
+            with patch.object(scope, 'identity', wraps=scope.identity) as identity:
+                code, _, _ = self.invoke(scope, 'cancel-all', fixture.module)
+            self.assertEqual(code, 0)
+            self.assertFalse(pidfile.exists())
+            self.assertNotIn(1, [call.args[0] for call in identity.call_args_list])
+            self.assertNotIn('/proc/1/ns/pid', fixture.links)
+
+    def test_legacy_root_start_is_anchored_before_descendant_scan(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        fixture.write(str(TARGET_PID) + '/cmdline', ('sh\0' + str(fixture.module / 'common/font_mix.sh') +
+                      '\0worker\0fixture-task\0').encode())
+        pidfile, _ = self.register(fixture, legacy=True)
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            changed = False
+            def inspect(pid):
+                nonlocal changed
+                record = original(pid)
+                if pid == TARGET_PID and not changed:
+                    fixture.write(str(TARGET_PID) + '/stat', stat_text(TARGET_PID, SELF_PID, '999'))
+                    changed = True
+                return record
+            with patch.object(scope, 'identity', side_effect=inspect):
+                self.assert_cancel_preserves(fixture, scope, pidfile)
+            self.assertTrue(changed, 'race fixture must have captured the original legacy root')
+
+    def test_saved_root_reuse_during_child_scan_is_rejected(self):
+        fixture = self.fixture()
+        fixture.add_process(TARGET_PID)
+        fixture.add_process(4300, parent=TARGET_PID, start='300')
+        with fixture.active():
+            scope = fixture.load()
+            original = scope.identity
+            anchor = original(TARGET_PID)
+            changed = False
+            def inspect(pid):
+                nonlocal changed
+                if pid == 4300 and not changed:
+                    fixture.write(str(TARGET_PID) + '/stat', stat_text(TARGET_PID, SELF_PID, '999'))
+                    changed = True
+                return original(pid)
+            with patch.object(scope, 'identity', side_effect=inspect):
+                with self.assertRaises(scope.IdentityUnavailable):
+                    scope.process_tree([TARGET_PID], expected_roots={TARGET_PID: anchor})
+            self.assertTrue(changed, 'race fixture must have reached the anchored root child')
+
     def test_normal_missing_target_namespace_is_unknown_not_absent(self):
         fixture = self.fixture()
         fixture.add_process(TARGET_PID, namespace=MISSING)

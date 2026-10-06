@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Exercise missing PID-namespace interfaces with real, test-owned processes.
+"""Exercise restricted PID-namespace interfaces with real, test-owned processes.
 
 Usage: python3 scripts/task_scope_namespace_lifecycle_test.py [module_root]
 
 The child runner executes the selected common/task_scope.py with runpy. Only
 the missing namespace-link interface is simulated; the older-kernel variant
 also removes NSpid from real status reads and supplies an explicit disabled
-kernel option. PID mappings, native procfs, process trees, signals, and reaping
-remain real. Nothing is installed and no production bypass is introduced.
+kernel option. A third mode preserves real namespace links for test-owned
+processes but denies access to the unrelated /proc/1/ns/pid link. PID mappings,
+native procfs, process trees, signals, and reaping remain real. Nothing is
+installed and no production bypass is introduced.
 """
 import ctypes
 import json
@@ -25,7 +27,7 @@ ROOT = (Path(sys.argv.pop(1)).resolve()
         if len(sys.argv) > 1 and not sys.argv[1].startswith('-')
         else Path(__file__).resolve().parents[1])
 PROGRAM = ROOT / 'common/task_scope.py'
-MODES = ('single-nspid', 'config-pid-ns-disabled')
+MODES = ('single-nspid', 'config-pid-ns-disabled', 'normal-unrelated-pid1-denied')
 OWNER_SUFFIXES = ('', '.task', '.start', '.boot', '.ready', '.owner.json', '.children')
 
 
@@ -33,11 +35,15 @@ RUNNER = r'''import errno, gzip, io, os, re, runpy, sys
 from pathlib import Path
 
 mode, program, *arguments = sys.argv[1:]
-if mode not in ('single-nspid', 'config-pid-ns-disabled'):
+if mode not in ('single-nspid', 'config-pid-ns-disabled', 'normal-unrelated-pid1-denied'):
     raise SystemExit('unknown test runner mode')
 real_readlink = os.readlink
 def missing_namespace(path, *args, **kwargs):
-    if re.fullmatch(r'/proc/(?:self|[0-9]+)/ns/pid', os.fsdecode(path)):
+    value = os.fsdecode(path)
+    if mode == 'normal-unrelated-pid1-denied':
+        if value == '/proc/1/ns/pid':
+            raise PermissionError(errno.EACCES, 'test: unrelated namespace restricted', str(path))
+    elif re.fullmatch(r'/proc/(?:self|[0-9]+)/ns/pid', value):
         raise FileNotFoundError(errno.ENOENT, 'test: namespace link absent', str(path))
     return real_readlink(path, *args, **kwargs)
 os.readlink = missing_namespace
@@ -170,6 +176,7 @@ class MissingNamespaceLifecycleTest(unittest.TestCase):
         self.env['LUOSHU_TMP_DIR'] = str(self.directory / 'tmp')
         info = os.stat('/proc')
         self.namespace = 'procfs-single:%s:%s' % (info.st_dev, info.st_ino)
+        self.native_namespace = os.readlink('/proc/self/ns/pid')
         self.processes = []
         self.logs = []
         self.addCleanup(self.cleanup_processes)
@@ -185,6 +192,9 @@ class MissingNamespaceLifecycleTest(unittest.TestCase):
 
     def command(self, mode, *arguments):
         return [sys.executable, str(self.runner), mode, str(PROGRAM), *map(str, arguments)]
+
+    def expected_namespace(self, mode):
+        return self.native_namespace if mode == 'normal-unrelated-pid1-denied' else self.namespace
 
     def diagnostics(self):
         output = []
@@ -226,7 +236,7 @@ class MissingNamespaceLifecycleTest(unittest.TestCase):
     def assert_proof(self, mode, pidfile, task, result, reason=None):
         proof = json.loads(Path(str(pidfile) + '.cleanup.json').read_text())
         self.assertEqual(proof['schema'], 'task-cleanup-v2')
-        self.assertEqual(proof['namespace'], self.namespace)
+        self.assertEqual(proof['namespace'], self.expected_namespace(mode))
         self.assertEqual(proof['task'], task)
         self.assertEqual(proof['result'], result)
         if reason is not None:
@@ -271,7 +281,7 @@ class MissingNamespaceLifecycleTest(unittest.TestCase):
         else:
             process = self.start(mode, 'nested' if action == 'nested' else 'hold')
             owner = json.loads(Path(str(self.pidfile) + '.owner.json').read_text())
-            self.assertEqual(owner['namespace'], self.namespace)
+            self.assertEqual(owner['namespace'], self.expected_namespace(mode))
             self.action(mode, 'alive')
             result = json.loads(self.action(mode, 'cancel').stdout)
             self.assertEqual(result['status'], 'ok')

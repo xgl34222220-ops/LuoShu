@@ -205,25 +205,77 @@ def signal_record(record, number):
             os.close(descriptor)
 
 
-def process_tree(roots, excluded=()):
-    records = {}
-    for entry in Path('/proc').iterdir():
-        if entry.name.isdigit():
-            record = identity(int(entry.name))
-            if record:
-                records[record['procPid']] = record
-    parents = set(roots)
+def _process_link(proc_pid):
+    """Read only ancestry first; unrelated namespace links may be restricted."""
+    root = Path('/proc') / str(proc_pid)
+    try:
+        text = (root / 'stat').read_text()
+        fields = text.rsplit(') ', 1)[1].split()
+        if int(text.split(' ', 1)[0]) != int(proc_pid):
+            raise IdentityUnavailable('ancestry PID mismatch')
+        return {'parent': int(fields[1]), 'start': fields[19]}
+    except (OSError, ValueError, IndexError, TypeError) as error:
+        if _proc_missing(root):
+            return None
+        raise IdentityUnavailable('process ancestry unreadable: %s: %s' % (proc_pid, error)) from error
+
+
+def process_tree(roots, excluded=(), expected_roots=None, allow_gone_roots=False):
+    # Namespace visibility for an unrelated system process is irrelevant. First
+    # establish ancestry from stat, then strictly verify only the selected tree.
+    anchors = dict(expected_roots or ((pid, identity(pid)) for pid in roots))
     excluded = set(excluded)
-    owned = {}
-    changed = True
-    while changed:
-        changed = False
-        for pid, record in records.items():
-            if pid not in parents and pid not in excluded and record['parent'] in parents:
-                parents.add(pid)
-                owned[pid] = record
-                changed = True
-    return owned
+    for attempt in range(5):
+        for pid, anchor in list(anchors.items()):
+            current = identity(pid)
+            if current is None and anchor and allow_gone_roots and _local_pid_absent(anchor['pid']):
+                del anchors[pid]
+                continue
+            if not anchor or not current or any(current[key] != anchor[key] for key in ('start', 'pid', 'boot', 'namespace')):
+                raise IdentityUnavailable('task root identity changed: ' + str(pid))
+        records = {}
+        for entry in Path('/proc').iterdir():
+            if entry.name.isdigit():
+                record = _process_link(int(entry.name))
+                if record:
+                    records[int(entry.name)] = record
+        parents = set(anchors)
+        owned = {}
+        changed = True
+        while changed:
+            changed = False
+            for pid, record in records.items():
+                if pid not in parents and pid not in excluded and record['parent'] in parents:
+                    parents.add(pid)
+                    owned[pid] = record
+                    changed = True
+        verified = {}
+        retry = False
+        for pid, link in owned.items():
+            record = identity(pid)
+            if record is None:
+                if not _proc_missing(Path('/proc') / str(pid)):
+                    raise IdentityUnavailable('descendant identity unavailable: ' + str(pid))
+                retry = True
+                break
+            if any(record[key] != link[key] for key in ('start', 'parent')):
+                retry = True
+                break
+            verified[pid] = record
+        # A vanished/reused intermediate must not authorize snapshot children.
+        # Rebuild the complete chain instead of silently dropping that ancestor.
+        if not retry:
+            for pid, record in {**anchors, **verified}.items():
+                current = identity(pid)
+                keys = ('start', 'pid', 'namespace') + (('parent',) if pid in verified else ())
+                if not current or any(current[key] != record[key] for key in keys):
+                    retry = True
+                    break
+        if not retry:
+            return verified
+        if attempt < 4:
+            time.sleep(.01)
+    raise IdentityUnavailable('task ancestry changed repeatedly during inspection')
 
 
 def descendants(excluded=()):
@@ -673,6 +725,26 @@ def legacy_cancel(pidfile, module):
     record = None
     for entry in Path('/proc').iterdir():
         if entry.name.isdigit():
+            try:
+                values = _status_fields(entry)
+                proc_pid = int(entry.name)
+                if int(values['Pid']) != proc_pid or int(values['Tgid']) != proc_pid:
+                    raise IdentityUnavailable('legacy proc PID mapping mismatch')
+                if 'NSpid' in values:
+                    levels = list(map(int, values['NSpid'].split()))
+                    if not levels or levels[0] != proc_pid or any(value <= 0 for value in levels):
+                        raise IdentityUnavailable('legacy namespace PID mapping invalid')
+                    local = levels[-1]
+                elif PROCFS_KEY is not None and NO_NSPID:
+                    local = proc_pid
+                else:
+                    raise IdentityUnavailable('legacy local PID mapping unproven')
+            except (OSError, ValueError, IndexError, KeyError) as error:
+                if _proc_missing(entry):
+                    continue
+                raise IdentityUnavailable('legacy PID mapping unreadable: ' + str(entry)) from error
+            if local != pid:
+                continue
             candidate = identity(int(entry.name))
             if candidate and candidate['pid'] == pid:
                 record = candidate
@@ -712,12 +784,12 @@ def legacy_cancel(pidfile, module):
     if not owned_script or not (task and (task in command or script_task) or singleton and any(
             Path(arg).name == 'google_font_provider_service.sh' for arg in owned_script)):
         return cleanup_rejected(pidfile, 'legacy-command-unconfirmed')
-    saved = {record['procPid']: record, **process_tree([record['procPid']])}
+    saved = {record['procPid']: record, **process_tree([record['procPid']], expected_roots={record['procPid']: record})}
     started = time.monotonic()
     signal_record(record, signal.SIGTERM)
     while time.monotonic() - started < 4:
         roots = [proc_pid for proc_pid, value in saved.items() if same_process(value)]
-        saved.update(process_tree(roots))
+        saved.update(process_tree(roots, expected_roots={pid: saved[pid] for pid in roots}, allow_gone_roots=True))
         live = [value for value in saved.values() if same_process(value)]
         if not live:
             break
