@@ -67,6 +67,7 @@ class LegacyOwnershipTests(unittest.TestCase):
             stack.enter_context(patch.object(SCOPE, 'process_tree', return_value={}))
             stack.enter_context(patch.object(SCOPE, 'signal_record', side_effect=lambda record, number: self.signals.append((record['pid'], number))))
             stack.enter_context(patch.object(SCOPE, 'same_process', return_value=False))
+            stack.enter_context(patch.object(SCOPE, '_local_pid_absent', side_effect=lambda pid: not self.live))
             # Belt-and-braces guards: even an unexpected implementation path
             # cannot deliver an OS signal from this test process.
             stack.enter_context(patch.object(SCOPE.os, 'kill', side_effect=AssertionError('real os.kill forbidden')))

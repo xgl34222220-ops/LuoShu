@@ -149,7 +149,7 @@ while True: time.sleep(.02)
                   'namespace': os.readlink('/proc/self/ns/pid'), 'task': 'owned-task'}
         for bad in ('start', 'boot'):
             if bad == 'boot':
-                record['start'] = fields[19]; record['boot'] = 'previous-boot'
+                record['start'] = fields[19]; record['boot'] = '00000000-0000-4000-8000-000000000001'
             Path(str(self.pidfile) + '.owner.json').write_text(json.dumps(record))
             for suffix, key in (('', 'pid'), ('.task', 'task'), ('.start', 'start'), ('.boot', 'boot')):
                 Path(str(self.pidfile) + suffix).write_text(str(record[key]))
@@ -291,7 +291,7 @@ time.sleep(60)
             self.assertEqual(proof['task'], task)
             self.assertTrue(proof['cleaned'])
         record = dict(task='previous-boot-task', pid=123, procPid=123, start='456',
-                      namespace=os.readlink('/proc/self/ns/pid'), boot='previous-boot')
+                      namespace=os.readlink('/proc/self/ns/pid'), boot='00000000-0000-4000-8000-000000000001')
         for suffix, key in (('', 'pid'), ('.task', 'task'), ('.start', 'start'), ('.boot', 'boot')):
             Path(str(self.pidfile) + suffix).write_text(str(record[key]))
         Path(str(self.pidfile) + '.owner.json').write_text(json.dumps(record))

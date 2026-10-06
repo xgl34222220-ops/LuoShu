@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -17,26 +18,132 @@ import time
 
 BOOT = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
 SELF_PROC = int(os.readlink('/proc/self'))
-SELF_NS = os.readlink('/proc/self/ns/pid')
 TOKEN = re.compile(r'[A-Za-z0-9_.-]{1,160}\Z')
+BOOT_ID = re.compile(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\Z')
+
+
+def previous_boot(value):
+    return bool(isinstance(value, str) and BOOT_ID.fullmatch(value)
+                and BOOT_ID.fullmatch(BOOT) and value != BOOT)
+
+
+class IdentityUnavailable(RuntimeError):
+    """Unreadable identity is not proof that a process has exited."""
+
+
+def _status_fields(root):
+    return dict(line.split(':', 1) for line in (root / 'status').read_text().splitlines() if ':' in line)
+
+
+def _procfs_key():
+    # A fallback is valid only on native procfs, never a lookalike directory.
+    libc = ctypes.CDLL(None, use_errno=True)
+    buffer = ctypes.create_string_buffer(256)
+    if libc.statfs(b'/proc', ctypes.byref(buffer)) != 0 or ctypes.c_long.from_buffer(buffer).value != 0x9fa0:
+        raise IdentityUnavailable('native procfs unavailable')
+    info = os.stat('/proc')
+    return info.st_dev, info.st_ino
+
+
+def _no_pid_namespaces_supported():
+    # Missing NSpid alone is not proof, especially on old/vendor kernels.
+    # Require an explicit statement from this running kernel's configuration.
+    try:
+        import gzip
+        with gzip.open('/proc/config.gz', 'rt') as config:
+            limit = 2 * 1024 * 1024
+            contents = config.read(limit + 1)
+            if len(contents) > limit:
+                return False
+            lines = contents.splitlines()
+            return '# CONFIG_PID_NS is not set' in lines and not any(
+                line.startswith('CONFIG_PID_NS=') for line in lines)
+    except Exception:
+        # Optional evidence may be absent, truncated, or invalid compressed
+        # data (including zlib.error). None of those proves a capability.
+        return False
+
+
+def _single_pid_view(root, proc_pid, key, no_nspid):
+    fields = _status_fields(root)
+    if any(os.stat(root / name).st_dev != key[0] for name in ('stat', 'status')):
+        raise IdentityUnavailable('procfs view changed')
+    if int((root / 'stat').read_text().split(' ', 1)[0]) != proc_pid:
+        raise IdentityUnavailable('stat PID mapping mismatch')
+    if int(fields['Pid']) != proc_pid or int(fields['Tgid']) != proc_pid:
+        raise IdentityUnavailable('proc PID mapping mismatch')
+    values = fields.get('NSpid')
+    if no_nspid:
+        if values is not None:
+            raise IdentityUnavailable('PID namespace evidence changed')
+    elif values is None or list(map(int, values.split())) != [proc_pid]:
+        raise IdentityUnavailable('nested or ambiguous PID mapping')
+
+
+def _namespace_context():
+    try:
+        return os.readlink('/proc/self/ns/pid'), None, False
+    except FileNotFoundError:
+        pass
+    # Permission failures must not activate a compatibility fallback.
+    key = _procfs_key()
+    if int(os.readlink('/proc/self')) != os.getpid():
+        raise IdentityUnavailable('caller PID mapping mismatch')
+    fields = _status_fields(Path('/proc/self'))
+    no_nspid = 'NSpid' not in fields
+    if no_nspid and not _no_pid_namespaces_supported():
+        raise IdentityUnavailable('PID namespace capability is unproven')
+    _single_pid_view(Path('/proc/self'), os.getpid(), key, no_nspid)
+    return 'procfs-single:%s:%s' % key, key, no_nspid
+
+
+try:
+    SELF_NS, PROCFS_KEY, NO_NSPID = _namespace_context()
+    IDENTITY_ERROR = ''
+except (OSError, ValueError, KeyError, IdentityUnavailable) as error:
+    SELF_NS, PROCFS_KEY, NO_NSPID = None, None, False
+    IDENTITY_ERROR = str(error)
+
+
+def _proc_missing(root):
+    try:
+        root.stat()
+        return False
+    except FileNotFoundError:
+        return True
+    except OSError as error:
+        raise IdentityUnavailable(str(error)) from error
 
 
 def identity(proc_pid):
+    if SELF_NS is None:
+        raise IdentityUnavailable(IDENTITY_ERROR or 'PID identity unavailable')
+    root = Path('/proc') / str(proc_pid)
     try:
-        root = Path('/proc') / str(proc_pid)
-        fields = (root / 'stat').read_text().rsplit(') ', 1)[1].split()
-        namespace = os.readlink(root / 'ns/pid')
-        if namespace != SELF_NS:
-            return None
+        stat_text = (root / 'stat').read_text()
+        fields = stat_text.rsplit(') ', 1)[1].split()
+        if int(stat_text.split(' ', 1)[0]) != int(proc_pid):
+            raise IdentityUnavailable('stat PID mismatch')
         local_pid = int(proc_pid)
-        for line in (root / 'status').read_text().splitlines():
-            if line.startswith('NSpid:'):
-                local_pid = int(line.split()[-1])
-                break
+        if PROCFS_KEY is not None:
+            if _procfs_key() != PROCFS_KEY or int(os.readlink('/proc/self')) != os.getpid():
+                raise IdentityUnavailable('caller procfs mapping changed')
+            _single_pid_view(Path('/proc/self'), os.getpid(), PROCFS_KEY, NO_NSPID)
+            _single_pid_view(root, local_pid, PROCFS_KEY, NO_NSPID)
+            namespace = SELF_NS
+        else:
+            namespace = os.readlink(root / 'ns/pid')
+            if namespace != SELF_NS:
+                return None
+            values = _status_fields(root).get('NSpid')
+            if values is not None:
+                local_pid = int(values.split()[-1])
         return {'procPid': int(proc_pid), 'pid': local_pid, 'parent': int(fields[1]),
                 'start': fields[19], 'state': fields[0], 'namespace': namespace, 'boot': BOOT}
-    except (OSError, ValueError, IndexError, TypeError):
-        return None
+    except (OSError, ValueError, IndexError, KeyError, TypeError) as error:
+        if _proc_missing(root):
+            return None
+        raise IdentityUnavailable('process identity unreadable: %s: %s' % (proc_pid, error)) from error
 
 
 def atomic(path, value):
@@ -260,6 +367,8 @@ def cleanup(worker, pidfile, allow_handoff):
 def run(args):
     if not TOKEN.fullmatch(args.task) or not 0.05 <= args.timeout <= 3600:
         return 2
+    if not identity(SELF_PROC):
+        raise IdentityUnavailable('supervisor identity unavailable')
     pidfile = Path(args.pid_file)
     pidfile.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock = open(str(pidfile) + '.lock', 'a')
@@ -347,10 +456,12 @@ def run(args):
         try:
             proof = cleanup(worker, pidfile, args.request and reason == 'completed' and result == 0)
         except BaseException as error:
-            proof = dict(terminated=0, reaped=0, leftoverPids=sorted(r['pid'] for r in descendants().values()),
+            # Do not repeat an unreadable identity scan or erase evidence after
+            # incomplete cleanup. Errors alone make the proof fail closed.
+            proof = dict(terminated=0, reaped=0, leftoverPids=[],
                          handoffTasks=[], handoffOwners=[], cleanupErrors=[str(error)])
         proof['reaped'] += reaped_during_run
-        if not proof['leftoverPids']:
+        if not proof['leftoverPids'] and not proof['cleanupErrors']:
             try:
                 remove_temporary(record)
             except BaseException as error:
@@ -376,8 +487,7 @@ def cancel(pidfile, task):
     if not same_process(record):
         # A full reboot ends every process belonging to that registration. Do
         # not require an EXIT proof from a supervisor killed by the old boot.
-        previous_boot = bool(record and record.get('boot') and record['boot'] != BOOT)
-        if previous_boot:
+        if record and previous_boot(record.get('boot')):
             clear_owner(pidfile, record)
             return {'status': 'ok', 'data': {'task': task, 'token': task,
                     'cleaned': True, 'state': 'previous-boot'}}, 0
@@ -387,8 +497,8 @@ def cancel(pidfile, task):
             if not isinstance(proof, dict):
                 raise ValueError('invalid cleanup proof')
             task = task or proof.get('task', '')
-            clean = (proof.get('task') == task and proof.get('boot') == BOOT and
-                     proof.get('namespace', SELF_NS) == SELF_NS and
+            clean = (SELF_NS is not None and proof.get('task') == task and proof.get('boot') == BOOT and
+                     proof.get('namespace') == SELF_NS and
                      proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors'))
             if record:
                 clean = clean and record.get('namespace') == SELF_NS and \
@@ -397,7 +507,7 @@ def cancel(pidfile, task):
                 clean = False
             elif any(Path(str(pidfile) + suffix).exists() for suffix in ('', '.task', '.start', '.boot', '.ready')):
                 clean = False
-            elif proof.get('boot') and proof['boot'] != BOOT:
+            elif previous_boot(proof.get('boot')):
                 clean = proof.get('task') == task
             # The submission may have finished just before App cancellation,
             # before its response/task id reached the caller.
@@ -414,7 +524,7 @@ def cancel(pidfile, task):
             if not clean and record is None and not Path(str(pidfile) + '.owner.json').exists():
                 try:
                     saved_boot = Path(str(pidfile) + '.boot').read_text().strip()
-                    clean = bool(saved_boot and saved_boot != BOOT)
+                    clean = previous_boot(saved_boot)
                     if clean:
                         for path in evidence:
                             path.unlink(missing_ok=True)
@@ -434,8 +544,8 @@ def cancel(pidfile, task):
         proof = json.loads(Path(str(pidfile) + '.cleanup.json').read_text())
         if not isinstance(proof, dict):
             raise ValueError('invalid cleanup proof')
-        clean = (not same_process(record) and proof.get('cleaned') is True and
-                 proof.get('namespace', SELF_NS) == SELF_NS and
+        clean = (SELF_NS is not None and not same_process(record) and proof.get('cleaned') is True and
+                 proof.get('namespace') == SELF_NS and
                  not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
                  all(proof.get(key) == record.get(key) for key in ('task', 'pid', 'start', 'boot')))
         for child in proof.get('handoffOwners', []):
@@ -452,8 +562,8 @@ def cleaned(pidfile, task):
     try:
         proof = json.loads(Path(str(pidfile) + '.cleanup.json').read_text())
         record = read_owner(pidfile)
-        return bool(proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
-                    proof.get('task') == task and proof.get('boot') == BOOT and proof.get('namespace', SELF_NS) == SELF_NS and
+        return bool(SELF_NS is not None and proof.get('cleaned') is True and not proof.get('leftoverPids') and not proof.get('cleanupErrors') and
+                    proof.get('task') == task and proof.get('boot') == BOOT and proof.get('namespace') == SELF_NS and
                     not same_process(record) and
                     (record or not Path(str(pidfile) + '.owner.json').exists()) and
                     (not record or record.get('namespace') == SELF_NS and
@@ -467,7 +577,7 @@ def settled(pidfile):
     record = read_owner(pidfile)
     if same_process(record):
         return 3
-    if record and record.get('boot') and record['boot'] != BOOT:
+    if record and previous_boot(record.get('boot')):
         return 0
     if not record:
         if Path(str(pidfile) + '.owner.json').exists():
@@ -475,7 +585,7 @@ def settled(pidfile):
         if any(Path(str(pidfile) + suffix).exists() for suffix in ('', '.task', '.start', '.boot', '.ready')):
             try:
                 saved_boot = Path(str(pidfile) + '.boot').read_text().strip()
-                return 0 if saved_boot and saved_boot != BOOT else 125
+                return 0 if previous_boot(saved_boot) else 125
             except OSError:
                 return 125
     proof_path = Path(str(pidfile) + '.cleanup.json')
@@ -485,7 +595,7 @@ def settled(pidfile):
         proof = json.loads(proof_path.read_text())
         if not isinstance(proof, dict):
             return 125
-        if not record and proof.get('boot') and proof['boot'] != BOOT:
+        if not record and previous_boot(proof.get('boot')):
             return 0
         if not cleaned(pidfile, record['task'] if record else proof.get('task', '')):
             return 125
@@ -509,6 +619,22 @@ def cleanup_rejected(pidfile, reason):
     return 125
 
 
+def _local_pid_absent(pid):
+    # A missing proc entry can mean hidepid, not exit. This is a non-signalling
+    # existence probe of the legacy record's local PID, never a proc PID guess.
+    if SELF_NS is None:
+        raise IdentityUnavailable(IDENTITY_ERROR or 'PID identity unavailable')
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    except OSError as error:
+        raise IdentityUnavailable('PID existence unavailable: ' + str(error)) from error
+
+
 def legacy_cancel(pidfile, module):
     """Migration only: snapshot live identity after exact old command proof.
 
@@ -529,17 +655,7 @@ def legacy_cancel(pidfile, module):
         return cleanup_rejected(pidfile, 'legacy-pid-invalid')
     if pid <= 1:
         return cleanup_rejected(pidfile, 'legacy-pid-unsafe')
-    record = None
-    for entry in Path('/proc').iterdir():
-        if entry.name.isdigit():
-            candidate = identity(int(entry.name))
-            if candidate and candidate['pid'] == pid:
-                record = candidate
-                break
-    if not record or record['state'] == 'Z':
-        for suffix in ('', '.task', '.boot', '.start'):
-            Path(str(pidfile) + suffix).unlink(missing_ok=True)
-        return 0
+    boot_issue = 'legacy-boot-invalid'
     try:
         saved_boot = Path(str(pidfile) + '.boot').read_text().strip()
     except OSError:
@@ -548,14 +664,30 @@ def legacy_cancel(pidfile, module):
         try:
             saved_boot = saved_boot or (pidfile.parent / 'boot-id').read_text().strip()
         except OSError:
-            return cleanup_rejected(pidfile, 'legacy-boot-missing')
-    # Empty/unknown/fallback values do not prove a completed previous boot.
-    if not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', saved_boot):
-        return cleanup_rejected(pidfile, 'legacy-boot-invalid')
-    if saved_boot != BOOT:
+            boot_issue = 'legacy-boot-missing'
+    # A verified previous boot needs no live process/namespace lookup.
+    if previous_boot(saved_boot):
         for suffix in ('', '.task', '.boot', '.start'):
             Path(str(pidfile) + suffix).unlink(missing_ok=True)
         return 0
+    record = None
+    for entry in Path('/proc').iterdir():
+        if entry.name.isdigit():
+            candidate = identity(int(entry.name))
+            if candidate and candidate['pid'] == pid:
+                record = candidate
+                break
+    if not record and not _proc_missing(Path('/proc') / str(pid)):
+        return cleanup_rejected(pidfile, 'legacy-process-identity-unavailable')
+    if not record and not _local_pid_absent(pid):
+        return cleanup_rejected(pidfile, 'legacy-process-identity-unavailable')
+    if not record or record['state'] == 'Z':
+        for suffix in ('', '.task', '.boot', '.start'):
+            Path(str(pidfile) + suffix).unlink(missing_ok=True)
+        return 0
+    # Empty/unknown/fallback values do not prove a completed previous boot.
+    if not BOOT_ID.fullmatch(saved_boot):
+        return cleanup_rejected(pidfile, boot_issue)
     lock_start = dict(line.split('=', 1) for line in pid_text.splitlines()[1:] if '=' in line).get('starttime')
     try:
         sidecar_start = Path(str(pidfile) + '.start').read_text().strip()
@@ -615,7 +747,27 @@ def legacy_cancel(pidfile, module):
     return 0 if not remaining else 125
 
 
-def main():
+def _task_root_present(root):
+    try:
+        if not stat.S_ISDIR(root.stat().st_mode):
+            raise IdentityUnavailable('task root is not a directory: ' + str(root))
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise IdentityUnavailable('task root unreadable: ' + str(root)) from error
+
+
+def _owner_files(root):
+    def failed(error):
+        raise IdentityUnavailable('task records unreadable: ' + str(error)) from error
+    for directory, _, files in os.walk(root, onerror=failed):
+        for name in files:
+            if name.endswith('.owner.json'):
+                yield Path(directory) / name
+
+
+def _main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest='action', required=True)
     runner = commands.add_parser('run')
@@ -638,11 +790,14 @@ def main():
         seen = set()
         result = 0
         for root in roots:
-            if root.is_dir():
+            if _task_root_present(root):
                 if not root.resolve().is_relative_to(module):
                     result = cleanup_rejected(root, 'task-root-outside-module')
                     continue
-                for owner in root.rglob('*.owner.json'):
+                for owner in _owner_files(root):
+                    if owner.is_symlink() or not owner.resolve().is_relative_to(module):
+                        result = cleanup_rejected(owner, 'task-owner-outside-module')
+                        continue
                     pidfile = str(owner.resolve())[:-len('.owner.json')]
                     if pidfile in seen:
                         continue
@@ -657,11 +812,17 @@ def main():
                         result = code
         old_files = []
         for root in roots:
-            if root.is_dir():
+            if _task_root_present(root):
                 if not root.resolve().is_relative_to(module):
                     continue
-                for pattern in ('*worker.pid', 'font-prewarm-*.pid', '*provider*.pid'):
-                    old_files.extend(root.glob(pattern))
+                try:
+                    for entry in root.iterdir():
+                        name = entry.name
+                        if name.endswith('worker.pid') or (name.endswith('.pid') and
+                                (name.startswith('font-prewarm-') or 'provider' in name)):
+                            old_files.append(entry)
+                except OSError as error:
+                    raise IdentityUnavailable('legacy task records unreadable: ' + str(root)) from error
         old_files.append(module / '.google-font-provider.lock/pid')
         for pidfile in old_files:
             if pidfile.exists() and str(pidfile.resolve()) not in seen and not Path(str(pidfile) + '.owner.json').exists():
@@ -685,6 +846,17 @@ def main():
     result, code = cancel(args.pidfile, args.task)
     print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
     return code
+
+
+def main():
+    try:
+        return _main()
+    except IdentityUnavailable as error:
+        print(json.dumps({'status': 'error', 'data': {'cleaned': False,
+                         'reason': 'proc-identity-unavailable'},
+                         'message': '进程身份接口不可用，任务记录已保留: ' + str(error)},
+                        ensure_ascii=False, separators=(',', ':')))
+        return 126
 
 
 if __name__ == '__main__':
