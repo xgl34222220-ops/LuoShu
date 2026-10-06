@@ -624,42 +624,49 @@ def cleaned(pidfile, task):
         return False
 
 
-def settled(pidfile):
+def settled(pidfile, diagnostic=False):
     """Read-only slot inspection: cleanup proof, safe absence, or old boot."""
+    def result(code, reason):
+        # Fixed tokens only: never expose task IDs, paths, or exception text.
+        # Diagnostics are opt-in and cannot authorize cleanup or change a code.
+        if diagnostic and code:
+            print('reason=' + reason)
+        return code
+
     record = read_owner(pidfile)
     if same_process(record):
-        return 3
+        return result(3, 'owner-live')
     if record and previous_boot(record.get('boot')):
         return 0
     if not record:
         if Path(str(pidfile) + '.owner.json').exists():
-            return 125
+            return result(125, 'owner-record-invalid')
         if any(Path(str(pidfile) + suffix).exists() for suffix in ('', '.task', '.start', '.boot', '.ready')):
             try:
                 saved_boot = Path(str(pidfile) + '.boot').read_text().strip()
-                return 0 if previous_boot(saved_boot) else 125
-            except OSError:
-                return 125
+                return 0 if previous_boot(saved_boot) else result(125, 'legacy-record-unconfirmed')
+            except OSError as error:
+                return result(125, 'permission-denied' if isinstance(error, PermissionError) else 'legacy-boot-unreadable')
     proof_path = Path(str(pidfile) + '.cleanup.json')
     if not proof_path.exists():
-        return 125 if record else 0
+        return result(125, 'cleanup-proof-missing') if record else 0
     try:
         proof = json.loads(proof_path.read_text())
         if not isinstance(proof, dict):
-            return 125
+            return result(125, 'cleanup-proof-invalid')
         if not record and previous_boot(proof.get('boot')):
             return 0
         if not cleaned(pidfile, record['task'] if record else proof.get('task', '')):
-            return 125
+            return result(125, 'cleanup-proof-unconfirmed')
         for child in proof.get('handoffOwners', []):
             if read_owner(child['pidfile']) == child:
                 if same_process(child):
-                    return 3
+                    return result(3, 'handoff-live')
                 if child.get('boot') == BOOT and not cleaned(child['pidfile'], child['task']):
-                    return 125
+                    return result(125, 'handoff-unconfirmed')
         return 0
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return 125
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        return result(125, 'permission-denied' if isinstance(error, PermissionError) else 'cleanup-proof-unreadable')
 
 
 def cleanup_rejected(pidfile, reason):
@@ -853,6 +860,8 @@ def _main():
         child = commands.add_parser(name)
         child.add_argument('pidfile')
         child.add_argument('task', nargs='?', default='')
+        if name == 'settled':
+            child.add_argument('--diagnostic', action='store_true')
     stop_all = commands.add_parser('cancel-all')
     stop_all.add_argument('module')
     args = parser.parse_args()
@@ -914,7 +923,7 @@ def _main():
     if args.action == 'cleaned':
         return 0 if cleaned(args.pidfile, args.task) else 1
     if args.action == 'settled':
-        return settled(args.pidfile)
+        return settled(args.pidfile, args.diagnostic)
     result, code = cancel(args.pidfile, args.task)
     print(json.dumps(result, ensure_ascii=False, separators=(',', ':')))
     return code

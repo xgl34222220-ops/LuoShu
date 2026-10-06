@@ -79,10 +79,46 @@ mix_config_json_fast() {
         "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
 }
 
+# Only fixed, bounded labels enter the App task card. Supervisor stderr can
+# contain arbitrary paths, task IDs, control characters or interpreter dumps.
+mix_scope_diagnostic() {
+    _msd_slot="$1"; _msd_rc="$2"; _msd_output="$3"
+    case "$_msd_slot" in
+        axes_worker.pid) _msd_label=axes_worker ;;
+        auto_multiweight_worker.pid) _msd_label=auto_multiweight_worker ;;
+        mix_worker.pid) _msd_label=mix_worker ;;
+        mix-monitor-*) _msd_label=mix-monitor ;;
+        *) _msd_label=supervisor ;;
+    esac
+    case "$_msd_output" in
+        *'Permission denied'*|*'Operation not permitted'*|*'reason=permission-denied'*) _msd_reason='权限不足，无法读取任务证据' ;;
+        *'reason=owner-live'*) _msd_reason='旧任务仍在运行' ;;
+        *'reason=handoff-live'*) _msd_reason='移交的子任务仍在运行' ;;
+        *'reason=owner-record-invalid'*) _msd_reason='任务身份记录不完整、不匹配或不可读' ;;
+        *'reason=legacy-record-unconfirmed'*) _msd_reason='旧任务记录尚未确认退出' ;;
+        *'reason=legacy-boot-unreadable'*) _msd_reason='旧任务启动标记缺失或不可读' ;;
+        *'reason=cleanup-proof-missing'*) _msd_reason='任务清理证明缺失' ;;
+        *'reason=cleanup-proof-invalid'*) _msd_reason='任务清理证明格式无效' ;;
+        *'reason=cleanup-proof-unconfirmed'*) _msd_reason='任务清理证明不匹配或未完成' ;;
+        *'reason=handoff-unconfirmed'*) _msd_reason='移交子任务的清理未确认' ;;
+        *'reason=cleanup-proof-unreadable'*) _msd_reason='任务清理证明不可读或损坏' ;;
+        *'proc-identity-unavailable'*) _msd_reason='进程身份接口不可用' ;;
+        *'任务监督器不可用'*) _msd_reason='任务监督器不可用' ;;
+        *) case "$_msd_rc" in
+            3) _msd_reason='旧任务仍在运行' ;;
+            125) _msd_reason='任务清理状态未确认' ;;
+            126|127) _msd_reason='任务监督器无法启动' ;;
+            *) _msd_reason='任务检查异常退出' ;;
+           esac ;;
+    esac
+    printf '%s: rc=%s，%s；' "$_msd_label" "$_msd_rc" "$_msd_reason"
+}
+
 # Inspect every controller/engine/monitor slot without signalling processes.
 # 0 = proved cleanup, 1 = safe absence without a terminal proof, 3 = live,
 # 125 = unconfirmed cleanup. Successful work always requires a matching proof.
 mix_scope_state_fast() (
+    _mssf_diagnostic="${2:-}"
     _mssf_file="$1"; _mssf_task=$(read_value "$1" task)
     _mssf_child=$(read_value "$1" childTask); [ -n "$_mssf_child" ] || _mssf_child="$_mssf_task"
     _mssf_root="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}"
@@ -91,8 +127,14 @@ mix_scope_state_fast() (
     for _mssf_slot in "axes_worker.pid|$_mssf_task" "auto_multiweight_worker.pid|$_mssf_task" \
         "mix_worker.pid|$_mssf_child" "mix-monitor-$_mssf_child.pid|$_mssf_child.monitor"; do
         _mssf_pidfile="$_mssf_root/${_mssf_slot%%|*}"; _mssf_expected="${_mssf_slot#*|}"
-        sh "$(luoshu_scope_runner)" settled "$_mssf_pidfile" >/dev/null 2>&1
-        _mssf_rc=$?
+        if [ "$_mssf_diagnostic" = diagnostic ]; then
+            _mssf_output=$(sh "$(luoshu_scope_runner)" settled "$_mssf_pidfile" --diagnostic 2>&1)
+            _mssf_rc=$?
+            [ "$_mssf_rc" -eq 0 ] || mix_scope_diagnostic "${_mssf_slot%%|*}" "$_mssf_rc" "$_mssf_output"
+        else
+            sh "$(luoshu_scope_runner)" settled "$_mssf_pidfile" >/dev/null 2>&1
+            _mssf_rc=$?
+        fi
         case "$_mssf_rc" in 0) ;; 3) _mssf_live=1; continue ;; *) _mssf_unknown=1; continue ;; esac
         if [ "$_mssf_exact" -eq 0 ]; then
             if sh "$(luoshu_scope_runner)" cleaned "$_mssf_pidfile" "$_mssf_expected" >/dev/null 2>&1; then
@@ -809,12 +851,16 @@ case "$_cmd" in
         _start_conf="$REALMOD/config/axes_task.conf"
         [ -s "$_start_conf" ] || _start_conf="$REALMOD/config/mix_task.conf"
         _start_state=$(read_value "$_start_conf" state)
+        _start_detail=$(mix_scope_state_fast "$_start_conf" diagnostic); _start_scope=$?
         case "$_start_state" in queued|running|cleanup-pending)
-            printf '{"status":"error","message":"已有字体组合任务正在运行或等待清理，请刷新重试"}\n'; exit 1 ;;
+            [ -n "$_start_detail" ] || _start_detail="supervisor: rc=$_start_scope，任务状态=$_start_state；"
+            printf '{"status":"error","message":"已有字体组合任务正在运行或等待清理：%s请保留此任务卡"}\n' \
+                "$(json_escape_router "$_start_detail")"; exit 1 ;;
         esac
-        mix_scope_state_fast "$_start_conf"; _start_scope=$?
         case "$_start_scope" in 0|1) ;; *)
-            printf '{"status":"error","message":"上一字体组合任务清理尚未确认，请刷新重试"}\n'; exit 1 ;;
+            [ -n "$_start_detail" ] || _start_detail="supervisor: rc=$_start_scope，任务检查未完成；"
+            printf '{"status":"error","message":"上一字体组合任务清理尚未确认：%s请保留此任务卡"}\n' \
+                "$(json_escape_router "$_start_detail")"; exit 1 ;;
         esac
         prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'

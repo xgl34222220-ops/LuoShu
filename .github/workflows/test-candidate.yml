@@ -273,6 +273,7 @@ jobs:
           sh scripts/installer_bootstrap_test.sh "$tmp"
           python3 scripts/task_scope_legacy_test.py "$tmp"
           python3 scripts/task_scope_namespace_test.py "$tmp"
+          python3 scripts/task_scope_diagnostic_test.py "$tmp"
           python3 scripts/task_scope_namespace_lifecycle_test.py "$tmp"
           python3 scripts/installer_task_cleanup_test.py "$tmp"
           python3 scripts/stable111_rework_gate.py --zip "$module"
@@ -297,3 +298,4 @@ jobs:
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+

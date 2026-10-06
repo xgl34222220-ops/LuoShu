@@ -39,6 +39,7 @@ sh "$ROOT/scripts/runtime_paths_test.sh"
 sh "$ROOT/scripts/installer_bootstrap_test.sh"
 python3 "$ROOT/scripts/task_scope_legacy_test.py"
 python3 "$ROOT/scripts/task_scope_namespace_test.py"
+python3 "$ROOT/scripts/task_scope_diagnostic_test.py"
 python3 "$ROOT/scripts/task_scope_namespace_lifecycle_test.py"
 python3 "$ROOT/scripts/installer_task_cleanup_test.py"
 python3 "$ROOT/scripts/task_scope_test.py"
@@ -347,3 +348,4 @@ grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
 grep -q 'prepared-v8' common/multiweight_mix_task.sh
+
