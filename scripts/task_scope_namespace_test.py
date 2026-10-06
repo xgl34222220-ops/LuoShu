@@ -131,6 +131,18 @@ class ProcFixture:
             raise self.readlink_errors[value]
         return REAL_READLINK(self.redirected(path), *args, **kwargs)
 
+    def path_stat(self, path, *args, **kwargs):
+        # Python 3.10 pathlib caches its OS accessor, so patching os.stat does
+        # not intercept REAL_STAT. Apply logical-path faults before delegation.
+        if str(path) in self.stat_errors:
+            raise self.stat_errors[str(path)]
+        return REAL_STAT(Path(self.redirected(path)), *args, **kwargs)
+
+    def path_lstat(self, path, *args, **kwargs):
+        if str(path) in self.stat_errors:
+            raise self.stat_errors[str(path)]
+        return REAL_LSTAT(Path(self.redirected(path)), *args, **kwargs)
+
     def os_stat(self, path, *args, **kwargs):
         if not isinstance(path, int) and os.fsdecode(path) in self.stat_errors:
             raise self.stat_errors[os.fsdecode(path)]
@@ -155,8 +167,8 @@ class ProcFixture:
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(builtins, 'open', self.open))
             stack.enter_context(patch.object(Path, 'open', lambda path, *a, **k: self.path_open(path, *a, **k)))
-            stack.enter_context(patch.object(Path, 'stat', lambda path, *a, **k: REAL_STAT(Path(self.redirected(path)), *a, **k)))
-            stack.enter_context(patch.object(Path, 'lstat', lambda path, *a, **k: REAL_LSTAT(Path(self.redirected(path)), *a, **k)))
+            stack.enter_context(patch.object(Path, 'stat', lambda path, *a, **k: self.path_stat(path, *a, **k)))
+            stack.enter_context(patch.object(Path, 'lstat', lambda path, *a, **k: self.path_lstat(path, *a, **k)))
             stack.enter_context(patch.object(Path, 'iterdir', lambda path: self.iterdir(path)))
             stack.enter_context(patch.object(os, 'stat', self.os_stat))
             stack.enter_context(patch.object(os, 'scandir', self.scandir))
@@ -231,6 +243,46 @@ class NamespaceCompatibilityTests(unittest.TestCase):
         self.assertTrue(messages, 'refusal must have structured output')
         self.assertTrue(any(m.get('status') == 'error' and m.get('data', {}).get('cleaned') is False
                             for m in messages), messages)
+
+    def test_fixture_stat_denial_applies_to_pathlib_and_os_entrypoints(self):
+        fixture = self.fixture()
+        root = fixture.module / 'config'
+        root.mkdir()
+        denial = PermissionError(errno.EACCES, 'fixture stat denial')
+        fixture.stat_errors[str(root)] = denial
+        with fixture.active():
+            for entrypoint in (root.stat, root.lstat, lambda: os.stat(root)):
+                with self.subTest(entrypoint=entrypoint):
+                    with self.assertRaises(PermissionError) as raised:
+                        entrypoint()
+                    self.assertIs(raised.exception, denial)
+
+    def test_fixture_stat_denial_survives_cached_pathlib_os_accessor(self):
+        fixture = self.fixture()
+        root = fixture.module / 'config'
+        root.mkdir()
+        logical_proc = Path('/proc') / str(SELF_PID) / 'status'
+        for path in (root, logical_proc):
+            fixture.stat_errors[str(path)] = PermissionError(errno.EACCES, 'cached accessor denial')
+        # Emulate older pathlib calling its captured native accessor instead
+        # of the patched os.stat. The shim must reject before this delegation.
+        calls = []
+        def cached_stat(path, *args, **kwargs):
+            calls.append(path)
+            return REAL_OS_STAT(path, *args, **kwargs)
+        with fixture.active(), patch.dict(globals(), {'REAL_STAT': cached_stat}):
+            for path in (root, logical_proc):
+                with self.subTest(path=path):
+                    with self.assertRaises(PermissionError):
+                        path.stat()
+                    with self.assertRaises(PermissionError):
+                        os.stat(path)
+            self.assertEqual(calls, [], 'denied paths must not reach the cached native accessor')
+            # An allowed proc path still reaches the physical fixture rather
+            # than the real host /proc through that cached accessor.
+            allowed = Path('/proc') / str(SELF_PID) / 'stat'
+            self.assertGreater(allowed.stat().st_size, 0)
+            self.assertEqual(calls, [fixture.proc / str(SELF_PID) / 'stat'])
 
     def test_normal_namespace_identity_and_pid_translation_are_unchanged(self):
         fixture = self.fixture(self_nspid=[SELF_PID, 77], local_pid=77)
