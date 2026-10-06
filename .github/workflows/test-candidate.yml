@@ -128,6 +128,7 @@ jobs:
           export PYTHONPATH
           python3 scripts/task_scope_mksh_test.py
           python3 scripts/font_lock_namespace_test.py
+          python3 scripts/font_state_read_test.py
           sh -x scripts/background_task_test.sh
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh
@@ -278,6 +279,7 @@ jobs:
           python3 scripts/task_scope_diagnostic_test.py "$tmp"
           python3 scripts/task_scope_mksh_test.py "$tmp"
           python3 scripts/font_lock_namespace_test.py "$tmp"
+          python3 scripts/font_state_read_test.py "$tmp"
           python3 scripts/task_scope_namespace_lifecycle_test.py "$tmp"
           python3 scripts/installer_task_cleanup_test.py "$tmp"
           python3 scripts/stable111_rework_gate.py --zip "$module"

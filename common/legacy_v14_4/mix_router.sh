@@ -36,7 +36,35 @@ FINALIZE_LOCK="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/mix-stage-final
 FINALIZE_FONT_LOCK="$REALMOD/.font_switch.lock"
 
 read_value() {
-    sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+    _lrv_file="$1"; _lrv_key="$2"
+    # This runs during every progress poll and commit check. Keep first-key,
+    # literal-value semantics without spawning sed + head + tr per field.
+    # Never source/eval state files: font names and messages are data.
+    [ -r "$_lrv_file" ] || return 0
+    while IFS= read -r _lrv_line || [ -n "$_lrv_line" ]; do
+        case "$_lrv_line" in
+            "$_lrv_key="*)
+                _lrv_value=${_lrv_line#*=}
+                case "$_lrv_value" in
+                    *[[:cntrl:]]*)
+                        # Android mksh has builtin print; printf may be external.
+                        if [ -n "${KSH_VERSION:-}" ]; then _lrv_cr=$(print -n '\r')
+                        else _lrv_cr=$(printf '\r'); fi
+                        while :; do
+                            case "$_lrv_value" in
+                                *"$_lrv_cr"*) _lrv_value=${_lrv_value%%"$_lrv_cr"*}${_lrv_value#*"$_lrv_cr"} ;;
+                                *) break ;;
+                            esac
+                        done
+                        ;;
+                esac
+                if [ -n "${KSH_VERSION:-}" ]; then print -rn -- "$_lrv_value"
+                else printf '%s' "$_lrv_value"; fi
+                return 0
+                ;;
+        esac
+    done < "$_lrv_file" 2>/dev/null
+    return 0
 }
 
 json_escape_router() {

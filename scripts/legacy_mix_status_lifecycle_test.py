@@ -41,8 +41,8 @@ class MixStatusLifecycleTest(unittest.TestCase):
             'percent=34\ncjk=测试字体\nlatin=Latin\ndigit=Digits\n'
             'cjkAxes=wght=440\nroot=/preserve-this-cache\nchildTask=mix-child\n')
 
-    def call(self, command='status'):
-        result = subprocess.run(['sh', str(ROOT / 'common/legacy_v14_4/mix_router.sh'), command],
+    def call(self, command='status', router=None):
+        result = subprocess.run(['sh', str(router or ROOT / 'common/legacy_v14_4/mix_router.sh'), command],
                                 env=self.env, text=True, capture_output=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse((self.module / '.luoshu-state/cache/legacy-v14-runtime').exists())
@@ -169,17 +169,25 @@ class MixStatusLifecycleTest(unittest.TestCase):
 
     def test_settled_success_with_journal_created_after_reconcile_requires_cleanup(self):
         before = self.completed_receipt()
-        directory = Path(self.temp.name) / 'bin'
-        directory.mkdir()
-        sed = directory / 'sed'
-        sed.write_text('#!/bin/sh\n'
-                       'if [ "$2" = "s/^requestId=//p" ] && '
-                       '[ "$3" = "$MODDIR/config/mix-commit.conf" ]; then\n'
-                       '  mkdir -p "$MODDIR/.luoshu-state/backup/next-transaction"\n'
-                       'fi\nexec /bin/sed "$@"\n')
-        sed.chmod(0o755)
-        self.env['PATH'] = f'{directory}:{self.env["PATH"]}'
-        data = self.call()['data']
+        # Inject at the state-reader boundary, not at a particular sed pipeline.
+        # The production reader and all reconciliation/transaction checks still
+        # run unchanged; this only creates the racing journal before its read.
+        source = (ROOT / 'common/legacy_v14_4/mix_router.sh').read_text()
+        self.assertEqual(source.count('read_value() {\n'), 1)
+        source = source.replace('read_value() {\n', 'production_read_value() {\n', 1)
+        wrapper = '''read_value() {
+    if [ "$2" = requestId ] && [ "$1" = "$MODDIR/config/mix-commit.conf" ]; then
+        mkdir -p "$MODDIR/.luoshu-state/backup/next-transaction"
+    fi
+    production_read_value "$@"
+}
+
+'''
+        self.assertEqual(source.count('json_escape_router() {\n'), 1)
+        source = source.replace('json_escape_router() {\n', wrapper + 'json_escape_router() {\n', 1)
+        router = Path(self.temp.name) / 'race-router.sh'
+        router.write_text(source)
+        data = self.call(router=router)['data']
         self.assertTrue((self.module / '.luoshu-state/backup/next-transaction').exists())
         self.assertEqual(data['state'], 'cleanup-pending')
         self.assertFalse(data['liveApplied'])
