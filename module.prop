@@ -1,8 +1,8 @@
 id=LuoShu
-name=洛书·1.1.1整理测试
-version=v2.0.0
-versionCode=70000
+name=洛书
+version=v2.2.2
+versionCode=70202
 versionSeries=refactor
 author=惜故里丶
-description=Android 全局字体引擎：基于正式 1.1.1 重整目录与单次任务收尾，测试候选
+description=Android 全局字体引擎：保留 1.1.1 挂载核心，整合任务收尾、连续切换与状态读取优化
 updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json

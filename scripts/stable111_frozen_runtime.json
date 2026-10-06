@@ -27,6 +27,14 @@
   "publishedMetadataSha256": {
     "update.json": "b31c8b63f7673bf6a2efc716afdc5053697508bc2faadcce82d9a9d96db19446",
     "update-prerelease.json": "b31c8b63f7673bf6a2efc716afdc5053697508bc2faadcce82d9a9d96db19446",
-    "config/stable_version_policy.json": "58e93349fd8026015a2fbf81deee3a97bd0409e051f8dbf3bfea2c0181d6db2e"
+    "config/stable_version_policy.json": "56e1d2707ddb1973aa620198e1144eb1535822a3d5319ac2bfb9da74dadf5244"
+  },
+  "authorizedPublishedMetadataSha256": {
+    "version": "v2.2.2",
+    "authorizedAt": "2026-10-06T13:36:26Z",
+    "sha256": {
+      "update.json": "d8df3fc70a93ef4713d6853bd382f1baca0512902d1246c8f43588ca13b471a3",
+      "update-prerelease.json": "d8df3fc70a93ef4713d6853bd382f1baca0512902d1246c8f43588ca13b471a3"
+    }
   }
 }
