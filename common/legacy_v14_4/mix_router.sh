@@ -671,11 +671,19 @@ finalize_mix_stage() {
         return 1
     fi
     _finalize_wait=0
-    while ! luoshu_font_lock_acquire "$FINALIZE_FONT_LOCK" "$$"; do
+    while :; do
+        luoshu_font_lock_acquire "$FINALIZE_FONT_LOCK" "$$"
+        _finalize_lock_rc=$?
+        [ "$_finalize_lock_rc" -ne 0 ] || break
+        if [ "$_finalize_lock_rc" -ne 2 ]; then
+            finalize_lock_release >/dev/null 2>&1 || true
+            printf '{"status":"error","message":"%s"}\n' "$(luoshu_font_lock_failure_message)"
+            return 1
+        fi
         _finalize_wait=$((_finalize_wait + 1))
         if [ "$_finalize_wait" -ge 20 ]; then
             finalize_lock_release >/dev/null 2>&1 || true
-            printf '{"status":"error","message":"已有字体事务正在提交，请稍后重试"}\n'
+            printf '{"status":"error","message":"字体提交锁被占用或等待清理，请保留任务卡"}\n'
             return 1
         fi
         sleep 1

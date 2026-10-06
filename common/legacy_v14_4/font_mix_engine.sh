@@ -517,7 +517,13 @@ apply_mix() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
     [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" = 1 ] || [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
-    luoshu_font_lock_acquire "$LOCK_FILE" "$$" || { set_mix_error '字体正在切换中'; return 2; }
+    luoshu_font_lock_acquire "$LOCK_FILE" "$$"
+    _mix_lock_rc=$?
+    case "$_mix_lock_rc" in
+        0) ;;
+        2) set_mix_error '字体切换锁被占用或等待清理，请稍后再试'; return 2 ;;
+        *) set_mix_error "$(luoshu_font_lock_failure_message)"; return 2 ;;
+    esac
     trap cleanup_mix_process EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT

@@ -107,6 +107,7 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
 import sys
 
 try:
@@ -115,8 +116,15 @@ try:
     state = module / '.luoshu-state'
     assert not state.is_symlink()
     allowed = (state / 'tasks', state / 'config')
-    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-    namespace = os.readlink('/proc/self/ns/pid')
+    # Reuse the supervisor's evidence-bound procfs identity contract. Missing
+    # namespace links are compatible only when that contract proves one PID
+    # view; permission errors, nested mappings and unknown capability refuse.
+    scope = runpy.run_path(str(module / 'common/task_scope.py'), run_name='luoshu_lock_identity')
+    if not isinstance(scope['SELF_NS'], str) or not scope['SELF_NS']:
+        raise RuntimeError('supervisor identity unavailable')
+    boot = scope['BOOT']
+    namespace = scope['SELF_NS']
+    process_identity = scope['identity']
 
     def owned_path(value):
         path = Path(value)
@@ -154,24 +162,24 @@ try:
             assert not sidecar.is_symlink() and sidecar.read_text().strip() == expected
         proc_pid = owner['procPid']
         assert type(proc_pid) is int and proc_pid > 1
-        proc_root = Path('/proc') / str(proc_pid)
-        stat = (proc_root / 'stat').read_text().rsplit(') ', 1)[1].split()
-        assert stat[0] != 'Z' and stat[19] == start
-        assert os.readlink(proc_root / 'ns/pid') == namespace
-        local_pid = str(proc_pid)
-        for line in (proc_root / 'status').read_text().splitlines():
-            if line.startswith('NSpid:'):
-                local_pid = line.split()[-1]
-        assert local_pid == pid
+        current = process_identity(proc_pid)
+        assert current and current['state'] != 'Z'
+        assert (str(current['pid']), current['start'], current['boot'], current['namespace']) == (pid, start, saved_boot, namespace)
         # The shell invoking this reader must actually descend from the saved
         # supervisor, rather than borrowing another live task's environment.
-        ancestor = int(os.readlink('/proc/self'))
+        ancestor = scope['SELF_PROC']
         visited = set()
         while ancestor != proc_pid:
             assert ancestor > 1 and ancestor not in visited and len(visited) < 1024
             visited.add(ancestor)
-            tail = (Path('/proc') / str(ancestor) / 'stat').read_text().rsplit(') ', 1)[1].split()
-            ancestor = int(tail[1])
+            link = process_identity(ancestor)
+            assert link and link['state'] != 'Z'
+            ancestor = link['parent']
+        # Close the ancestry walk with a fresh exact owner/sidecar check.
+        assert scope['read_owner'](str(path)) == owner
+        rechecked = process_identity(proc_pid)
+        assert rechecked and rechecked['state'] != 'Z'
+        assert all(rechecked[key] == current[key] for key in ('procPid', 'pid', 'start', 'boot', 'namespace'))
         for key, value in (('pidfile', str(path)), ('task', task), ('pid', pid),
                            ('start', start), ('boot', saved_boot), ('namespace', namespace)):
             print('scope_' + key + '=' + value)
@@ -219,7 +227,7 @@ try:
             os.close(descriptor)
     else:
         raise ValueError('unknown scope action')
-except (AssertionError, OSError, ValueError, KeyError, TypeError, IndexError):
+except (AssertionError, OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError):
     sys.exit(1)
 PY
 )
@@ -324,7 +332,16 @@ luoshu_font_lock_reap_stale() {
     fi
 }
 
+# Fixed UI messages, never raw procfs errors, paths or task identifiers.
+luoshu_font_lock_failure_message() {
+    case "${LUOSHU_FONT_LOCK_FAILURE_REASON:-}" in
+        scope-identity-unverified) printf '%s' '字体切换锁身份验证失败，请保留任务卡' ;;
+        *) printf '%s' '无法创建或验证字体切换锁，请保留任务卡' ;;
+    esac
+}
+
 luoshu_font_lock_acquire() {
+    LUOSHU_FONT_LOCK_FAILURE_REASON=''
     _lfla_path="${1:-$MODULE_DIR/.font_switch.lock}"
     _lfla_owner="${2:-$$}"
     case "$_lfla_owner" in ''|*[!0-9]*) return 1 ;; esac
@@ -335,10 +352,16 @@ luoshu_font_lock_acquire() {
     _lfla_scope=''
     if [ -n "${LUOSHU_TASK_SCOPE_PIDFILE:-}${LUOSHU_TASK_SCOPE_TASK:-}${LUOSHU_TASK_SCOPE_PID:-}" ]; then
         [ -n "${LUOSHU_TASK_SCOPE_PIDFILE:-}" ] && [ -n "${LUOSHU_TASK_SCOPE_TASK:-}" ] && \
-            [ -n "${LUOSHU_TASK_SCOPE_PID:-}" ] || return 1
+            [ -n "${LUOSHU_TASK_SCOPE_PID:-}" ] || {
+                LUOSHU_FONT_LOCK_FAILURE_REASON=scope-identity-unverified
+                return 1
+            }
         # A scoped task cannot silently downgrade an unverified association to
         # the legacy namespace lease. Only genuinely unscoped callers use it.
-        _lfla_scope="$(luoshu_font_lock_scope_identity capture 2>/dev/null)" || return 1
+        _lfla_scope="$(luoshu_font_lock_scope_identity capture 2>/dev/null)" || {
+            LUOSHU_FONT_LOCK_FAILURE_REASON=scope-identity-unverified
+            return 1
+        }
     fi
     _lfla_attempt=0
     while [ "$_lfla_attempt" -lt 6 ]; do
