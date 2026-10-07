@@ -8,6 +8,8 @@ on:
       - module.prop
       - scripts/android_ui_smoke*.py
       - scripts/google_font_compat_smoke.py
+      - scripts/ui_snapshot/**
+      - scripts/build_ui_snapshot_helper.sh
       - .github/workflows/android-ui-smoke.yml
   pull_request:
     branches: [main]
@@ -16,6 +18,8 @@ on:
       - module.prop
       - scripts/android_ui_smoke*.py
       - scripts/google_font_compat_smoke.py
+      - scripts/ui_snapshot/**
+      - scripts/build_ui_snapshot_helper.sh
       - .github/workflows/android-ui-smoke.yml
   workflow_dispatch:
 
@@ -76,6 +80,21 @@ jobs:
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
+      - name: Build independent real accessibility snapshot test helper
+        id: snapshot-build
+        if: ${{ steps.apk-build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          sh scripts/build_ui_snapshot_helper.sh ui-snapshot-apk/luoshu-ui-snapshot.apk 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-snapshot-build.log"
+      - name: Upload independent snapshot test helper
+        if: ${{ steps.snapshot-build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-UI-Snapshot-Test-Helper
+          path: ui-snapshot-apk/*.apk
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload build, current unit test and lint evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,6 +104,7 @@ jobs:
             ${{ runner.temp }}/luoshu-ui-build.log
             ${{ runner.temp }}/luoshu-ui-unit-tests.log
             ${{ runner.temp }}/luoshu-ui-lint.log
+            ${{ runner.temp }}/luoshu-ui-snapshot-build.log
             android-app/app/build/test-results/testDebugUnitTest/
             android-app/app/build/reports/tests/testDebugUnitTest/
             android-app/app/build/reports/lint-results-debug.*
@@ -107,6 +127,10 @@ jobs:
         with:
           name: LuoShu-UI-Smoke-APK
           path: ui-smoke-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Snapshot-Test-Helper
+          path: ui-snapshot-apk
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -131,7 +155,7 @@ jobs:
           disable-animations: false
           disable-linux-hw-accel: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --output ui-smoke-output --serial emulator-5554
+          script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output ui-smoke-output --serial emulator-5554
       - name: Upload screenshots, hierarchy and crash evidence
         if: always()
         uses: actions/upload-artifact@v4

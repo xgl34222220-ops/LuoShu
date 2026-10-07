@@ -89,7 +89,19 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         typography = MiuixTypography,
         animate = true,
     ) {
-        ProvideMiuixTokens(settings, content)
+        // Keep large error surfaces quiet in both modes while retaining
+        // readable error text and icons across every shared screen.
+        val scheme = MaterialTheme.colorScheme
+        MaterialTheme(
+            colorScheme = scheme.copy(
+                error = if (dark) Color(0xFFE9ABA7) else Color(0xFFA64A4A),
+                onError = if (dark) Color(0xFF3D1F1D) else Color.White,
+                errorContainer = if (dark) Color(0xFF342627) else Color(0xFFF4E9E7),
+                onErrorContainer = if (dark) Color(0xFFF1D4D1) else Color(0xFF633734),
+            ),
+        ) {
+            ProvideMiuixTokens(settings, content)
+        }
     }
 }
 

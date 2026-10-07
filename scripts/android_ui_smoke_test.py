@@ -3,10 +3,16 @@
 
 import unittest
 import xml.etree.ElementTree as ET
+import json
+import subprocess
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock
 
 from android_ui_smoke import (
-    anchors_preserved, app_labels, center, choice_selected, content_anchors,
+    action_disabled, anchors_preserved, app_labels, center, choice_selected, content_anchors,
     crash_reason, label_target, orientation_matches, page_ready, tab_target,
+    SmokeRun,
 )
 
 
@@ -113,6 +119,17 @@ class UiSmokeHarnessTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Enabled action"):
             label_target(root, "收藏", PACKAGE)
 
+    def test_disabled_action_reads_ancestor_semantics_without_tapping(self):
+        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" enabled="false" clickable="false" bounds="[40,400][300,540]">
+            <node package="{PACKAGE}" text="刷新字体库" enabled="true" bounds="[80,440][260,500]" />
+          </node>
+        </node></hierarchy>''')
+        self.assertTrue(action_disabled(root, "刷新字体库", PACKAGE))
+        root[0][0].set("enabled", "true")
+        self.assertFalse(action_disabled(root, "刷新字体库", PACKAGE))
+        self.assertFalse(action_disabled(root, "missing", PACKAGE))
+
     def test_scroll_anchors_exclude_dock_duplicates_and_foreign_package(self):
         root = self.hierarchy()
         ET.SubElement(root[0], "node", {"package": PACKAGE, "text": "系统默认字体", "bounds": "[200,1400][700,1500]"})
@@ -137,6 +154,69 @@ class UiSmokeHarnessTest(unittest.TestCase):
         root = ET.fromstring(f'<hierarchy><node package="{PACKAGE}" bounds="[0,0][1920,1080]" /></hierarchy>')
         self.assertTrue(orientation_matches(root, PACKAGE, landscape=True))
         self.assertFalse(orientation_matches(root, "other.app", landscape=True))
+
+    def test_successful_platform_dump_stays_on_normal_backend_and_keeps_cli_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None, Path("snapshot.apk"))
+            xml = ET.tostring(self.hierarchy(), encoding="utf-8")
+            responses = [subprocess.CompletedProcess([], 0, b"", b""),
+                         subprocess.CompletedProcess([], 0, b"UI hierchary dumped to: /sdcard/luoshu-ui-smoke.xml", b""),
+                         subprocess.CompletedProcess([], 0, xml, b"")]
+            run.adb = Mock(side_effect=responses)
+            run.snapshot_hierarchy = Mock(side_effect=AssertionError("Normal reader must stay in use"))
+            root = run.hierarchy()
+            self.assertTrue(page_ready(root, "首页", "当前字体", PACKAGE))
+            self.assertEqual("uiautomator-cli", run.hierarchy_backend)
+            evidence = json.loads((output / "hierarchy-dump-0001.json").read_text())
+            self.assertEqual(0, evidence["returncode"])
+            self.assertIn("dumped to", evidence["stdout"])
+
+    def test_exit_zero_idle_failure_is_preserved_and_real_reader_is_cached(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None, Path("snapshot.apk"))
+            empty = subprocess.CompletedProcess([], 0, b"", b"")
+            run.adb = Mock(side_effect=[empty,
+                subprocess.CompletedProcess([], 0, b"", b"ERROR: could not get idle state.\n"),
+                subprocess.CompletedProcess([], 1, b"", b"cat: No such file or directory\n"),
+                empty, subprocess.CompletedProcess([], 0, b"probe is writable", b""), empty])
+            run.snapshot_hierarchy = Mock(return_value=self.hierarchy())
+            self.assertTrue(page_ready(run.hierarchy(), "首页", "当前字体", PACKAGE))
+            self.assertEqual("ui-automation-snapshot", run.hierarchy_backend)
+            self.assertIn("could not get idle state", run.checks[0]["reason"])
+            evidence = json.loads((output / "hierarchy-dump-0001.json").read_text())
+            self.assertEqual(0, evidence["returncode"])
+            self.assertIn("could not get idle state", evidence["stderr"])
+            self.assertEqual(0, json.loads((output / "hierarchy-storage-probe-0001.json").read_text())["touch_returncode"])
+            previous_commands = run.adb.call_count
+            run.hierarchy()
+            self.assertEqual(previous_commands, run.adb.call_count)
+            self.assertEqual(2, run.snapshot_hierarchy.call_count)
+
+    def test_dump_failure_without_real_reader_remains_a_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            empty = subprocess.CompletedProcess([], 0, b"", b"")
+            run.adb = Mock(side_effect=[empty,
+                subprocess.CompletedProcess([], 0, b"ERROR: null root node returned by UiTestAutomationBridge.", b""),
+                subprocess.CompletedProcess([], 1, b"", b"missing"), empty, empty, empty])
+            with self.assertRaisesRegex(RuntimeError, "null root"):
+                run.hierarchy()
+            self.assertEqual("uiautomator-cli", run.hierarchy_backend)
+
+    def test_failed_snapshot_is_not_reported_as_a_successful_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None, Path("snapshot.apk"))
+            empty = subprocess.CompletedProcess([], 0, b"", b"")
+            run.adb = Mock(side_effect=[empty,
+                subprocess.CompletedProcess([], 0, b"ERROR: could not get idle state.", b""),
+                subprocess.CompletedProcess([], 1, b"", b"missing"), empty, empty, empty])
+            run.snapshot_hierarchy = Mock(side_effect=RuntimeError("No real active window"))
+            with self.assertRaisesRegex(RuntimeError, "No real active window"):
+                run.hierarchy()
+            self.assertEqual([], run.checks)
 
 
 if __name__ == "__main__":

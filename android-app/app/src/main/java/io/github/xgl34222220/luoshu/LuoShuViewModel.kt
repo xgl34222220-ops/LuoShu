@@ -306,14 +306,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     private fun launchFontWork(force: Boolean, showErrors: Boolean) {
         fontRequestJob = viewModelScope.launch {
-            cacheLoadJob.join()
-            initialStatusReady.first { it }
-            if (!snapshot.installed || !snapshot.rootGranted) return@launch
-            val hadFonts = fonts.isNotEmpty()
-            fontLoading = !hadFonts
-            fontRefreshing = hadFonts
-            if (showErrors) fontError = ""
             try {
+                cacheLoadJob.join()
+                initialStatusReady.first { it }
+                if (!snapshot.installed || !snapshot.rootGranted) return@launch
+                val hadFonts = fonts.isNotEmpty()
+                fontLoading = !hadFonts
+                fontRefreshing = hadFonts
+                if (showErrors) fontError = ""
                 when {
                     force -> rebuildFontIndex(showErrors = true)
                     fonts.isEmpty() -> rebuildFontIndex(showErrors = showErrors)
@@ -323,8 +323,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 fontLoading = false
                 fontRefreshing = false
                 fontRequestJob = null
-                if (pendingForceRefresh && currentCoroutineContext().isActive) {
-                    pendingForceRefresh = false
+                val runPendingRefresh = pendingForceRefresh
+                pendingForceRefresh = false
+                if (runPendingRefresh && currentCoroutineContext().isActive && snapshot.installed && snapshot.rootGranted) {
                     refreshFonts(force = true)
                 }
             }

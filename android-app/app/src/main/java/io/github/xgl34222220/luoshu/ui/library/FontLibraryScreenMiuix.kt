@@ -228,7 +228,7 @@ internal fun FontLibraryScreenMiuix(
                     )
                 }
             }
-        } else if (state.operationBusy) {
+        } else if (state.operationRunning) {
             item(key = "loading") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("正在处理字体，请稍候…", color = textSecondary, fontSize = 13.sp)

@@ -159,6 +159,19 @@ def choice_selected(root: ET.Element, label: str, package: str) -> bool:
     return target.get("selected") == "true" or target.get("checked") == "true"
 
 
+def action_disabled(root: ET.Element, label: str, package: str) -> bool:
+    parents = {child: parent for parent in root.iter() for child in parent}
+    for node in root.iter("node"):
+        if node.get("package") != package or label not in labels(node):
+            continue
+        candidate = node
+        while candidate is not None and candidate.get("package") == package:
+            if candidate.get("enabled") == "false":
+                return True
+            candidate = parents.get(candidate)
+    return False
+
+
 def content_anchors(root: ET.Element, package: str) -> dict[str, tuple[int, int]]:
     """Visible text positions, excluding navigation, for actual scroll preservation."""
     rectangles = []
@@ -226,7 +239,7 @@ def crash_reason(log: str, package: str) -> str | None:
 
 
 class SmokeRun:
-    def __init__(self, apk: Path, output: Path, package: str, serial: str | None):
+    def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None):
         self.apk = apk
         self.output = output
         self.package = package
@@ -235,6 +248,9 @@ class SmokeRun:
         self.results: list[dict[str, object]] = []
         self.checks: list[dict[str, object]] = []
         self.api_level: int | None = None
+        self.snapshot_apk = snapshot_apk
+        self.hierarchy_attempts = 0
+        self.hierarchy_backend = "uiautomator-cli"
         self.started_at = time.monotonic()
 
     def adb(self, *arguments: str, timeout: float = 20, check: bool = True) -> subprocess.CompletedProcess[bytes]:
@@ -251,12 +267,70 @@ class SmokeRun:
         return self.adb(*arguments, **kwargs).stdout.decode("utf-8", "replace")
 
     def hierarchy(self) -> ET.Element:
+        self.hierarchy_attempts += 1
+        if self.hierarchy_backend == "ui-automation-snapshot":
+            return self.snapshot_hierarchy()
         remote = "/sdcard/luoshu-ui-smoke.xml"
         self.adb("shell", "rm", "-f", remote)
-        self.adb("shell", "uiautomator", "dump", remote, timeout=15)
-        xml = self.text("shell", "cat", remote)
+        started = time.monotonic()
+        failure = None
+        try:
+            dumped = self.adb("shell", "uiautomator", "dump", remote, timeout=15, check=False)
+            stdout = dumped.stdout.decode("utf-8", "replace")
+            stderr = dumped.stderr.decode("utf-8", "replace")
+            evidence = {"attempt": self.hierarchy_attempts, "returncode": dumped.returncode,
+                        "seconds": round(time.monotonic() - started, 3), "stdout": stdout, "stderr": stderr}
+            (self.output / f"hierarchy-dump-{self.hierarchy_attempts:04d}.json").write_text(
+                json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            if dumped.returncode or re.search(r"\bERROR:", stdout + stderr):
+                failure = f"uiautomator dump returned {dumped.returncode}: {(stdout + stderr).strip()}"
+            result = self.adb("shell", "cat", remote, check=False)
+            if result.returncode:
+                failure = failure or f"uiautomator returned {dumped.returncode} without creating {remote}: {(stdout + stderr).strip()}"
+                (self.output / f"hierarchy-read-{self.hierarchy_attempts:04d}.txt").write_bytes(result.stdout + result.stderr)
+            elif failure is None:
+                xml = result.stdout.decode("utf-8", "replace")
+                root = ET.fromstring(xml)
+                (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
+                return root
+        except (RuntimeError, ET.ParseError) as error:
+            failure = str(error)
+            (self.output / f"hierarchy-dump-{self.hierarchy_attempts:04d}-failure.txt").write_text(failure + "\n", encoding="utf-8")
+        # Preserve a same-UID storage probe to distinguish a non-idle CLI from a
+        # missing or unwritable shared storage path; never infer the cause from exit 0.
+        probe = remote + ".probe"
+        touched = self.adb("shell", "touch", probe, check=False)
+        listed = self.adb("shell", "ls", "-l", probe, check=False)
+        self.adb("shell", "rm", "-f", probe, check=False)
+        (self.output / f"hierarchy-storage-probe-{self.hierarchy_attempts:04d}.json").write_text(
+            json.dumps({"path": probe, "touch_returncode": touched.returncode,
+                        "touch_output": (touched.stdout + touched.stderr).decode("utf-8", "replace"),
+                        "list_returncode": listed.returncode,
+                        "list_output": (listed.stdout + listed.stderr).decode("utf-8", "replace")},
+                       ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if self.snapshot_apk is not None:
+            self.hierarchy_backend = "ui-automation-snapshot"
+            root = self.snapshot_hierarchy()
+            self.checks.append({"check": "hierarchy-reader-fallback", "passed": True,
+                                "reason": failure, "backend": self.hierarchy_backend})
+            return root
+        raise RuntimeError(failure or "uiautomator did not produce a valid live hierarchy")
+
+    def snapshot_hierarchy(self) -> ET.Element:
+        helper = "io.github.xgl34222220.luoshu.uisnapshot"
+        filename = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
+        result = self.adb("shell", "am", "instrument", "-w", "-r", "-e", "filename", filename,
+                          f"{helper}/.SnapshotInstrumentation", timeout=20, check=False)
+        (self.output / f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.txt").write_bytes(result.stdout + result.stderr)
+        output = (result.stdout + result.stderr).decode("utf-8", "replace")
+        if result.returncode or "INSTRUMENTATION_RESULT: snapshot=ok" not in output:
+            raise RuntimeError(f"Real UiAutomation snapshot failed ({result.returncode}): {output[-3000:]}")
+        xml = self.text("shell", "run-as", helper, "cat", f"files/{filename}")
+        root = ET.fromstring(xml)
+        if root.tag != "hierarchy" or not list(root.iter("node")):
+            raise RuntimeError("Real UiAutomation snapshot contains no accessible window nodes")
         (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
-        return ET.fromstring(xml)
+        return root
 
     def logcat(self, filename: str = "logcat.txt") -> str:
         log = self.text("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime")
@@ -557,6 +631,8 @@ class SmokeRun:
     def run(self) -> None:
         self.adb("wait-for-device", timeout=60)
         self.adb("install", "-r", "-g", str(self.apk), timeout=120)
+        if self.snapshot_apk is not None:
+            self.adb("install", "-r", str(self.snapshot_apk), timeout=120)
         self.adb("shell", "pm", "clear", self.package)
         # Clearing App data also revokes the grant made by install -g. Grant this
         # permission after the reset so the first-run dialog cannot cover the UI.
@@ -584,6 +660,26 @@ class SmokeRun:
                 x, y = center(target)
                 self.adb("shell", "input", "tap", str(x), str(y))
                 root = self.wait_page(label, marker)
+                if theme == "light" and name == "home":
+                    root = self.wait_ui(
+                        lambda root: page_ready(root, label, marker, self.package)
+                        and "未连接" in app_labels(root, self.package)
+                        and bool({"等待模块", "需要授权"} & app_labels(root, self.package))
+                        and not {"检测中…", "核实中…", "正在连接"} & app_labels(root, self.package)
+                        and any("Root" in value and "权限" in value for value in app_labels(root, self.package)),
+                        "Completed unavailable Root/module check on the real emulator home",
+                    )
+                    self.record("unavailable-home-settled", version="未连接", connection_state="Root/module unavailable")
+                if theme == "light" and name == "library":
+                    root = self.wait_ui(
+                        lambda root: page_ready(root, label, marker, self.package)
+                        and "正在处理字体，请稍候…" not in app_labels(root, self.package)
+                        and any("Root" in value and "权限" in value for value in app_labels(root, self.package))
+                        and action_disabled(root, "刷新字体库", self.package),
+                        "Unavailable Root library reports its error and blocked action without pretending work is running",
+                    )
+                    self.record("unavailable-library-settled", blocked_action="刷新字体库", error_visible=True,
+                                false_operation_progress=False)
                 # Keep the production animations enabled; capture once navigation settles.
                 time.sleep(0.7)
                 self.capture(f"{theme}-{name}", root)
@@ -624,12 +720,17 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--package", default="io.github.xgl34222220.luoshu.debug")
     parser.add_argument("--serial")
+    parser.add_argument("--snapshot-apk", type=Path,
+                        help="Independent UiAutomation test APK for reading live hierarchy when the platform dump cannot reach global idle")
     args = parser.parse_args()
     if not args.apk.is_file():
         parser.error(f"APK does not exist: {args.apk}")
+    if args.snapshot_apk is not None and not args.snapshot_apk.is_file():
+        parser.error(f"Snapshot test APK does not exist: {args.snapshot_apk}")
     if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", args.package):
         parser.error("Invalid Android package name")
-    run = SmokeRun(args.apk.resolve(), args.output.resolve(), args.package, args.serial)
+    run = SmokeRun(args.apk.resolve(), args.output.resolve(), args.package, args.serial,
+                   args.snapshot_apk.resolve() if args.snapshot_apk is not None else None)
     error = None
     try:
         run.run()
@@ -650,6 +751,7 @@ def main() -> int:
             error = crash_reason(final_log.read_text(encoding="utf-8", errors="replace"), args.package)
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
+                   "hierarchy_backend": run.hierarchy_backend,
                    "screens": run.results, "checks": run.checks}
         (run.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0 if error is None else 1

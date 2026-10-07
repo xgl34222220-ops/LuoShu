@@ -8,6 +8,32 @@ import org.junit.Test
 
 class HomeContractTest {
     @Test
+    fun completedRootFailureShowsDisconnectedInsteadOfTheInitialDetectingLabel() {
+        val state = ModuleSnapshot(loading = false, error = "未找到 Root 命令 su").toHomeUiState()
+
+        assertFalse(state.loading)
+        assertFalse(state.rootGranted)
+        assertFalse(state.moduleInstalled)
+        assertEquals("未连接", state.version)
+        assertEquals("未找到 Root 命令 su", state.error)
+    }
+
+    @Test
+    fun moduleMissingWithGrantedRootAlsoFinishesTheVersionCheck() {
+        val state = ModuleSnapshot(loading = false, rootGranted = true, installed = false).toHomeUiState()
+
+        assertFalse(state.loading)
+        assertEquals("未连接", state.version)
+    }
+
+    @Test
+    fun initialConnectionKeepsCheckingAndVerifiedConnectionKeepsItsRealVersion() {
+        assertEquals("检测中…", ModuleSnapshot().toHomeUiState().version)
+        val verified = ModuleSnapshot(loading = false, rootGranted = true, installed = true, version = "v2.2.2")
+        assertEquals("v2.2.2", verified.toHomeUiState().version)
+    }
+
+    @Test
     fun failedMountShowsSystemFontInsteadOfConfiguredFontAsEffective() {
         val state = ModuleSnapshot(
             loading = false,
