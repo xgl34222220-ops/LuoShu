@@ -45,6 +45,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
+      - name: Prepare real screenshot baseline regression dependency
+        run: |
+          python3 -m venv "$RUNNER_TEMP/luoshu-ui-host-tests"
+          "$RUNNER_TEMP/luoshu-ui-host-tests/bin/pip" install Pillow==12.3.0
+          echo "$RUNNER_TEMP/luoshu-ui-host-tests/bin" >> "$GITHUB_PATH"
       - name: Verify UI navigation and crash detection helpers
         run: python3 scripts/android_ui_smoke_test.py
       - name: Run current debug unit tests
