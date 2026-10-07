@@ -10,8 +10,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
+from contextlib import ExitStack
 from pathlib import Path
 
 import numpy as np
@@ -77,7 +80,8 @@ class FrameClassifier:
             self.home_patches.append((label, (max(0, x1 - 6), max(0, y1 - 70), min(size[0], x2 + 6), min(size[1], y2 + 70)), template))
         fixtures = Path(__file__).with_name("startup_visual_fixtures")
         # Original emulator is 720x1560; normalize both fixture and real frame.
-        self.logo = edges(resized(Image.open(fixtures / f"native-logo-{theme}.png"), (168, 168)))
+        with Image.open(fixtures / f"native-logo-{theme}.png") as artwork:
+            self.logo = edges(resized(artwork, (168, 168)))
         self.baseline = edges(resized(baseline, size)) if baseline is not None else None
 
     def classify(self, frame: np.ndarray) -> dict:
@@ -117,6 +121,7 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
     errors = []
     home_seen = False
     logo_seen = False
+    native_logo_seen = False
     for frame in frames:
         state = frame["state"]
         stamp = f"frame {frame['frame']} at {frame['seconds']:.6f}s"
@@ -126,6 +131,7 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
             if warm:
                 errors.append(f"Warm same-process resume displayed branded startup: {stamp}")
             logo_seen = True
+            native_logo_seen |= state == "native-logo"
         if state in ("home", "home-transition"):
             home_seen = True
         if state == "black-blank":
@@ -136,46 +142,92 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
             errors.append(f"Launch returned to the previous surface: {stamp}")
     if not home_seen:
         errors.append("Recording never established visible real home content")
+    if not warm and not native_logo_seen:
+        errors.append("Insufficient cold-start coverage: recording never established native-logo")
     if not frames or frames[-1]["state"] != "home":
         errors.append("Recording did not finish with visible real home content")
     return {"passed": not errors, "errors": errors, "home_seen": home_seen,
-            "logo_seen": logo_seen, "unclassified_frames": sum(frame["state"] == "unclassified" for frame in frames)}
+            "logo_seen": logo_seen, "native_logo_seen": native_logo_seen,
+            "unclassified_frames": sum(frame["state"] == "unclassified" for frame in frames)}
+
+
+def original_timestamps(frames: list[dict]) -> list[float]:
+    """Require a complete, ordered original presentation timeline."""
+    timestamps = []
+    for index, frame in enumerate(frames):
+        try:
+            stamp = float(frame["best_effort_timestamp_time"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise RuntimeError(f"Original frame {index} has no valid presentation timestamp") from error
+        if not math.isfinite(stamp) or stamp < 0:
+            raise RuntimeError(f"Original frame {index} has nonfinite or negative presentation timestamp: {stamp}")
+        if timestamps and stamp <= timestamps[-1]:
+            raise RuntimeError(f"Original frame {index} has nonincreasing presentation timestamp: {stamp}")
+        timestamps.append(stamp)
+    return timestamps
 
 
 def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, output: Path,
                       *, baseline: Path | None = None, warm: bool = False) -> dict:
-    info = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height:frame=best_effort_timestamp_time", "-of", "json", str(video)]))
-    stream = info["streams"][0]
-    size = (MATCH_WIDTH, round(stream["height"] * MATCH_WIDTH / stream["width"]))
-    if abs(size[1] / size[0] - 1560 / 720) > .02:
-        raise RuntimeError("Startup artwork matching requires the recorded portrait emulator aspect ratio")
-    classifier = FrameClassifier(Image.open(home), ET.parse(hierarchy).getroot(), theme, size,
-                                 Image.open(baseline) if baseline is not None else None)
-    process = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-vsync", "0",
-        "-vf", f"scale={size[0]}:{size[1]}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     frames = []
-    try:
-        for index, timestamp in enumerate(info["frames"]):
-            data = process.stdout.read(size[0] * size[1] * 3)
-            if len(data) != size[0] * size[1] * 3:
-                raise RuntimeError("Decoder omitted or truncated an original video frame")
-            result = classifier.classify(np.frombuffer(data, dtype=np.uint8).reshape(size[1], size[0], 3))
-            frames.append({"frame": index, "seconds": float(timestamp["best_effort_timestamp_time"]), **result})
-        if process.stdout.read(1):
-            raise RuntimeError("Decoded frame count differs from the original presentation timestamps")
-        error = process.stderr.read().decode("utf-8", "replace")
-        if process.wait(timeout=10):
-            raise RuntimeError(f"Frame decoder failed: {error}")
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=5)
-    result = {"video": video.name, "sha256": hashlib.sha256(video.read_bytes()).hexdigest(),
+    result = {"video": video.name, "sha256": None,
               "scope": "Every original decoded frame and presentation timestamp; real semantic home and native artwork image matching",
-              "theme": theme, "warm_same_process": warm, "frames_decoded": len(frames),
-              "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH},
-              **timeline_verdict(frames, warm=warm), "frames": frames}
+              "theme": theme, "warm_same_process": warm,
+              "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH}}
+    try:
+        result["sha256"] = hashlib.sha256(video.read_bytes()).hexdigest()
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height:frame=best_effort_timestamp_time", "-of", "json", str(video)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        probe_error = probe.stderr.decode("utf-8", "replace")
+        result["probe"] = {"returncode": probe.returncode, "stderr": probe_error}
+        if probe.returncode or probe_error.strip():
+            raise RuntimeError(f"Original frame probe failed (exit {probe.returncode}): {probe_error}")
+        info = json.loads(probe.stdout)
+        result["original_timestamp_count"] = len(info["frames"])
+        result["original_timestamps_valid"] = False
+        timestamps = original_timestamps(info["frames"])
+        result["original_timestamps_valid"] = True
+        stream = info["streams"][0]
+        size = (MATCH_WIDTH, round(stream["height"] * MATCH_WIDTH / stream["width"]))
+        if abs(size[1] / size[0] - 1560 / 720) > .02:
+            raise RuntimeError("Startup artwork matching requires the recorded portrait emulator aspect ratio")
+        with ExitStack() as references:
+            home_image = references.enter_context(Image.open(home))
+            baseline_image = references.enter_context(Image.open(baseline)) if baseline is not None else None
+            classifier = FrameClassifier(home_image, ET.parse(hierarchy).getroot(), theme, size, baseline_image)
+        # A file avoids a full stderr pipe blocking the decoder on damaged input.
+        with tempfile.TemporaryFile() as decoder_errors:
+            process = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-vsync", "0",
+                "-vf", f"scale={size[0]}:{size[1]}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=decoder_errors)
+            try:
+                for index, stamp in enumerate(timestamps):
+                    data = process.stdout.read(size[0] * size[1] * 3)
+                    if len(data) != size[0] * size[1] * 3:
+                        raise RuntimeError("Decoder omitted or truncated an original video frame")
+                    classification = classifier.classify(np.frombuffer(data, dtype=np.uint8).reshape(size[1], size[0], 3))
+                    frames.append({"frame": index, "seconds": stamp, **classification})
+                if process.stdout.read(1):
+                    raise RuntimeError("Decoded frame count differs from the original presentation timestamps")
+                process.wait(timeout=10)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+                process.stdout.close()
+                decoder_errors.seek(0)
+                decoder_error = decoder_errors.read().decode("utf-8", "replace")
+                result["decoder"] = {"returncode": process.returncode, "stderr": decoder_error}
+            if process.returncode or decoder_error.strip():
+                raise RuntimeError(f"Frame decoder failed (exit {process.returncode}): {decoder_error}")
+        result.update(timeline_verdict(frames, warm=warm))
+    except Exception as error:
+        result.update(timeline_verdict(frames, warm=warm))
+        result["passed"] = False
+        result["evidence_error"] = f"{type(error).__name__}: {error}"
+        result["errors"].insert(0, f"Visual evidence inspection failed: {result['evidence_error']}")
+    result.update(frames_decoded=len(frames), frames=frames)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
 

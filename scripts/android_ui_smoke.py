@@ -1073,6 +1073,8 @@ class SmokeRun:
                     previous_pid = None
                     if kind == "warm":
                         previous_pid = self.text("shell", "pidof", self.package).strip()
+                        if re.fullmatch(r"[1-9]\d*", previous_pid) is None:
+                            raise RuntimeError(f"{name}: warm launch requires one existing App PID; pidof returned {previous_pid!r}")
                         self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
                         time.sleep(.7)
                     self.adb("logcat", "-c")
@@ -1080,7 +1082,7 @@ class SmokeRun:
                         self.launch(name)
                     except RuntimeError as error:
                         errors.append(f"{name}: {error}")
-                    if previous_pid:
+                    if kind == "warm":
                         current_pid = self.text("shell", "pidof", self.package).strip()
                         if current_pid != previous_pid:
                             errors.append(f"{name}: warm resume changed App PID {previous_pid} to {current_pid}")

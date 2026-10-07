@@ -154,12 +154,14 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
-          ram-size: 2048M
+          ram-size: 4096M
           heap-size: 512M
           emulator-boot-timeout: 600
           disable-animations: false
           disable-linux-hw-accel: false
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # swiftshader_indirect is deprecated since emulator 36.4.9. Use the
+          # supported software backend, retaining animations and all ANR gates.
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -camera-back none
           # Functional acceptance has no video encoder load. Startup recordings
           # run on their own emulator below and never substitute for these checks.
           script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output ui-smoke-output --serial emulator-5554
@@ -177,7 +179,7 @@ jobs:
     needs: build
     if: ${{ !cancelled() && needs.build.outputs.apk_built == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -193,16 +195,21 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Prepare every-frame visual acceptance and regression tests
+        timeout-minutes: 10
         shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null
+          set -o pipefail
+          mkdir -p launch-visual-output
+          # Bound mirror stalls and retain preparation errors alongside footage.
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee launch-visual-output/decoder-apt-update.log
+            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
+          fi
           python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
           "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0
           echo "$RUNNER_TEMP/luoshu-startup-visual/bin" >> "$GITHUB_PATH"
           command -v ffmpeg
           command -v ffprobe
-          mkdir -p launch-visual-output
           ffmpeg -version > launch-visual-output/ffmpeg-version.txt
           ffprobe -version > launch-visual-output/ffprobe-version.txt
           "$RUNNER_TEMP/luoshu-startup-visual/bin/python" scripts/android_startup_visual_test.py
@@ -229,12 +236,12 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
-          ram-size: 2048M
+          ram-size: 4096M
           heap-size: 512M
           emulator-boot-timeout: 600
           disable-animations: false
           disable-linux-hw-accel: false
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -camera-back none
           # Four bounded recordings retain every original frame/timestamp.
           # Re-covering home, black blanks and unknown frames fail acceptance.
           script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only

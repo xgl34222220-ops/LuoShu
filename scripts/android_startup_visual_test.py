@@ -2,12 +2,17 @@
 """Synthetic matcher regressions; these never claim emulator acceptance."""
 import unittest
 import xml.etree.ElementTree as ET
+import io
+import json
+import subprocess
+import tempfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from android_startup_visual import FrameClassifier, timeline_verdict
+from android_startup_visual import FrameClassifier, inspect_recording, original_timestamps, timeline_verdict
 
 
 class StartupVisualTest(unittest.TestCase):
@@ -71,6 +76,110 @@ class StartupVisualTest(unittest.TestCase):
         classifier, home, baseline, splash = self.reference()
         self.assertTrue(timeline_verdict(self.frames(classifier, (baseline, home)), warm=True)["passed"])
         self.assertFalse(timeline_verdict(self.frames(classifier, (baseline, splash, home)), warm=True)["passed"])
+
+    def test_cold_without_full_native_logo_has_insufficient_coverage(self):
+        classifier, home, baseline, splash = self.reference()
+        for frames in (self.frames(classifier, (baseline, home)),
+                       [{"frame": 0, "seconds": .01, "state": "logo-transition"},
+                        {"frame": 1, "seconds": .02, "state": "home"}]):
+            verdict = timeline_verdict(frames)
+            self.assertFalse(verdict["passed"])
+            self.assertIn("Insufficient cold-start coverage", " ".join(verdict["errors"]))
+            self.assertNotIn("returned after visible home", " ".join(verdict["errors"]))
+        self.assertTrue(timeline_verdict(self.frames(classifier, (baseline, home)), warm=True)["passed"])
+
+
+class StartupEvidenceInspectionTest(unittest.TestCase):
+    """Fault injection verifies fail-closed evidence handling, not emulator behavior."""
+
+    def test_original_pts_preserve_irregular_frame_intervals(self):
+        stamps = ["0", "0.00001", "0.73", "29.99"]
+        self.assertEqual([float(stamp) for stamp in stamps],
+                         original_timestamps([{"best_effort_timestamp_time": stamp} for stamp in stamps]))
+
+    def test_missing_nonfinite_negative_and_nonincreasing_pts_fail(self):
+        for stamps in ([{}], [{"best_effort_timestamp_time": None}],
+                       [{"best_effort_timestamp_time": "bad"}],
+                       *[[{"best_effort_timestamp_time": stamp}] for stamp in ("nan", "inf", "-inf", "-.01")],
+                       [{"best_effort_timestamp_time": "0"}, {"best_effort_timestamp_time": "0"}],
+                       [{"best_effort_timestamp_time": "2"}, {"best_effort_timestamp_time": "1"}]):
+            with self.subTest(stamps=stamps), self.assertRaises(RuntimeError):
+                original_timestamps(stamps)
+
+    def inspect_fault(self, *, probe_error=b"", probe_returncode=0, timestamps=(".01", ".033333"),
+                      decoder_error=b"", decoder_returncode=0, byte_adjustment=0):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            video, home, hierarchy, output = (root / name for name in ("raw.mp4", "home.png", "home.xml", "verdict.json"))
+            video.write_bytes(b"original-video-evidence")
+            Image.new("RGB", (360, 780)).save(home)
+            hierarchy.write_text("<hierarchy />")
+            info = {"streams": [{"width": 720, "height": 1560}],
+                    "frames": [{"best_effort_timestamp_time": stamp} for stamp in timestamps]}
+            probe = subprocess.CompletedProcess([], probe_returncode, json.dumps(info).encode(), probe_error)
+            raw = bytes(360 * 780 * 3 * 2 + byte_adjustment)
+            process = Mock(stdout=io.BytesIO(raw), returncode=decoder_returncode)
+            process.poll.return_value = decoder_returncode
+            process.wait.return_value = decoder_returncode
+            classifier = Mock()
+            classifier.classify.side_effect = [{"state": "native-logo"}, {"state": "home"}]
+
+            def decode(*args, **kwargs):
+                kwargs["stderr"].write(decoder_error)
+                return process
+
+            with patch("android_startup_visual.subprocess.run", return_value=probe), \
+                 patch("android_startup_visual.subprocess.Popen", side_effect=decode) as decoder, \
+                 patch("android_startup_visual.FrameClassifier", return_value=classifier):
+                result = inspect_recording(video, home, hierarchy, "light", output)
+            self.assertEqual(result, json.loads(output.read_text()))
+            return result, decoder.call_count
+
+    def test_every_original_frame_and_pts_reaches_saved_verdict(self):
+        result, calls = self.inspect_fault()
+        self.assertTrue(result["passed"])
+        self.assertEqual(1, calls)
+        self.assertEqual(2, result["frames_decoded"])
+        self.assertEqual([.01, .033333], [frame["seconds"] for frame in result["frames"]])
+        self.assertEqual([0, 1], [frame["frame"] for frame in result["frames"]])
+
+    def test_probe_error_stderr_fails_even_with_zero_exit(self):
+        result, calls = self.inspect_fault(probe_error=b"corrupt input packet\n")
+        self.assertFalse(result["passed"])
+        self.assertEqual(0, calls)
+        self.assertIn("corrupt input packet", result["evidence_error"])
+        self.assertEqual("corrupt input packet\n", result["probe"]["stderr"])
+
+    def test_decoder_error_stderr_fails_even_with_complete_frames_and_zero_exit(self):
+        result, calls = self.inspect_fault(decoder_error=b"invalid NAL unit\n")
+        self.assertFalse(result["passed"])
+        self.assertEqual(1, calls)
+        self.assertEqual(2, result["frames_decoded"])
+        self.assertEqual("invalid NAL unit\n", result["decoder"]["stderr"])
+        self.assertIn("invalid NAL unit", result["evidence_error"])
+
+    def test_nonzero_probe_and_decoder_exits_fail_and_preserve_evidence(self):
+        for kwargs, stage in (({"probe_returncode": 1}, "probe"), ({"decoder_returncode": 1}, "decoder")):
+            with self.subTest(stage=stage):
+                result, _ = self.inspect_fault(**kwargs)
+                self.assertFalse(result["passed"])
+                self.assertEqual(1, result[stage]["returncode"])
+                self.assertIn("failed", result["evidence_error"])
+
+    def test_truncated_or_extra_decoded_frame_bytes_fail(self):
+        for difference in (-1, 1):
+            with self.subTest(difference=difference):
+                result, _ = self.inspect_fault(byte_adjustment=difference)
+                self.assertFalse(result["passed"])
+                self.assertIn("original", result["evidence_error"])
+                self.assertEqual(1 if difference < 0 else 2, result["frames_decoded"])
+
+    def test_invalid_pts_is_saved_as_failure_before_decode(self):
+        result, calls = self.inspect_fault(timestamps=("0", "nan"))
+        self.assertFalse(result["passed"])
+        self.assertEqual(0, calls)
+        self.assertEqual(0, result["frames_decoded"])
+        self.assertIn("nonfinite", result["evidence_error"])
 
 
 if __name__ == "__main__":

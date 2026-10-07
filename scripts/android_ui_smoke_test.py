@@ -514,6 +514,35 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run.verify_rapid_navigation.assert_not_called()
             run.assert_running.assert_called_once()
 
+    def test_warm_visual_launch_requires_one_existing_process_before_recording(self):
+        for missing_or_ambiguous in ("", "123 456", "not-a-pid"):
+            with self.subTest(pidof=missing_or_ambiguous), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                               record_launch=True, visual_launch_only=True)
+                run.adb = Mock()
+                run.text = Mock(side_effect=["36", missing_or_ambiguous])
+                run.launch = Mock()
+                run.assert_running = Mock()
+                with patch("android_ui_smoke.time.sleep"), \
+                        self.assertRaisesRegex(RuntimeError, "warm launch requires one existing App PID"):
+                    run.run()
+                run.launch.assert_called_once_with("light-cold-start")
+                self.assertFalse(any(check["check"].endswith("same-process") for check in run.checks))
+
+    def test_warm_visual_launch_rejects_a_restarted_process(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                           record_launch=True, visual_launch_only=True)
+            run.adb = Mock()
+            run.text = Mock(side_effect=["36", "123", "456", "789", "789"])
+            run.launch = Mock()
+            run.assert_running = Mock()
+            with patch("android_ui_smoke.time.sleep"), \
+                    self.assertRaisesRegex(RuntimeError, "warm resume changed App PID 123 to 456"):
+                run.run()
+            self.assertEqual(4, run.launch.call_count)
+            self.assertEqual(["dark-warm-start-same-process"], [check["check"] for check in run.checks])
+
     def test_scroll_uses_live_content_and_override_dimensions(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)

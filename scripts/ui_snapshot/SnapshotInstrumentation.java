@@ -47,6 +47,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         AccessibilityNodeInfo root = null;
         long waitStarted = 0;
         int attempts = 0;
+        int incompleteRoots = 0;
         String rootSource = "unavailable";
         try {
             String filename = arguments.getString("filename", "hierarchy-0000.xml");
@@ -70,7 +71,10 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 root = automation.getRootInActiveWindow();
                 if (root != null) {
                     rootSource = "getRootInActiveWindow";
-                    break;
+                    if (hasVisibleChild(root)) break;
+                    incompleteRoots++;
+                    root.recycle();
+                    root = null;
                 }
                 List<AccessibilityWindowInfo> windows = automation.getWindows();
                 try {
@@ -81,7 +85,10 @@ public final class SnapshotInstrumentation extends Instrumentation {
                             root = window.getRoot();
                             if (root != null) {
                                 rootSource = (priority == 0 ? "active-window:" : "focused-window:") + window.getId();
-                                break;
+                                if (hasVisibleChild(root)) break;
+                                incompleteRoots++;
+                                root.recycle();
+                                root = null;
                             }
                         }
                     }
@@ -95,8 +102,11 @@ public final class SnapshotInstrumentation extends Instrumentation {
             }
             result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
             result.putString("attempts", Integer.toString(attempts));
+            result.putString("incomplete_roots", Integer.toString(incompleteRoots));
             result.putString("root_source", rootSource);
-            if (root == null) throw new IllegalStateException("No active accessibility window");
+            if (root == null) throw new IllegalStateException(incompleteRoots == 0
+                    ? "No active accessibility window"
+                    : "No visible accessibility descendants within 8s");
             WindowManager manager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
             Display display = manager.getDefaultDisplay();
             Point size = new Point();
@@ -124,6 +134,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         } catch (Exception failure) {
             if (waitStarted != 0) result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
             result.putString("attempts", Integer.toString(attempts));
+            result.putString("incomplete_roots", Integer.toString(incompleteRoots));
             result.putString("root_source", rootSource);
             result.putString("snapshot", "failed");
             result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
@@ -131,6 +142,23 @@ public final class SnapshotInstrumentation extends Instrumentation {
         } finally {
             if (root != null) root.recycle();
         }
+    }
+
+    /** A new connection can see the window root before its live children arrive.
+     * Keep polling on this same connection within the original eight-second wait;
+     * never declare a root-only snapshot to be usable App content.
+     */
+    private static boolean hasVisibleChild(AccessibilityNodeInfo root) {
+        for (int index = 0; index < root.getChildCount(); index++) {
+            AccessibilityNodeInfo child = root.getChild(index);
+            if (child == null) continue;
+            try {
+                if (child.isVisibleToUser()) return true;
+            } finally {
+                child.recycle();
+            }
+        }
+        return false;
     }
 
     private void dumpNode(XmlSerializer xml, AccessibilityNodeInfo node, int index, Point size, int depth) throws Exception {

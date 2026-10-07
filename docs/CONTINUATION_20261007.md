@@ -54,3 +54,13 @@ API 28 字体库滚动根据真实滚动容器边界发送手势，记录可见�
 - 手机端切换全程及生成、映射、验证、提交、进程清理阶段耗时。主机阶段基准不能换算为整次手机切换速度。
 
 本轮最终 SHA、CI 终态、制品 SHA-256 和逐项结果由交付报告固定；在真实运行前不填写通过。
+
+## c49e5ad 后续失败与修正
+
+`c49e5ad7dd7d059608fa4a4b6dedd9f0b1d4c73f` 的候选构建 [37670249386](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37670249386) 在 `SwitchProviderTest.test_real_switch_router_commits_only_successful_stages` 断言没有缓存配置而失败，签名和 APK/模块构建均未运行。该独立夹具也没有复制完整 mapper 身份输入；补齐 13 个必需文件后原 6 项断言全部通过，生产缺依赖拒绝规则、实际 router、暂存/回滚测试不变。失败产物仅为源码检查日志，不是安装包。
+
+同 SHA 的 [UI 37670249577](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37670249577) 编译、JVM 与 lint 通过，功能 API 28 和 36 仍失败。API 28 第一次平台快照耗费约 11 秒后，独立 helper 返回了只有根节点的树，外层 8 秒预算已经耗尽。helper 现在在原有内部 8 秒窗口中、同一 UiAutomation 连接上等待真实可见子节点，并记录不完整根节点数量；不把根节点当作可用内容，也不延长滚动/搜索预算。
+
+API 36 保留真实同 PID ANR：主线程等待 `RenderProxy::setStopped`，RenderThread 阻塞在 `qemu_pipe_read` / `glCreateProgram_enc`。当时系统总体 CPU 约 99%，Launcher、SystemUI 和 GMS 也留下启动饥饿日志；helper 在该 ANR 之后才创建，不能用 helper 修正声称这项 ANR 消失。工作流针对这份证据将模拟器 RAM 从 2 GiB 调为 4 GiB，并将 emulator 37.2.12 的 `swiftshader_indirect` 改为官方支持的 `software` 后端（[Android 官方图形选项](https://developer.android.com/studio/run/emulator-acceleration)，旧选项自 36.4.9 弃用）。动画、API、真实内容和 ANR 拒绝规则保持不变。是否消除图形阻塞必须由后续运行确定。
+
+逐帧门禁进一步拒绝缺失、非有限、负值或非严格递增的原始 PTS，以及 ffprobe/ffmpeg 返回 0 但输出错误日志的输入；失败诊断与部分已解码帧仍保存。冷启动必须实际拍到原生徽标，否则记为录像覆盖不足，不能据首页画面判定双页已修复。热启动必须先获得一个有效的现存 App PID，随后严格比较同 PID；原有空 PID 跳过路径已移除。新门禁 14 项、UI 帮助函数 49 项通过；尚不替代新原录像的独立人工核对。
