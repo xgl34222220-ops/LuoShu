@@ -12,6 +12,7 @@ on:
       - uninstall.sh
       - module.prop
       - .github/workflows/test-candidate.yml
+      - .github/workflows/android-ui-smoke.yml
   pull_request:
     branches:
       - main
@@ -28,6 +29,7 @@ on:
       - uninstall.sh
       - action.sh
       - .github/workflows/test-candidate.yml
+      - .github/workflows/android-ui-smoke.yml
 permissions:
   contents: read
 jobs:

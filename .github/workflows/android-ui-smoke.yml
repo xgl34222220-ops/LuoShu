@@ -9,6 +9,7 @@ on:
       - module.prop
       - scripts/**
       - .github/workflows/android-ui-smoke.yml
+      - .github/workflows/test-candidate.yml
   pull_request:
     branches: [main]
     paths:
@@ -17,6 +18,7 @@ on:
       - module.prop
       - scripts/**
       - .github/workflows/android-ui-smoke.yml
+      - .github/workflows/test-candidate.yml
   workflow_dispatch:
 
 permissions:
