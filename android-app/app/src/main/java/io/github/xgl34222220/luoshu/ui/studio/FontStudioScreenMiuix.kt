@@ -57,6 +57,7 @@ import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 import kotlin.math.roundToInt
@@ -132,11 +133,11 @@ private fun MiuixCompositionMap(state: FontStudioUiState, actions: FontStudioAct
     val tokens = LocalMiuixTokens.current
     val shape = LuoShuSmoothShape(24.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(
             modifier = Modifier
@@ -202,10 +203,11 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enable
 private fun MiuixStudioTask(state: FontStudioUiState) {
     val tokens = LocalMiuixTokens.current
     Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -249,11 +251,11 @@ private fun MiuixSlotCard(
     val font = slotState.font
     val shape = LuoShuSmoothShape(24.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -353,10 +355,11 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
     val probe = state.coverage
     val metrics = probe.metrics.takeIf { probe.fontId == fontId }
     Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -425,11 +428,11 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
     val selectionReady = state.slots.size == MixSlot.entries.size && state.slots.all { it.font?.valid == true }
     val shape = LuoShuSmoothShape(24.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

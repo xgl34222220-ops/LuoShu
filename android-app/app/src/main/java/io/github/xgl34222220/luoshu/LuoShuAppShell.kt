@@ -67,6 +67,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -100,6 +102,7 @@ import io.github.xgl34222220.luoshu.ui.home.toHomeUiState
 import io.github.xgl34222220.luoshu.ui.library.FontLibraryActions
 import io.github.xgl34222220.luoshu.ui.library.FontLibraryRoute
 import io.github.xgl34222220.luoshu.ui.library.toFontLibraryUiState
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuGlassBackdropDrawable
 import io.github.xgl34222220.luoshu.ui.logs.LogsActions
 import io.github.xgl34222220.luoshu.ui.logs.LogsRoute
 import io.github.xgl34222220.luoshu.ui.logs.toLogsUiState
@@ -515,19 +518,15 @@ internal fun LuoShuAppShell(
 
 @Composable
 private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
-    val scheme = MaterialTheme.colorScheme
+    val pureBlack = appearance.amoledBlack && dark
+    val backdrop = remember(dark, pureBlack) { LuoShuGlassBackdropDrawable(dark, pureBlack) }
     Box(
         Modifier.fillMaxSize()
             .background(LocalMiuixTokens.current.pageBackground)
             .drawBehind {
-                if (!appearance.amoledBlack || !dark) {
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = if (dark) .035f else .04f), Color.Transparent),
-                            center = Offset(size.width * .92f, 0f),
-                            radius = size.width,
-                        ),
-                    )
+                if (appearance.glassEnabled) {
+                    backdrop.setBounds(0, 0, size.width.toInt(), size.height.toInt())
+                    drawIntoCanvas { backdrop.draw(it.nativeCanvas) }
                 }
             },
     )

@@ -23,6 +23,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -36,6 +37,7 @@ import android.view.Gravity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -48,6 +50,7 @@ import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.resolveAndCacheFontDefaultAxes
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -101,10 +104,11 @@ private fun MiuixFontPickerDialog(
     val filtered = remember(fonts, query) { filterFonts(fonts, query) }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp).luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
             shape = LuoShuSmoothShape(32.dp),
-            color = tokens.elevatedCardBackground,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(
                 modifier = Modifier.padding(18.dp),
@@ -130,9 +134,14 @@ private fun MiuixFontPickerDialog(
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
                     singleLine = true,
                     shape = LuoShuSmoothShape(20.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = tokens.glassCardColor,
+                        unfocusedContainerColor = tokens.glassCardColor,
+                        unfocusedBorderColor = tokens.cardOutline,
+                    ),
                     leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                     placeholder = { Text("搜索名称、格式或字重") },
                 )
@@ -168,14 +177,17 @@ private fun MiuixFontPickerDialog(
                                     enabled = resolvingId == null,
                                     role = Role.RadioButton,
                                     onClick = { onChoose(font) },
-                                ),
+                                )
+                                .luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
                             shape = LuoShuSmoothShape(22.dp),
                             color = if (font.id == selected) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = .09f)
+                                lerp(tokens.glassCardColor, MaterialTheme.colorScheme.primaryContainer, .26f)
                             } else {
-                                tokens.cardBackground
+                                tokens.glassCardColor
                             },
-                            border = BorderStroke(1.dp, if (font.id == selected) MaterialTheme.colorScheme.primary.copy(alpha = .25f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
+                            border = if (font.id == selected) {
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .28f))
+                            } else BorderStroke(1.dp, tokens.glassOutlineBrush),
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),

@@ -21,6 +21,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceRepository
+import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.launch.LuoShuLaunchController
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             if (openTaskCenter) TaskCenterHost() else LuoShuHost()
         }
+        launchController.attachArtwork()
         observeFirstDraw(activityStartedAt)
     }
 
@@ -70,6 +72,7 @@ class MainActivity : ComponentActivity() {
                 view.post {
                     removeFirstDrawListener()
                     firstContentDrawn = true
+                    launchController.onContentDrawn()
                     requestImportNotificationPermissionWhenReady()
                 }
             }
@@ -132,6 +135,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
+        if (openTaskCenter) launchController.finishForTaskEntry()
         requestImportNotificationPermissionWhenReady()
     }
 
@@ -161,9 +165,18 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 appearanceRepository.settings
-                    .map { settings -> settings.highRefreshRate }
+                    .map { settings -> Triple(settings.highRefreshRate, settings.themeMode, settings.amoledBlack) }
                     .distinctUntilChanged()
-                    .collect(displayPerformanceController::setHighRefreshEnabled)
+                    .collect { (highRefresh, themeMode, amoledBlack) ->
+                        displayPerformanceController.setHighRefreshEnabled(highRefresh)
+                        val dark = when (themeMode) {
+                            ThemeMode.LIGHT -> false
+                            ThemeMode.DARK -> true
+                            ThemeMode.SYSTEM -> resources.configuration.uiMode and
+                                Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+                        }
+                        launchController.applyAppearance(dark, dark && amoledBlack)
+                    }
             }
         }
     }

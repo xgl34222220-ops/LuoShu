@@ -65,6 +65,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -120,17 +121,18 @@ internal fun HomeScreenMiuix(
         }
         item(key = "current-font") {
             Surface(
+                modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(28.dp)),
                 shape = LuoShuSmoothShape(28.dp),
                 color = cardColor,
-                shadowElevation = 0.dp,
+                shadowElevation = tokens.cardShadowElevation,
                 border = BorderStroke(
                     1.dp,
-                    tokens.cardOutline,
+                    tokens.glassOutlineBrush,
                 ),
             ) {
                 Column(
                     Modifier.fillMaxWidth()
-                        .background(Brush.linearGradient(listOf(scheme.primaryContainer.copy(alpha = .20f), cardColor)))
+                        .background(Brush.linearGradient(listOf(scheme.primary.copy(alpha = .045f), Color.Transparent)))
                         .padding(22.dp),
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
@@ -187,8 +189,10 @@ internal fun HomeScreenMiuix(
                 Surface(
                     color = if (failed) scheme.errorContainer else cardColor,
                     shape = shape,
-                    border = BorderStroke(1.dp, if (failed) scheme.error.copy(alpha = .16f) else tokens.cardOutline),
-                    modifier = Modifier.fillMaxWidth().clip(shape).clickable(onClick = actions.openLogs),
+                    border = if (failed) BorderStroke(1.dp, scheme.error.copy(alpha = .16f))
+                        else BorderStroke(1.dp, tokens.glassOutlineBrush),
+                    shadowElevation = tokens.cardShadowElevation,
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape).clip(shape).clickable(onClick = actions.openLogs),
                 ) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -235,7 +239,9 @@ internal fun HomeScreenMiuix(
             }
         }
         item(key = "device-details") {
-            Surface(shape = shape, color = cardColor, border = BorderStroke(1.dp, tokens.cardOutline)) {
+            Surface(modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape), shape = shape,
+                color = cardColor, border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                shadowElevation = tokens.cardShadowElevation) {
                 Column(Modifier.fillMaxWidth()) {
                     Row(
                         modifier = Modifier.fillMaxWidth()
@@ -290,11 +296,11 @@ private fun HomeShortcut(title: String, subtitle: String, icon: ImageVector, onC
     Surface(
         onClick = onClick,
         interactionSource = interactionSource,
-        modifier = modifier.luoShuPressScale(interactionSource),
+        modifier = modifier.luoShuPressScale(interactionSource).luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         color = tokens.cardBackground,
-        shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        shadowElevation = tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Surface(shape = LuoShuSmoothShape(15.dp), color = tokens.elevatedCardBackground) {

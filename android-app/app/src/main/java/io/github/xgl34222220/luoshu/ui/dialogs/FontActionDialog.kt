@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 internal enum class FontActionKind(
     val title: String,
@@ -67,10 +68,11 @@ private fun MiuixFontActionDialog(
     val tokens = LocalMiuixTokens.current
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp).luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
             shape = LuoShuSmoothShape(32.dp),
-            color = tokens.elevatedCardBackground,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(
                 modifier = Modifier.padding(22.dp),

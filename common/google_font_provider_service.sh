@@ -18,6 +18,7 @@ fi
 
 BRIDGE="$MODDIR/common/google_font_provider_bridge.sh"
 THEME_BRIDGE="$MODDIR/common/hyperos_theme_font_bridge.sh"
+FALLBACK="$MODDIR/common/google_font_fallback.sh"
 LOCK="$_provider_tasks/google-font-provider.lock"
 [ -f "$BRIDGE" ] || exit 0
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
@@ -73,6 +74,22 @@ if [ -z "$_provider_active" ] || [ "$_provider_active" = default ] || \
     exit $?
 fi
 
+# This remains a finite boot/apply pass. Only a validated existing undo record
+# with a same-install GMS upgrade reset can cause a component write. A missing
+# record, unchanged version or an explicit external edit remains untouched.
+_provider_fallback_rc=0
+if [ -f "$FALLBACK" ]; then
+    _provider_fallback_log="${LUOSHU_LOG_DIR:-$MODDIR/logs}/google-font-compatibility.log"
+    mkdir -p "${_provider_fallback_log%/*}" 2>/dev/null || true
+    _provider_fallback_bytes=$(stat -c '%s' "$_provider_fallback_log" 2>/dev/null)
+    case "$_provider_fallback_bytes" in ''|*[!0-9]*) _provider_fallback_bytes=0 ;; esac
+    [ "$_provider_fallback_bytes" -lt 1048576 ] || \
+        mv -f "$_provider_fallback_log" "${_provider_fallback_log}.1" 2>/dev/null || true
+    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+        sh "$FALLBACK" reconcile-owned --json >> "$_provider_fallback_log" 2>&1 || \
+        _provider_fallback_rc=1
+fi
+
 provider_run "$BRIDGE" apply
 _provider_google_rc=$?
 _provider_theme_rc=2
@@ -86,7 +103,7 @@ _provider_refresh_rc=0
 if [ -s "$MODDIR/config/google-font-refresh-pending.conf" ]; then
     provider_run "$BRIDGE" refresh || _provider_refresh_rc=1
 fi
-case "$_provider_google_rc:$_provider_theme_rc:$_provider_refresh_rc" in
-    0:0:0|0:2:0|2:0:0|2:2:0) exit 0 ;;
+case "$_provider_google_rc:$_provider_theme_rc:$_provider_refresh_rc:$_provider_fallback_rc" in
+    0:0:0:0|0:2:0:0|2:0:0:0|2:2:0:0) exit 0 ;;
     *) exit 1 ;;
 esac

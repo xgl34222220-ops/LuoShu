@@ -11,11 +11,13 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.materialkolor.DynamicMaterialTheme
 import com.materialkolor.PaletteStyle
@@ -55,13 +57,21 @@ data class MiuixTokens(
     val textPrimary: Color,
     val textSecondary: Color,
     val cardOutline: Color = Color(0xFFE3E2DD),
+    val glassEnabled: Boolean = false,
+    val glassDialogColor: Color = cardBackground,
+    val glassHighlight: Color = Color.Transparent,
+    val glassOutlineBrush: Brush = Brush.linearGradient(listOf(cardOutline, cardOutline)),
+    val cardShadowElevation: Dp = 0.dp,
     val success: Color = Color(0xFF27BE83),
     val warning: Color = Color(0xFFF0A532),
-)
+) {
+    val glassCardColor: Color
+        get() = cardBackground
+}
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF7F6F2),
+        pageBackground = Color(LuoShuGlassPalette.LightBackground),
         cardBackground = Color.White,
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF16171B),
@@ -92,11 +102,27 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         // Keep large error surfaces quiet in both modes while retaining
         // readable error text and icons across every shared screen.
         val scheme = MaterialTheme.colorScheme
+        val backdrop = when {
+            pureBlack -> Color.Black
+            dark -> Color(LuoShuGlassPalette.DarkBackground)
+            else -> Color(LuoShuGlassPalette.LightBackground)
+        }
+        val surface = if (dark) Color(0xFF222A3B) else Color(0xFFF8FAFF)
+        fun materialSurface(alpha: Float) = surface.copy(alpha = if (settings.glassEnabled) alpha else 1f)
         MaterialTheme(
             colorScheme = scheme.copy(
+                background = backdrop,
+                surface = materialSurface(.88f),
+                surfaceContainerLowest = materialSurface(.78f),
+                surfaceContainerLow = materialSurface(.84f),
+                surfaceContainer = materialSurface(.89f),
+                surfaceContainerHigh = materialSurface(.94f),
+                surfaceContainerHighest = materialSurface(.97f),
                 error = if (dark) Color(0xFFE9ABA7) else Color(0xFFA64A4A),
                 onError = if (dark) Color(0xFF3D1F1D) else Color.White,
-                errorContainer = if (dark) Color(0xFF342627) else Color(0xFFF4E9E7),
+                errorContainer = (if (dark) Color(0xFF342627) else Color(0xFFF4E9E7)).copy(
+                    alpha = if (settings.glassEnabled) .94f else 1f,
+                ),
                 onErrorContainer = if (dark) Color(0xFFF1D4D1) else Color(0xFF633734),
             ),
         ) {
@@ -111,25 +137,53 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
     val dark = resolveDark(settings.themeMode)
     val pureBlack = dark && settings.amoledBlack
     val scheme = MaterialTheme.colorScheme
+    val glass = settings.glassEnabled
+    val lightFill = Color(0xFFF8FAFF)
+    val darkFill = if (pureBlack) Color(0xFF181C26) else Color(0xFF222A3B)
+    val cardOutline = if (glass) {
+        Color.White.copy(alpha = if (dark) .16f else .75f)
+    } else {
+        scheme.onSurface.copy(alpha = if (dark) .10f else .07f)
+    }
     val tokens = MiuixTokens(
         pageBackground = when {
             pureBlack -> Color.Black
-            dark -> lerp(Color(0xFF151619), scheme.primaryContainer, .03f)
-            else -> lerp(Color(0xFFF7F6F2), scheme.primaryContainer, .03f)
+            dark -> Color(LuoShuGlassPalette.DarkBackground)
+            else -> Color(LuoShuGlassPalette.LightBackground)
         },
         cardBackground = when {
-            pureBlack -> Color(0xFF111214)
-            dark -> scheme.surfaceContainerLow
-            else -> scheme.surfaceContainerLowest
+            glass && dark -> darkFill.copy(alpha = .70f)
+            glass -> lightFill.copy(alpha = .72f)
+            dark -> darkFill
+            else -> lightFill
         },
         elevatedCardBackground = when {
-            pureBlack -> Color(0xFF1B1C20)
-            dark -> scheme.surfaceContainerHigh
-            else -> lerp(scheme.surfaceContainerLowest, scheme.primaryContainer, .12f)
+            glass && dark -> Color(0xFF35405A).copy(alpha = .72f)
+            glass -> Color.White.copy(alpha = .66f)
+            dark -> Color(0xFF30384A)
+            else -> lerp(lightFill, scheme.primaryContainer, .06f)
         },
         textPrimary = scheme.onSurface,
         textSecondary = scheme.onSurfaceVariant,
-        cardOutline = scheme.onSurface.copy(alpha = if (dark) .10f else .07f),
+        cardOutline = cardOutline,
+        glassEnabled = glass,
+        glassDialogColor = when {
+            glass && dark -> Color(0xFF1B2333).copy(alpha = .95f)
+            glass -> lightFill.copy(alpha = .94f)
+            dark -> darkFill
+            else -> lightFill
+        },
+        glassHighlight = if (glass) Color.White.copy(alpha = if (dark) .07f else .28f) else Color.Transparent,
+        glassOutlineBrush = Brush.linearGradient(
+            if (glass) {
+                listOf(
+                    Color.White.copy(alpha = if (dark) .24f else .90f),
+                    Color.White.copy(alpha = if (dark) .055f else .30f),
+                    Color(LuoShuGlassPalette.BlueGlow).copy(alpha = if (dark) .22f else .20f),
+                )
+            } else listOf(cardOutline, cardOutline),
+        ),
+        cardShadowElevation = if (glass) if (dark) 1.dp else 2.dp else 0.dp,
         success = if (dark) Color(0xFF69D9AD) else Color(0xFF187B58),
         warning = if (dark) Color(0xFFF3C378) else Color(0xFF956319),
     )

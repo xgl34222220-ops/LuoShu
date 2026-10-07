@@ -31,8 +31,9 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.NativeImportPhase
 import io.github.xgl34222220.luoshu.NativeImportState
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
-import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 @Composable
 internal fun ImportTaskControls(
@@ -49,14 +50,14 @@ internal fun ImportTaskControls(
 
     val tokens = LocalMiuixTokens.current
     val shape = LuoShuSmoothShape(24.dp)
-    val container = tokens.elevatedCardBackground
+    val container = tokens.glassCardColor
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
-        color = container.copy(alpha = .98f),
-        shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        color = container,
+        shadowElevation = tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(horizontal = 15.dp, vertical = 13.dp)) {
             Text(

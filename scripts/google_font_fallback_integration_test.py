@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Real v1 journal migration + built-in state/actions; no device render claims."""
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -12,6 +14,17 @@ import unittest
 from google_font_fallback_test import m, FakeAndroid
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class RecoveryAndroid(FakeAndroid):
+    version = 123456
+    package_state = 0
+
+    def snapshot(self, user):
+        current = super().snapshot(user)
+        current['versionCode'] = self.version
+        current['packageState'] = self.package_state
+        return current
 
 class IntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -131,6 +144,255 @@ class IntegrationTest(unittest.TestCase):
         self.assertNotIn('model.enable()', page.split('confirmButton')[0])
         uninstall = (ROOT / 'uninstall.sh').read_text()
         self.assertLess(uninstall.index('restore-owned --json'), uninstall.index('. "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"'))
+
+
+class OwnedRecoveryTest(unittest.TestCase):
+    setUp = IntegrationTest.setUp
+    status = IntegrationTest.status
+
+    def enable(self, original=0):
+        self.backend = RecoveryAndroid()
+        self.backend.states[0] = original
+        m.enable(self.backend, self.journal)
+        self.backend.calls.clear()
+
+    def upgrade_reset(self):
+        self.backend.version += 1
+        self.backend.states[0] = self.journal.read()['original']
+
+    def reconcile(self):
+        with m.locked_store(self.store):
+            return m.reconcile_owned(self.backend, self.journal, self.module)
+
+    def reapply(self):
+        with m.locked_store(self.store):
+            return m.reapply_owned(self.backend, self.journal, self.module)
+
+    def test_missing_journal_does_not_claim_or_modify_external_settings(self):
+        self.backend.states[0] = 2
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.reads, 0)
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(self.status()['canReapply'])
+        with self.assertRaises(m.FallbackError):
+            self.reapply()
+
+    def test_status_stays_read_only_for_a_verified_upgrade_reset(self):
+        self.enable()
+        self.upgrade_reset()
+        before = self.journal.path.read_bytes()
+        result = self.status()
+        self.assertEqual(result['state'], 'changed')
+        self.assertTrue(result['canReapply'])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_upgrade_reset_reapplies_once_and_preserves_original_undo(self):
+        self.enable()
+        before = self.journal.read()
+        self.upgrade_reset()
+        result = self.reconcile()
+        self.assertTrue(result['recoveredAfterUpgrade'])
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        saved = self.journal.read()
+        for key, value in before.items():
+            self.assertEqual(saved[key], value)
+        self.assertEqual(saved['lastVerifiedVersionCode'], self.backend.version)
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertIsNone(self.journal.read())
+
+    def test_still_disabled_upgrade_only_checkpoints_metadata_not_android(self):
+        self.enable()
+        self.backend.version += 1
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.read()['lastVerifiedVersionCode'], self.backend.version)
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [], 'a previous upgrade must not justify a later edit')
+
+    def test_unchanged_or_older_version_never_overwrites_an_external_reset(self):
+        for delta in (0, -1):
+            with self.subTest(delta=delta):
+                self.journal.clear()
+                self.enable()
+                before = self.journal.path.read_bytes()
+                self.backend.version += delta
+                self.backend.states[0] = 0
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_explicit_external_enable_is_not_overwritten_even_after_upgrade(self):
+        self.enable()
+        self.backend.version += 1
+        self.backend.states[0] = 1
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertFalse(self.status()['canReapply'])
+        with self.assertRaises(m.FallbackError):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [])
+
+    def test_explicit_original_enable_requires_an_explicit_reapply(self):
+        self.enable(original=1)
+        self.upgrade_reset()
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.reapply()['status'], 'component-disabled')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        self.assertEqual(self.journal.read()['original'], 1)
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 1)
+
+    def test_explicit_reapply_cycles_only_the_owned_component_and_retains_undo(self):
+        self.enable()
+        result = self.reapply()
+        self.assertEqual(result['status'], 'component-disabled')
+        self.assertEqual(self.backend.calls, [(0, 0), (0, 2)])
+        self.assertEqual(self.backend.states[10], 2)
+        self.assertEqual(self.journal.read()['original'], 0)
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_explicit_reapply_from_original_state_uses_one_disable_without_losing_undo(self):
+        self.enable()
+        self.backend.states[0] = 0
+        self.assertEqual(self.reapply()['status'], 'component-disabled')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_new_install_or_absent_provider_is_never_repaired(self):
+        for change in ('appId', 'declared', 'packageState'):
+            with self.subTest(change=change):
+                self.journal.clear()
+                self.enable()
+                self.upgrade_reset()
+                if change == 'appId':
+                    self.backend.appid += 1
+                elif change == 'declared':
+                    self.backend.declared = False
+                else:
+                    self.backend.package_state = 2
+                before = self.journal.path.read_bytes()
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                with self.assertRaises(m.FallbackError):
+                    self.reapply()
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_inactive_module_preserves_undo_without_reapplying(self):
+        self.enable()
+        self.upgrade_reset()
+        for marker in ('default', 'disable', 'remove'):
+            with self.subTest(marker=marker):
+                if marker == 'default':
+                    (self.module / 'config/active_font.conf').write_text('default\n')
+                else:
+                    (self.module / marker).touch()
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                with self.assertRaises(m.FallbackError):
+                    self.reapply()
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.read()['original'], 0)
+                (self.module / 'config/active_font.conf').write_text('custom\n')
+                if marker != 'default':
+                    (self.module / marker).unlink()
+
+    def test_recovery_obeys_recorded_user_without_touching_user_zero(self):
+        self.backend = RecoveryAndroid({0: 0, 10: 0})
+        self.journal = m.Journal(self.store, 10)
+        m.enable(self.backend, self.journal)
+        self.backend.calls.clear()
+        self.upgrade_reset()
+        self.backend.states[10], self.backend.states[0] = 0, 0
+        self.assertTrue(self.reconcile()['recoveredAfterUpgrade'])
+        self.assertEqual(self.backend.calls, [(10, 2)])
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_snapshot_race_is_rejected_before_any_component_write(self):
+        self.enable()
+        self.upgrade_reset()
+        snapshot, count = self.backend.snapshot, 0
+        def raced(user):
+            nonlocal count
+            count += 1
+            if count == 2:
+                self.backend.states[user] = 1
+            return snapshot(user)
+        self.backend.snapshot = raced
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_intermediate_failure_rolls_back_to_pre_reapply_disabled_state(self):
+        self.enable()
+        before = self.journal.path.read_bytes()
+        self.backend.fail, self.backend.mutate_then_fail = 0, True
+        with self.assertRaisesRegex(m.FallbackError, '已回到本次操作前状态'):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [(0, 0), (0, 2)])
+        self.assertEqual(self.backend.states[0], 2)
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_final_disable_error_after_real_mutation_retains_the_original_record(self):
+        self.enable()
+        self.backend.fail, self.backend.mutate_then_fail = 2, True
+        with self.assertRaisesRegex(m.FallbackError, '已回到本次操作前状态'):
+            self.reapply()
+        self.assertEqual(self.backend.states[0], 2)
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_failed_final_disable_and_failed_rollback_keep_undo_for_restore(self):
+        self.enable()
+        self.backend.fail = 2
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reapply()
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertEqual(self.journal.read()['original'], 0)
+        self.assertTrue(self.status()['canRestore'])
+        self.backend.fail = None
+        m.restore(self.backend, self.journal)
+        self.assertIsNone(self.journal.read())
+
+    def test_false_success_during_upgrade_repair_returns_original_state_and_keeps_undo(self):
+        self.enable()
+        self.upgrade_reset()
+        self.backend.fake_success = True
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_corrupt_version_checkpoint_cannot_authorize_automatic_repair(self):
+        for value in (None, True, '1', -1):
+            with self.subTest(value=value):
+                self.journal.clear()
+                self.enable()
+                self.upgrade_reset()
+                self.journal.save({**self.journal.read(), 'lastVerifiedVersionCode': value})
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+
+    def test_actual_cli_recovery_routes_under_lock_and_returns_fresh_diagnostic(self):
+        self.enable()
+        self.upgrade_reset()
+        output = io.StringIO()
+        with patch.object(m, 'Android', return_value=self.backend), \
+                patch.object(m, 'STORE', self.store), \
+                patch.object(m, 'LEGACY_STORE', self.root / 'legacy'), \
+                patch.object(m, 'MODULE', self.module), \
+                patch('sys.argv', ['google_font_fallback.py', 'reconcile-owned', '--user', '0', '--json']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(m.main(), 0)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result['recoveredAfterUpgrade'])
+        self.assertEqual(result['current']['state'], 'enabled')
+        self.assertTrue(result['current']['canReapply'])
+        self.assertEqual(self.backend.calls, [(0, 2)])
 
 
 class JournalMigrationTest(unittest.TestCase):

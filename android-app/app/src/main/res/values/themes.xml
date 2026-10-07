@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launch_background">#F7F6F2</color>
+    <color name="launch_background">#EEF1FA</color>
+    <color name="launch_gradient_start">#CDDDF4</color>
+    <color name="launch_gradient_center">#E2DDF3</color>
+    <color name="launch_gradient_end">#D1E8ED</color>
     <color name="launch_ink">#536B8E</color>
     <color name="launch_gold">#B39864</color>
     <bool name="launch_light_system_bars">true</bool>
@@ -17,7 +20,7 @@
         <item name="android:fontFamily">sans</item>
     </style>
 
-    <!-- API 28–30 use the starting window itself; no extra Activity or loading page. -->
+    <!-- API 28–30 use the native gradient starting window; no loading Activity. -->
     <style name="Theme.LuoShuLaunch" parent="Theme.LuoShuHybrid">
         <item name="android:windowBackground">@drawable/luoshu_launch_background</item>
     </style>

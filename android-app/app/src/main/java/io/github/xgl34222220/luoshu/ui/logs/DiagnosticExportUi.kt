@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,14 +24,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
-import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 internal data class DiagnosticExportState(
     val busy: Boolean = false,
@@ -174,9 +178,15 @@ internal fun DiagnosticExportDialog(
     onDismiss: () -> Unit,
 ) {
     val failed = state.error.isNotBlank()
+    val tokens = LocalMiuixTokens.current
+    val shape = LuoShuSmoothShape(34.dp)
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = LuoShuSmoothShape(34.dp),
+        modifier = Modifier.shadow(tokens.cardShadowElevation, shape)
+            .luoShuGlassHighlight(shape).border(1.dp, tokens.glassOutlineBrush, shape),
+        shape = shape,
+        containerColor = tokens.glassDialogColor,
+        tonalElevation = 0.dp,
         icon = {
             Icon(
                 if (failed) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
@@ -199,7 +209,8 @@ internal fun DiagnosticExportDialog(
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         shape = LuoShuSmoothShape(18.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        color = tokens.glassCardColor,
+                        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
                     ) {
                         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary)

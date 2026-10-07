@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.NativeImportViewModel
@@ -320,11 +321,12 @@ private fun FontDirectoryMonitorButton(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier,
+        modifier = modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
         shape = LuoShuSmoothShape(22.dp),
-        color = LocalMiuixTokens.current.cardBackground,
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
-        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -373,11 +375,11 @@ private fun FontDirectoryMonitorDialog(
     val diff = scan?.diff ?: FontDirectoryDiff()
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(34.dp)),
             shape = LuoShuSmoothShape(34.dp),
-            color = LocalMiuixTokens.current.elevatedCardBackground,
-            shadowElevation = 0.dp,
-            border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
+            color = LocalMiuixTokens.current.glassDialogColor,
+            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -408,9 +410,11 @@ private fun FontDirectoryMonitorDialog(
                 }
 
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
                     shape = LuoShuSmoothShape(20.dp),
-                    color = LocalMiuixTokens.current.cardBackground,
+                    color = LocalMiuixTokens.current.glassCardColor,
+                    border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                    shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
@@ -433,9 +437,11 @@ private fun FontDirectoryMonitorDialog(
 
                 if (errorMessage.isNotBlank()) {
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
                         shape = LuoShuSmoothShape(18.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
+                        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                     ) {
                         Row(Modifier.padding(11.dp), verticalAlignment = Alignment.Top) {
                             Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)

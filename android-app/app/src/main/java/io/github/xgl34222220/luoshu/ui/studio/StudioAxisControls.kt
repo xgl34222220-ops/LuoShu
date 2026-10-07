@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.rememberWeightAxisInfo
@@ -92,8 +93,11 @@ internal fun MiuixStudioAxisControls(
                         label = "axisValueBadge",
                     )
                     Surface(
+                        modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
                         shape = LuoShuSmoothShape(22.dp),
-                        color = tokens.textPrimary.copy(alpha = .035f),
+                        color = tokens.glassCardColor,
+                        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                        shadowElevation = tokens.cardShadowElevation,
                     ) {
                         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -164,8 +168,11 @@ internal fun MiuixStudioAxisControls(
         }
         else -> {
             Surface(
+                modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
                 shape = LuoShuSmoothShape(18.dp),
-                color = tokens.textPrimary.copy(alpha = .035f),
+                color = tokens.glassCardColor,
+                border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                shadowElevation = tokens.cardShadowElevation,
             ) {
                 Text(
                     "字重：${fontWeightName(fontFixedWeight(font))} · 无需调节",
@@ -252,8 +259,8 @@ private fun InteractiveAxisSlider(
                 shape = LuoShuSmoothShape(14.dp),
                 color = scheme.primary,
                 contentColor = scheme.onPrimary,
-                shadowElevation = 0.dp,
-                border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
+                shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+                border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
             ) {
                 Text(
                     fontAxisValueLabel(current),

@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -143,6 +147,13 @@ internal fun StudioPresetDialog(
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
+        containerColor = LocalMiuixTokens.current.glassDialogColor,
+        tonalElevation = 0.dp,
+        modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(34.dp))
+            .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(34.dp))
+            .border(
+                BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(34.dp),
+            ),
         shape = LuoShuSmoothShape(34.dp),
         icon = {
             if (busy) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
@@ -183,9 +194,11 @@ internal fun StudioPresetDialog(
                     }
                     presets.isEmpty() -> {
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
                             shape = LuoShuSmoothShape(18.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            color = LocalMiuixTokens.current.glassCardColor,
+                            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                         ) {
                             Text(
                                 "还没有本地方案。保存后可在这里一键载入。",
@@ -241,6 +254,13 @@ internal fun StudioPresetDialog(
     renaming?.let { preset ->
         AlertDialog(
             onDismissRequest = { renaming = null },
+            containerColor = LocalMiuixTokens.current.glassDialogColor,
+            tonalElevation = 0.dp,
+            modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(32.dp))
+                .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(32.dp))
+                .border(
+                    BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(32.dp),
+                ),
             shape = LuoShuSmoothShape(32.dp),
             icon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
             title = { Text("重命名方案", fontWeight = FontWeight.SemiBold) },
@@ -283,9 +303,11 @@ private fun PresetRow(
     onDelete: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
         shape = LuoShuSmoothShape(20.dp),
         color = LocalMiuixTokens.current.elevatedCardBackground,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 11.dp, top = 9.dp, end = 6.dp, bottom = 9.dp),

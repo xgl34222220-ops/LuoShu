@@ -40,13 +40,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
@@ -90,10 +91,11 @@ internal fun NativeImportOverlay(
     if (embedded) {
         val tokens = LocalMiuixTokens.current
         Surface(
-            modifier = modifier.fillMaxWidth(),
+            modifier = modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(28.dp)),
             shape = LuoShuSmoothShape(28.dp),
-            color = tokens.cardBackground,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
+            color = tokens.glassCardColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -152,7 +154,6 @@ private fun ImportActionButton(
 ) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalMiuixTokens.current
-    val dark = scheme.background.luminance() < .5f
     val taskVisible = state.busy || state.paused
     val targetWidth = when {
         !expanded -> 54.dp
@@ -175,12 +176,11 @@ private fun ImportActionButton(
         animationSpec = spring(dampingRatio = .82f, stiffness = 470f),
         label = "nativeImportGlassHeight",
     )
-    val glassColor = if (embedded) {
-        scheme.primary.copy(alpha = if (dark) .13f else .07f)
-    } else {
-        tokens.elevatedCardBackground.copy(alpha = if (dark) .94f else .96f)
+    val glassColor = when {
+        !tokens.glassEnabled && embedded -> scheme.primaryContainer
+        embedded -> lerp(tokens.glassCardColor, scheme.primaryContainer, .18f)
+        else -> tokens.glassDialogColor
     }
-    val borderColor = scheme.outlineVariant.copy(alpha = .55f)
     val textColor = tokens.textPrimary
 
     val buttonModifier = if (embedded) {
@@ -191,11 +191,12 @@ private fun ImportActionButton(
     Surface(
         onClick = onImport,
         enabled = enabled,
-        modifier = buttonModifier,
+        modifier = buttonModifier.luoShuGlassHighlight(LuoShuSmoothShape(if (embedded) 20.dp else 26.dp)),
         shape = LuoShuSmoothShape(if (embedded) 20.dp else 26.dp),
         color = glassColor,
         contentColor = scheme.primary,
-        border = BorderStroke(1.dp, borderColor),
+        shadowElevation = if (embedded) 0.dp else tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         if (!expanded) {
             Box(contentAlignment = Alignment.Center) {
@@ -283,10 +284,11 @@ private fun ImportResultDialog(
     val tokens = LocalMiuixTokens.current
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp).luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
             shape = LuoShuSmoothShape(32.dp),
-            color = tokens.elevatedCardBackground,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),

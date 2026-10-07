@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +23,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -28,7 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 internal enum class DeviceTrustLevel {
     SYSTEM,
@@ -178,13 +183,15 @@ internal fun DeviceTrustChip(
     modifier: Modifier = Modifier,
 ) {
     val presentation = deviceTrustPresentation(state)
+    val tokens = LocalMiuixTokens.current
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
         shape = LuoShuSmoothShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        color = tokens.glassCardColor,
         contentColor = presentation.color,
-        shadowElevation = 0.dp,
+        shadowElevation = tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp),
@@ -212,9 +219,15 @@ internal fun DeviceTrustDialog(
     onOpenAcceptance: () -> Unit = {},
 ) {
     val presentation = deviceTrustPresentation(state)
+    val tokens = LocalMiuixTokens.current
+    val shape = LuoShuSmoothShape(34.dp)
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = LuoShuSmoothShape(34.dp),
+        modifier = Modifier.shadow(tokens.cardShadowElevation, shape)
+            .luoShuGlassHighlight(shape).border(1.dp, tokens.glassOutlineBrush, shape),
+        shape = shape,
+        containerColor = tokens.glassDialogColor,
+        tonalElevation = 0.dp,
         icon = { Icon(presentation.icon, contentDescription = null, tint = presentation.color) },
         title = { Text(presentation.title, fontWeight = FontWeight.Black) },
         text = {

@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.settings
 
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -67,6 +68,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import io.github.xgl34222220.luoshu.ui.theme.luoShuPressScale
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -195,7 +197,11 @@ internal fun SettingsHubRoute(
                     .navigationBarsPadding()
                     .padding(start = 6.dp)
                     .clip(detailShape)
-                    .background(LocalMiuixTokens.current.pageBackground),
+                    .background(
+                        LocalMiuixTokens.current.pageBackground.copy(
+                            alpha = if (LocalMiuixTokens.current.glassEnabled) .46f else 1f,
+                        ),
+                    ),
             ) {
                 LuoShuDetailBar(title = target.label, onBack = { sectionName = null })
                 Box(Modifier.weight(1f)) {
@@ -306,11 +312,12 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
     Surface(
         onClick = onClick,
         interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f),
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f)
+            .luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         color = tokens.cardBackground,
-        border = BorderStroke(1.dp, tokens.cardOutline),
-        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+        shadowElevation = tokens.cardShadowElevation,
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -362,11 +369,12 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
 private fun SettingsGroup(content: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         color = tokens.cardBackground,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        shadowElevation = tokens.cardShadowElevation,
     ) {
         Column { content() }
     }
@@ -490,73 +498,86 @@ private fun OverviewPage(model: SystemCenterViewModel) = pageList {
 }
 
 @Composable
-private fun AppearancePage(settings: AppearanceSettings, actions: AppearanceActions) = pageList {
-    item {
-        SettingCard("外观预览") {
-            Text("让文字更悦目", color = MaterialTheme.colorScheme.primary, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(5.dp))
-            Text("Aa 0123456789 · 洛书", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp, lineHeight = 22.sp)
-
+private fun AppearancePage(settings: AppearanceSettings, actions: AppearanceActions) {
+    val monetSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val effectiveMonet = settings.monetEnabled && monetSupported
+    pageList {
+        item {
+            SettingCard("外观预览") {
+                Text("让文字更悦目", color = MaterialTheme.colorScheme.primary, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(5.dp))
+                Text("Aa 0123456789 · 洛书", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp, lineHeight = 22.sp)
+            }
         }
-    }
-    item {
-        SettingCard("颜色与模式") {
-            Text("深色模式", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(7.dp))
-            ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
-            Spacer(Modifier.height(13.dp))
-            Text("取色风格", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(7.dp))
-            ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
+        item {
+            SettingCard("颜色与模式") {
+                Text("深色模式", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
+                Spacer(Modifier.height(13.dp))
+                Text("取色风格", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
+            }
         }
-    }
-    item {
-        SettingCard("主题色") {
-            Text(
-                if (settings.monetEnabled) "已跟随壁纸取色；关闭动态取色后可选择主题色。" else "为界面选择一种喜欢的颜色。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-            )
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                AccentOptions.forEach { option ->
-                    val active = settings.seedArgb == option.argb
-                    Column(
-                        Modifier.clip(LuoShuSmoothShape(16.dp)).selectable(
-                            selected = active,
-                            enabled = !settings.monetEnabled,
-                            role = Role.RadioButton,
-                            onClick = { actions.setSeedArgb(option.argb) },
-                        ).padding(horizontal = 5.dp, vertical = 5.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(46.dp),
-                            shape = LuoShuSmoothShape(16.dp),
-                            color = Color(option.argb).copy(alpha = if (settings.monetEnabled) .35f else 1f),
+        item {
+            SettingCard("主题色") {
+                Text(
+                    when {
+                        !monetSupported -> "当前系统不支持壁纸取色，可直接选择主题色。"
+                        effectiveMonet -> "已跟随壁纸取色；关闭动态取色后可选择主题色。"
+                        else -> "为界面选择一种喜欢的颜色。"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    AccentOptions.forEach { option ->
+                        val active = settings.seedArgb == option.argb
+                        Column(
+                            Modifier.clip(LuoShuSmoothShape(16.dp)).selectable(
+                                selected = active,
+                                enabled = !effectiveMonet,
+                                role = Role.RadioButton,
+                                onClick = { actions.setSeedArgb(option.argb) },
+                            ).padding(horizontal = 5.dp, vertical = 5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (active) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            Surface(
+                                modifier = Modifier.size(46.dp),
+                                shape = LuoShuSmoothShape(16.dp),
+                                color = Color(option.argb).copy(alpha = if (effectiveMonet) .35f else 1f),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (active) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                }
                             }
+                            Text(option.label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         }
-                        Text(option.label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
             }
         }
-    }
-    item {
-        SettingCard("视觉与显示") {
-            ToggleLine("Monet 动态取色", "跟随系统壁纸强调色", settings.monetEnabled, actions.setMonetEnabled)
-            ToggleLine("纯黑深色模式", "AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
-            ToggleLine("玻璃半透明", "用于悬浮底栏和弹层，内容卡片保持清晰", settings.glassEnabled, actions.setGlassEnabled)
-            ToggleLine("背景模糊", "模糊底栏后方经过的内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
-            ToggleLine("悬浮底栏", "关闭后贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
-            ToggleLine("高刷新率", "优先同分辨率高刷新模式", settings.highRefreshRate, actions.setHighRefreshRate)
+        item {
+            SettingCard("视觉与显示") {
+                ToggleLine(
+                    "Monet 动态取色",
+                    if (monetSupported) "跟随系统壁纸强调色" else "需要 Android 12 或更高版本，当前可手动选色",
+                    effectiveMonet,
+                    actions.setMonetEnabled,
+                    enabled = monetSupported,
+                )
+                ToggleLine("纯黑深色模式", "AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
+                ToggleLine("玻璃半透明", "柔和透光的卡片、悬浮底栏与弹层", settings.glassEnabled, actions.setGlassEnabled)
+                ToggleLine("背景模糊", "模糊底栏后方经过的内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
+                ToggleLine("悬浮底栏", "关闭后贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
+                ToggleLine("高刷新率", "优先同分辨率高刷新模式", settings.highRefreshRate, actions.setHighRefreshRate)
+            }
         }
     }
 }
@@ -697,13 +718,14 @@ private fun ToggleLine(title: String, description: String, checked: Boolean, onC
 private fun SettingCard(title: String, content: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
     Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         border = BorderStroke(
             1.dp,
-            tokens.cardOutline,
+            tokens.glassOutlineBrush,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
     ) {
         Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
             Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
@@ -718,13 +740,14 @@ private fun StatusCard(title: String, subtitle: String, level: HealthLevel, load
     val accent = when (level) { HealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary; HealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary; HealthLevel.ERROR -> MaterialTheme.colorScheme.error }
     val tokens = LocalMiuixTokens.current
     Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         border = BorderStroke(
             1.dp,
-            tokens.cardOutline,
+            tokens.glassOutlineBrush,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
     ) {
         Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

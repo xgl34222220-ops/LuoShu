@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -170,6 +173,8 @@ internal fun DeviceAcceptanceGuideDialog(
     onReboot: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val tokens = LocalMiuixTokens.current
+    val dialogShape = LuoShuSmoothShape(36.dp)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val store = remember(context) { DeviceAcceptanceStore(context) }
@@ -191,10 +196,12 @@ internal fun DeviceAcceptanceGuideDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 800.dp),
-            shape = LuoShuSmoothShape(36.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 0.dp,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 800.dp).luoShuGlassHighlight(dialogShape),
+            shape = dialogShape,
+            color = tokens.glassDialogColor,
+            contentColor = tokens.textPrimary,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

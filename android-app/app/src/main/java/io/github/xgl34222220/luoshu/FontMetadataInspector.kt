@@ -24,6 +24,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
@@ -72,11 +74,11 @@ internal fun FontMetadataInspector(
     Surface(
         onClick = { showPicker = true },
         enabled = viewModel.snapshot.installed && viewModel.fonts.isNotEmpty() && !busy,
-        modifier = modifier.size(52.dp),
+        modifier = modifier.size(52.dp).luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
         shape = LuoShuSmoothShape(18.dp),
-        color = tokens.elevatedCardBackground,
+        color = tokens.glassCardColor,
         contentColor = MaterialTheme.colorScheme.primary,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (busy) {
@@ -136,10 +138,11 @@ private fun MetadataDialog(onDismiss: () -> Unit, content: @Composable ColumnSco
     val tokens = LocalMiuixTokens.current
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp).luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
             shape = LuoShuSmoothShape(32.dp),
-            color = tokens.elevatedCardBackground,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(
                 modifier = Modifier.padding(20.dp),
@@ -171,9 +174,14 @@ private fun MetadataPickerDialog(
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
             singleLine = true,
             shape = LuoShuSmoothShape(20.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = tokens.glassCardColor,
+                unfocusedContainerColor = tokens.glassCardColor,
+                unfocusedBorderColor = tokens.cardOutline,
+            ),
             leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
             placeholder = { Text("搜索名称、格式或字重") },
         )
@@ -194,10 +202,10 @@ private fun MetadataPickerDialog(
             items(filtered, key = { it.id }) { font ->
                 Surface(
                     onClick = { onChoose(font) },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
                     shape = LuoShuSmoothShape(22.dp),
-                    color = tokens.cardBackground,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
+                    color = tokens.glassCardColor,
+                    border = BorderStroke(1.dp, tokens.glassOutlineBrush),
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),

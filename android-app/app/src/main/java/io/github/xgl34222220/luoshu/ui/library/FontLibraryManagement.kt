@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.FontItem
@@ -230,12 +231,12 @@ internal fun FontLibraryManagementButton(
     Surface(
         onClick = onClick,
         enabled = !loading,
-        modifier = modifier,
+        modifier = modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
         shape = LuoShuSmoothShape(22.dp),
-        color = LocalMiuixTokens.current.cardBackground,
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
-        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
-        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
@@ -277,18 +278,18 @@ internal fun FontLibraryManagementDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 760.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 760.dp).luoShuGlassHighlight(LuoShuSmoothShape(34.dp)),
             shape = LuoShuSmoothShape(34.dp),
-            color = LocalMiuixTokens.current.elevatedCardBackground,
-            shadowElevation = 0.dp,
-            border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
+            color = LocalMiuixTokens.current.glassDialogColor,
+            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
                         shape = LuoShuSmoothShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             LuoShuGlyph(
@@ -382,9 +383,11 @@ private fun ManagementBatchPanel(
     onToggleTag: (String) -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
         shape = LuoShuSmoothShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = LocalMiuixTokens.current.glassCardColor,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -469,14 +472,15 @@ private fun ManagementFamilyRow(
 ) {
     val warning = conflictMessage.isNotBlank()
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
         shape = LuoShuSmoothShape(22.dp),
         color = when {
             !font.valid -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .52f)
             selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .62f)
-            else -> LocalMiuixTokens.current.cardBackground
+            else -> LocalMiuixTokens.current.glassCardColor
         },
-        shadowElevation = 0.dp,
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
     ) {
         Column(Modifier.padding(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -484,7 +488,7 @@ private fun ManagementFamilyRow(
                 Surface(
                     modifier = Modifier.size(42.dp).clickable(onClick = onDetails),
                     shape = LuoShuSmoothShape(14.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)

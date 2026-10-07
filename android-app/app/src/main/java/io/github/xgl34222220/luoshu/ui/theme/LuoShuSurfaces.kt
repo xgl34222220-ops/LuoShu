@@ -14,10 +14,41 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-/** Quiet shared surfaces, without an animated backdrop for each scrolling card. */
+/** A cached sheen below the surface fill; text and touch feedback remain undimmed. */
+@Composable
+internal fun Modifier.luoShuGlassHighlight(
+    shape: Shape = LuoShuSmoothShape(24.dp),
+): Modifier {
+    val tokens = LocalMiuixTokens.current
+    if (!tokens.glassEnabled) return this
+    val highlight = tokens.glassHighlight
+    return drawWithCache {
+        val outline = shape.createOutline(size, layoutDirection, this)
+        val path = Path().apply {
+            when (outline) {
+                is Outline.Generic -> addPath(outline.path)
+                is Outline.Rounded -> addRoundRect(outline.roundRect)
+                is Outline.Rectangle -> addRect(outline.rect)
+            }
+        }
+        val sheen = Brush.verticalGradient(listOf(highlight, Color.Transparent))
+        onDrawBehind {
+            clipPath(path) { drawRect(sheen) }
+        }
+    }
+}
+
+/** A shared translucent material without a blur pass or frame producer for every card. */
 @Composable
 internal fun LuoShuSurfaceCard(
     modifier: Modifier = Modifier,
@@ -25,15 +56,16 @@ internal fun LuoShuSurfaceCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
+    val shape = LuoShuSmoothShape(24.dp)
     Surface(
-        modifier = modifier.fillMaxWidth(),
-        shape = LuoShuSmoothShape(24.dp),
+        modifier = modifier.fillMaxWidth().luoShuGlassHighlight(shape),
+        shape = shape,
         color = if (emphasized) {
-            lerp(tokens.cardBackground, MaterialTheme.colorScheme.primaryContainer, .18f)
+            lerp(tokens.cardBackground, MaterialTheme.colorScheme.primaryContainer.copy(alpha = tokens.cardBackground.alpha), .12f)
         } else tokens.cardBackground,
         contentColor = tokens.textPrimary,
-        shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        shadowElevation = tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(
             modifier = Modifier.padding(20.dp),

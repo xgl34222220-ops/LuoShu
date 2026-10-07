@@ -43,27 +43,33 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.xgl34222220.luoshu.LuoShuApplication
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 @Composable
 internal fun GoogleFontCompatibilityPage() {
     val model: GoogleFontCompatibilityModel = viewModel()
     val state = model.ui
     val owner = LocalLifecycleOwner.current
+    val maintenanceCompletion = (LocalContext.current.applicationContext as? LuoShuApplication)
+        ?.maintenanceCompletion?.collectAsStateWithLifecycle()?.value ?: 0L
     var confirmAction by rememberSaveable { mutableStateOf<String?>(null) }
     var detailsExpanded by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(Unit) { model.refresh() }
+    LaunchedEffect(maintenanceCompletion) { model.refresh() }
     DisposableEffect(owner, model) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) model.refresh()
@@ -106,6 +112,10 @@ internal fun GoogleFontCompatibilityPage() {
                 }
                 Button(onClick = { confirmAction = "enable" }, enabled = idle && state.canEnable,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("开启 Google 字体兼容") }
+                if (state.managed) {
+                    OutlinedButton(onClick = { confirmAction = "reapply-owned" }, enabled = idle && state.canReapply,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("重新应用兼容") }
+                }
                 OutlinedButton(onClick = { confirmAction = "restore" }, enabled = idle && state.canRestore,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("恢复原设置") }
             }
@@ -117,6 +127,7 @@ internal fun GoogleFontCompatibilityPage() {
                 GoogleStepCard("2", "开启兼容", "点击「开启 Google 字体兼容」并确认；显示已开启后完整重启一次。")
                 GoogleStepCard("3", "验证保持", "检查 Google Play 等应用，放到后台后再次打开，确认英文和数字没有恢复默认。")
                 GoogleCompatibilityText("之前用独立脚本开启过的，本页会直接识别原恢复记录，不需要重复执行。")
+                GoogleCompatibilityText("已有兼容记录时，开机、应用字体、打开洛书以及洛书运行时的 GMS 更新会核验设置；确认是更新重置后自动维护。仍回退可点「重新应用兼容」。")
             }
         }
         item {
@@ -176,6 +187,7 @@ internal fun GoogleFontCompatibilityPage() {
                         GoogleCompatibilityText("只停用当前用户的 Google 下载字体提供组件，不停用整个谷歌服务，不删除字体缓存、账户或应用数据。")
                         GoogleCompatibilityText("会影响该用户所有依赖 GMS 下载字体的应用，可能涉及下载式表情字体；修改时相关 GMS 进程可能重启。")
                         GoogleCompatibilityText("此设置跨重启保留。停用模块不会保证自动撤销；停用或卸载洛书前，请先点击「恢复原设置」并完整重启；卸载脚本也会尝试恢复有记录的设置。")
+                        GoogleCompatibilityText("自动维护仅处理同一安装身份的 GMS 新版本重置，不覆盖明确启用或同版本外部修改。洛书进程退出后不会常驻监听更新，下次开机、应用字体或进入洛书时再核验。")
                         GoogleCompatibilityText("不保证替换应用内置字体、网页指定字体或已经打开的旧字体，也不会自动封禁联网或强停前台应用。")
                     }
                 }
@@ -184,25 +196,40 @@ internal fun GoogleFontCompatibilityPage() {
     }
     confirmAction?.let { action ->
         val enabling = action == "enable"
+        val reapplying = action == "reapply-owned"
+        val allowed = when (action) {
+            "enable" -> state.canEnable
+            "reapply-owned" -> state.canReapply
+            "restore" -> state.canRestore
+            else -> false
+        }
         AlertDialog(
             onDismissRequest = { confirmAction = null },
             shape = LuoShuSmoothShape(28.dp),
-            title = { Text(if (enabling) "开启 Google 字体兼容？" else "恢复原设置？") },
+            containerColor = LocalMiuixTokens.current.glassDialogColor,
+            title = { Text(when { enabling -> "开启 Google 字体兼容？"; reapplying -> "重新应用兼容？"; else -> "恢复原设置？" }) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(if (enabling)
-                        "将停用当前 Android 用户的 Google 字体提供组件，让依赖它的应用尝试使用备用字体。影响该用户全部依赖 GMS 下载字体的应用，可能影响下载式表情字体，并可能重启相关 GMS 进程。"
-                    else "将依据保存的恢复记录，还原开启前的组件状态；不会一律强制启用，也不会修改其他用户或其他组件。")
-                    Text("不会清除账户、应用数据或字体缓存。完成后请完整重启手机。")
+                    Text(when {
+                        enabling -> "将停用当前 Android 用户的 Google 字体提供组件，让依赖它的应用尝试使用备用字体。影响该用户全部依赖 GMS 下载字体的应用，可能影响下载式表情字体，并可能重启相关 GMS 进程。"
+                        reapplying -> "将核验当前用户的原恢复记录和 GMS 安装身份，重新应用兼容设置；保留开启前的原状态。组件切换可能重启相关 GMS 进程，影响该用户依赖下载字体的应用。"
+                        else -> "将依据保存的恢复记录，还原开启前的组件状态；不会一律强制启用，也不会修改其他用户或其他组件。"
+                    })
+                    Text(if (reapplying) "不会清除账户、应用数据或字体缓存。完成后重新打开谷歌应用检查；仍异常时完整重启。"
+                        else "不会清除账户、应用数据或字体缓存。完成后请完整重启手机。")
                     if (enabling) Text("停用或卸载洛书前，先在此页恢复原设置。此功能不保证所有页面永不回退。")
                 }
             },
             dismissButton = { TextButton(onClick = { confirmAction = null }) { Text("取消") } },
             confirmButton = {
-                TextButton(enabled = idle && (if (enabling) state.canEnable else state.canRestore), onClick = {
+                TextButton(enabled = idle && allowed, onClick = {
                     confirmAction = null
-                    if (enabling) model.enable() else model.restore()
-                }) { Text(if (enabling) "了解影响，确认开启" else "确认恢复") }
+                    when (action) {
+                        "enable" -> model.enable()
+                        "reapply-owned" -> model.reapply()
+                        "restore" -> model.restore()
+                    }
+                }) { Text(when { enabling -> "了解影响，确认开启"; reapplying -> "确认重新应用"; else -> "确认恢复" }) }
             },
         )
     }
@@ -242,10 +269,12 @@ private fun GoogleStepCard(number: String, title: String, body: String) {
 
 @Composable
 private fun GoogleCompatibilityCard(title: String, content: @Composable () -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = LuoShuSmoothShape(24.dp),
-        color = LocalMiuixTokens.current.cardBackground, shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline)) {
-        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val tokens = LocalMiuixTokens.current
+    val shape = LuoShuSmoothShape(24.dp)
+    Surface(Modifier.fillMaxWidth(), shape = shape,
+        color = tokens.glassCardColor, shadowElevation = tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush)) {
+        Column(Modifier.luoShuGlassHighlight(shape).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
             content()
         }

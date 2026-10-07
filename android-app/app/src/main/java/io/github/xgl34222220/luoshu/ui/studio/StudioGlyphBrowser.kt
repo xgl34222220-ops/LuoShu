@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.MixSlot
@@ -115,18 +116,18 @@ internal fun StudioGlyphBrowserDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 780.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 780.dp).luoShuGlassHighlight(LuoShuSmoothShape(36.dp)),
             shape = LuoShuSmoothShape(36.dp),
-            color = LocalMiuixTokens.current.elevatedCardBackground,
-            shadowElevation = 0.dp,
-            border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
+            color = LocalMiuixTokens.current.glassDialogColor,
+            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
                         shape = LuoShuSmoothShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(Icons.Rounded.ListAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
@@ -195,9 +196,11 @@ internal fun StudioGlyphBrowserDialog(
                     }
                     item {
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
                             shape = LuoShuSmoothShape(24.dp),
-                            color = LocalMiuixTokens.current.cardBackground,
+                            color = LocalMiuixTokens.current.glassCardColor,
+                            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                         ) {
                             Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -241,9 +244,11 @@ internal fun StudioGlyphBrowserDialog(
                     }
                     item {
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
                             shape = LuoShuSmoothShape(20.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            color = LocalMiuixTokens.current.glassCardColor,
+                            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                         ) {
                             Text(
                                 text = glyphCodePointLabels(visible),
@@ -291,7 +296,7 @@ private fun StudioGlyphPill(
     Surface(
         modifier = modifier.clickable(onClick = onClick),
         shape = LuoShuSmoothShape(999.dp),
-        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+        color = if (active) MaterialTheme.colorScheme.primary else LocalMiuixTokens.current.glassCardColor,
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {
         Text(

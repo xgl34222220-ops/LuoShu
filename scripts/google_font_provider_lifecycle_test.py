@@ -117,6 +117,39 @@ esac
         self.assertEqual(self.rows('theme'), ['theme-applied'])
         self.assertEqual(self.rows('sleeps'), [])
 
+    def fallback(self):
+        (self.module / 'common/google_font_fallback.sh').write_text('''
+printf '%s\\n' "$*" >> "$TEST_ROOT/fallback"
+printf '%s\\n' '{"status":"unchanged","message":"owned one-shot fixture"}'
+exit "${TEST_FALLBACK_RC:-0}"
+''')
+
+    def test_owned_fallback_reconciliation_is_one_bounded_pass_before_mounts(self):
+        self.fallback()
+        result = self.run_service('reconcile')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows('fallback'), ['reconcile-owned --json'])
+        self.assertEqual(self.rows('applied'), ['applied'])
+        self.assertEqual(self.rows('sleeps'), [])
+        log = self.module / '.luoshu-state/logs/google-font-compatibility.log'
+        self.assertIn('owned one-shot fixture', log.read_text())
+
+    def test_owned_fallback_failure_is_reported_without_skipping_other_adapters_or_retrying(self):
+        self.fallback()
+        result = self.run_service(TEST_FALLBACK_RC='1')
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.rows('fallback'), ['reconcile-owned --json'])
+        self.assertEqual(self.rows('applied'), ['applied'])
+        self.assertEqual(self.rows('sleeps'), [])
+
+    def test_default_font_does_not_reapply_component_compatibility(self):
+        self.fallback()
+        self.active.write_text('default\n')
+        result = self.run_service()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows('fallback'), [])
+        self.assertEqual(self.rows('restored'), ['restored'])
+
     def test_default_disable_remove_restore_both_adapters_then_exit(self):
         self.theme()
         for stop in ('default', 'disable', 'remove'):

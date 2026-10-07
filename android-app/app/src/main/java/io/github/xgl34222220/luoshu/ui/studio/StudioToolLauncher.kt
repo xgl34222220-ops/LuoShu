@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.studio
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -91,8 +93,9 @@ internal fun StudioToolLauncher(
             onDismissRequest = { if (!childLayerActive) menuVisible = false },
             sheetState = sheetState,
             sheetGesturesEnabled = !childLayerActive,
+            modifier = Modifier.luoShuGlassHighlight(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)),
             shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-            containerColor = tokens.cardBackground,
+            containerColor = tokens.glassDialogColor,
             tonalElevation = 0.dp,
             scrimColor = scheme.scrim.copy(alpha = .20f),
             dragHandle = {
@@ -170,10 +173,12 @@ private fun StudioToolMenuItem(
     val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
         shape = LuoShuSmoothShape(18.dp),
-        color = LocalMiuixTokens.current.cardBackground,
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),

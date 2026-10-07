@@ -12,7 +12,8 @@ from unittest.mock import Mock
 from android_ui_smoke import (
     action_disabled, anchors_preserved, app_labels, center, choice_selected, content_anchors,
     crash_reason, label_target, orientation_matches, page_ready, tab_target,
-    SmokeRun, instrumentation_results,
+    SmokeRun, instrumentation_results, library_state_preserved,
+    legacy_manual_colors_ready, legacy_monet_unavailable,
 )
 
 
@@ -154,6 +155,78 @@ class UiSmokeHarnessTest(unittest.TestCase):
         root = ET.fromstring(f'<hierarchy><node package="{PACKAGE}" bounds="[0,0][1920,1080]" /></hierarchy>')
         self.assertTrue(orientation_matches(root, PACKAGE, landscape=True))
         self.assertFalse(orientation_matches(root, "other.app", landscape=True))
+
+    def saved_library(self, selected="字体库"):
+        root = self.hierarchy(selected)
+        ET.SubElement(root[0], "node", {"package": PACKAGE, "text": "筛选结果", "bounds": "[70,400][360,480]"})
+        filter_node = ET.SubElement(root[0], "node", {"package": PACKAGE, "focusable": "true",
+            "enabled": "true", "selected": "true", "bounds": "[215,26][367,129]"})
+        ET.SubElement(filter_node, "node", {"package": PACKAGE, "text": "收藏", "bounds": "[257,89][325,97]"})
+        return root
+
+    def test_saved_library_can_preserve_state_while_search_is_offscreen(self):
+        root = self.saved_library()
+        before = content_anchors(root, PACKAGE)
+        self.assertFalse(page_ready(root, "字体库", "搜索你的字体", PACKAGE))
+        self.assertTrue(library_state_preserved(root, before, PACKAGE))
+        # The original top-page assertion still requires its real search field.
+        ET.SubElement(root[0], "node", {"package": PACKAGE, "text": "搜索你的字体", "bounds": "[70,200][1300,350]"})
+        self.assertTrue(page_ready(root, "字体库", "搜索你的字体", PACKAGE))
+        self.assertTrue(choice_selected(root, "收藏", PACKAGE))
+
+    def test_saved_library_rejects_changed_tab_filter_marker_or_scroll(self):
+        before = content_anchors(self.saved_library(), PACKAGE)
+        self.assertFalse(library_state_preserved(self.saved_library("首页"), before, PACKAGE))
+        root = self.saved_library()
+        root[0][-1].set("selected", "false")
+        self.assertFalse(library_state_preserved(root, before, PACKAGE))
+        root = self.saved_library()
+        root[0][-2].set("text", "另一个页面")
+        self.assertFalse(library_state_preserved(root, before, PACKAGE))
+        root = self.saved_library()
+        root[0][-2].set("bounds", "[70,540][360,620]")
+        self.assertFalse(library_state_preserved(root, before, PACKAGE))
+        self.assertFalse(library_state_preserved(self.saved_library(), {}, PACKAGE))
+
+    def legacy_palette(self):
+        return ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" text="当前系统不支持壁纸取色，可直接选择主题色。" bounds="[40,400][1000,500]" />
+          <node package="{PACKAGE}" text="曜紫" enabled="true" clickable="true" selected="false" bounds="[40,520][250,650]" />
+          <node package="{PACKAGE}" text="青蓝" enabled="true" clickable="true" selected="true" bounds="[270,520][480,650]" />
+          <node package="{PACKAGE}" text="需要 Android 12 或更高版本，当前可手动选色" bounds="[40,700][1000,750]" />
+          <node package="{PACKAGE}" enabled="false" bounds="[40,760][1000,900]">
+            <node package="{PACKAGE}" text="Monet 动态取色" enabled="true" bounds="[80,780][520,850]" />
+          </node>
+        </node></hierarchy>''')
+
+    def test_legacy_colors_require_enabled_actions_and_no_wallpaper_claim(self):
+        root = self.legacy_palette()
+        self.assertTrue(legacy_manual_colors_ready(root, PACKAGE))
+        root[0][1].set("enabled", "false")
+        self.assertFalse(legacy_manual_colors_ready(root, PACKAGE))
+        root = self.legacy_palette()
+        ET.SubElement(root[0], "node", {"package": PACKAGE, "text": "已跟随壁纸取色；关闭动态取色后可选择主题色。"})
+        self.assertFalse(legacy_manual_colors_ready(root, PACKAGE))
+
+    def test_legacy_monet_requires_actual_disabled_semantics_and_version_notice(self):
+        root = self.legacy_palette()
+        self.assertTrue(legacy_monet_unavailable(root, PACKAGE))
+        root[0][-1].set("enabled", "true")
+        self.assertFalse(legacy_monet_unavailable(root, PACKAGE))
+        root = self.legacy_palette()
+        root[0][-2].set("text", "跟随系统壁纸强调色")
+        self.assertFalse(legacy_monet_unavailable(root, PACKAGE))
+
+    def test_optional_recording_failure_is_evidence_only_not_an_app_verdict(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            process = Mock(returncode=1)
+            process.communicate.return_value = (b"", b"encoder not available")
+            process.poll.return_value = 1
+            run.finish_launch_recording(process)
+            self.assertFalse(run.recordings[0]["available"])
+            self.assertIn("encoder not available", run.recordings[0]["error"])
+            self.assertEqual([], run.checks)
 
     def test_successful_platform_dump_stays_on_normal_backend_and_keeps_cli_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:

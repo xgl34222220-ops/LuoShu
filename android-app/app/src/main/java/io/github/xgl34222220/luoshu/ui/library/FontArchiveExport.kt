@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.BuildConfig
@@ -193,11 +196,12 @@ internal fun FontArchiveExportTool(
             showDialog = true
         },
         enabled = enabled && validFonts.isNotEmpty(),
-        modifier = modifier,
+        modifier = modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
         shape = LuoShuSmoothShape(22.dp),
-        color = LocalMiuixTokens.current.cardBackground,
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
-        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -224,6 +228,13 @@ internal fun FontArchiveExportTool(
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { if (!busy) showDialog = false },
+            containerColor = LocalMiuixTokens.current.glassDialogColor,
+            tonalElevation = 0.dp,
+            modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(34.dp))
+                .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(34.dp))
+                .border(
+                    BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(34.dp),
+                ),
             shape = LuoShuSmoothShape(34.dp),
             icon = {
                 if (busy) CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 2.dp)
@@ -274,7 +285,7 @@ internal fun FontArchiveExportTool(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = LuoShuSmoothShape(16.dp),
                                 color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)
-                                else LocalMiuixTokens.current.cardBackground,
+                                else LocalMiuixTokens.current.glassCardColor,
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),

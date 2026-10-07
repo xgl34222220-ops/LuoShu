@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
@@ -185,7 +186,13 @@ internal fun LogsScreenMiuix(
                 }
                 LogsTab.LOGS -> {
                     item(key = "log-summary") {
-                        Card(shape = LuoShuSmoothShape(24.dp), colors = CardDefaults.cardColors(containerColor = tokens.cardBackground), border = BorderStroke(1.dp, tokens.cardOutline)) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+                            shape = LuoShuSmoothShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+                            elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+                            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                        ) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Metric("日志", state.lineCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
@@ -267,7 +274,13 @@ private fun ChoiceChip(label: String, selected: Boolean, modifier: Modifier = Mo
 @Composable
 private fun OverviewCard(state: LogsUiState) {
     val tokens = LocalMiuixTokens.current
-    Card(shape = LuoShuSmoothShape(26.dp), colors = CardDefaults.cardColors(containerColor = tokens.cardBackground), border = BorderStroke(1.dp, tokens.cardOutline)) {
+    Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(26.dp)),
+        shape = LuoShuSmoothShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+    ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusIcon(if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle, MaterialTheme.colorScheme.primary)
@@ -297,7 +310,13 @@ private fun OverviewCard(state: LogsUiState) {
 private fun IssueSummary(failedCount: Int, warningCount: Int, errorCount: Int) {
     val tokens = LocalMiuixTokens.current
     val hasIssues = failedCount > 0 || warningCount > 0 || errorCount > 0
-    Card(shape = LuoShuSmoothShape(24.dp), colors = CardDefaults.cardColors(containerColor = tokens.cardBackground), border = BorderStroke(1.dp, tokens.cardOutline)) {
+    Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+    ) {
         Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             StatusIcon(if (hasIssues) Icons.Rounded.Warning else Icons.Rounded.CheckCircle, if (hasIssues) tokens.warning else tokens.success)
             Spacer(Modifier.width(14.dp))
@@ -324,10 +343,12 @@ private fun TaskCard(task: TaskCenterItem) {
     Card(
         onClick = { expanded = !expanded },
         interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f).animateContentSize(spring(dampingRatio = .9f, stiffness = 420f)),
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f)
+            .luoShuGlassHighlight(LuoShuSmoothShape(24.dp)).animateContentSize(spring(dampingRatio = .9f, stiffness = 420f)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        border = BorderStroke(1.dp, tokens.cardOutline),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -397,7 +418,13 @@ private fun StatusIcon(icon: ImageVector, color: Color) {
 @Composable
 private fun EmptyState(icon: ImageVector, title: String, message: String) {
     val tokens = LocalMiuixTokens.current
-    Card(shape = LuoShuSmoothShape(24.dp), colors = CardDefaults.cardColors(containerColor = tokens.cardBackground), border = BorderStroke(1.dp, tokens.cardOutline)) {
+    Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+    ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             StatusIcon(icon, MaterialTheme.colorScheme.primary)
             Text(title, color = tokens.textPrimary, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)

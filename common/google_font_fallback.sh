@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Explicit UI action only. Never enable on install or boot.
+# Explicit enable only. Reconciliation repairs only a verified owned upgrade reset.
 set -eu
 HERE=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)
 MODDIR="${MODDIR:-${MODULE_DIR:-${HERE%/*}}}"
@@ -9,7 +9,7 @@ if [ -f "$HERE/runtime_paths.sh" ]; then
     luoshu_runtime_paths_init "$MODDIR" || exit 1
 fi
 PYROOT="$HERE/python"
-case "${1:-status}" in status|enable|restore|restore-owned) ;; *)
+case "${1:-status}" in status|enable|restore|restore-owned|reconcile-owned|reapply-owned) ;; *)
     printf '%s\n' '{"status":"error","message":"不支持的 Google 字体操作。"}'; exit 2;;
 esac
 if [ "$(id -u)" != 0 ]; then

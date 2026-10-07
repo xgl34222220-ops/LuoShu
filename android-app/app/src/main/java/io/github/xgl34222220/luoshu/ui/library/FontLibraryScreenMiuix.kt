@@ -83,6 +83,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
@@ -250,9 +251,11 @@ internal fun FontLibraryScreenMiuix(
         if (!state.loading && state.fonts.isEmpty()) {
             item(key = "empty") {
                 Card(
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
                     shape = LuoShuSmoothShape(24.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
                     colors = CardDefaults.cardColors(containerColor = cardColor),
-                    border = BorderStroke(1.dp, tokens.cardOutline),
+                    border = BorderStroke(1.dp, tokens.glassOutlineBrush),
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(24.dp),
@@ -301,13 +304,14 @@ private fun MiuixSystemFontRow(
     textPrimary: Color, textSecondary: Color, onRestore: () -> Unit,
 ) {
     Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
         border = BorderStroke(
             1.dp,
-            LocalMiuixTokens.current.cardOutline,
+            LocalMiuixTokens.current.glassOutlineBrush,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = LocalMiuixTokens.current.cardShadowElevation),
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
@@ -343,19 +347,15 @@ private fun MiuixFontRow(
     Card(
         onClick = onDetails,
         interactionSource = interactionSource,
-        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f),
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f)
+            .luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (font.valid) cardColor else scheme.errorContainer.copy(alpha = .34f),
         ),
-        border = BorderStroke(
-            1.dp,
-            when {
-                !font.valid -> scheme.error.copy(alpha = .16f)
-                else -> LocalMiuixTokens.current.cardOutline
-            },
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = if (!font.valid) BorderStroke(1.dp, scheme.error.copy(alpha = .16f))
+            else BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        elevation = CardDefaults.cardElevation(defaultElevation = LocalMiuixTokens.current.cardShadowElevation),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

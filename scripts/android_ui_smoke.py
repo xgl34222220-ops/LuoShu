@@ -210,6 +210,29 @@ def anchors_preserved(before: dict[str, tuple[int, int]], after: dict[str, tuple
     )
 
 
+def library_state_preserved(root: ET.Element, before: dict[str, tuple[int, int]], package: str) -> bool:
+    """Require the real page, selected filter and every saved visible anchor."""
+    return (page_ready(root, "字体库", "筛选结果", package)
+            and choice_selected(root, "收藏", package)
+            and anchors_preserved(before, content_anchors(root, package)))
+
+
+def legacy_manual_colors_ready(root: ET.Element, package: str) -> bool:
+    texts = app_labels(root, package)
+    if ("当前系统不支持壁纸取色，可直接选择主题色。" not in texts
+            or any("已跟随壁纸取色" in text for text in texts)):
+        return False
+    try:
+        return all(label_target(root, label, package).get("enabled") != "false" for label in ("曜紫", "青蓝"))
+    except ValueError:
+        return False
+
+
+def legacy_monet_unavailable(root: ET.Element, package: str) -> bool:
+    return ("需要 Android 12 或更高版本，当前可手动选色" in app_labels(root, package)
+            and action_disabled(root, "Monet 动态取色", package))
+
+
 def orientation_matches(root: ET.Element, package: str, landscape: bool) -> bool:
     rectangles = []
     for node in root.iter("node"):
@@ -251,6 +274,7 @@ class SmokeRun:
         self.output.mkdir(parents=True, exist_ok=True)
         self.results: list[dict[str, object]] = []
         self.checks: list[dict[str, object]] = []
+        self.recordings: list[dict[str, object]] = []
         self.api_level: int | None = None
         self.snapshot_apk = snapshot_apk
         self.hierarchy_attempts = 0
@@ -462,6 +486,52 @@ class SmokeRun:
         print(f"Verified {name}", flush=True)
 
     def launch(self, name: str) -> ET.Element:
+        recording = self.begin_launch_recording() if name == "cold-start" else None
+        try:
+            return self.launch_and_capture(name)
+        finally:
+            if recording is not None:
+                self.finish_launch_recording(recording)
+
+    def begin_launch_recording(self):
+        """Record a bounded real launch concurrently; evidence failure is not App failure."""
+        try:
+            self.adb("shell", "rm", "-f", "/sdcard/luoshu-cold-start.mp4", check=False)
+            process = subprocess.Popen(self.adb_command + ["shell", "screenrecord", "--time-limit", "12",
+                "--bit-rate", "2000000", "--size", "720x1560", "/sdcard/luoshu-cold-start.mp4"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(.2)
+            return process
+        except (OSError, RuntimeError) as error:
+            self.recordings.append({"recording": "cold-start", "available": False, "error": str(error)})
+            return None
+
+    def finish_launch_recording(self, process) -> None:
+        evidence = {"recording": "cold-start", "available": False, "time_limit_seconds": 12,
+                    "scope": "raw device screenrecord; no guaranteed artwork frame; App timing and animations unchanged"}
+        try:
+            stdout, stderr = process.communicate(timeout=15)
+            (self.output / "cold-start-recording.txt").write_bytes(stdout + stderr)
+            evidence["returncode"] = process.returncode
+            if process.returncode:
+                raise RuntimeError((stdout + stderr).decode("utf-8", "replace"))
+            video = self.output / "cold-start.mp4"
+            pulled = self.adb("pull", "/sdcard/luoshu-cold-start.mp4", str(video), check=False, timeout=30)
+            if pulled.returncode or not video.is_file() or b"ftyp" not in video.read_bytes()[:64]:
+                raise RuntimeError("Device launch recording was not returned as a valid MP4")
+            evidence.update(available=True, file=video.name, bytes=video.stat().st_size)
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+            if process.poll() is None:
+                try:
+                    process.kill()  # Only this host adb reader; device recorder has its own 12s limit.
+                    process.communicate(timeout=3)
+                except (OSError, subprocess.TimeoutExpired) as cleanup_error:
+                    evidence["cleanup_error"] = str(cleanup_error)
+            evidence["error"] = str(error)
+        finally:
+            self.recordings.append(evidence)
+
+    def launch_and_capture(self, name: str) -> ET.Element:
         start = time.monotonic()
         launch = self.text("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
         (self.output / f"{name}-launch.txt").write_text(launch, encoding="utf-8")
@@ -515,10 +585,34 @@ class SmokeRun:
             root = self.wait_ui(lambda root: choice_selected(root, label, self.package), f"Selected theme {label!r}")
             self.capture(filename, root)
             self.record(filename, selected_label=label)
+        if self.api_level is not None and self.api_level < 31:
+            self.verify_legacy_palette()
         self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
         root = self.wait_page("设置", "你的洛书")
         self.capture("settings-detail-return", root)
         self.record("settings-detail-return", restored_tab="设置")
+
+    def verify_legacy_palette(self) -> None:
+        for _ in range(8):
+            root = self.hierarchy()
+            if legacy_manual_colors_ready(root, self.package):
+                break
+            self.scroll(root)
+        else:
+            raise RuntimeError("Legacy Android manual theme colors were blocked or wallpaper capability was misstated")
+        for label, name in (("曜紫", "legacy-theme-purple"), ("青蓝", "legacy-theme-cyan")):
+            self.tap_label(label)
+            root = self.wait_ui(lambda root: choice_selected(root, label, self.package), f"Legacy manual color {label!r}")
+            self.capture(name, root)
+            self.record(name, selected_label=label)
+        for _ in range(8):
+            root = self.hierarchy()
+            if legacy_monet_unavailable(root, self.package):
+                self.capture("legacy-monet-unavailable", root)
+                self.record("legacy-monet-capability", wallpaper_supported=False, manual_colors_enabled=True)
+                return
+            self.scroll(root)
+        raise RuntimeError("Unsupported legacy Monet option was not disabled with its Android 12 requirement")
 
     def verify_library_preservation(self) -> None:
         # A real smaller emulator viewport makes an empty library scrollable.
@@ -567,13 +661,26 @@ class SmokeRun:
             raise RuntimeError("Favorite filter selection was not preserved after changing tabs")
         self.capture("library-filter-after-tab", root)
         self.record("library-filter-across-tabs", selected_label="收藏")
+        background_anchors = content_anchors(root, self.package)
         self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
         time.sleep(.5)
         self.adb("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
         root = self.wait_ui(
-            lambda root: page_ready(root, "字体库", "搜索你的字体", self.package) and choice_selected(root, "收藏", self.package),
-            "Library filter on returning from the background",
+            lambda root: library_state_preserved(root, background_anchors, self.package),
+            "Library page, filter and scroll position on returning from the background",
         )
+        self.capture("library-background-preserved", root)
+        self.record("library-background-preserved", selected_label="收藏", anchors=background_anchors)
+        # Verify the saved state before scrolling: the search field can be above
+        # the viewport. Then reach it by a real gesture and keep the original
+        # selected-page, search-content and selected-filter assertions intact.
+        for _ in range(8):
+            if page_ready(root, "字体库", "搜索你的字体", self.package) and choice_selected(root, "收藏", self.package):
+                break
+            self.scroll(root, "down")
+            root = self.hierarchy()
+        else:
+            raise RuntimeError("Font library search and preserved favorite filter were not reachable after background return")
         self.capture("library-background-return", root)
         self.record("library-background-return", selected_label="收藏")
 
@@ -705,6 +812,13 @@ class SmokeRun:
         self.adb("shell", "am", "force-stop", self.package)
         self.launch("repeat-cold-start")
         self.select_tab("设置", "你的洛书")
+        if self.api_level is not None and self.api_level < 31:
+            self.tap_label("外观与主题", scroll_attempts=8)
+            root = self.find_choice("青蓝")
+            self.capture("legacy-theme-after-cold-start", root)
+            self.record("legacy-theme-persistence", selected_label="青蓝", app_restart="force-stop and cold start")
+            self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            self.wait_page("设置", "你的洛书")
         self.assert_running()
 
     def diagnostics(self) -> None:
@@ -759,7 +873,7 @@ def main() -> int:
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
                    "hierarchy_backend": run.hierarchy_backend,
-                   "screens": run.results, "checks": run.checks}
+                   "screens": run.results, "checks": run.checks, "recordings": run.recordings}
         (run.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0 if error is None else 1
 

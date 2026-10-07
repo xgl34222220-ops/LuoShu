@@ -3,6 +3,8 @@ package io.github.xgl34222220.luoshu.ui.studio
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,12 +31,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.MixSlot
@@ -244,6 +249,13 @@ internal fun StudioProfileTransferDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = LocalMiuixTokens.current.glassDialogColor,
+        tonalElevation = 0.dp,
+        modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(34.dp))
+            .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(34.dp))
+            .border(
+                BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(34.dp),
+            ),
         shape = LuoShuSmoothShape(34.dp),
         icon = { Icon(Icons.Rounded.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
         title = { Text("组合方案 JSON", fontWeight = FontWeight.SemiBold) },

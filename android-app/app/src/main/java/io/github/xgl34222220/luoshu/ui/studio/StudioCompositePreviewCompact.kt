@@ -61,6 +61,7 @@ import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 private enum class CompactPreviewScenario(val label: String) {
     MIXED("混排"), BODY("正文"), INTERFACE("界面"), WECHAT("微信"), PLAY("Play"), STATUS("状态栏"),
@@ -88,10 +89,12 @@ internal fun StudioCompositePreviewDialogCompact(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 18.dp, vertical = 28.dp)
-                .heightIn(max = 820.dp),
+                .heightIn(max = 820.dp)
+                .luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
             shape = LuoShuSmoothShape(32.dp),
-            color = tokens.elevatedCardBackground,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,10 +265,10 @@ private fun CompactPreviewCard(
 ) {
     val tokens = LocalMiuixTokens.current
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
         shape = LuoShuSmoothShape(24.dp),
-        color = tokens.cardBackground,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
+        color = tokens.glassCardColor,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(14.dp)) {
             Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = tokens.textPrimary)
@@ -278,10 +281,11 @@ private fun CompactPreviewCard(
 
 @Composable
 private fun SystemPreviewCompact(scenario: CompactPreviewScenario) {
+    val tokens = LocalMiuixTokens.current
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(19.dp)),
         shape = LuoShuSmoothShape(19.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.glassCardColor,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp)) {
             when (scenario) {
@@ -335,6 +339,7 @@ private fun SystemPreviewCompact(scenario: CompactPreviewScenario) {
 
 @Composable
 private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactPreviewScenario) {
+    val tokens = LocalMiuixTokens.current
     val cjk = state.slots.firstOrNull { it.slot == MixSlot.Cjk }
     val latin = state.slots.firstOrNull { it.slot == MixSlot.Latin }
     val digit = state.slots.firstOrNull { it.slot == MixSlot.Digit }
@@ -357,9 +362,9 @@ private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactP
     }
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(19.dp)),
         shape = LuoShuSmoothShape(19.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.glassCardColor,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)) {
             when (scenario) {
@@ -440,12 +445,14 @@ private fun CompactPresetRow(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val tokens = LocalMiuixTokens.current
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(19.dp)),
         shape = LuoShuSmoothShape(19.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        color = tokens.glassCardColor,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),

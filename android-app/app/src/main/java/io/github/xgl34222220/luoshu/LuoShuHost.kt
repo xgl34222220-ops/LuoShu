@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
@@ -27,6 +29,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 // Legacy inventory marker: viewModel<NativeImportViewModel>() was replaced by the Application-scoped owner.
 @Composable
@@ -36,8 +40,20 @@ internal fun LuoShuHost() {
     val appearanceViewModel: AppearanceViewModel = viewModel()
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
+    val application = LocalContext.current.applicationContext as LuoShuApplication
 
-    DisposableEffect(lifecycleOwner, model) {
+    LaunchedEffect(application, lifecycleOwner, model) {
+        combine(
+            lifecycleOwner.lifecycle.currentStateFlow,
+            snapshotFlow { model.snapshot },
+        ) { state, snapshot -> snapshot to state.isAtLeast(Lifecycle.State.RESUMED) }
+            .distinctUntilChanged()
+            .collect { (snapshot, resumed) ->
+                application.googleFontMaintenance.update(snapshot, resumed)
+            }
+    }
+
+    DisposableEffect(lifecycleOwner, model, application) {
         val lifecycle = lifecycleOwner.lifecycle
         val observer = LifecycleEventObserver { _, _ ->
             model.setForeground(lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
@@ -47,6 +63,7 @@ internal fun LuoShuHost() {
         onDispose {
             lifecycle.removeObserver(observer)
             model.setForeground(false)
+            application.googleFontMaintenance.detachHost()
         }
     }
 
