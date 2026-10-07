@@ -2,6 +2,7 @@
 """Host tests for the screenshot harness; these do not claim emulator coverage."""
 
 import unittest
+import io
 import xml.etree.ElementTree as ET
 import json
 import subprocess
@@ -16,6 +17,7 @@ from android_ui_smoke import (
     legacy_manual_colors_ready, legacy_monet_unavailable,
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
     scroll_progress, visible_action, visible_text, ScrollBudget,
+    focused_component,
 )
 
 
@@ -514,6 +516,71 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run.verify_rapid_navigation.assert_not_called()
             run.assert_running.assert_called_once()
 
+    def baseline_png(self, content=20, clock=0):
+        from PIL import Image
+        image = Image.new("RGB", (40, 80), (content, content, content))
+        image.paste((clock, 0, 0), (0, 0, 40, 4))
+        image.paste((0, clock, 0), (0, 76, 40, 80))
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+
+    def baseline_window(self, component="com.example.launcher/com.example.launcher.Home"):
+        return (f"mCurrentFocus=Window{{abc u0 {component}}}\n"
+                "InsetsSource id=1 type=statusBars frame=[0,0][40,4] visible=true\n"
+                "InsetsSource id=2 type=navigationBars frame=[0,76][40,80] visible=true\n")
+
+    def test_home_baseline_requires_stable_real_content_and_preserves_raw_final_png(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            captures = [self.baseline_png(10), self.baseline_png(20),
+                        self.baseline_png(20, 1), self.baseline_png(20, 2)]
+            run.text = Mock(side_effect=["com.example.launcher/.Home\n"] + [self.baseline_window()] * 4)
+            run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, png, b"") for png in captures])
+            clock = [0.0]
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
+                baseline = run.wait_home_baseline("light-cold-start")
+            self.assertEqual(captures[-1], baseline)
+            self.assertEqual(captures[-1], (Path(temporary) / "light-cold-start-baseline-03.png").read_bytes())
+            metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertEqual([1, 1, 2, 3], [sample["stable_captures"] for sample in metadata["samples"]])
+            self.assertTrue(metadata["passed"])
+            self.assertEqual([0, 4, 40, 76], metadata["samples"][-1]["content_bounds"])
+            self.assertEqual("com.example.launcher/com.example.launcher.Home",
+                             focused_component(self.baseline_window("com.example.launcher/.Home")))
+
+    def test_visual_baseline_focus_or_motion_failure_never_starts_recording_and_keeps_deadline(self):
+        for cause in ("wrong-focus", "moving-home"):
+            with self.subTest(cause=cause), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                               record_launch=True, visual_launch_only=True)
+                home = self.baseline_window() if cause == "moving-home" else self.baseline_window(f"{PACKAGE}/.MainActivity")
+                run.text = Mock(side_effect=lambda *args, **kwargs:
+                                "com.example.launcher/.Home\n" if "resolve-activity" in args else home)
+                captures = [self.baseline_png(20), self.baseline_png(30)]
+                count = [0]
+                def capture(*args, **kwargs):
+                    png = captures[count[0] % 2] if cause == "moving-home" else captures[0]
+                    count[0] += 1
+                    return subprocess.CompletedProcess([], 0, png, b"")
+                run.adb = Mock(side_effect=capture)
+                run.begin_launch_recording = Mock()
+                run.launch_and_capture = Mock()
+                clock = [0.0]
+                with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                        patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)), \
+                        self.assertRaisesRegex(RuntimeError, "within 10s"):
+                    run.launch("light-cold-start")
+                run.begin_launch_recording.assert_not_called()
+                run.launch_and_capture.assert_not_called()
+                metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+                self.assertFalse(metadata["passed"])
+                self.assertEqual(10, metadata["elapsed_seconds"])
+                self.assertTrue(metadata["samples"])
+                self.assertTrue((Path(temporary) / metadata["samples"][-1]["window"]).is_file())
+                self.assertTrue((Path(temporary) / metadata["samples"][-1]["screenshot"]).is_file())
+
     def test_warm_visual_launch_requires_one_existing_process_before_recording(self):
         for missing_or_ambiguous in ("", "123 456", "not-a-pid"):
             with self.subTest(pidof=missing_or_ambiguous), tempfile.TemporaryDirectory() as temporary:
@@ -690,6 +757,14 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run = SmokeRun(Path("app.apk"), output, PACKAGE, None, Path("snapshot.apk"))
             transcript = ("INSTRUMENTATION_RESULT: wait_ms=8001\nINSTRUMENTATION_RESULT: attempts=79\n"
                           "INSTRUMENTATION_RESULT: root_source=unavailable\n"
+                          f"INSTRUMENTATION_RESULT: last_root_package={PACKAGE}\n"
+                          "INSTRUMENTATION_RESULT: last_root_window_id=7\n"
+                          "INSTRUMENTATION_RESULT: last_root_child_count=0\n"
+                          "INSTRUMENTATION_RESULT: last_root_visible_child_count=0\n"
+                          "INSTRUMENTATION_RESULT: root_refresh_attempts=3\n"
+                          "INSTRUMENTATION_RESULT: root_refresh_successes=2\n"
+                          "INSTRUMENTATION_RESULT: root_refresh_failures=1\n"
+                          'INSTRUMENTATION_RESULT: window_counts=[{"windows":0,"active":0,"focused":0}]\n'
                           "INSTRUMENTATION_RESULT: error=IllegalStateException: No active accessibility window\n"
                           "INSTRUMENTATION_RESULT: snapshot=failed\nINSTRUMENTATION_CODE: 0\n")
             run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, transcript.encode(), b""))
@@ -700,6 +775,9 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertEqual("8001", metadata["wait_ms"])
             self.assertEqual("79", metadata["attempts"])
             self.assertEqual("failed", metadata["snapshot"])
+            self.assertEqual("7", metadata["last_root_window_id"])
+            self.assertEqual("3", metadata["root_refresh_attempts"])
+            self.assertEqual(0, json.loads(metadata["window_counts"])[0]["windows"])
             self.assertEqual("failed", instrumentation_results(transcript)["snapshot"])
 
 

@@ -30,7 +30,7 @@ class GlassVisualHierarchyTest(unittest.TestCase):
         self.assertNotRegex(host, r"AppBackdrop\(|LuoShuGlassBackdropDrawable\(")
         self.assertIn(".windowInsetsPadding(contentInsets)", host)
         self.assertIn(".consumeWindowInsets(contentInsets)", host)
-        self.assertIn("LuoShuAppShell(model, features, appearanceViewModel)", host)
+        self.assertIn("LuoShuAppShell(model, features, appearanceViewModel, firstFrameCommitted)", host)
         # The shell's backdrop must remain inside the existing capture region;
         # making the Host clear must not sacrifice the floating dock's sample.
         shell = (UI.parent / "LuoShuAppShell.kt").read_text(encoding="utf-8")

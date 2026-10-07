@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 // Legacy inventory marker: viewModel<NativeImportViewModel>() was replaced by the Application-scoped owner.
 @Composable
-internal fun LuoShuHost() {
+internal fun LuoShuHost(firstFrameCommitted: Boolean) {
     val model: LuoShuViewModel = viewModel()
     val features: Alpha15FeatureViewModel = viewModel()
     val appearanceViewModel: AppearanceViewModel = viewModel()
@@ -92,7 +92,7 @@ internal fun LuoShuHost() {
                     .windowInsetsPadding(contentInsets)
                     .consumeWindowInsets(contentInsets),
             ) {
-                LuoShuAppShell(model, features, appearanceViewModel)
+                LuoShuAppShell(model, features, appearanceViewModel, firstFrameCommitted)
             }
         }
     }

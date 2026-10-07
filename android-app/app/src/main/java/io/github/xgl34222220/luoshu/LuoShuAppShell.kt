@@ -163,6 +163,7 @@ internal fun LuoShuAppShell(
     viewModel: LuoShuViewModel,
     features: Alpha15FeatureViewModel,
     appearanceViewModel: AppearanceViewModel,
+    firstFrameCommitted: Boolean,
 ) {
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(AppPage.Home) }
@@ -309,7 +310,10 @@ internal fun LuoShuAppShell(
         targetVisible = dockVisibility.targetState,
         transitionIdle = dockVisibility.isIdle,
     )
-    val blurActive = appearance.blurEnabled && appearance.glassEnabled && dockCaptureRequired
+    // Submit the complete home before initializing offscreen captures and shader effects.
+    // Glass tint, borders, card sheen and the real page backdrop remain in the first frame.
+    val blurActive = firstFrameCommitted && appearance.blurEnabled &&
+        appearance.glassEnabled && dockCaptureRequired
     val hazeState = rememberHazeState(blurEnabled = blurActive)
     val liquidBackdrop = rememberLayerBackdrop()
     val liquidGlassSupported = blurActive &&
@@ -464,6 +468,7 @@ internal fun LuoShuAppShell(
                 appearance = appearance,
                 hazeState = hazeState,
                 backdrop = liquidBackdrop.takeIf { liquidGlassSupported },
+                blurActive = blurActive,
             )
         }
 
@@ -563,6 +568,7 @@ private fun MiuixAppDock(
     appearance: AppearanceSettings,
     hazeState: HazeState,
     backdrop: LayerBackdrop?,
+    blurActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -572,8 +578,8 @@ private fun MiuixAppDock(
     val floating = appearance.floatingDock
     val shape = if (floating) RoundedCornerShape(31.dp) else RoundedCornerShape(topStart = 31.dp, topEnd = 31.dp)
     val activeGlass = appearance.glassEnabled
-    val runtimeLiquid = activeGlass && appearance.blurEnabled && backdrop != null && isRuntimeShaderSupported()
-    val activeHaze = activeGlass && appearance.blurEnabled && !runtimeLiquid
+    val runtimeLiquid = blurActive && backdrop != null && isRuntimeShaderSupported()
+    val activeHaze = blurActive && !runtimeLiquid
     val dockSurfaceBackdrop = rememberLayerBackdrop()
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {

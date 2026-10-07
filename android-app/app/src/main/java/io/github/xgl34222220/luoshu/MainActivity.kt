@@ -23,6 +23,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceRepository
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.launch.LuoShuLaunchController
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuFirstFramePolicy
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuFirstFramePolicy.DrawAction
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -30,6 +32,10 @@ class MainActivity : ComponentActivity() {
     private var openTaskCenter by mutableStateOf(false)
     private var firstDrawListener: ViewTreeObserver.OnDrawListener? = null
     private var firstDrawCallback: Runnable? = null
+    private var firstFrameCommitCallback: Runnable? = null
+    private var firstFrameCommitObserver: ViewTreeObserver? = null
+    private val firstFramePolicy = LuoShuFirstFramePolicy()
+    private var firstFrameCommitted by mutableStateOf(false)
     private var firstContentDrawn = false
     private val launchController by lazy(LazyThreadSafetyMode.NONE) {
         LuoShuLaunchController(this)
@@ -55,33 +61,72 @@ class MainActivity : ComponentActivity() {
         )
         observeDisplayPreference()
         setContent {
-            if (openTaskCenter) TaskCenterHost() else LuoShuHost()
+            if (openTaskCenter) TaskCenterHost() else LuoShuHost(firstFrameCommitted)
         }
         observeFirstDraw(activityStartedAt)
     }
 
     private fun observeFirstDraw(startedAt: Long) {
         val view = window.decorView
-        var reported = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Register before the first traversal: ViewRootImpl captures commit callbacks
+            // before dispatching OnDraw. A scheduled draw is not a submitted frame.
+            firstFrameCommitCallback = Runnable {
+                firstFrameCommitCallback = null
+                firstFrameCommitObserver = null
+                deliverFirstFrame(startedAt, "first_frame_committed", "swap_chain")
+            }.also { callback ->
+                firstFrameCommitObserver = view.viewTreeObserver
+                view.viewTreeObserver.registerFrameCommitCallback(callback)
+            }
+        }
         val listener = ViewTreeObserver.OnDrawListener {
-            if (!reported) {
-                reported = true
+            // isHardwareAccelerated is reliable during draw, after Window attachment.
+            // API 28 and software rendering have no frame commit callback.
+            val action = firstFramePolicy.onDraw(
+                frameCommitSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+                hardwareAccelerated = view.isHardwareAccelerated,
+            )
+            if (action != DrawAction.NONE) {
                 val elapsed = SystemClock.elapsedRealtime() - startedAt
                 Log.i("LuoShuStartup", "event=first_decor_draw elapsedMs=$elapsed activityFirstDrawMs=$elapsed")
                 // Android forbids removing an OnDrawListener while dispatching onDraw.
                 firstDrawCallback = Runnable {
                     firstDrawCallback = null
                     removeFirstDrawListener()
-                    if (!isFinishing && !isDestroyed) {
-                        firstContentDrawn = true
-                        launchController.onContentDrawn()
-                        requestImportNotificationPermissionWhenReady()
+                    if (!isFinishing && !isDestroyed && action == DrawAction.POST_DRAW_DELIVERY) {
+                        removeFirstFrameCommitCallback()
+                        val phase = if (view.isHardwareAccelerated) "legacy_draw_return" else "software_draw_return"
+                        deliverFirstFrame(startedAt, "first_frame_draw_delivered", phase)
                     }
                 }.also { view.post(it) }
             }
         }
         firstDrawListener = listener
         view.viewTreeObserver.addOnDrawListener(listener)
+    }
+
+    private fun deliverFirstFrame(startedAt: Long, event: String, phase: String) {
+        if (isFinishing || isDestroyed || !firstFramePolicy.onFrameDelivered()) return
+        Log.i("LuoShuStartup", "event=$event elapsedMs=${SystemClock.elapsedRealtime() - startedAt} phase=$phase")
+        firstContentDrawn = true
+        // The first frame contains the complete home and glass tint. Offscreen blur and
+        // refraction may now be initialized without delaying that first Window buffer.
+        firstFrameCommitted = true
+        launchController.onContentDrawn()
+        requestImportNotificationPermissionWhenReady()
+    }
+
+    private fun removeFirstFrameCommitCallback() {
+        val callback = firstFrameCommitCallback
+        firstFrameCommitCallback = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && callback != null) {
+            // A pre-attachment observer can be merged into the attached Window observer.
+            // Remove from both; a callback already queued is guarded by deliverFirstFrame.
+            firstFrameCommitObserver?.takeIf { it.isAlive }?.unregisterFrameCommitCallback(callback)
+            window.decorView.viewTreeObserver.takeIf { it.isAlive }?.unregisterFrameCommitCallback(callback)
+        }
+        firstFrameCommitObserver = null
     }
 
     private fun removeFirstDrawListener() {
@@ -93,9 +138,11 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        firstFramePolicy.dispose()
         firstDrawCallback?.let(window.decorView::removeCallbacks)
         firstDrawCallback = null
         removeFirstDrawListener()
+        removeFirstFrameCommitCallback()
         launchController.dispose()
         super.onDestroy()
     }

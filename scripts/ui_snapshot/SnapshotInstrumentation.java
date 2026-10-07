@@ -16,6 +16,8 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
 
 import org.xmlpull.v1.XmlSerializer;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -45,10 +47,21 @@ public final class SnapshotInstrumentation extends Instrumentation {
     public void onStart() {
         Bundle result = new Bundle();
         AccessibilityNodeInfo root = null;
+        AccessibilityNodeInfo incompleteRoot = null;
+        JSONArray rootObservations = new JSONArray();
+        JSONArray windowCounts = new JSONArray();
         long waitStarted = 0;
         int attempts = 0;
         int incompleteRoots = 0;
+        int refreshAttempts = 0;
+        int refreshSuccesses = 0;
+        int refreshFailures = 0;
         String rootSource = "unavailable";
+        result.putString("root_refresh_attempts", "0");
+        result.putString("root_refresh_successes", "0");
+        result.putString("root_refresh_failures", "0");
+        result.putString("root_observations", "[]");
+        result.putString("window_counts", "[]");
         try {
             String filename = arguments.getString("filename", "hierarchy-0000.xml");
             if (!filename.matches("hierarchy-[0-9]{4,8}\\.xml")) {
@@ -68,26 +81,63 @@ public final class SnapshotInstrumentation extends Instrumentation {
             long deadline = waitStarted + 8000;
             while (root == null && SystemClock.uptimeMillis() < deadline) {
                 attempts++;
+                // refresh() re-queries this real node's current state rather
+                // than relying on the connection's cached incomplete root.
+                // It shares the original connection and eight-second deadline.
+                if (incompleteRoot != null) {
+                    refreshAttempts++;
+                    boolean refreshed = incompleteRoot.refresh();
+                    if (refreshed) refreshSuccesses++; else refreshFailures++;
+                    result.putString("root_refresh_attempts", Integer.toString(refreshAttempts));
+                    result.putString("root_refresh_successes", Integer.toString(refreshSuccesses));
+                    result.putString("root_refresh_failures", Integer.toString(refreshFailures));
+                    result.putString("last_root_refresh_result", Boolean.toString(refreshed));
+                    int visibleChildren = observeRoot(result, rootObservations, incompleteRoot,
+                            "retained-root:refresh", waitStarted);
+                    if (refreshed && visibleChildren > 0 && SystemClock.uptimeMillis() < deadline) {
+                        root = incompleteRoot;
+                        incompleteRoot = null;
+                        rootSource = "retained-root:refresh";
+                        break;
+                    }
+                    if (!refreshed) {
+                        // The node is obsolete; never reuse it as UI evidence.
+                        incompleteRoot.recycle();
+                        incompleteRoot = null;
+                    }
+                }
+                if (SystemClock.uptimeMillis() >= deadline) break;
                 root = automation.getRootInActiveWindow();
                 if (root != null) {
                     rootSource = "getRootInActiveWindow";
-                    if (hasVisibleChild(root)) break;
+                    if (observeRoot(result, rootObservations, root, rootSource, waitStarted) > 0) break;
                     incompleteRoots++;
-                    root.recycle();
+                    if (incompleteRoot == null) incompleteRoot = root; else root.recycle();
                     root = null;
                 }
+                if (SystemClock.uptimeMillis() >= deadline) break;
                 List<AccessibilityWindowInfo> windows = automation.getWindows();
                 try {
+                    int active = 0;
+                    int focused = 0;
+                    for (AccessibilityWindowInfo window : windows) {
+                        if (window.isActive()) active++;
+                        if (window.isFocused()) focused++;
+                    }
+                    windowCounts.put(new JSONObject().put("elapsed_ms", SystemClock.uptimeMillis() - waitStarted)
+                            .put("windows", windows.size()).put("active", active).put("focused", focused));
+                    result.putString("window_counts", windowCounts.toString());
                     // Prefer active over merely focused if both are reported.
                     for (int priority = 0; priority < 2 && root == null; priority++) {
                         for (AccessibilityWindowInfo window : windows) {
+                            if (SystemClock.uptimeMillis() >= deadline) break;
                             if (!(priority == 0 ? window.isActive() : window.isFocused())) continue;
                             root = window.getRoot();
                             if (root != null) {
                                 rootSource = (priority == 0 ? "active-window:" : "focused-window:") + window.getId();
-                                if (hasVisibleChild(root)) break;
+                                if (observeRoot(result, rootObservations, root, rootSource, waitStarted) > 0) break;
                                 incompleteRoots++;
-                                root.recycle();
+                                if (incompleteRoot == null) incompleteRoot = root; else root.recycle();
                                 root = null;
                             }
                         }
@@ -104,6 +154,10 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("attempts", Integer.toString(attempts));
             result.putString("incomplete_roots", Integer.toString(incompleteRoots));
             result.putString("root_source", rootSource);
+            if (root != null && SystemClock.uptimeMillis() >= deadline) {
+                root.recycle();
+                root = null;
+            }
             if (root == null) throw new IllegalStateException(incompleteRoots == 0
                     ? "No active accessibility window"
                     : "No visible accessibility descendants within 8s");
@@ -141,6 +195,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
             finish(Activity.RESULT_CANCELED, result);
         } finally {
             if (root != null) root.recycle();
+            if (incompleteRoot != null) incompleteRoot.recycle();
         }
     }
 
@@ -148,17 +203,30 @@ public final class SnapshotInstrumentation extends Instrumentation {
      * Keep polling on this same connection within the original eight-second wait;
      * never declare a root-only snapshot to be usable App content.
      */
-    private static boolean hasVisibleChild(AccessibilityNodeInfo root) {
+    private static int observeRoot(Bundle result, JSONArray observations, AccessibilityNodeInfo root,
+            String source, long waitStarted) throws Exception {
+        int visibleChildren = 0;
         for (int index = 0; index < root.getChildCount(); index++) {
             AccessibilityNodeInfo child = root.getChild(index);
             if (child == null) continue;
             try {
-                if (child.isVisibleToUser()) return true;
+                if (child.isVisibleToUser()) visibleChildren++;
             } finally {
                 child.recycle();
             }
         }
-        return false;
+        String rootPackage = text(root.getPackageName());
+        result.putString("last_root_package", rootPackage);
+        result.putString("last_root_window_id", Integer.toString(root.getWindowId()));
+        result.putString("last_root_child_count", Integer.toString(root.getChildCount()));
+        result.putString("last_root_visible_child_count", Integer.toString(visibleChildren));
+        observations.put(new JSONObject().put("elapsed_ms", SystemClock.uptimeMillis() - waitStarted)
+                .put("source", source).put("package", rootPackage).put("window_id", root.getWindowId())
+                .put("children", root.getChildCount()).put("visible_children", visibleChildren)
+                .put("refresh_result", source.equals("retained-root:refresh")
+                        ? result.getString("last_root_refresh_result") : JSONObject.NULL));
+        result.putString("root_observations", observations.toString());
+        return visibleChildren;
     }
 
     private void dumpNode(XmlSerializer xml, AccessibilityNodeInfo node, int index, Point size, int depth) throws Exception {

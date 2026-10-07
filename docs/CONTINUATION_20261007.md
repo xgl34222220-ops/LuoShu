@@ -64,3 +64,19 @@ API 28 字体库滚动根据真实滚动容器边界发送手势，记录可见�
 API 36 保留真实同 PID ANR：主线程等待 `RenderProxy::setStopped`，RenderThread 阻塞在 `qemu_pipe_read` / `glCreateProgram_enc`。当时系统总体 CPU 约 99%，Launcher、SystemUI 和 GMS 也留下启动饥饿日志；helper 在该 ANR 之后才创建，不能用 helper 修正声称这项 ANR 消失。工作流针对这份证据将模拟器 RAM 从 2 GiB 调为 4 GiB，并将 emulator 37.2.12 的 `swiftshader_indirect` 改为官方支持的 `software` 后端（[Android 官方图形选项](https://developer.android.com/studio/run/emulator-acceleration)，旧选项自 36.4.9 弃用）。动画、API、真实内容和 ANR 拒绝规则保持不变。是否消除图形阻塞必须由后续运行确定。
 
 逐帧门禁进一步拒绝缺失、非有限、负值或非严格递增的原始 PTS，以及 ffprobe/ffmpeg 返回 0 但输出错误日志的输入；失败诊断与部分已解码帧仍保存。冷启动必须实际拍到原生徽标，否则记为录像覆盖不足，不能据首页画面判定双页已修复。热启动必须先获得一个有效的现存 App PID，随后严格比较同 PID；原有空 PID 跳过路径已移除。新门禁 14 项、UI 帮助函数 49 项通过；尚不替代新原录像的独立人工核对。
+
+## 6af650c 原录像否决与首帧提交修正
+
+`6af650c388d966f3bb242f4c7241c9012bdd79bb` 的 [候选构建 37673679492](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37673679492) 完成所有步骤：源码门禁 39 suites / 677 tests（构建模块时原样再运行一次）、补充检查 54 tests、最终包验证 204 tests 全部通过。模块 70202、release App 7020201，最终 ZIP 内 APK 与独立签名 APK 字节一致，冻结 22 个文件及 helpers5 校验通过。这只证明构建及包验证，不构成安装交付许可。
+
+同 SHA [UI 37673679437](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37673679437) 的 JVM 211 项与 lint 通过；API 36 功能完整通过，31 次捕获 / 30 张独立 PNG，包括字体库实际滚动、跨页/后台/旋转保持、主题、禁用动画、再次冷启动和完整中文 Google 说明。Google 整体使用共享预算中的 3 / 8 次真实手势。原日志没有洛书 ANR/崩溃，但有一项无关 GMS broadcast ANR，不能写成模拟器全系统无 ANR。API 28 在第 55 次 hierarchy 请求失败：前一次已有组合页 70 个真实节点，实际页面与焦点一直可见，同 PID、无 ANR；helper 的 8 秒内只有一次不完整根节点，其后查询为空。缓存/窗口跟踪原因尚属推断，不能据此忽略失败。
+
+四段新原录像共 159 帧：亮冷 56、亮热 39、暗冷 40、暗热 24。独立解码/逐格审阅未见首页后徽标回盖，热启动同 PID 且未见 branded logo；但暗冷帧 23–27 在 3.072333–4.186622 秒为真实黑空屏，帧 28（5.104889 秒）才见首页，故候选视觉仍失败。原视频和原失败 JSON 不覆盖。`ffmpeg -vsync 0` 导出 rawvideo 使用默认 `1/framerate` 时基导致 DTS 舍入错误；显式使用 demux 时基后四视频错误输出清空、原始 PTS 和全部 RGB 字节哈希保持相同。这一工具修正不改变黑屏事实。
+
+暗冷同 PID 4927 日志：19:28:39.975 开始 decor 绘制；40.976 SurfaceSyncGroup 在 1000 ms 后强制 ready；40.983 系统 Displayed；43.592 才交付真实内容提交。HWUI 第一帧 IssueDrawCommandsStart→SwapBuffers 约 3451 ms，而主线程录制约 181 ms。首次就捕获完整页面并初始化模糊/七采样折射链是优先待验证的开销来源；日志不能精确量化每个 shader，也没有默认退场 native-removal 回调时间。
+
+后续实现保留默认平台 Splash 退场和首帧真实首页/渐变/玻璃底色/高光/边框，将离屏捕获、模糊与折射推迟到首帧真正提交后。API 29+ 硬件使用 [registerFrameCommitCallback](https://developer.android.com/reference/android/view/ViewTreeObserver#registerFrameCommitCallback(java.lang.Runnable))；它证明 rendered/submitted to swap chain，不证明已经显示。API 28 或软件渲染则使用绘制返回后的 post，并在日志中明确区分。没有设置等待秒数、最短 Splash 时长或复制第二启动页。直接用于 Activity 的纯策略覆盖六项提交/回退/销毁/重复/重建行为；Android 编译、这些 JVM 测试和新的原录像仍须由后续准确 SHA 验证，不能先写黑屏已修好。
+
+API 28 helper 在同一连接、原 8 秒内用 public `AccessibilityNodeInfo.refresh()` 重查保留的不完整真实节点，并输出 package、windowId、可见子节点、refresh 成败及窗口计数。过时或超期节点不能写成有效 XML。其缓存解释仍是待新运行检验的推断，失败门禁保持。视觉录制之前则在最多 10 秒内解析真实 HOME component、确认 Window 焦点，并要求排除真实系统栏后的原截图内容连续三次完全相同；所有原 PNG/Window 都保存。该等待发生在启动前，只为确定原录像基线，不改变 App 动画或 30 秒录制，也不能用它替代启动耗时。
+
+真实系统窗口缩放过渡使用有界统一变换匹配：scale .65–1.05（.005 步长），归一化 360 宽的 x±20/y±80；两个真实首页语义 crop 必须命中同一个 scale/dx/dy，取较低分数。完整原生/首页 .92、过渡 .72 的门槛不变；任意缩放徽标在首页之后或同 PID 热启动中出现仍失败。新回归夹具来自 `6af650c` 原视频，逐张记录视频 SHA、原帧、PTS 和 PNG SHA，没有按帧号/时间放行。20 项逐帧门禁回归通过，原 `1788866` 的真实回盖和黑帧仍拒绝；修正工具重读 `6af650c` 后仍拒绝暗冷的空背景/五个黑帧及亮热的未稳态基线。新的 App 修改必须重新录制验收，不以重读旧片通过替代。

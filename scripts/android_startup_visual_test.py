@@ -4,15 +4,17 @@ import unittest
 import xml.etree.ElementTree as ET
 import io
 import json
+import shutil
 import subprocess
 import tempfile
+import hashlib
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from android_startup_visual import FrameClassifier, inspect_recording, original_timestamps, timeline_verdict
+from android_startup_visual import FrameClassifier, edges, inspect_recording, match_score, original_timestamps, timeline_verdict
 
 
 class StartupVisualTest(unittest.TestCase):
@@ -87,6 +89,87 @@ class StartupVisualTest(unittest.TestCase):
             self.assertIn("Insufficient cold-start coverage", " ".join(verdict["errors"]))
             self.assertNotIn("returned after visible home", " ".join(verdict["errors"]))
         self.assertTrue(timeline_verdict(self.frames(classifier, (baseline, home)), warm=True)["passed"])
+
+    def test_two_home_labels_cannot_match_different_translations(self):
+        classifier, home, baseline, splash = self.reference()
+        altered = home.copy()
+        draw = ImageDraw.Draw(altered)
+        draw.rectangle((41, 318, 128, 339), fill=(245, 245, 250))
+        draw.rectangle((41, 359, 140, 380), fill=(245, 245, 250))
+        draw.text((45, 262), "CURRENT FONT", fill=(20, 25, 35))
+        draw.text((45, 423), "SYSTEM DEFAULT", fill=(20, 25, 35))
+        # Each separate old search can find its text, but no common transform
+        # can account for these opposite shifts and altered spacing.
+        edge_frame = edges(np.asarray(altered))
+        for _, (x1, y1, x2, y2), template in classifier.home_patches:
+            self.assertGreaterEqual(match_score(edge_frame[y1:y2, x1:x2], template), .92)
+        self.assertEqual("unclassified", classifier.classify(np.asarray(altered))["state"])
+
+
+class RealSurfaceReferenceTest(unittest.TestCase):
+    """Frozen real frame regressions; never evidence a later emulator run passes."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.fixtures = Path(__file__).with_name("startup_visual_fixtures")
+        cls.provenance = json.loads((cls.fixtures / "surface-reference-provenance.json").read_text())
+        cls.classifiers = {}
+        for theme in ("light", "dark"):
+            with Image.open(cls.fixtures / f"reference-home-{theme}.png") as home:
+                cls.classifiers[theme] = FrameClassifier(home,
+                    ET.parse(cls.fixtures / f"reference-home-{theme}.xml").getroot(), theme, (360, 780))
+
+    def classify(self, reference):
+        with Image.open(self.fixtures / reference["file"]) as original:
+            frame = np.asarray(original.convert("RGB").resize((360, 780), Image.Resampling.BILINEAR))
+        return self.classifiers[reference["theme"]].classify(frame)
+
+    def test_real_opening_and_resume_transforms_are_explicitly_recognized(self):
+        for reference in self.provenance["references"]:
+            if reference["expected_state"] not in ("logo-transition", "home-transition"):
+                continue
+            with self.subTest(file=reference["file"]):
+                result = self.classify(reference)
+                self.assertEqual(reference["expected_state"], result["state"])
+                transform = result["logo_transform" if result["state"] == "logo-transition" else "home_transform"]
+                self.assertGreaterEqual(transform["score"], .72)
+                self.assertGreaterEqual(transform["scale"], .65)
+                self.assertLessEqual(transform["scale"], 1.05)
+
+    def test_real_black_blank_dark_background_and_wrong_launcher_still_fail(self):
+        for reference in self.provenance["references"]:
+            if reference["expected_state"] not in ("unclassified", "black-blank"):
+                continue
+            with self.subTest(file=reference["file"]):
+                result = self.classify(reference)
+                self.assertEqual(reference["expected_state"], result["state"])
+                self.assertFalse(timeline_verdict([{"frame": 0, "seconds": reference["time_seconds"], **result}], warm=True)["passed"])
+
+    def test_real_transformed_logo_return_and_warm_branding_fail(self):
+        for reference in self.provenance["references"]:
+            if reference["expected_state"] != "logo-transition":
+                continue
+            with self.subTest(file=reference["file"]):
+                logo = {"frame": 1, "seconds": .01, **self.classify(reference)}
+                home = {"frame": 0, "seconds": 0, "state": "home"}
+                final_home = {"frame": 2, "seconds": .02, "state": "home"}
+                verdict = timeline_verdict([home, logo, final_home])
+                self.assertFalse(verdict["passed"])
+                self.assertIn("returned after visible home", " ".join(verdict["errors"]))
+                warm = timeline_verdict([logo, final_home], warm=True)
+                self.assertFalse(warm["passed"])
+                self.assertIn("Warm same-process", " ".join(warm["errors"]))
+                self.assertFalse(verdict["native_logo_seen"])
+
+    def test_real_frozen_fixture_hashes_and_original_frame_provenance(self):
+        for reference in self.provenance["references"] + self.provenance["home_references"]:
+            with self.subTest(file=reference["file"]):
+                self.assertEqual(reference["file_sha256"], hashlib.sha256((self.fixtures / reference["file"]).read_bytes()).hexdigest())
+                self.assertEqual(64, len(reference["source_sha256"]))
+        for reference in self.provenance["references"]:
+            self.assertEqual([0, 0, 720, 1560], reference["crop_pixels"])
+            self.assertGreaterEqual(reference["frame"], 0)
+            self.assertGreaterEqual(reference["time_seconds"], 0)
 
 
 class StartupEvidenceInspectionTest(unittest.TestCase):
@@ -180,6 +263,31 @@ class StartupEvidenceInspectionTest(unittest.TestCase):
         self.assertEqual(0, calls)
         self.assertEqual(0, result["frames_decoded"])
         self.assertIn("nonfinite", result["evidence_error"])
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "Requires real frame decoder tools")
+    def test_real_vfr_pts_do_not_round_into_rawvideo_muxer_errors(self):
+        # Adjacent frames at 1.000/1.001s expose default low-rate output DTS
+        # rounding. Artwork classification is mocked: this is decoder evidence,
+        # never an emulator or a synthetic visual-acceptance claim.
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            video, home, hierarchy, output = (root / name for name in ("vfr.mp4", "home.png", "home.xml", "verdict.json"))
+            filters = r"settb=1/1000000,setpts=if(eq(N\,0)\,0\,if(eq(N\,1)\,1000000\,if(eq(N\,2)\,1001000\,2000000)))"
+            encoded = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                "color=c=red:s=360x780:r=25:d=0.16", "-vf", filters, "-vsync", "0",
+                "-enc_time_base", "1/1000000", "-c:v", "libx264", "-bf", "0", "-pix_fmt", "yuv420p", str(video)],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            self.assertEqual(b"", encoded.stderr)
+            Image.new("RGB", (360, 780)).save(home)
+            hierarchy.write_text("<hierarchy />")
+            classifier = Mock()
+            classifier.classify.side_effect = [{"state": "native-logo"}, *[{"state": "home"}] * 3]
+            with patch("android_startup_visual.FrameClassifier", return_value=classifier):
+                result = inspect_recording(video, home, hierarchy, "light", output)
+            self.assertTrue(result["passed"], result["errors"])
+            self.assertEqual(4, result["frames_decoded"])
+            self.assertEqual([0, 1, 1.001, 2], [frame["seconds"] for frame in result["frames"]])
+            self.assertEqual("", result["decoder"]["stderr"])
 
 
 if __name__ == "__main__":

@@ -26,6 +26,8 @@ MATCH_WIDTH = 360
 LOGO_MATCH = .92
 HOME_MATCH = .92
 TRANSITION_MATCH = .72
+SURFACE_SCALES = tuple(index / 200 for index in range(130, 211))
+SURFACE_SHIFT = (20, 80)
 
 
 def edges(rgb: np.ndarray) -> np.ndarray:
@@ -35,11 +37,11 @@ def edges(rgb: np.ndarray) -> np.ndarray:
     return np.hypot(dx, dy)
 
 
-def match_score(area: np.ndarray, template: np.ndarray) -> float:
+def match_scores(area: np.ndarray, template: np.ndarray) -> np.ndarray:
     """Normalized correlation of actual ink edges, excluding flat backgrounds."""
     height, width = template.shape
     if area.shape[0] < height or area.shape[1] < width or template.std() < 1:
-        return 0.0
+        return np.empty((0, 0), dtype=np.float32)
     centered = template - template.mean()
     numerator = correlate(area, centered, mode="valid", method="fft")
     integral = np.pad(area.cumsum(0).cumsum(1), ((1, 0), (1, 0)))
@@ -49,7 +51,12 @@ def match_score(area: np.ndarray, template: np.ndarray) -> float:
     variance = np.maximum(totals(squared) - totals(integral) ** 2 / template.size, 0)
     denominator = np.sqrt(variance * (centered * centered).sum())
     scores = np.divide(numerator, denominator, out=np.zeros_like(numerator), where=denominator > 1)
-    return float(np.clip(scores.max(), 0, 1))
+    return np.clip(scores, 0, 1)
+
+
+def match_score(area: np.ndarray, template: np.ndarray) -> float:
+    scores = match_scores(area, template)
+    return float(scores.max()) if scores.size else 0.0
 
 
 def resized(image: Image.Image, size: tuple[int, int]) -> np.ndarray:
@@ -62,6 +69,7 @@ class FrameClassifier:
         self.size = size
         self.reference = resized(home, size)
         self.home_patches = []
+        self.home_bounds = []
         reference_edges = edges(self.reference)
         # Two independent real content strings survive Root-status updates.
         # A flat full-frame similarity could wrongly accept the opaque splash.
@@ -78,11 +86,57 @@ class FrameClassifier:
             if template.std() < 1:
                 raise RuntimeError(f"Home reference crop for {label!r} has no visible text")
             self.home_patches.append((label, (max(0, x1 - 6), max(0, y1 - 70), min(size[0], x2 + 6), min(size[1], y2 + 70)), template))
+            self.home_bounds.append((label, (max(0, x1 - 2), max(0, y1 - 2), min(size[0], x2 + 2), min(size[1], y2 + 2))))
         fixtures = Path(__file__).with_name("startup_visual_fixtures")
         # Original emulator is 720x1560; normalize both fixture and real frame.
         with Image.open(fixtures / f"native-logo-{theme}.png") as artwork:
             self.logo = edges(resized(artwork, (168, 168)))
+            self.logo_transforms = [(scale, edges(resized(artwork, (round(168 * scale), round(168 * scale)))))
+                                    for scale in SURFACE_SCALES if scale != 1]
+        self.home_transforms = []
+        for scale in SURFACE_SCALES:
+            scaled_size = tuple(round(value * scale) for value in size)
+            scaled_edges = edges(resized(home, scaled_size))
+            patches = []
+            for label, bounds in self.home_bounds:
+                x1, y1, x2, y2 = (round(value * scaled_size[index % 2] / size[index % 2]) for index, value in enumerate(bounds))
+                origin = (x1 + round((size[0] - scaled_size[0]) / 2), y1 + round((size[1] - scaled_size[1]) / 2))
+                patches.append((label, origin, scaled_edges[y1:y2, x1:x2].copy()))
+            self.home_transforms.append((scale, patches))
+        self.full_home_transform = next(transform for transform in self.home_transforms if transform[0] == 1)
         self.baseline = edges(resized(baseline, size)) if baseline is not None else None
+
+    def home_transform_match(self, frame: np.ndarray, transform: tuple) -> dict:
+        """Both semantic crops must match one scale and one shared translation."""
+        scale, patches = transform
+        height, width = frame.shape
+        dx1 = max(-SURFACE_SHIFT[0], *[-origin[0] for _, origin, _ in patches])
+        dy1 = max(-SURFACE_SHIFT[1], *[-origin[1] for _, origin, _ in patches])
+        dx2 = min(SURFACE_SHIFT[0], *[width - origin[0] - template.shape[1] for _, origin, template in patches])
+        dy2 = min(SURFACE_SHIFT[1], *[height - origin[1] - template.shape[0] for _, origin, template in patches])
+        if dx2 < dx1 or dy2 < dy1:
+            return {"score": 0.0, "scale": scale, "dx": None, "dy": None, "scores": {label: 0.0 for label, _, _ in patches}}
+        maps = []
+        for _, (x, y), template in patches:
+            maps.append(match_scores(frame[y + dy1:y + template.shape[0] + dy2, x + dx1:x + template.shape[1] + dx2], template))
+        if any(not scores.size for scores in maps):
+            return {"score": 0.0, "scale": scale, "dx": None, "dy": None, "scores": {label: 0.0 for label, _, _ in patches}}
+        combined = np.minimum.reduce(maps)
+        y, x = np.unravel_index(combined.argmax(), combined.shape)
+        return {"score": float(combined[y, x]), "scale": scale, "dx": int(x + dx1), "dy": int(y + dy1),
+                "scores": {label: float(scores[y, x]) for (label, _, _), scores in zip(patches, maps)}}
+
+    def logo_transform_match(self, frame: np.ndarray, scale: float, template: np.ndarray) -> dict:
+        height, width = frame.shape
+        th, tw = template.shape
+        px, py = round((width - tw) / 2), round((height - th) / 2)
+        dx1, dx2 = max(-SURFACE_SHIFT[0], -px), min(SURFACE_SHIFT[0], width - px - tw)
+        dy1, dy2 = max(-SURFACE_SHIFT[1], -py), min(SURFACE_SHIFT[1], height - py - th)
+        scores = match_scores(frame[py + dy1:py + th + dy2, px + dx1:px + tw + dx2], template)
+        if not scores.size:
+            return {"score": 0.0, "scale": scale, "dx": None, "dy": None}
+        y, x = np.unravel_index(scores.argmax(), scores.shape)
+        return {"score": float(scores[y, x]), "scale": scale, "dx": int(x + dx1), "dy": int(y + dy1)}
 
     def classify(self, frame: np.ndarray) -> dict:
         height, width, _ = frame.shape
@@ -90,9 +144,8 @@ class FrameClassifier:
         black_fraction = float(np.mean(interior.max(axis=2) < 8))
         edge_frame = edges(frame)
         logo_score = match_score(edge_frame[int(height * .32):int(height * .69), int(width * .20):int(width * .80)], self.logo)
-        home_scores = {}
-        for label, (x1, y1, x2, y2), template in self.home_patches:
-            home_scores[label] = match_score(edge_frame[y1:y2, x1:x2], template)
+        home_match = self.home_transform_match(edge_frame, self.full_home_transform)
+        logo_transform = {"score": logo_score, "scale": 1.0}
         baseline_score = 0.0
         if self.baseline is not None:
             area = edge_frame[int(height * .06):int(height * .94)]
@@ -102,18 +155,32 @@ class FrameClassifier:
             state = "black-blank"
         elif logo_score >= LOGO_MATCH:
             state = "native-logo"
-        elif min(home_scores.values()) >= HOME_MATCH:
-            state = "home"
-        elif logo_score >= TRANSITION_MATCH:
-            state = "logo-transition"
-        elif min(home_scores.values()) >= TRANSITION_MATCH:
-            state = "home-transition"
-        elif baseline_score >= .95:
-            state = "prelaunch"
         else:
-            state = "unclassified"
+            # Logo search precedes home, including transformed logos returning
+            # over already-visible content or on a same-process warm resume.
+            for scale, artwork in self.logo_transforms:
+                match = self.logo_transform_match(edge_frame, scale, artwork)
+                if match["score"] > logo_transform["score"]:
+                    logo_transform = match
+            if logo_transform["score"] >= TRANSITION_MATCH:
+                state = "logo-transition"
+            elif home_match["score"] >= HOME_MATCH:
+                state = "home"
+            else:
+                for transform in self.home_transforms:
+                    match = self.home_transform_match(edge_frame, transform)
+                    if match["score"] > home_match["score"]:
+                        home_match = match
+                if home_match["score"] >= TRANSITION_MATCH:
+                    state = "home-transition"
+                elif baseline_score >= .95:
+                    state = "prelaunch"
+                else:
+                    state = "unclassified"
         return {"state": state, "logo_score": round(logo_score, 5),
-                "home_scores": {key: round(value, 5) for key, value in home_scores.items()},
+                "home_scores": {key: round(value, 5) for key, value in home_match["scores"].items()},
+                "home_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in home_match.items() if key != "scores"},
+                "logo_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in logo_transform.items()},
                 "baseline_score": round(baseline_score, 5), "black_fraction": round(black_fraction, 5)}
 
 
@@ -173,7 +240,9 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
     result = {"video": video.name, "sha256": None,
               "scope": "Every original decoded frame and presentation timestamp; real semantic home and native artwork image matching",
               "theme": theme, "warm_same_process": warm,
-              "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH}}
+              "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH},
+              "surface_transform_bounds": {"scale_min": min(SURFACE_SCALES), "scale_max": max(SURFACE_SCALES),
+                                           "scale_step": .005, "shared_home_translation_pixels": list(SURFACE_SHIFT)}}
     try:
         result["sha256"] = hashlib.sha256(video.read_bytes()).hexdigest()
         probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
@@ -199,7 +268,10 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
         # A file avoids a full stderr pipe blocking the decoder on damaged input.
         with tempfile.TemporaryFile() as decoder_errors:
             process = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(video), "-vsync", "0",
-                "-vf", f"scale={size[0]}:{size[1]}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                # Keep variable-rate PTS precise; default 1/framerate can round
+                # distinct input timestamps into equal rawvideo muxer DTS.
+                "-vf", f"scale={size[0]}:{size[1]}", "-enc_time_base", "demux",
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
                 stdout=subprocess.PIPE, stderr=decoder_errors)
             try:
                 for index, stamp in enumerate(timestamps):

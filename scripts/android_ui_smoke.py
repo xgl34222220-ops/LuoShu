@@ -9,6 +9,8 @@ screencap output; no mock data, screenshots or crash suppression are injected.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import re
 import struct
@@ -26,6 +28,37 @@ PAGES = (
     ("settings", "设置", "你的洛书"),
 )
 BOUNDS = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+
+
+def canonical_component(component: str) -> str:
+    package, activity = component.split("/", 1)
+    return f"{package}/{package + activity if activity.startswith('.') else activity}"
+
+
+def focused_component(window: str) -> str | None:
+    match = re.search(r"mCurrentFocus=Window\{[^\n]*?\s([\w.$]+/[\w.$]+)\}", window)
+    return canonical_component(match.group(1)) if match else None
+
+
+def home_content_bounds(window: str, size: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Exclude only the real status/navigation source rectangles from comparison."""
+    width, height = size
+    top, bottom = 0, height
+    status_found = navigation_found = False
+    for kind, left, upper, right, lower in re.findall(
+            r"type=(statusBars|navigationBars)\s+frame=\[(\d+),(\d+)\]\[(\d+),(\d+)\]", window):
+        left, upper, right, lower = map(int, (left, upper, right, lower))
+        if left != 0 or right != width:
+            continue
+        if kind == "statusBars" and upper == 0 and 0 < lower < height:
+            top = max(top, lower)
+            status_found = True
+        elif kind == "navigationBars" and lower == height and 0 < upper < height:
+            bottom = min(bottom, upper)
+            navigation_found = True
+    if not status_found or not navigation_found or top >= bottom:
+        raise RuntimeError("Cannot identify real HOME system bars for baseline stability")
+    return 0, top, width, bottom
 
 
 def labels(node: ET.Element) -> set[str]:
@@ -765,7 +798,7 @@ class SmokeRun:
 
     def launch(self, name: str) -> ET.Element:
         if self.record_launch:
-            baseline = self.adb("exec-out", "screencap", "-p").stdout
+            baseline = self.wait_home_baseline(name) if self.visual_launch_only else self.adb("exec-out", "screencap", "-p").stdout
             (self.output / f"{name}-before.png").write_bytes(baseline)
         recording = self.begin_launch_recording(name) if self.record_launch else None
         root = None
@@ -787,6 +820,65 @@ class SmokeRun:
             self.record(f"{name}-visual-handoff", frames_decoded=result["frames_decoded"],
                         verdict=f"{name}-visual-verdict.json", scope=result["scope"])
         return root
+
+    def wait_home_baseline(self, name: str) -> bytes:
+        """Require actual HOME focus and three stable raw captures before recording."""
+        from PIL import Image
+
+        started = time.monotonic()
+        deadline = started + 10
+        metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": []}
+        previous = None
+        stable = 0
+
+        def remaining() -> float:
+            value = deadline - time.monotonic()
+            if value <= 0:
+                raise RuntimeError("HOME baseline did not become focused and stable within 10s")
+            return value
+
+        try:
+            resolved = self.text("shell", "cmd", "package", "resolve-activity", "--brief",
+                                 "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME",
+                                 timeout=remaining())
+            (self.output / f"{name}-baseline-home.txt").write_text(resolved, encoding="utf-8")
+            components = re.findall(r"^([\w.$]+/[\w.$]+)$", resolved, re.MULTILINE)
+            if len(components) != 1 or components[0].startswith("android/"):
+                raise RuntimeError("Actual HOME activity did not resolve to one Launcher component")
+            home = canonical_component(components[0])
+            metadata["home_component"] = home
+            while True:
+                remaining()
+                index = len(metadata["samples"])
+                window = self.text("shell", "dumpsys", "window", timeout=remaining())
+                window_file = f"{name}-baseline-{index:02d}-window.txt"
+                (self.output / window_file).write_text(window, encoding="utf-8")
+                png = self.adb("exec-out", "screencap", "-p", timeout=remaining()).stdout
+                png_file = f"{name}-baseline-{index:02d}.png"
+                (self.output / png_file).write_bytes(png)
+                focused = focused_component(window)
+                with Image.open(io.BytesIO(png)) as captured:
+                    rect = home_content_bounds(window, captured.size)
+                    pixels = captured.convert("RGB").crop(rect).tobytes()
+                    signature = (captured.size, rect, pixels)
+                stable = stable + 1 if focused == home and signature == previous else int(focused == home)
+                previous = signature if focused == home else None
+                metadata["samples"].append({"elapsed_seconds": round(time.monotonic() - started, 3),
+                    "focused_component": focused, "window": window_file, "screenshot": png_file,
+                    "content_bounds": list(rect), "content_sha256": hashlib.sha256(pixels).hexdigest(),
+                    "stable_captures": stable})
+                remaining()
+                if stable >= 3:
+                    metadata["passed"] = True
+                    return png
+                time.sleep(min(.4, remaining()))
+        except Exception as error:
+            metadata.update(passed=False, error=str(error))
+            raise RuntimeError(f"{name}: HOME baseline failed: {error}") from error
+        finally:
+            metadata["elapsed_seconds"] = round(time.monotonic() - started, 3)
+            (self.output / f"{name}-baseline-readiness.json").write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def begin_launch_recording(self, name: str = "cold-start"):
         """Record a bounded real launch concurrently; evidence failure is not App failure."""
@@ -1067,7 +1159,6 @@ class SmokeRun:
                 self.adb("shell", "cmd", "uimode", "night", mode)
                 self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
                 self.adb("shell", "am", "force-stop", self.package)
-                time.sleep(.7)
                 for kind in ("cold", "warm"):
                     name = f"{theme}-{kind}-start"
                     previous_pid = None
@@ -1076,7 +1167,6 @@ class SmokeRun:
                         if re.fullmatch(r"[1-9]\d*", previous_pid) is None:
                             raise RuntimeError(f"{name}: warm launch requires one existing App PID; pidof returned {previous_pid!r}")
                         self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
-                        time.sleep(.7)
                     self.adb("logcat", "-c")
                     try:
                         self.launch(name)
