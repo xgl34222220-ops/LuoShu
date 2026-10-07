@@ -241,6 +241,7 @@ private fun GoogleStepCard(number: String, title: String, body: String) {
         modifier = Modifier.fillMaxWidth(),
         shape = LuoShuSmoothShape(18.dp),
         color = MaterialTheme.colorScheme.primary.copy(alpha = .07f),
+        contentColor = LocalMiuixTokens.current.textPrimary,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 12.dp),
@@ -272,7 +273,8 @@ private fun GoogleCompatibilityCard(title: String, content: @Composable () -> Un
     val tokens = LocalMiuixTokens.current
     val shape = LuoShuSmoothShape(24.dp)
     Surface(Modifier.fillMaxWidth(), shape = shape,
-        color = tokens.glassCardColor, shadowElevation = tokens.cardShadowElevation,
+        color = tokens.glassCardColor, contentColor = tokens.textPrimary,
+        shadowElevation = tokens.cardShadowElevation,
         border = BorderStroke(1.dp, tokens.glassOutlineBrush)) {
         Column(Modifier.luoShuGlassHighlight(shape).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)

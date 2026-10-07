@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
@@ -187,7 +188,13 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
         success = if (dark) Color(0xFF69D9AD) else Color(0xFF187B58),
         warning = if (dark) Color(0xFFF3C378) else Color(0xFF956319),
     )
-    CompositionLocalProvider(LocalMiuixTokens provides tokens, content = content)
+    CompositionLocalProvider(
+        LocalMiuixTokens provides tokens,
+        // Custom translucent fills are not exact ColorScheme surface roles.
+        // Their contentColorFor fallback must follow our resolved theme too.
+        LocalContentColor provides tokens.textPrimary,
+        content = content,
+    )
 }
 
 @Composable
