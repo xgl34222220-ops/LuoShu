@@ -1,6 +1,16 @@
 package io.github.xgl34222220.luoshu.ui.library
 
-import androidx.compose.foundation.clickable
+import android.view.Gravity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,7 +18,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,32 +27,50 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FontDownload
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Sort
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
-import android.view.Gravity
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import io.github.xgl34222220.luoshu.ui.theme.luoShuPressScale
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,76 +79,216 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
-import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
-import io.github.xgl34222220.luoshu.ui.font.fontPreviewText
+import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
 @Composable
 internal fun FontLibraryScreenMiuix(
+    style: UiStyle,
     state: FontLibraryUiState,
     actions: FontLibraryActions,
-    topActions: @Composable () -> Unit = {},
+    tools: @Composable () -> Unit,
 ) {
+    val tokens = LocalMiuixTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val cardColor = tokens.cardBackground
+    val elevatedColor = tokens.elevatedCardBackground
+    val textPrimary = tokens.textPrimary
+    val textSecondary = tokens.textSecondary
+    var showTools by rememberSaveable { mutableStateOf(false) }
+    var showSort by remember { mutableStateOf(false) }
+    val filtered = state.query.isNotBlank() || state.filter != FontLibraryFilter.ALL
+
+    val listState = rememberLazyListState()
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
-        item { MiuixLibraryHeader(state, actions.refresh) }
-        item { topActions() }
-        item { MiuixBrowsePanel(state, actions) }
-
-        if (state.loading || state.operationBusy) {
-            item {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().height(4.dp),
-                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        item(key = "header") {
+            LuoShuTopBar(title = "字体库") {
+                LuoShuHeaderAction(
+                    icon = Icons.Rounded.Refresh,
+                    contentDescription = "刷新字体库",
+                    onClick = actions.refresh,
+                    enabled = !state.loading && !state.operationBusy,
+                    loading = state.loading,
+                    containerColor = elevatedColor,
                 )
             }
         }
-        if (state.error.isNotBlank()) {
-            item { MiuixLibraryNotice(state.error, error = true) }
-        }
-        if (state.operationMessage.isNotBlank()) {
-            item {
-                MiuixLibraryNotice(
-                    message = state.operationMessage,
-                    error = false,
-                    busy = state.operationBusy,
-                )
-            }
-        }
-
-        item {
-            MiuixSectionLabel(
-                title = "系统字体",
-                subtitle = if (state.activeFontId == "default") "当前使用 ROM 原始字体" else "可随时恢复原始映射",
+        item(key = "search") {
+            TextField(
+                value = state.query,
+                onValueChange = actions.setQuery,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = LuoShuSmoothShape(20.dp),
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (state.query.isNotEmpty()) {
+                        IconButton(onClick = { actions.setQuery("") }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "清空搜索")
+                        }
+                    }
+                },
+                placeholder = { Text("搜索你的字体") },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = elevatedColor,
+                    unfocusedContainerColor = elevatedColor,
+                    disabledContainerColor = elevatedColor,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
             )
         }
-        item {
+        item(key = "filters") {
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FontLibraryFilter.entries.forEach { option ->
+                    ChoicePill(option.label, state.filter == option) { actions.setFilter(option) }
+                }
+            }
+        }
+        item(key = "collection_heading") {
+            Column {
+                LuoShuSectionHeading(
+                    title = if (filtered) "筛选结果" else "本地字体",
+                    subtitle = "${state.visibleCount} 款字体 · ${state.validCount} 款可用",
+                )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box {
+                        TextButton(onClick = { showSort = true }) {
+                            Icon(Icons.Rounded.Sort, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(state.sort.label, fontSize = 12.sp)
+                            Icon(Icons.Rounded.ExpandMore, contentDescription = null, modifier = Modifier.size(18.dp))
+                        }
+                        DropdownMenu(expanded = showSort, onDismissRequest = { showSort = false }) {
+                            FontLibrarySort.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    trailingIcon = {
+                                        if (state.sort == option) Icon(Icons.Rounded.Check, contentDescription = "已选择")
+                                    },
+                                    onClick = { actions.setSort(option); showSort = false },
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { showTools = !showTools }) {
+                        Text(if (showTools) "收起管理" else "导入与管理", fontSize = 12.sp)
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            if (showTools) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+        item(key = "tools") {
+            AnimatedVisibility(
+                visible = showTools,
+                enter = fadeIn(tween(LuoShuMotionTokens.Fast)) +
+                    expandVertically(tween(LuoShuMotionTokens.Normal, easing = FastOutSlowInEasing)) +
+                    slideInVertically(tween(LuoShuMotionTokens.Normal, easing = FastOutSlowInEasing)) { it / 6 },
+                exit = fadeOut(tween(140)) +
+                    shrinkVertically(tween(170, easing = FastOutSlowInEasing)),
+            ) {
+                tools()
+            }
+        }
+        if (state.loading) {
+            item(key = "loading") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LuoShuLoadingSkeleton(
+                        modifier = Modifier.fillMaxWidth(.42f).height(14.dp),
+                    )
+                    LuoShuLoadingSkeleton(
+                        modifier = Modifier.fillMaxWidth().height(5.dp),
+                        shape = LuoShuSmoothShape(999.dp),
+                    )
+                }
+            }
+        } else if (state.operationBusy) {
+            item(key = "loading") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("正在处理字体，请稍候…", color = textSecondary, fontSize = 13.sp)
+                    LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp))
+                }
+            }
+        }
+        if (state.error.isNotBlank()) item(key = "error") { NoticeCard(state.error, error = true) }
+        if (state.operationMessage.isNotBlank()) {
+            item(key = "operation") { NoticeCard(state.operationMessage, error = false) }
+        }
+        item(key = "system_font") {
             MiuixSystemFontRow(
-                active = state.activeFontId == "default",
-                busy = state.operationBusy,
+                active = state.activeFontId == "default", busy = state.operationBusy,
+                cardColor = cardColor, textPrimary = textPrimary, textSecondary = textSecondary,
                 onRestore = actions.restoreDefault,
             )
         }
-
-        item {
-            MiuixSectionLabel(
-                title = "已导入字体",
-                subtitle = "显示 ${state.visibleCount} 个 · ${state.sort.label}",
-            )
-        }
         if (!state.loading && state.fonts.isEmpty()) {
-            item { MiuixLibraryEmpty(state) }
+            item(key = "empty") {
+                Card(
+                    shape = LuoShuSmoothShape(24.dp),
+                    colors = CardDefaults.cardColors(containerColor = cardColor),
+                    border = BorderStroke(1.dp, tokens.cardOutline),
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Surface(shape = LuoShuSmoothShape(22.dp), color = scheme.primary.copy(alpha = .08f)) {
+                            Icon(
+                                if (filtered) Icons.Rounded.Search else Icons.Rounded.FontDownload,
+                                contentDescription = null, tint = scheme.primary,
+                                modifier = Modifier.padding(18.dp).size(30.dp),
+                            )
+                        }
+                        Text(
+                            if (filtered) "没有找到匹配的字体" else "从第一款字体开始",
+                            color = textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            if (filtered) "试试其他关键词，或清除筛选条件。" else "导入喜欢的字体，在这里预览、整理和应用。",
+                            color = textSecondary, fontSize = 13.sp, lineHeight = 20.sp,
+                            textAlign = TextAlign.Center,
+                        )
+                        FilledTonalButton(onClick = {
+                            if (filtered) { actions.setQuery(""); actions.setFilter(FontLibraryFilter.ALL) }
+                            else showTools = true
+                        }) { Text(if (filtered) "清除筛选" else "打开导入与管理") }
+                    }
+                }
+            }
         }
-        items(state.fonts, key = { it.id }) { font ->
-            MiuixFontCard(
-                font = font,
-                active = state.activeFontId == font.id,
-                busy = state.operationBusy,
-                onDetails = { actions.details(font) },
-                onApply = { actions.apply(font) },
+        items(state.fonts, key = { "font:${it.id}" }, contentType = { "font" }) { font ->
+            MiuixFontRow(
+                font = font, active = state.activeFontId == font.id, busy = state.operationBusy,
+                cardColor = cardColor, textPrimary = textPrimary, textSecondary = textSecondary,
+                onDetails = { actions.details(font) }, onApply = { actions.apply(font) },
                 onDelete = { actions.delete(font) },
             )
         }
@@ -129,636 +296,199 @@ internal fun FontLibraryScreenMiuix(
 }
 
 @Composable
-private fun MiuixLibraryHeader(state: FontLibraryUiState, onRefresh: () -> Unit) {
-    val tokens = LocalMiuixTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "FONT LIBRARY",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.4.sp,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "字体库",
-                color = tokens.textPrimary,
-                fontSize = 38.sp,
-                lineHeight = 43.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Text(
-                "管理与应用本地字体 · ${state.validCount}/${state.totalCount} 可用",
-                color = tokens.textSecondary,
-                fontSize = 12.sp,
-            )
-        }
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
-            elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
-        ) {
-            IconButton(
-                onClick = onRefresh,
-                enabled = !state.loading,
-                modifier = Modifier.size(52.dp),
-            ) {
-                if (state.loading) {
-                    CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新字体库")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixBrowsePanel(state: FontLibraryUiState, actions: FontLibraryActions) {
-    val tokens = LocalMiuixTokens.current
+private fun MiuixSystemFontRow(
+    active: Boolean, busy: Boolean, cardColor: Color,
+    textPrimary: Color, textSecondary: Color, onRestore: () -> Unit,
+) {
     Card(
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = LuoShuSmoothShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = BorderStroke(
+            1.dp,
+            LocalMiuixTokens.current.cardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            OutlinedTextField(
-                value = state.query,
-                onValueChange = actions.setQuery,
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(22.dp),
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                placeholder = { Text("搜索名称、ID 或格式") },
-            )
-            Spacer(Modifier.height(12.dp))
-            MiuixPanelLabel("筛选")
-            Spacer(Modifier.height(7.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FontLibraryFilter.entries.forEach { option ->
-                    MiuixChoicePill(
-                        label = option.label,
-                        active = state.filter == option,
-                        onClick = { actions.setFilter(option) },
-                    )
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    Text("Aa", color = MaterialTheme.colorScheme.primary, fontSize = 21.sp, fontWeight = FontWeight.Medium)
                 }
             }
-            Spacer(Modifier.height(12.dp))
-            MiuixPanelLabel("排序")
-            Spacer(Modifier.height(7.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FontLibrarySort.entries.forEach { option ->
-                    MiuixChoicePill(
-                        label = option.label,
-                        active = state.sort == option,
-                        onClick = { actions.setSort(option) },
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MiuixMetricPill("结果", state.visibleCount, Modifier.weight(1f))
-                MiuixMetricPill("可变", state.variableCount, Modifier.weight(1f))
-                MiuixMetricPill("多字重", state.multiWeightCount, Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixPanelLabel(text: String) {
-    val tokens = LocalMiuixTokens.current
-    Text(
-        text,
-        color = tokens.textSecondary,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = .5.sp,
-    )
-}
-
-@Composable
-private fun MiuixChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(999.dp),
-        color = if (active) {
-            MaterialTheme.colorScheme.primary
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
-    ) {
-        Text(
-            text = label,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            softWrap = false,
-        )
-    }
-}
-
-@Composable
-private fun MiuixMetricPill(label: String, value: Int, modifier: Modifier) {
-    val tokens = LocalMiuixTokens.current
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                value.toString(),
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 17.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(label, color = tokens.textSecondary, fontSize = 10.sp)
-        }
-    }
-}
-
-@Composable
-private fun MiuixSectionLabel(title: String, subtitle: String) {
-    val tokens = LocalMiuixTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Text(
-            title,
-            color = tokens.textPrimary,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Black,
-            modifier = Modifier.weight(1f),
-        )
-        Text(
-            subtitle,
-            color = tokens.textSecondary,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun MiuixSystemFontRow(active: Boolean, busy: Boolean, onRestore: () -> Unit) {
-    val tokens = LocalMiuixTokens.current
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                modifier = Modifier.size(54.dp),
-                shape = RoundedCornerShape(19.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        "系",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                }
-            }
-            Spacer(Modifier.width(13.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    "系统默认字体",
-                    color = tokens.textPrimary,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Black,
-                )
-                Text(
-                    "ROM 原始字体映射",
-                    color = tokens.textSecondary,
-                    fontSize = 11.sp,
-                )
+                Text("系统默认", color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("恢复手机原有字体", color = textSecondary, fontSize = 12.sp, lineHeight = 18.sp)
             }
             Spacer(Modifier.width(8.dp))
-            if (active) {
-                MiuixLibraryPill("使用中", tokens.success)
-            } else {
-                MiuixCardAction(
-                    label = "恢复",
-                    primary = false,
-                    enabled = !busy,
-                    onClick = onRestore,
-                    modifier = Modifier.width(82.dp),
-                    showArrow = false,
-                )
-            }
+            if (active) StatusPill("使用中")
+            else FilledTonalButton(
+                onClick = onRestore, enabled = !busy,
+                modifier = Modifier.heightIn(min = 44.dp), shape = LuoShuSmoothShape(16.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            ) { Text("恢复", fontSize = 13.sp) }
         }
     }
 }
 
 @Composable
-private fun MiuixFontCard(
-    font: FontItem,
-    active: Boolean,
-    busy: Boolean,
-    onDetails: () -> Unit,
-    onApply: () -> Unit,
-    onDelete: () -> Unit,
+private fun MiuixFontRow(
+    font: FontItem, active: Boolean, busy: Boolean, cardColor: Color,
+    textPrimary: Color, textSecondary: Color,
+    onDetails: () -> Unit, onApply: () -> Unit, onDelete: () -> Unit,
 ) {
-    val tokens = LocalMiuixTokens.current
+    var menuExpanded by remember(font.id) { mutableStateOf(false) }
+    val interactionSource = remember(font.id) { MutableInteractionSource() }
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(30.dp)
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(if (active) 8.dp else 4.dp, shape, clip = false),
-        shape = shape,
+        onClick = onDetails,
+        interactionSource = interactionSource,
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (font.valid) {
-                tokens.cardBackground
-            } else {
-                scheme.errorContainer.copy(alpha = .42f)
+            containerColor = if (font.valid) cardColor else scheme.errorContainer.copy(alpha = .34f),
+        ),
+        border = BorderStroke(
+            1.dp,
+            when {
+                !font.valid -> scheme.error.copy(alpha = .16f)
+                else -> LocalMiuixTokens.current.cardOutline
             },
         ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(56.dp).clickable(onClick = onDetails),
-                    shape = RoundedCornerShape(20.dp),
-                    color = scheme.primary.copy(alpha = .105f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (font.valid) {
-                            NativeFontPreview(
-                                font = font,
-                                text = "Aa",
-                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(56.dp).padding(7.dp),
-                                textSizeSp = 19f,
-                                gravity = Gravity.CENTER,
-                                maxLines = 1,
-                            )
-                        } else {
-                            Text(
-                                "Aa",
-                                color = scheme.primary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
-                    }
-                }
-                Spacer(Modifier.width(13.dp))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 56.dp)
-                        .clickable(onClick = onDetails),
-                    verticalArrangement = Arrangement.Center,
-                ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
                     Text(
-                        font.name,
-                        color = tokens.textPrimary,
-                        fontSize = 18.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        font.name, color = textPrimary, fontSize = 16.sp, lineHeight = 22.sp,
+                        fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
-                        listOf(font.format, font.size, font.date)
-                            .filter { it.isNotBlank() }
-                            .joinToString(" · "),
-                        color = tokens.textSecondary,
-                        fontSize = 10.sp,
+                        fontMetadataSummary(font),
+                        color = textSecondary,
+                        fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(Modifier.width(6.dp))
-                if (active) {
-                    MiuixLibraryPill("使用中", tokens.success)
-                } else {
-                    Surface(
-                        onClick = onDelete,
-                        enabled = !busy,
-                        modifier = Modifier.size(40.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = tokens.textPrimary.copy(alpha = .055f),
-                        contentColor = tokens.textSecondary,
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                Icons.Rounded.Delete,
-                                contentDescription = "删除字体",
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
+                if (active) StatusPill("使用中")
+                Box {
+                    IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "${font.name}的更多操作", tint = textSecondary)
+                    }
+                    DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                        DropdownMenuItem(text = { Text("字体详情") }, onClick = { menuExpanded = false; onDetails() })
+                        DropdownMenuItem(
+                            text = { Text("删除字体") },
+                            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                            enabled = !busy && !active,
+                            onClick = { menuExpanded = false; onDelete() },
+                        )
                     }
                 }
             }
-
-            Spacer(Modifier.height(14.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-                shape = RoundedCornerShape(23.dp),
-                color = tokens.textPrimary.copy(alpha = .038f),
-            ) {
-                NativeFontPreview(
-                    font = font,
-                    text = fontPreviewText(font, detailed = true),
-                    axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(102.dp)
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    textSizeSp = 23f,
-                    maxLines = 2,
-                )
-            }
-
-            if (!font.valid && font.error.isNotBlank()) {
-                Spacer(Modifier.height(10.dp))
+            if (font.valid) {
+                Surface(
+                    shape = LuoShuSmoothShape(18.dp),
+                    color = if (active) scheme.primary.copy(alpha = .07f) else textPrimary.copy(alpha = .035f),
+                ) {
+                    NativeFontPreview(
+                        font = font,
+                        text = if (font.supportsCjk) "山海有相逢 Aa 0123" else "Hello, LuoShu 0123",
+                        axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                        modifier = Modifier.fillMaxWidth().height(70.dp).padding(horizontal = 14.dp),
+                        textSizeSp = 22f, gravity = Gravity.CENTER_VERTICAL, maxLines = 1,
+                    )
+                }
+            } else if (font.error.isNotBlank()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Warning,
-                        contentDescription = null,
-                        tint = scheme.error,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        font.error,
-                        color = scheme.error,
-                        fontSize = 10.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Icon(Icons.Rounded.Warning, contentDescription = null, tint = scheme.error, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(font.error, color = scheme.error, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
             }
-
-            Spacer(Modifier.height(12.dp))
-            HorizontalDivider(color = scheme.outlineVariant.copy(alpha = .30f))
-            Spacer(Modifier.height(11.dp))
-            MiuixCapabilityStrip(fontCapabilityLabel(font))
-            Spacer(Modifier.height(10.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                MiuixCardAction(
-                    label = "查看详情",
-                    primary = false,
-                    enabled = true,
-                    onClick = onDetails,
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "轻触卡片查看详情",
                     modifier = Modifier.weight(1f),
-                    showArrow = false,
+                    color = textSecondary,
+                    fontSize = 11.sp,
                 )
+                Spacer(Modifier.width(12.dp))
                 if (active) {
-                    MiuixCurrentAction(
-                        modifier = Modifier.weight(1f),
-                        color = tokens.success,
-                    )
+                    FilledTonalButton(onClick = onDetails, modifier = Modifier.heightIn(min = 44.dp), shape = LuoShuSmoothShape(16.dp)) {
+                        Text("查看详情", fontSize = 13.sp)
+                    }
                 } else {
-                    MiuixCardAction(
-                        label = "应用字体",
-                        primary = true,
-                        enabled = font.valid && !busy,
-                        onClick = onApply,
-                        modifier = Modifier.weight(1f),
-                        showArrow = true,
-                    )
+                    Button(
+                        onClick = onApply, enabled = font.valid && !busy,
+                        modifier = Modifier.heightIn(min = 44.dp), shape = LuoShuSmoothShape(16.dp),
+                        contentPadding = PaddingValues(horizontal = 22.dp, vertical = 8.dp),
+                    ) { Text("应用字体", fontSize = 13.sp, fontWeight = FontWeight.SemiBold) }
                 }
             }
         }
     }
 }
 
-@Composable
-private fun MiuixCapabilityStrip(text: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(17.dp),
-        color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
-    ) {
-        Text(
-            text = text,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            color = MaterialTheme.colorScheme.primary,
-            fontSize = 10.sp,
-            lineHeight = 14.sp,
-            fontWeight = FontWeight.Black,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-        )
+private fun fontMetadataSummary(font: FontItem): String {
+    val weight = when {
+        font.variable -> "可变字重"
+        font.weights.size > 1 -> "${font.weights.size} 档字重"
+        else -> "单字重"
     }
+    return listOf(
+        font.format,
+        font.size,
+        weight,
+        if (font.supportsCjk) "中文 / 拉丁" else "拉丁",
+    ).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
 @Composable
-private fun MiuixCardAction(
-    label: String,
-    primary: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    showArrow: Boolean,
-) {
+private fun ChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    val container = when {
-        primary && enabled -> scheme.primary
-        primary -> scheme.surfaceVariant
-        else -> scheme.surfaceContainerHigh
-    }
-    val content = when {
-        primary && enabled -> scheme.onPrimary
-        primary -> scheme.onSurfaceVariant.copy(alpha = .68f)
-        else -> scheme.onSurface
-    }
+    val containerColor by animateColorAsState(
+        targetValue = if (active) scheme.primary else LocalMiuixTokens.current.elevatedCardBackground,
+        animationSpec = tween(LuoShuMotionTokens.Fast),
+        label = "fontFilterColor",
+    )
     Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier.defaultMinSize(minHeight = 46.dp),
-        shape = RoundedCornerShape(17.dp),
-        color = container,
-        contentColor = content,
-        shadowElevation = if (primary && enabled) 3.dp else 0.dp,
+        modifier = Modifier.clip(LuoShuSmoothShape(16.dp)).selectable(selected = active, role = Role.Tab, onClick = onClick),
+        shape = LuoShuSmoothShape(16.dp),
+        color = containerColor,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                label,
-                color = content,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                softWrap = false,
-            )
-            if (showArrow) {
-                Spacer(Modifier.width(4.dp))
-                Icon(
-                    Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.size(17.dp),
-                    tint = content,
-                )
-            }
+        Box(Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+            Text(label, color = if (active) scheme.onPrimary else scheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         }
     }
 }
 
 @Composable
-private fun MiuixCurrentAction(modifier: Modifier = Modifier, color: Color) {
+private fun NoticeCard(message: String, error: Boolean) {
+    val scheme = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.defaultMinSize(minHeight = 46.dp),
-        shape = RoundedCornerShape(17.dp),
-        color = color.copy(alpha = .11f),
+        shape = LuoShuSmoothShape(20.dp),
+        color = if (error) scheme.errorContainer else scheme.primaryContainer,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Rounded.CheckCircle,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(17.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                "正在使用",
-                color = color,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MiuixLibraryNotice(message: String, error: Boolean, busy: Boolean = false) {
-    val tokens = LocalMiuixTokens.current
-    Surface(
-        shape = RoundedCornerShape(27.dp),
-        color = if (error) MaterialTheme.colorScheme.errorContainer else tokens.cardBackground,
-        shadowElevation = if (error) 0.dp else 4.dp,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(15.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (busy) {
-                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(
-                    if (error) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
-                    contentDescription = null,
-                    tint = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Text(
-                message,
-                modifier = Modifier.weight(1f),
-                color = if (error) MaterialTheme.colorScheme.onErrorContainer else tokens.textPrimary,
-                fontSize = 12.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MiuixLibraryEmpty(state: FontLibraryUiState) {
-    val tokens = LocalMiuixTokens.current
-    val filtered = state.filter != FontLibraryFilter.ALL
-    Card(
-        shape = RoundedCornerShape(34.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(34.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Surface(
-                modifier = Modifier.size(58.dp),
-                shape = RoundedCornerShape(21.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.FontDownload,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Spacer(Modifier.height(13.dp))
-            Text(
-                when {
-                    state.query.isNotBlank() -> "没有匹配的字体"
-                    filtered -> "当前筛选没有结果"
-                    else -> "还没有导入字体"
-                },
-                color = tokens.textPrimary,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Text(
-                when {
-                    state.query.isNotBlank() -> "清空搜索或尝试其他关键词"
-                    filtered -> "切换到“全部”查看其他字体"
-                    else -> "使用页面上方的导入工具栏添加字体文件"
-                },
-                color = tokens.textSecondary,
-                fontSize = 11.sp,
-                textAlign = TextAlign.Center,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MiuixLibraryPill(text: String, color: Color) {
-    Surface(shape = RoundedCornerShape(999.dp), color = color.copy(alpha = .12f)) {
         Text(
-            text,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            color = color,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
+            message, modifier = Modifier.fillMaxWidth().padding(16.dp),
+            color = if (error) scheme.onErrorContainer else scheme.onPrimaryContainer,
+            fontSize = 13.sp, lineHeight = 20.sp,
         )
+    }
+}
+
+@Composable
+private fun StatusPill(text: String) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(shape = LuoShuSmoothShape(12.dp), color = scheme.primary.copy(alpha = .10f)) {
+        Row(Modifier.padding(horizontal = 9.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Check, contentDescription = null, tint = scheme.primary, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(3.dp))
+            Text(text, color = scheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
     }
 }

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.FileDownload
@@ -36,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -244,9 +244,9 @@ internal fun StudioProfileTransferDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        shape = LuoShuSmoothShape(34.dp),
         icon = { Icon(Icons.Rounded.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-        title = { Text("组合方案 JSON", fontWeight = FontWeight.Black) },
+        title = { Text("组合方案 JSON", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -274,12 +274,12 @@ internal fun StudioProfileTransferDialog(
                     }
                 }
                 if (status.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                         Text(status, modifier = Modifier.fillMaxWidth().padding(11.dp), fontSize = 10.sp)
                     }
                 }
                 if (errorMessage.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                    Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(11.dp), verticalAlignment = Alignment.Top) {
                             Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                             Spacer(Modifier.size(7.dp))
@@ -298,7 +298,7 @@ internal fun StudioProfileTransferDialog(
                         pendingProfile = null
                         status = "方案已载入到字体工坊，生成前仍可继续调整"
                     },
-                ) { Text("应用方案", fontWeight = FontWeight.Black) }
+                ) { Text("应用方案", fontWeight = FontWeight.SemiBold) }
             } else {
                 TextButton(onClick = onDismiss) { Text("完成") }
             }

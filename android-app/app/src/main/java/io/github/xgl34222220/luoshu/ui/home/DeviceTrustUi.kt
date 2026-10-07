@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Info
@@ -29,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 
 internal enum class DeviceTrustLevel {
     SYSTEM,
@@ -181,7 +181,7 @@ internal fun DeviceTrustChip(
     Surface(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 18.dp else 16.dp),
+        shape = LuoShuSmoothShape(18.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = presentation.color,
         shadowElevation = 0.dp,
@@ -214,7 +214,7 @@ internal fun DeviceTrustDialog(
     val presentation = deviceTrustPresentation(state)
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        shape = LuoShuSmoothShape(34.dp),
         icon = { Icon(presentation.icon, contentDescription = null, tint = presentation.color) },
         title = { Text(presentation.title, fontWeight = FontWeight.Black) },
         text = {

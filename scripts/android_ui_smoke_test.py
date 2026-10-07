@@ -4,7 +4,10 @@
 import unittest
 import xml.etree.ElementTree as ET
 
-from android_ui_smoke import center, crash_reason, page_ready, tab_target
+from android_ui_smoke import (
+    anchors_preserved, app_labels, center, choice_selected, content_anchors,
+    crash_reason, label_target, orientation_matches, page_ready, tab_target,
+)
 
 
 PACKAGE = "io.github.xgl34222220.luoshu.debug"
@@ -79,6 +82,61 @@ class UiSmokeHarnessTest(unittest.TestCase):
             node.set("enabled", "false")
         with self.assertRaisesRegex(ValueError, "not found"):
             tab_target(root, "字体库", PACKAGE)
+
+    def test_choice_uses_actual_enabled_selected_semantics(self):
+        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" text="浅色" enabled="true" clickable="true" selected="true" bounds="[40,400][300,540]" />
+          <node package="{PACKAGE}" text="深色" enabled="true" clickable="true" selected="false" bounds="[320,400][580,540]" />
+          <node package="other.app" text="跟随系统" enabled="true" clickable="true" selected="true" bounds="[620,400][900,540]" />
+        </node></hierarchy>''')
+        self.assertTrue(choice_selected(root, "浅色", PACKAGE))
+        self.assertFalse(choice_selected(root, "深色", PACKAGE))
+        self.assertFalse(choice_selected(root, "跟随系统", PACKAGE))
+        self.assertNotIn("跟随系统", app_labels(root, PACKAGE))
+
+    def test_action_resolves_semantic_parent_and_rejects_disabled_ancestor(self):
+        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" enabled="true" clickable="true" bounds="[40,400][1000,620]">
+            <node package="{PACKAGE}" text="外观与主题" clickable="false" bounds="[120,420][520,500]" />
+          </node>
+        </node></hierarchy>''')
+        self.assertEqual((520, 510), center(label_target(root, "外观与主题", PACKAGE)))
+        root[0][0].set("enabled", "false")
+        with self.assertRaisesRegex(ValueError, "Enabled action"):
+            label_target(root, "外观与主题", PACKAGE)
+
+    def test_does_not_guess_an_action_from_visible_noninteractive_text(self):
+        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" text="收藏" clickable="false" bounds="[40,400][300,540]" />
+        </node></hierarchy>''')
+        self.assertFalse(choice_selected(root, "收藏", PACKAGE))
+        with self.assertRaisesRegex(ValueError, "Enabled action"):
+            label_target(root, "收藏", PACKAGE)
+
+    def test_scroll_anchors_exclude_dock_duplicates_and_foreign_package(self):
+        root = self.hierarchy()
+        ET.SubElement(root[0], "node", {"package": PACKAGE, "text": "系统默认字体", "bounds": "[200,1400][700,1500]"})
+        ET.SubElement(root[0], "node", {"package": "other.app", "text": "foreign", "bounds": "[200,1400][700,1500]"})
+        positions = content_anchors(root, PACKAGE)
+        self.assertEqual((450, 1450), positions["系统默认字体"])
+        self.assertNotIn("字体库", positions)
+        self.assertNotIn("foreign", positions)
+        ET.SubElement(root[0], "node", {"package": PACKAGE, "text": "系统默认字体", "bounds": "[200,1600][700,1700]"})
+        self.assertNotIn("系统默认字体", content_anchors(root, PACKAGE))
+
+    def test_scroll_preservation_rejects_missing_moved_or_empty_anchors(self):
+        before = {"系统默认字体": (200, 700), "清除筛选": (400, 1100)}
+        self.assertTrue(anchors_preserved(before, {"系统默认字体": (200, 705), "清除筛选": (400, 1100)}))
+        self.assertFalse(anchors_preserved(before, {"系统默认字体": (200, 700)}))
+        self.assertFalse(anchors_preserved(before, {"系统默认字体": (200, 830), "清除筛选": (400, 1100)}))
+        self.assertFalse(anchors_preserved({}, {}))
+
+    def test_orientation_uses_real_app_bounds(self):
+        self.assertTrue(orientation_matches(self.hierarchy(), PACKAGE, landscape=False))
+        self.assertFalse(orientation_matches(self.hierarchy(), PACKAGE, landscape=True))
+        root = ET.fromstring(f'<hierarchy><node package="{PACKAGE}" bounds="[0,0][1920,1080]" /></hierarchy>')
+        self.assertTrue(orientation_matches(root, PACKAGE, landscape=True))
+        self.assertFalse(orientation_matches(root, "other.app", landscape=True))
 
 
 if __name__ == "__main__":

@@ -23,30 +23,6 @@ import io.github.xgl34222220.luoshu.ui.appearance.AppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.KolorStyle
 import io.github.xgl34222220.luoshu.ui.appearance.LocalAppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
-import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
-
-private val MaterialShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(32.dp),
-)
-
-private val MaterialTypography = Typography(
-    displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 43.sp, fontWeight = FontWeight.Bold),
-    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 37.sp, fontWeight = FontWeight.Bold),
-    headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold),
-    headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
-    labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-    labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = .2.sp),
-)
 
 private val MiuixShapes = Shapes(
     extraSmall = RoundedCornerShape(7.dp),
@@ -78,13 +54,14 @@ data class MiuixTokens(
     val elevatedCardBackground: Color,
     val textPrimary: Color,
     val textSecondary: Color,
+    val cardOutline: Color = Color(0xFFE3E2DD),
     val success: Color = Color(0xFF27BE83),
     val warning: Color = Color(0xFFF0A532),
 )
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF1F5F9),
+        pageBackground = Color(0xFFF7F6F2),
         cardBackground = Color.White,
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF16171B),
@@ -95,25 +72,7 @@ val LocalMiuixTokens = staticCompositionLocalOf {
 @Composable
 fun LuoShuTheme(settings: AppearanceSettings, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalAppearanceSettings provides settings) {
-        when (settings.uiStyle) {
-            UiStyle.MATERIAL -> LuoShuMaterialTheme(settings, content)
-            UiStyle.MIUIX -> LuoShuMiuixTheme(settings, content)
-        }
-    }
-}
-
-@Composable
-private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composable () -> Unit) {
-    DynamicMaterialTheme(
-        seedColor = resolveSeedColor(settings),
-        useDarkTheme = resolveDark(settings.themeMode),
-        withAmoled = settings.amoledBlack,
-        style = settings.kolorStyle.toPaletteStyle(),
-        shapes = MaterialShapes,
-        typography = MaterialTypography,
-        animate = true,
-    ) {
-        ProvideMiuixTokens(settings, content)
+        LuoShuMiuixTheme(settings, content)
     }
 }
 
@@ -134,7 +93,7 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
     }
 }
 
-/** Shared screens use the same resolved palette in either appearance mode. */
+/** Shared screens use the same resolved MIUIx palette. */
 @Composable
 private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composable () -> Unit) {
     val dark = resolveDark(settings.themeMode)
@@ -143,8 +102,8 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
     val tokens = MiuixTokens(
         pageBackground = when {
             pureBlack -> Color.Black
-            dark -> scheme.surfaceContainerLowest
-            else -> lerp(Color(0xFFF1F5F9), scheme.primaryContainer, .05f)
+            dark -> lerp(Color(0xFF151619), scheme.primaryContainer, .03f)
+            else -> lerp(Color(0xFFF7F6F2), scheme.primaryContainer, .03f)
         },
         cardBackground = when {
             pureBlack -> Color(0xFF111214)
@@ -158,6 +117,7 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
         },
         textPrimary = scheme.onSurface,
         textSecondary = scheme.onSurfaceVariant,
+        cardOutline = scheme.onSurface.copy(alpha = if (dark) .10f else .07f),
         success = if (dark) Color(0xFF69D9AD) else Color(0xFF187B58),
         warning = if (dark) Color(0xFFF3C378) else Color(0xFF956319),
     )

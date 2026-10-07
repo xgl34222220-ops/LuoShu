@@ -55,23 +55,6 @@ class CompatibilitySmokeRun(base.SmokeRun):
             self.scroll(root)
         raise RuntimeError('中文影响与恢复说明不可见或折叠说明无法展开')
 
-    def scroll(self, root):
-        rectangles = []
-        for node in root.iter('node'):
-            if node.get('package') != self.package:
-                continue
-            try:
-                rectangles.append(base.bounds(node))
-            except ValueError:
-                continue
-        if not rectangles:
-            raise RuntimeError('无法读取实际 App 页面边界')
-        height = max(r[3] for r in rectangles)
-        width = max(r[2] for r in rectangles)
-        self.adb('shell', 'input', 'swipe', str(width // 2), str(int(height * .72)),
-                 str(width // 2), str(int(height * .27)), '400')
-
-
 if __name__ == '__main__':
     base.SmokeRun = CompatibilitySmokeRun
     raise SystemExit(base.main())

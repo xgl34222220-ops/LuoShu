@@ -1,16 +1,17 @@
 package io.github.xgl34222220.luoshu.ui.theme
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
@@ -34,6 +36,22 @@ internal object LuoShuMotionTokens {
     const val Normal = 220
     const val Emphasized = 260
     const val LoadingRevealDelay = 160L
+}
+
+/** Transform only the drawing; touch targets and neighboring layout keep their full size. */
+@Composable
+internal fun Modifier.luoShuPressScale(
+    interactionSource: MutableInteractionSource,
+    enabled: Boolean = true,
+    pressedScale: Float = .97f,
+): Modifier {
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (enabled && pressed) pressedScale else 1f,
+        animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMedium),
+        label = "luoshuPressScale",
+    )
+    return graphicsLayer { scaleX = scale; scaleY = scale }
 }
 
 @Composable
@@ -57,16 +75,20 @@ internal fun LuoShuLoadingSkeleton(
         animationSpec = tween(LuoShuMotionTokens.Micro),
         label = "luoshuSkeletonAlpha",
     )
-    val shimmer = rememberInfiniteTransition(label = "luoshuSkeleton")
-    val progress by shimmer.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "luoshuSkeletonProgress",
-    )
+    // A hidden placeholder must not leave an infinite frame producer running.
+    val progress = if (active && revealed) {
+        val shimmer = rememberInfiniteTransition(label = "luoshuSkeleton")
+        val phase by shimmer.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1400, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "luoshuSkeletonProgress",
+        )
+        phase
+    } else 0f
     val base = MaterialTheme.colorScheme.onSurface.copy(alpha = .055f)
     val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = .13f)
     Box(

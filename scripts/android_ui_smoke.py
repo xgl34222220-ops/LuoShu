@@ -113,6 +113,104 @@ def page_ready(root: ET.Element, label: str, marker: str, package: str) -> bool:
     return selected and content
 
 
+def app_labels(root: ET.Element, package: str) -> set[str]:
+    return {value for node in root.iter("node") if node.get("package") == package for value in labels(node)}
+
+
+def label_target(root: ET.Element, label: str, package: str) -> ET.Element:
+    """Resolve a label to its enabled, visible semantic action, never a text guess."""
+    parents = {child: parent for parent in root.iter() for child in parent}
+    targets = []
+    for node in root.iter("node"):
+        if node.get("package") != package or label not in labels(node):
+            continue
+        ancestors = []
+        ancestor = node
+        while ancestor is not None:
+            ancestors.append(ancestor)
+            ancestor = parents.get(ancestor)
+        if any(ancestor.get("enabled") == "false" for ancestor in ancestors):
+            continue
+        candidate = node
+        while candidate is not None and candidate.get("package") == package:
+            try:
+                bounds(candidate)
+            except ValueError:
+                candidate = parents.get(candidate)
+                continue
+            if candidate.get("enabled") != "false" and (
+                candidate.get("clickable") == "true"
+                or candidate.get("checkable") == "true"
+                or candidate.get("selected") == "true" and candidate.get("focusable") == "true"
+            ):
+                targets.append(candidate)
+                break
+            candidate = parents.get(candidate)
+    if not targets:
+        raise ValueError(f"Enabled action for {label!r} not found in the App hierarchy")
+    return min(targets, key=lambda node: (bounds(node)[2] - bounds(node)[0]) * (bounds(node)[3] - bounds(node)[1]))
+
+
+def choice_selected(root: ET.Element, label: str, package: str) -> bool:
+    try:
+        target = label_target(root, label, package)
+    except ValueError:
+        return False
+    return target.get("selected") == "true" or target.get("checked") == "true"
+
+
+def content_anchors(root: ET.Element, package: str) -> dict[str, tuple[int, int]]:
+    """Visible text positions, excluding navigation, for actual scroll preservation."""
+    rectangles = []
+    for node in root.iter("node"):
+        if node.get("package") == package:
+            try:
+                rectangles.append(bounds(node))
+            except ValueError:
+                pass
+    if not rectangles:
+        raise ValueError("App bounds not found in the hierarchy")
+    bottom = max(rect[3] for rect in rectangles)
+    navigation = {page[1] for page in PAGES}
+    anchors = {}
+    duplicates = set()
+    for node in root.iter("node"):
+        if node.get("package") != package:
+            continue
+        try:
+            position = center(node)
+        except ValueError:
+            continue
+        if not bottom * .12 < position[1] < bottom * .82:
+            continue
+        for label in labels(node) - navigation:
+            if label in anchors:
+                duplicates.add(label)
+            anchors[label] = position
+    return {label: position for label, position in anchors.items() if label not in duplicates}
+
+
+def anchors_preserved(before: dict[str, tuple[int, int]], after: dict[str, tuple[int, int]], tolerance: int = 12) -> bool:
+    return bool(before) and all(
+        label in after and all(abs(left - right) <= tolerance for left, right in zip(position, after[label]))
+        for label, position in before.items()
+    )
+
+
+def orientation_matches(root: ET.Element, package: str, landscape: bool) -> bool:
+    rectangles = []
+    for node in root.iter("node"):
+        if node.get("package") == package:
+            try:
+                rectangles.append(bounds(node))
+            except ValueError:
+                pass
+    if not rectangles:
+        return False
+    width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)
+    return width > height if landscape else height > width
+
+
 def crash_reason(log: str, package: str) -> str | None:
     escaped = re.escape(package)
     if re.search(rf"\bANR in {escaped}(?:\s|$|:)", log):
@@ -135,6 +233,8 @@ class SmokeRun:
         self.adb_command = ["adb"] + (["-s", serial] if serial else [])
         self.output.mkdir(parents=True, exist_ok=True)
         self.results: list[dict[str, object]] = []
+        self.checks: list[dict[str, object]] = []
+        self.api_level: int | None = None
         self.started_at = time.monotonic()
 
     def adb(self, *arguments: str, timeout: float = 20, check: bool = True) -> subprocess.CompletedProcess[bytes]:
@@ -185,6 +285,113 @@ class SmokeRun:
             time.sleep(0.4)
         raise RuntimeError(f"UI page did not become ready within {timeout}s: {last_error}")
 
+    def wait_ui(self, predicate, description: str, timeout: float = 30) -> ET.Element:
+        deadline = time.monotonic() + timeout
+        last_error = description
+        while time.monotonic() < deadline:
+            self.assert_running()
+            try:
+                root = self.hierarchy()
+                if predicate(root):
+                    return root
+            except (RuntimeError, ValueError, ET.ParseError) as error:
+                last_error = str(error)
+            time.sleep(.3)
+        raise RuntimeError(f"{description} did not become ready within {timeout}s: {last_error}")
+
+    def tap_label(self, label: str, *, scroll_attempts: int = 0, direction: str = "up") -> ET.Element:
+        for attempt in range(scroll_attempts + 1):
+            root = self.hierarchy()
+            try:
+                target = label_target(root, label, self.package)
+            except ValueError:
+                if attempt == scroll_attempts:
+                    raise
+                self.scroll(root, direction)
+                continue
+            x, y = center(target)
+            self.adb("shell", "input", "tap", str(x), str(y))
+            return root
+        raise RuntimeError(f"Action {label!r} was not tapped")
+
+    def select_tab(self, label: str, marker: str | None = None) -> ET.Element:
+        root = self.ensure_dock()
+        x, y = center(tab_target(root, label, self.package))
+        self.adb("shell", "input", "tap", str(x), str(y))
+        if marker is not None:
+            return self.wait_page(label, marker)
+        return self.wait_ui(
+            lambda root: any(node.get("selected") == "true" for node in tab_target(root, label, self.package).iter()),
+            f"Selected tab {label!r}",
+        )
+
+    def ensure_dock(self) -> ET.Element:
+        root = self.hierarchy()
+        try:
+            tab_target(root, "首页", self.package)
+            return root
+        except ValueError:
+            # Production Quick Return hides the dock after a real content scroll.
+            # A short downward gesture reveals it; do not tap invisible coordinates.
+            rectangles = [bounds(node) for node in root.iter("node")
+                          if node.get("package") == self.package and BOUNDS.fullmatch(node.get("bounds", ""))
+                          and bounds(node)[2] > bounds(node)[0] and bounds(node)[3] > bounds(node)[1]]
+            if not rectangles:
+                raise RuntimeError("Cannot read actual App bounds for Quick Return")
+            width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)
+            self.adb("shell", "input", "swipe", str(width // 2), str(int(height * .40)),
+                     str(width // 2), str(int(height * .46)), "300")
+            return self.wait_ui(lambda root: tab_target(root, "首页", self.package) is not None, "Quick Return navigation")
+
+    def find_choice(self, label: str, *, scroll_attempts: int = 8) -> ET.Element:
+        for attempt in range(scroll_attempts + 1):
+            root = self.hierarchy()
+            try:
+                label_target(root, label, self.package)
+            except ValueError:
+                if attempt == scroll_attempts:
+                    raise
+                self.scroll(root)
+                continue
+            if not choice_selected(root, label, self.package):
+                raise RuntimeError(f"Saved choice {label!r} is no longer selected")
+            return root
+        raise RuntimeError(f"Saved choice {label!r} could not be inspected")
+
+    def scroll(self, root: ET.Element, direction: str = "up") -> None:
+        rectangles = []
+        for node in root.iter("node"):
+            if node.get("package") == self.package:
+                try:
+                    rectangles.append(bounds(node))
+                except ValueError:
+                    pass
+        if not rectangles:
+            raise RuntimeError("Cannot read actual App bounds for scrolling")
+        width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)
+        start, end = (int(height * .72), int(height * .30))
+        if direction == "down":
+            start, end = end, start
+        elif direction != "up":
+            raise ValueError(f"Unknown scroll direction: {direction}")
+        self.adb("shell", "input", "swipe", str(width // 2), str(start), str(width // 2), str(end), "400")
+
+    def record(self, name: str, **evidence: object) -> None:
+        self.checks.append({"check": name, "passed": True, **evidence})
+        print(f"Verified {name}", flush=True)
+
+    def launch(self, name: str) -> ET.Element:
+        start = time.monotonic()
+        launch = self.text("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
+        (self.output / f"{name}-launch.txt").write_text(launch, encoding="utf-8")
+        if "Status: ok" not in launch or "Error:" in launch:
+            raise RuntimeError(f"MainActivity launch failed: {launch}")
+        root = self.wait_page("首页", "当前字体")
+        self.capture(f"{name}-home", root)
+        self.record(name, ui_ready_seconds=round(time.monotonic() - start, 3),
+                    am_total_time_ms=re.search(r"TotalTime:\s*(\d+)", launch).group(1) if re.search(r"TotalTime:\s*(\d+)", launch) else None)
+        return root
+
     def capture(self, name: str, root: ET.Element) -> None:
         self.assert_running()
         png = self.adb("exec-out", "screencap", "-p").stdout
@@ -198,22 +405,169 @@ class SmokeRun:
         self.results.append({"screen": name, "width": width, "height": height, "passed": True})
         print(f"Captured {name}: {width}x{height}", flush=True)
 
+    def verify_rapid_navigation(self) -> None:
+        root = self.ensure_dock()
+        coordinates = {label: center(tab_target(root, label, self.package)) for _, label, _ in PAGES}
+        sequence = ("首页", "组合", "字体库", "设置", "字体库", "首页", "设置", "组合", "首页")
+        for label in sequence:
+            x, y = coordinates[label]
+            self.adb("shell", "input", "tap", str(x), str(y))
+        root = self.wait_page("首页", "当前字体")
+        self.capture("rapid-navigation-home", root)
+        self.record("rapid-navigation", taps=list(sequence), final_tab="首页")
+
+    def verify_settings_details(self) -> None:
+        self.select_tab("设置", "你的洛书")
+        self.tap_label("外观与主题", scroll_attempts=8)
+        root = self.wait_ui(
+            lambda root: {"外观与主题", "外观预览", "颜色与模式"}.issubset(app_labels(root, self.package)),
+            "Appearance settings detail",
+        )
+        try:
+            tab_target(root, "设置", self.package)
+        except ValueError:
+            pass
+        else:
+            raise RuntimeError("Bottom navigation remains actionable over a settings detail")
+        for label, filename in (("浅色", "appearance-light"), ("深色", "appearance-dark"), ("跟随系统", "appearance-system")):
+            self.tap_label(label, scroll_attempts=5)
+            root = self.wait_ui(lambda root: choice_selected(root, label, self.package), f"Selected theme {label!r}")
+            self.capture(filename, root)
+            self.record(filename, selected_label=label)
+        self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        root = self.wait_page("设置", "你的洛书")
+        self.capture("settings-detail-return", root)
+        self.record("settings-detail-return", restored_tab="设置")
+
+    def verify_library_preservation(self) -> None:
+        # A real smaller emulator viewport makes an empty library scrollable.
+        # It still uses production data and controls; no mock fonts are inserted.
+        self.adb("shell", "wm", "size", "1080x1920")
+        self.adb("shell", "wm", "density", "420")
+        self.select_tab("字体库", "搜索你的字体")
+        self.tap_label("收藏", scroll_attempts=8)
+        root = self.wait_ui(lambda root: choice_selected(root, "收藏", self.package), "Favorite library filter")
+        self.capture("library-favorite-filter", root)
+        self.tap_label("导入与管理", scroll_attempts=5)
+        root = self.wait_ui(lambda root: "收起管理" in app_labels(root, self.package), "Expanded production font management tools")
+        initial = content_anchors(root, self.package)
+        for _ in range(3):
+            self.scroll(root)
+            time.sleep(.7)
+            root = self.hierarchy()
+            scrolled = content_anchors(root, self.package)
+            if scrolled and not anchors_preserved(initial, scrolled):
+                break
+        else:
+            raise RuntimeError("Font library did not produce an observable real scroll in the smaller viewport")
+        root = self.ensure_dock()
+        scrolled = content_anchors(root, self.package)
+        if not scrolled or anchors_preserved(initial, scrolled):
+            raise RuntimeError("Quick Return did not leave a measurable library scroll to verify")
+        self.capture("library-scrolled-before-tab", root)
+        self.select_tab("设置")
+        self.select_tab("组合")
+        self.select_tab("字体库")
+        root = self.wait_ui(
+            lambda root: anchors_preserved(scrolled, content_anchors(root, self.package)),
+            "Font library scroll position after leaving and returning to its tab",
+        )
+        self.capture("library-scrolled-after-tab", root)
+        self.record("library-scroll-across-tabs", anchors=scrolled, viewport="1080x1920@420dpi",
+                    library_data="production App data on the unrooted emulator; no imported font fixture")
+        # Restore the top to inspect selected semantics rather than inferring the
+        # filter from a screenshot color or from an unselected label still present.
+        for _ in range(8):
+            if choice_selected(root, "收藏", self.package):
+                break
+            self.scroll(root, "down")
+            root = self.hierarchy()
+        else:
+            raise RuntimeError("Favorite filter selection was not preserved after changing tabs")
+        self.capture("library-filter-after-tab", root)
+        self.record("library-filter-across-tabs", selected_label="收藏")
+        self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
+        time.sleep(.5)
+        self.adb("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
+        root = self.wait_ui(
+            lambda root: page_ready(root, "字体库", "搜索你的字体", self.package) and choice_selected(root, "收藏", self.package),
+            "Library filter on returning from the background",
+        )
+        self.capture("library-background-return", root)
+        self.record("library-background-return", selected_label="收藏")
+
+        rotation_preferences = {key: self.text("shell", "settings", "get", "system", key).strip()
+                                for key in ("accelerometer_rotation", "user_rotation")}
+        try:
+            self.adb("shell", "settings", "put", "system", "accelerometer_rotation", "0")
+            self.adb("shell", "settings", "put", "system", "user_rotation", "1")
+            root = self.wait_ui(
+                lambda root: orientation_matches(root, self.package, landscape=True),
+                "Actual landscape configuration",
+            )
+            root = self.find_choice("收藏")
+            self.capture("library-landscape", root)
+            self.adb("shell", "settings", "put", "system", "user_rotation", "0")
+            root = self.wait_ui(
+                lambda root: orientation_matches(root, self.package, landscape=False),
+                "Actual portrait configuration",
+            )
+            # Landscape required a content scroll to reach the filter; return to
+            # the top before inspecting the preserved choice in portrait.
+            for _ in range(3):
+                self.scroll(root, "down")
+                root = self.hierarchy()
+            root = self.find_choice("收藏")
+            self.capture("library-portrait-return", root)
+            self.record("library-rotation-return", selected_label="收藏", rotations=["landscape", "portrait"])
+        finally:
+            for key, value in rotation_preferences.items():
+                if value == "null":
+                    self.adb("shell", "settings", "delete", "system", key)
+                else:
+                    self.adb("shell", "settings", "put", "system", key, value)
+            self.adb("shell", "wm", "size", "reset")
+            self.adb("shell", "wm", "density", "reset")
+
+    def verify_disabled_animations(self) -> None:
+        keys = ("animator_duration_scale", "transition_animation_scale", "window_animation_scale")
+        previous = {key: self.text("shell", "settings", "get", "global", key).strip() for key in keys}
+        try:
+            for key in keys:
+                self.adb("shell", "settings", "put", "global", key, "0")
+                applied = self.text("shell", "settings", "get", "global", key).strip()
+                if float(applied) != 0:
+                    raise RuntimeError(f"System animation scale {key} was not disabled: {applied}")
+            self.verify_rapid_navigation()
+            self.select_tab("设置", "你的洛书")
+            self.tap_label("外观与主题", scroll_attempts=8)
+            root = self.wait_ui(lambda root: "外观预览" in app_labels(root, self.package), "Appearance detail with system animations disabled")
+            self.capture("animations-disabled-appearance", root)
+            self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+            root = self.wait_page("设置", "你的洛书")
+            self.capture("animations-disabled-settings-return", root)
+            self.record("system-animations-disabled", scales={key: 0 for key in keys})
+        finally:
+            for key, value in previous.items():
+                if value == "null":
+                    self.adb("shell", "settings", "delete", "global", key)
+                else:
+                    self.adb("shell", "settings", "put", "global", key, value)
+
     def run(self) -> None:
         self.adb("wait-for-device", timeout=60)
         self.adb("install", "-r", "-g", str(self.apk), timeout=120)
         self.adb("shell", "pm", "clear", self.package)
         # Clearing App data also revokes the grant made by install -g. Grant this
         # permission after the reset so the first-run dialog cannot cover the UI.
-        self.adb("shell", "pm", "grant", self.package, "android.permission.POST_NOTIFICATIONS")
+        self.api_level = int(self.text("shell", "getprop", "ro.build.version.sdk").strip())
+        if self.api_level >= 33:
+            self.adb("shell", "pm", "grant", self.package, "android.permission.POST_NOTIFICATIONS")
         self.adb("logcat", "-c")
         self.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         self.adb("shell", "wm", "dismiss-keyguard")
         self.adb("shell", "cmd", "uimode", "night", "no")
-        launch = self.text("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
-        (self.output / "launch.txt").write_text(launch, encoding="utf-8")
-        if "Status: ok" not in launch or "Error:" in launch:
-            raise RuntimeError(f"MainActivity launch failed: {launch}")
-        self.wait_page("首页", "当前字体")
+        self.launch("cold-start")
         for theme in ("light", "dark"):
             if theme == "dark":
                 self.adb("shell", "cmd", "uimode", "night", "yes")
@@ -239,6 +593,15 @@ class SmokeRun:
         self.adb("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
         root = self.wait_page("设置", "你的洛书")
         self.capture("dark-settings-resumed", root)
+        self.record("settings-background-return", restored_tab="设置")
+        self.verify_rapid_navigation()
+        self.verify_settings_details()
+        self.verify_library_preservation()
+        self.verify_disabled_animations()
+        self.select_tab("首页", "当前字体")
+        self.adb("shell", "am", "force-stop", self.package)
+        self.launch("repeat-cold-start")
+        self.select_tab("设置", "你的洛书")
         self.assert_running()
 
     def diagnostics(self) -> None:
@@ -285,7 +648,9 @@ def main() -> int:
         final_log = run.output / "logcat.txt"
         if error is None and final_log.is_file():
             error = crash_reason(final_log.read_text(encoding="utf-8", errors="replace"), args.package)
-        summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2), "screens": run.results}
+        summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
+                   "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
+                   "screens": run.results, "checks": run.checks}
         (run.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0 if error is None else 1
 

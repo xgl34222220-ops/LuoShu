@@ -21,6 +21,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceRepository
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuLaunchController
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -28,6 +29,10 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private var openTaskCenter by mutableStateOf(false)
     private var firstDrawListener: ViewTreeObserver.OnDrawListener? = null
+    private var firstContentDrawn = false
+    private val launchController by lazy(LazyThreadSafetyMode.NONE) {
+        LuoShuLaunchController(this)
+    }
     private val displayPerformanceController by lazy(LazyThreadSafetyMode.NONE) {
         DisplayPerformanceController(this)
     }
@@ -37,9 +42,16 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val activityStartedAt = SystemClock.elapsedRealtime()
+        // The OS has already drawn the launch theme. Keep only the real page background
+        // inside the Activity so rotation and navigation never redraw a second splash.
+        setTheme(R.style.Theme_LuoShuHybrid)
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
+        launchController.install(
+            skipExitAnimation = savedInstanceState != null || openTaskCenter,
+            onComplete = ::requestImportNotificationPermissionWhenReady,
+        )
         observeDisplayPreference()
         setContent {
             if (openTaskCenter) TaskCenterHost() else LuoShuHost()
@@ -57,7 +69,8 @@ class MainActivity : ComponentActivity() {
                 // Android forbids removing an OnDrawListener while dispatching onDraw.
                 view.post {
                     removeFirstDrawListener()
-                    if (!isFinishing && !isDestroyed) requestImportNotificationPermission()
+                    firstContentDrawn = true
+                    requestImportNotificationPermissionWhenReady()
                 }
             }
         }
@@ -75,6 +88,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         removeFirstDrawListener()
+        launchController.dispose()
         super.onDestroy()
     }
 
@@ -86,6 +100,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         displayPerformanceController.onResume()
+        launchController.resume()
+        requestImportNotificationPermissionWhenReady()
     }
 
     override fun onPause() {
@@ -96,6 +112,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         displayPerformanceController.onStop()
         super.onStop()
+        launchController.stop()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -115,13 +132,23 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
+        requestImportNotificationPermissionWhenReady()
     }
 
-    private fun requestImportNotificationPermission() {
+    private fun requestImportNotificationPermissionWhenReady() {
+        if (!firstContentDrawn || !launchController.isComplete || openTaskCenter ||
+            isFinishing || isDestroyed || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        ) return
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            // One launch-time explanation is enough. Denial, rotation, and background return
+            // should not turn opening the font library into a repeated permission prompt.
+            val permissions = getSharedPreferences("launch_permissions", MODE_PRIVATE)
+            if (permissions.getBoolean("import_notifications_requested", false)) return
+            permissions.edit().putBoolean("import_notifications_requested", true).apply()
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),

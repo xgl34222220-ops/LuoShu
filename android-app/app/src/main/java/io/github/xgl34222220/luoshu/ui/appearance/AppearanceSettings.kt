@@ -3,12 +3,12 @@ package io.github.xgl34222220.luoshu.ui.appearance
 import androidx.compose.runtime.Immutable
 
 enum class UiStyle(val label: String) {
-    MATERIAL("Material"),
-    MIUIX("Miuix");
+    MIUIX("MIUIx");
 
     companion object {
-        fun fromStorage(value: String?): UiStyle =
-            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: MIUIX
+        /** Legacy Material and unknown values resolve to the single supported appearance. */
+        @Suppress("UNUSED_PARAMETER")
+        fun fromStorage(value: String?): UiStyle = MIUIX
     }
 }
 
@@ -61,7 +61,7 @@ data class AppearanceSettings(
     val uiStyle: UiStyle = UiStyle.MIUIX,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val seedArgb: Int = AccentOptions.first().argb,
-    val kolorStyle: KolorStyle = KolorStyle.VIBRANT,
+    val kolorStyle: KolorStyle = KolorStyle.SOFT,
     val monetEnabled: Boolean = true,
     val amoledBlack: Boolean = false,
     val blurEnabled: Boolean = true,

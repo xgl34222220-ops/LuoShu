@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.BorderStroke
 import android.view.Gravity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -16,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
@@ -44,6 +44,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -114,15 +116,16 @@ internal fun StudioGlyphBrowserDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.fillMaxWidth().heightIn(max = 780.dp),
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 36.dp else 30.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 14.dp,
+            shape = LuoShuSmoothShape(36.dp),
+            color = LocalMiuixTokens.current.elevatedCardBackground,
+            shadowElevation = 0.dp,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = LuoShuSmoothShape(16.dp),
                         color = MaterialTheme.colorScheme.primaryContainer,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -131,7 +134,7 @@ internal fun StudioGlyphBrowserDialog(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("字形浏览器", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        Text("字形浏览器", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                         Text("视觉浏览不代替字形覆盖检测", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "关闭") }
@@ -184,7 +187,7 @@ internal fun StudioGlyphBrowserDialog(
                                 page = 0
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(20.dp),
+                            shape = LuoShuSmoothShape(20.dp),
                             minLines = 1,
                             maxLines = 3,
                             label = { Text("自定义字符，可留空使用分类样本") },
@@ -193,13 +196,13 @@ internal fun StudioGlyphBrowserDialog(
                     item {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(24.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            shape = LuoShuSmoothShape(24.dp),
+                            color = LocalMiuixTokens.current.cardBackground,
                         ) {
                             Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(slotState?.font?.name ?: "当前槽位未选择字体", fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(slotState?.font?.name ?: "当前槽位未选择字体", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(
                                             "${slotState?.weight ?: 400} · 第 ${safePage + 1}/$pageCount 页 · ${points.size} 个字符",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -239,7 +242,7 @@ internal fun StudioGlyphBrowserDialog(
                     item {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(20.dp),
+                            shape = LuoShuSmoothShape(20.dp),
                             color = MaterialTheme.colorScheme.surfaceContainer,
                         ) {
                             Text(
@@ -287,7 +290,7 @@ private fun StudioGlyphPill(
 ) {
     Surface(
         modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(999.dp),
+        shape = LuoShuSmoothShape(999.dp),
         color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {

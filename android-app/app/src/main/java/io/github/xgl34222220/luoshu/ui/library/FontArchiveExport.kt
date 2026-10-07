@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.FileDownload
@@ -43,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.BuildConfig
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.RootShell
@@ -193,10 +194,10 @@ internal fun FontArchiveExportTool(
         },
         enabled = enabled && validFonts.isNotEmpty(),
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = scheme.surfaceContainerLow,
+        shape = LuoShuSmoothShape(22.dp),
+        color = LocalMiuixTokens.current.cardBackground,
         contentColor = scheme.onSurface,
-        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -210,7 +211,7 @@ internal fun FontArchiveExportTool(
             )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("字体文件归档", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("字体文件归档", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     "真实文件 · SHA-256 清单 · 最多 32 个 Family",
                     fontSize = 9.sp,
@@ -223,12 +224,12 @@ internal fun FontArchiveExportTool(
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { if (!busy) showDialog = false },
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+            shape = LuoShuSmoothShape(34.dp),
             icon = {
                 if (busy) CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Rounded.FileDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             },
-            title = { Text("导出字体文件归档", fontWeight = FontWeight.Black) },
+            title = { Text("导出字体文件归档", fontWeight = FontWeight.SemiBold) },
             text = {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(
@@ -271,9 +272,9 @@ internal fun FontArchiveExportTool(
                             val selected = font.id in selectedIds
                             Surface(
                                 modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
+                                shape = LuoShuSmoothShape(16.dp),
                                 color = if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = .45f)
-                                else MaterialTheme.colorScheme.surfaceContainerLow,
+                                else LocalMiuixTokens.current.cardBackground,
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 5.dp),
@@ -303,7 +304,7 @@ internal fun FontArchiveExportTool(
                         }
                     }
                     if (status.isNotBlank()) {
-                        Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), MaterialTheme.colorScheme.primaryContainer) {
+                        Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), MaterialTheme.colorScheme.primaryContainer) {
                             Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
@@ -312,7 +313,7 @@ internal fun FontArchiveExportTool(
                         }
                     }
                     if (errorMessage.isNotBlank()) {
-                        Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), MaterialTheme.colorScheme.errorContainer) {
+                        Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), MaterialTheme.colorScheme.errorContainer) {
                             Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top) {
                                 Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.size(6.dp))
@@ -326,7 +327,7 @@ internal fun FontArchiveExportTool(
                 TextButton(
                     onClick = { exportLauncher.launch(fontArchiveFileName()) },
                     enabled = !busy && selectedIds.isNotEmpty(),
-                ) { Text(if (busy) "正在归档" else "导出 ZIP", fontWeight = FontWeight.Black) }
+                ) { Text(if (busy) "正在归档" else "导出 ZIP", fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {
                 TextButton(onClick = { showDialog = false }, enabled = !busy) { Text("关闭") }

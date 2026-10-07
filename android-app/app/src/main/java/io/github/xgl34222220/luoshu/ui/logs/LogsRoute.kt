@@ -51,7 +51,7 @@ internal fun LogsRoute(
             .navigationBarsPadding()
             .padding(bottom = 8.dp),
     ) {
-        LogsScreenCompact(
+        LogsScreenMiuix(
             style = style,
             state = displayState,
             actions = actions,

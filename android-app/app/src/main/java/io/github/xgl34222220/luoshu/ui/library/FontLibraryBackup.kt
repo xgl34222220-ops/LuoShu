@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Description
@@ -41,6 +40,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.BuildConfig
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -390,10 +391,10 @@ private fun FontLibraryBackupTool(
         onClick = { showDialog = true },
         enabled = enabled,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = scheme.surfaceContainerLow,
+        shape = LuoShuSmoothShape(22.dp),
+        color = LocalMiuixTokens.current.cardBackground,
         contentColor = scheme.onSurface,
-        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -407,7 +408,7 @@ private fun FontLibraryBackupTool(
             )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("备份与升级检查", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("备份与升级检查", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     if (migration.ready) "阻断 0 · 提示 ${migration.warningCount}" else "阻断 ${migration.blockerCount} · 提示 ${migration.warningCount}",
                     fontSize = 9.sp,
@@ -420,7 +421,7 @@ private fun FontLibraryBackupTool(
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+            shape = LuoShuSmoothShape(34.dp),
             icon = {
                 Icon(
                     if (migration.ready) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
@@ -428,7 +429,7 @@ private fun FontLibraryBackupTool(
                     tint = if (migration.ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 )
             },
-            title = { Text("字体库备份与升级检查", fontWeight = FontWeight.Black) },
+            title = { Text("字体库备份与升级检查", fontWeight = FontWeight.SemiBold) },
             text = {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(
@@ -471,7 +472,7 @@ private fun FontLibraryBackupTool(
                     if (status.isNotBlank()) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
+                            shape = LuoShuSmoothShape(16.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
                         ) {
                             Text(status, modifier = Modifier.padding(10.dp), fontSize = 10.sp)
@@ -480,7 +481,7 @@ private fun FontLibraryBackupTool(
                     if (errorMessage.isNotBlank()) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
+                            shape = LuoShuSmoothShape(16.dp),
                             color = MaterialTheme.colorScheme.errorContainer,
                         ) {
                             Text(errorMessage, modifier = Modifier.padding(10.dp), fontSize = 10.sp)
@@ -502,7 +503,7 @@ private fun FontLibraryBackupTool(
                                 "收藏和标签已恢复；组合方案因缺失 Family 未写入"
                             }
                         },
-                    ) { Text("确认恢复", fontWeight = FontWeight.Black) }
+                    ) { Text("确认恢复", fontWeight = FontWeight.SemiBold) }
                 } else {
                     TextButton(onClick = { showDialog = false }) { Text("完成") }
                 }
@@ -525,7 +526,7 @@ private fun MigrationCheckRow(check: FontMigrationCheck) {
     }
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = LuoShuSmoothShape(16.dp),
         color = color.copy(alpha = .10f),
     ) {
         Row(Modifier.padding(9.dp), verticalAlignment = Alignment.Top) {
@@ -537,7 +538,7 @@ private fun MigrationCheckRow(check: FontMigrationCheck) {
             )
             Spacer(Modifier.size(7.dp))
             Column(Modifier.weight(1f)) {
-                Text(check.title, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                Text(check.title, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 Text(check.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, lineHeight = 13.sp)
             }
         }

@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
@@ -44,6 +43,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.NativeImportViewModel
 import io.github.xgl34222220.luoshu.rememberNativeImportViewModel
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -320,10 +321,10 @@ private fun FontDirectoryMonitorButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = scheme.surfaceContainerLow,
+        shape = LuoShuSmoothShape(22.dp),
+        color = LocalMiuixTokens.current.cardBackground,
         contentColor = scheme.onSurface,
-        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -338,7 +339,7 @@ private fun FontDirectoryMonitorButton(
             )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     when {
                         !configured -> "选择 SAF 目录"
@@ -373,15 +374,16 @@ private fun FontDirectoryMonitorDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 14.dp,
+            shape = LuoShuSmoothShape(34.dp),
+            color = LocalMiuixTokens.current.elevatedCardBackground,
+            shadowElevation = 0.dp,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline),
         ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = LuoShuSmoothShape(16.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -395,7 +397,7 @@ private fun FontDirectoryMonitorDialog(
                     }
                     Spacer(Modifier.size(11.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.Black)
+                        Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                         Text("进入字体库时扫描，不在后台常驻", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                     }
                     IconButton(onClick = onDismiss) { LuoShuGlyph(
@@ -407,13 +409,13 @@ private fun FontDirectoryMonitorDialog(
 
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shape = LuoShuSmoothShape(20.dp),
+                    color = LocalMiuixTokens.current.cardBackground,
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
                             if (config.configured) config.label.ifBlank { "已选择目录" } else "尚未选择目录",
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -432,7 +434,7 @@ private fun FontDirectoryMonitorDialog(
                 if (errorMessage.isNotBlank()) {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = LuoShuSmoothShape(18.dp),
                         color = MaterialTheme.colorScheme.errorContainer,
                     ) {
                         Row(Modifier.padding(11.dp), verticalAlignment = Alignment.Top) {

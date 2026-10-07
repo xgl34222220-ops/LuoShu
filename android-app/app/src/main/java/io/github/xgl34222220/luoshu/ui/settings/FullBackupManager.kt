@@ -304,7 +304,7 @@ private fun encodeAppearance(settings: AppearanceSettings) = JSONObject()
     .put("floatingDock", settings.floatingDock).put("highRefreshRate", settings.highRefreshRate)
 
 private fun restoreAppearance(root: JSONObject, actions: AppearanceActions) {
-    runCatching { actions.setUiStyle(UiStyle.valueOf(root.optString("uiStyle"))) }
+    runCatching { actions.setUiStyle(UiStyle.fromStorage(root.optString("uiStyle"))) }
     runCatching { actions.setThemeMode(ThemeMode.valueOf(root.optString("themeMode"))) }
     if (root.has("seedArgb")) actions.setSeedArgb(root.optInt("seedArgb"))
     runCatching { actions.setKolorStyle(KolorStyle.valueOf(root.optString("kolorStyle"))) }

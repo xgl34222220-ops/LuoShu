@@ -161,6 +161,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var refreshJob: Job? = null
     private var logsJob: Job? = null
     private var mixConfigJob: Job? = null
+    private val mixConfigLoadGuard = MixConfigLoadGuard()
     private var prewarmJob: Job? = null
     private var fontTaskJob: Job? = null
     private var pendingFontCleanup: Pair<String, String>? = null
@@ -433,16 +434,23 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         return true
     }
 
-    fun refreshMixConfig() {
-        if (mixState.loading || mixState.busy) return
+    fun ensureMixConfig() = loadMixConfig(force = false)
+
+    fun refreshMixConfig() = loadMixConfig(force = true)
+
+    private fun loadMixConfig(force: Boolean) {
+        if (mixState.busy || operationBusy) return
+        val request = mixConfigLoadGuard.begin(force) ?: return
+        val requestedFontRevision = fontStateRevision
         mixState = mixState.copy(loading = true, error = "")
-        mixConfigJob?.cancel()
         mixConfigJob = viewModelScope.launch {
-            val result = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} mix_config",
-                timeoutMs = 25_000L,
-            )
             try {
+                cacheLoadJob.join()
+                initialStatusReady.first { it }
+                val result = RootShell.exec(
+                    "sh ${RootShell.quote(bridge)} mix_config",
+                    timeoutMs = 25_000L,
+                )
                 if (result.code != 0) error(result.stderr.ifBlank { "组合配置读取失败" })
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "组合配置读取失败"))
@@ -450,7 +458,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 val cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000)
                 val latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000)
                 val digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000)
-                mixState = mixState.copy(
+                val loaded = mixState.copy(
                     loading = false,
                     enabled = data.optBoolean("enabled", false),
                     cjk = data.optString("cjk", mixState.cjk),
@@ -465,7 +473,15 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
                     error = "",
                 )
-                normalizeMixSelections()
+                if (mixConfigLoadGuard.complete(
+                        request,
+                        allowApply = requestedFontRevision == fontStateRevision && !mixState.busy && !operationBusy,
+                    )) {
+                    mixState = loaded
+                    normalizeMixSelections()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 val message = error.message.orEmpty()
                 mixState = if (message.contains("interrupted by close", ignoreCase = true)) {
@@ -473,16 +489,22 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 } else {
                     mixState.copy(loading = false, error = message.ifBlank { "组合配置读取失败" })
                 }
+            } finally {
+                mixConfigLoadGuard.failed(request)
+                mixState = mixState.copy(loading = false)
+                mixConfigJob = null
             }
         }
     }
 
     fun updateMixFont(slot: MixSlot, fontId: String) {
-        mixState = when (slot) {
+        val updated = when (slot) {
             MixSlot.Cjk -> mixState.copy(cjk = fontId, cjkAxes = mapOf("wght" to mixState.cjkWeight.toFloat()))
             MixSlot.Latin -> mixState.copy(latin = fontId, latinAxes = mapOf("wght" to mixState.latinWeight.toFloat()))
             MixSlot.Digit -> mixState.copy(digit = fontId, digitAxes = mapOf("wght" to mixState.digitWeight.toFloat()))
         }
+        if (updated != mixState) mixConfigLoadGuard.edited()
+        mixState = updated
     }
 
     fun updateMixWeight(slot: MixSlot, weight: Int) {
@@ -493,7 +515,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         val cleanTag = tag.trim()
         if (cleanTag.length != 4 || !value.isFinite()) return
         val safe = if (cleanTag == "wght") value.coerceIn(1f, 1000f) else value
-        mixState = when (slot) {
+        val updated = when (slot) {
             MixSlot.Cjk -> mixState.copy(
                 cjkWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.cjkWeight,
                 cjkAxes = mixState.cjkAxes + (cleanTag to safe),
@@ -507,6 +529,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 digitAxes = mixState.digitAxes + (cleanTag to safe),
             )
         }
+        if (updated != mixState) mixConfigLoadGuard.edited()
+        mixState = updated
     }
 
     fun startMix() {

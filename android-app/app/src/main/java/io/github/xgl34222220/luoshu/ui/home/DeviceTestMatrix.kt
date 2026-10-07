@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.FileDownload
@@ -43,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -336,7 +336,7 @@ internal fun DeviceTestMatrixDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        shape = LuoShuSmoothShape(34.dp),
         icon = {
             Icon(
                 if (report.ready) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
@@ -360,7 +360,7 @@ internal fun DeviceTestMatrixDialog(
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = LuoShuSmoothShape(18.dp),
                         color = if (report.ready) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
                     ) {
                         Column(Modifier.padding(11.dp)) {
@@ -436,14 +436,14 @@ internal fun DeviceTestMatrixDialog(
                 }
                 if (status.isNotBlank()) {
                     item {
-                        Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), MaterialTheme.colorScheme.primaryContainer) {
+                        Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), MaterialTheme.colorScheme.primaryContainer) {
                             Text(status, modifier = Modifier.padding(10.dp), fontSize = 10.sp)
                         }
                     }
                 }
                 if (errorMessage.isNotBlank()) {
                     item {
-                        Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), MaterialTheme.colorScheme.errorContainer) {
+                        Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), MaterialTheme.colorScheme.errorContainer) {
                             Text(errorMessage, modifier = Modifier.padding(10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
@@ -461,7 +461,7 @@ private fun PreReleaseGateRow(check: PreReleaseGateCheck) {
         PreReleaseGateSeverity.WARNING -> MaterialTheme.colorScheme.tertiary
         PreReleaseGateSeverity.BLOCKER -> MaterialTheme.colorScheme.error
     }
-    Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), color.copy(alpha = .10f)) {
+    Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), color.copy(alpha = .10f)) {
         Row(Modifier.padding(9.dp), verticalAlignment = Alignment.Top) {
             Icon(
                 if (check.severity == PreReleaseGateSeverity.READY) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
@@ -482,7 +482,7 @@ private fun PreReleaseGateRow(check: PreReleaseGateCheck) {
 private fun DeviceTestRecordRow(record: DeviceTestMatrixRecord) {
     val pass = record.result == DeviceTestResult.PASS
     val color = if (pass) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-    Surface(Modifier.fillMaxWidth(), RoundedCornerShape(17.dp), color.copy(alpha = .09f)) {
+    Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(17.dp), color.copy(alpha = .09f)) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top) {
             Icon(
                 if (pass) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,

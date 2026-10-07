@@ -55,11 +55,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
-import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 
@@ -82,11 +83,10 @@ internal fun FontDetailsDialogRoute(
 ) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalMiuixTokens.current
-    val miuix = style == UiStyle.MIUIX
-    val container = if (miuix) tokens.cardBackground else scheme.surface
-    val elevated = if (miuix) tokens.elevatedCardBackground else scheme.surfaceContainerHigh
-    val primaryText = if (miuix) tokens.textPrimary else scheme.onSurface
-    val secondaryText = if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
+    val container = tokens.cardBackground
+    val elevated = tokens.elevatedCardBackground
+    val primaryText = tokens.textPrimary
+    val secondaryText = tokens.textSecondary
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val detailScrollState = rememberScrollState()
     var deepMetadata by remember(font.id) { mutableStateOf<FontDeepMetadata?>(null) }
@@ -169,7 +169,7 @@ internal fun FontDetailsDialogRoute(
             Spacer(Modifier.height(16.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(26.dp),
+                shape = LuoShuSmoothShape(26.dp),
                 color = elevated,
             ) {
                 NativeFontPreview(
@@ -205,7 +205,7 @@ internal fun FontDetailsDialogRoute(
             Spacer(Modifier.height(9.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
+                shape = LuoShuSmoothShape(22.dp),
                 color = elevated,
             ) {
                 Column(Modifier.padding(horizontal = 15.dp, vertical = 6.dp)) {
@@ -223,7 +223,7 @@ internal fun FontDetailsDialogRoute(
                 Spacer(Modifier.height(12.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = LuoShuSmoothShape(18.dp),
                     color = scheme.errorContainer,
                 ) {
                     Row(
@@ -250,10 +250,10 @@ internal fun FontDetailsDialogRoute(
             }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
+                shape = LuoShuSmoothShape(22.dp),
                 color = technicalSurface,
                 border = BorderStroke(
-                    0.5.dp,
+                    1.dp,
                     if (scheme.background.luminance() < .5f) {
                         Color.Transparent
                     } else {
@@ -323,7 +323,7 @@ internal fun FontDetailsDialogRoute(
             if (active) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = LuoShuSmoothShape(18.dp),
                     color = tokens.success.copy(alpha = .11f),
                 ) {
                     Row(
@@ -341,7 +341,7 @@ internal fun FontDetailsDialogRoute(
                     onClick = onApply,
                     enabled = font.valid && !busy,
                     modifier = Modifier.fillMaxWidth().height(50.dp),
-                    shape = RoundedCornerShape(17.dp),
+                    shape = LuoShuSmoothShape(17.dp),
                 ) {
                     Text("应用此字体", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
@@ -447,7 +447,7 @@ private fun StructuredMetadata(
 @Composable
 private fun FontStateBadge(text: String, color: Color, valid: Boolean) {
     Surface(
-        shape = RoundedCornerShape(999.dp),
+        shape = LuoShuSmoothShape(999.dp),
         color = color.copy(alpha = .11f),
     ) {
         Row(
@@ -470,8 +470,8 @@ private fun FontStateBadge(text: String, color: Color, valid: Boolean) {
 private fun PreviewModeChip(label: String, active: Boolean, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(999.dp),
-        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = LuoShuSmoothShape(999.dp),
+        color = if (active) MaterialTheme.colorScheme.primary else LocalMiuixTokens.current.elevatedCardBackground,
     ) {
         Text(
             text = label,

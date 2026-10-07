@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.DeleteSweep
@@ -20,7 +20,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,6 +31,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.NativeImportPhase
 import io.github.xgl34222220.luoshu.NativeImportState
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 @Composable
@@ -48,29 +48,26 @@ internal fun ImportTaskControls(
     if (state.taskId.isBlank() || state.phase == NativeImportPhase.IDLE) return
 
     val tokens = LocalMiuixTokens.current
-    val shape = RoundedCornerShape(24.dp)
-    val container = if (style == UiStyle.MIUIX) {
-        tokens.elevatedCardBackground
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHigh
-    }
+    val shape = LuoShuSmoothShape(24.dp)
+    val container = tokens.elevatedCardBackground
 
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = shape,
         color = container.copy(alpha = .98f),
-        shadowElevation = 8.dp,
+        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, tokens.cardOutline),
     ) {
         Column(Modifier.padding(horizontal = 15.dp, vertical = 13.dp)) {
             Text(
                 state.title,
-                color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface,
+                color = tokens.textPrimary,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
                 state.message,
-                color = if (style == UiStyle.MIUIX) tokens.textSecondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = tokens.textSecondary,
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
                 maxLines = 2,

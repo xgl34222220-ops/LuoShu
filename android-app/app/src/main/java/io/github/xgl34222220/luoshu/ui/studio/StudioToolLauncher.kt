@@ -39,8 +39,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -72,11 +73,7 @@ internal fun StudioToolLauncher(
         animationSpec = spring(dampingRatio = .90f, stiffness = Spring.StiffnessMedium),
         label = "studioToolParentAlpha",
     )
-    val background = when {
-        style == UiStyle.MIUIX -> tokens.elevatedCardBackground
-        enabled -> scheme.surfaceContainerHigh
-        else -> scheme.surfaceVariant
-    }
+    val background = tokens.elevatedCardBackground
 
     LuoShuHeaderAction(
         icon = Icons.Rounded.AutoAwesome,
@@ -95,13 +92,13 @@ internal fun StudioToolLauncher(
             sheetState = sheetState,
             sheetGesturesEnabled = !childLayerActive,
             shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-            containerColor = if (style == UiStyle.MIUIX) tokens.cardBackground else scheme.surface,
+            containerColor = tokens.cardBackground,
             tonalElevation = 0.dp,
             scrimColor = scheme.scrim.copy(alpha = .20f),
             dragHandle = {
                 Surface(
                     modifier = Modifier.padding(top = 10.dp).width(36.dp).height(4.dp),
-                    shape = RoundedCornerShape(999.dp),
+                    shape = LuoShuSmoothShape(999.dp),
                     color = scheme.onSurfaceVariant.copy(alpha = .26f),
                 ) {}
             },
@@ -123,7 +120,7 @@ internal fun StudioToolLauncher(
                 ) {
                     Surface(
                         modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(15.dp),
+                        shape = LuoShuSmoothShape(15.dp),
                         color = scheme.primary.copy(alpha = .10f),
                         contentColor = scheme.primary,
                     ) {
@@ -174,8 +171,8 @@ private fun StudioToolMenuItem(
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = scheme.surfaceContainerLow,
+        shape = LuoShuSmoothShape(18.dp),
+        color = LocalMiuixTokens.current.cardBackground,
         contentColor = scheme.onSurface,
     ) {
         Row(
@@ -184,7 +181,7 @@ private fun StudioToolMenuItem(
         ) {
             Surface(
                 modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = LuoShuSmoothShape(14.dp),
                 color = scheme.primary.copy(alpha = .09f),
                 contentColor = scheme.primary,
             ) {

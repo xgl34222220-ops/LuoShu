@@ -1,10 +1,10 @@
 package io.github.xgl34222220.luoshu
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,26 +14,24 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,10 +39,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,11 +73,10 @@ internal fun FontMetadataInspector(
         onClick = { showPicker = true },
         enabled = viewModel.snapshot.installed && viewModel.fonts.isNotEmpty() && !busy,
         modifier = modifier.size(52.dp),
-        shape = if (style == UiStyle.MIUIX) RoundedCornerShape(18.dp) else CircleShape,
-        color = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+        shape = LuoShuSmoothShape(18.dp),
+        color = tokens.elevatedCardBackground,
         contentColor = MaterialTheme.colorScheme.primary,
-        shadowElevation = if (style == UiStyle.MIUIX) 16.dp else 12.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (busy) {
@@ -95,54 +94,69 @@ internal fun FontMetadataInspector(
 
     if (showPicker) {
         MetadataPickerDialog(
-            style = style,
             fonts = viewModel.fonts,
             onDismiss = { showPicker = false },
             onChoose = { font ->
                 showPicker = false
                 busy = true
                 scope.launch {
-                    details = withContext(Dispatchers.IO) { loadDetailedFontMetadata(font) }
-                    busy = false
+                    try {
+                        details = withContext(Dispatchers.IO) { loadDetailedFontMetadata(font) }
+                    } finally {
+                        busy = false
+                    }
                 }
             },
         )
     }
 
     if (busy) {
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("正在分析字体", fontWeight = FontWeight.Black) },
-            text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("正在读取内部名称、字重、覆盖范围和可变轴…")
-                }
-            },
-            confirmButton = {},
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-            containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
-        )
+        MetadataDialog(onDismiss = {}) {
+            Text("正在分析字体", fontSize = 21.sp, fontWeight = FontWeight.SemiBold, color = tokens.textPrimary)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "正在读取内部名称、字重、覆盖范围和可变轴…",
+                    color = tokens.textSecondary,
+                    fontSize = 14.sp,
+                    lineHeight = 22.sp,
+                )
+            }
+        }
     }
 
     details?.let { result ->
-        MetadataResultDialog(
-            style = style,
-            result = result,
-            onDismiss = { details = null },
-        )
+        MetadataResultDialog(result = result, onDismiss = { details = null })
+    }
+}
+
+@Composable
+private fun MetadataDialog(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    val tokens = LocalMiuixTokens.current
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp),
+            shape = LuoShuSmoothShape(32.dp),
+            color = tokens.elevatedCardBackground,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                content = content,
+            )
+        }
     }
 }
 
 @Composable
 private fun MetadataPickerDialog(
-    style: UiStyle,
     fonts: List<FontItem>,
     onDismiss: () -> Unit,
     onChoose: (FontItem) -> Unit,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val filtered = remember(fonts, query) {
         val needle = query.trim()
         if (needle.isBlank()) fonts else fonts.filter { font ->
@@ -152,95 +166,89 @@ private fun MetadataPickerDialog(
         }
     }
     val tokens = LocalMiuixTokens.current
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("选择字体进行深度分析", fontWeight = FontWeight.Black) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
+    MetadataDialog(onDismiss) {
+        Text("深度分析字体", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = tokens.textPrimary)
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            shape = LuoShuSmoothShape(20.dp),
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            placeholder = { Text("搜索名称、格式或字重") },
+        )
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(min = 72.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (filtered.isEmpty()) {
+                item {
+                    Text(
+                        "没有找到匹配的字体。",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        color = tokens.textSecondary,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+            items(filtered, key = { it.id }) { font ->
+                Surface(
+                    onClick = { onChoose(font) },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 20.dp else 16.dp),
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    placeholder = { Text("搜索字体") },
-                )
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                    shape = LuoShuSmoothShape(22.dp),
+                    color = tokens.cardBackground,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
                 ) {
-                    items(filtered, key = { it.id }) { font ->
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Surface(
-                            modifier = Modifier.fillMaxWidth().clickable { onChoose(font) },
-                            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 24.dp else 18.dp),
-                            color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.size(44.dp),
+                            shape = LuoShuSmoothShape(15.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Surface(
-                                    modifier = Modifier.size(44.dp),
-                                    shape = RoundedCornerShape(15.dp),
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-                                    }
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(font.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(
-                                        listOf(font.format, font.size, font.weightLabel).filter { it.isNotBlank() }.joinToString(" · "),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                             }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(font.name, fontWeight = FontWeight.SemiBold, color = tokens.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                listOf(font.format, font.size, font.weightLabel).filter { it.isNotBlank() }.joinToString(" · "),
+                                color = tokens.textSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-        containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
-    )
+        }
+        OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = LuoShuSmoothShape(18.dp)) {
+            Text("关闭", fontWeight = FontWeight.SemiBold)
+        }
+    }
 }
 
 @Composable
-private fun MetadataResultDialog(
-    style: UiStyle,
-    result: DetailedFontMetadata,
-    onDismiss: () -> Unit,
-) {
+private fun MetadataResultDialog(result: DetailedFontMetadata, onDismiss: () -> Unit) {
     val tokens = LocalMiuixTokens.current
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(result.title, fontWeight = FontWeight.Black, maxLines = 2) },
-        text = {
-            SelectionContainer {
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
-                    item {
-                        Text(
-                            result.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp,
-                        )
-                    }
+    MetadataDialog(onDismiss) {
+        Text(result.title, fontSize = 22.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold, color = tokens.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        SelectionContainer(modifier = Modifier.weight(1f, fill = false)) {
+            LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                item {
+                    Text(result.text, color = tokens.textSecondary, fontSize = 12.sp, lineHeight = 18.sp)
                 }
             }
-        },
-        confirmButton = { Button(onClick = onDismiss) { Text("完成") } },
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-        containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
-    )
+        }
+        Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp), shape = LuoShuSmoothShape(18.dp)) {
+            Text("完成", fontWeight = FontWeight.SemiBold)
+        }
+    }
 }
 
 private suspend fun loadDetailedFontMetadata(font: FontItem): DetailedFontMetadata {

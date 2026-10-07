@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.settings
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -20,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -50,8 +50,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
-import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
 
@@ -121,7 +122,7 @@ internal fun GoogleFontCompatibilityPage() {
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
+                shape = LuoShuSmoothShape(22.dp),
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .62f),
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -185,7 +186,7 @@ internal fun GoogleFontCompatibilityPage() {
         val enabling = action == "enable"
         AlertDialog(
             onDismissRequest = { confirmAction = null },
-            shape = RoundedCornerShape(28.dp),
+            shape = LuoShuSmoothShape(28.dp),
             title = { Text(if (enabling) "开启 Google 字体兼容？" else "恢复原设置？") },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -211,7 +212,7 @@ internal fun GoogleFontCompatibilityPage() {
 private fun GoogleStepCard(number: String, title: String, body: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = LuoShuSmoothShape(18.dp),
         color = MaterialTheme.colorScheme.primary.copy(alpha = .07f),
     ) {
         Row(
@@ -220,7 +221,7 @@ private fun GoogleStepCard(number: String, title: String, body: String) {
         ) {
             Surface(
                 modifier = Modifier.size(28.dp),
-                shape = RoundedCornerShape(10.dp),
+                shape = LuoShuSmoothShape(10.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .13f),
             ) {
                 Row(
@@ -241,8 +242,9 @@ private fun GoogleStepCard(number: String, title: String, body: String) {
 
 @Composable
 private fun GoogleCompatibilityCard(title: String, content: @Composable () -> Unit) {
-    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
-        color = LocalMiuixTokens.current.cardBackground, shadowElevation = 1.dp) {
+    Surface(Modifier.fillMaxWidth(), shape = LuoShuSmoothShape(24.dp),
+        color = LocalMiuixTokens.current.cardBackground, shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.cardOutline)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
             content()

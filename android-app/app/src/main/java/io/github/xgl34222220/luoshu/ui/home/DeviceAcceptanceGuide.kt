@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -46,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -192,15 +192,15 @@ internal fun DeviceAcceptanceGuideDialog(
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.fillMaxWidth().heightIn(max = 800.dp),
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 36.dp else 30.dp),
+            shape = LuoShuSmoothShape(36.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 14.dp,
+            shadowElevation = 0.dp,
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(17.dp),
+                        shape = LuoShuSmoothShape(17.dp),
                         color = when {
                             complete -> MaterialTheme.colorScheme.primaryContainer
                             hasBlockingFailure -> MaterialTheme.colorScheme.errorContainer
@@ -328,7 +328,7 @@ private fun DeviceAcceptanceRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = LuoShuSmoothShape(20.dp),
         color = when {
             check.passed -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .48f)
             check.blocking -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .38f)

@@ -1,5 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.home
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,412 +14,428 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Layers
-import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import io.github.xgl34222220.luoshu.ui.theme.luoShuPressScale
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
 @Composable
-fun HomeScreenMiuix(
+internal fun HomeScreenMiuix(
+    style: UiStyle,
     state: HomeUiState,
     actions: HomeActions,
+    trustContent: @Composable () -> Unit,
+    onDeviceDetailsExpanded: (Boolean) -> Unit = {},
 ) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 132.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item { MiuixPageHeader(state = state, onRefresh = actions.refresh) }
-        item { MiuixFontHero(state) }
-
-        if (state.error.isNotBlank()) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                ) {
-                    Text(
-                        text = state.error,
-                        modifier = Modifier.padding(16.dp),
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                }
-            }
-        }
-
-        item { MiuixSectionTitle("SYSTEM STATUS", "运行状态", "Root 与字体挂载") }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MiuixMetricCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Rounded.Security,
-                    label = "Root",
-                    value = if (state.rootGranted) state.rootManager else "未授权",
-                    positive = state.rootGranted,
-                )
-                MiuixMetricCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Rounded.Layers,
-                    label = "挂载引擎",
-                    value = state.mountEngine,
-                    positive = state.mountHealthy,
-                )
-            }
-        }
-
-        item { MiuixSectionTitle("QUICK ACCESS", "常用入口", "字体管理与诊断") }
-        item {
-            MiuixActionGroup(
-                items = listOf(
-                    MiuixHomeAction(
-                        icon = Icons.Rounded.List,
-                        title = "字体库",
-                        description = "导入、预览和直接应用字体",
-                        onClick = actions.openFontLibrary,
-                    ),
-                    MiuixHomeAction(
-                        icon = Icons.Rounded.Tune,
-                        title = "字体组合",
-                        description = "中文、英文、数字与可变轴",
-                        onClick = actions.openFontStudio,
-                    ),
-                    MiuixHomeAction(
-                        icon = Icons.Rounded.Description,
-                        title = "运行日志",
-                        description = "查看任务进度与错误原因",
-                        onClick = actions.openLogs,
-                    ),
-                ),
-            )
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = actions.restoreDefault,
-                    enabled = state.moduleInstalled && state.rootGranted && !state.loading && !state.taskRunning,
-                    modifier = Modifier.weight(1f).height(54.dp),
-                    shape = RoundedCornerShape(20.dp),
-                ) {
-                    Text("恢复系统字体", fontWeight = FontWeight.Bold)
-                }
-                Button(
-                    onClick = actions.reboot,
-                    enabled = state.moduleInstalled && state.rootGranted && state.rebootRequired && !state.loading && !state.taskRunning,
-                    modifier = Modifier.weight(1f).height(54.dp),
-                    shape = RoundedCornerShape(20.dp),
-                ) {
-                    Icon(Icons.Rounded.RestartAlt, contentDescription = null)
-                    Spacer(Modifier.width(7.dp))
-                    Text("立即重启", fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixPageHeader(state: HomeUiState, onRefresh: () -> Unit) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "FONT ENGINE",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.4.sp,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "洛书",
-                color = LocalMiuixTokens.current.textPrimary,
-                fontSize = 39.sp,
-                lineHeight = 44.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Text(
-                text = "Miuix · ${state.version}",
-                color = LocalMiuixTokens.current.textSecondary,
-                fontSize = 12.sp,
-            )
-        }
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = LocalMiuixTokens.current.elevatedCardBackground),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        ) {
-            IconButton(onClick = onRefresh, modifier = Modifier.size(50.dp)) {
-                if (state.loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(23.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixFontHero(state: HomeUiState) {
     val tokens = LocalMiuixTokens.current
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(30.dp)
-    Card(
-        modifier = Modifier.fillMaxWidth().shadow(8.dp, shape, clip = false),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+    val cardColor = tokens.cardBackground
+    val textPrimary = tokens.textPrimary
+    val textSecondary = tokens.textSecondary
+    val shape = LuoShuSmoothShape(24.dp)
+    var deviceDetailsExpanded by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(deviceDetailsExpanded) { onDeviceDetailsExpanded(deviceDetailsExpanded) }
+    val canChange = state.moduleInstalled && state.rootGranted && !state.loading && !state.taskRunning
+    val next = nextStepFor(state, actions)
+
+    val listState = rememberLazyListState()
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .drawBehind {
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = .18f), Color.Transparent),
-                            center = Offset(size.width, 0f),
-                            radius = size.width * .78f,
-                        ),
-                        radius = size.width * .78f,
-                        center = Offset(size.width, 0f),
-                    )
-                    drawRoundRect(
-                        brush = Brush.verticalGradient(listOf(Color.White.copy(alpha = .24f), Color.Transparent)),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(36.dp.toPx()),
-                        size = size.copy(height = size.height * .36f),
-                    )
-                }
-                .padding(20.dp),
-        ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .background(
-                                color = if (state.moduleInstalled && state.rootGranted) tokens.success else tokens.warning,
-                                shape = CircleShape,
-                            ),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = if (state.moduleInstalled) "模块与字体引擎已连接" else "正在等待模块连接",
-                        color = tokens.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                    )
-                }
-                Spacer(Modifier.height(18.dp))
-                Text("当前字体", color = tokens.textSecondary, fontSize = 12.sp)
-                Text(
-                    text = state.currentFont,
-                    color = tokens.textPrimary,
-                    fontSize = 36.sp,
-                    lineHeight = 42.sp,
-                    fontWeight = FontWeight.Black,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+        item(key = "header") {
+            LuoShuTopBar(title = "洛书") {
+                LuoShuHeaderAction(
+                    icon = Icons.Rounded.Description,
+                    contentDescription = "任务中心",
+                    onClick = actions.openLogs,
+                    containerColor = cardColor,
                 )
-                Spacer(Modifier.height(16.dp))
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = tokens.textPrimary.copy(alpha = .045f),
+                LuoShuHeaderAction(
+                    icon = Icons.Rounded.Refresh,
+                    contentDescription = "刷新",
+                    onClick = actions.refresh,
+                    containerColor = cardColor,
+                    loading = state.loading,
+                )
+            }
+        }
+        item(key = "current-font") {
+            Surface(
+                shape = LuoShuSmoothShape(28.dp),
+                color = cardColor,
+                shadowElevation = 0.dp,
+                border = BorderStroke(
+                    1.dp,
+                    tokens.cardOutline,
+                ),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(Brush.linearGradient(listOf(scheme.primaryContainer.copy(alpha = .20f), cardColor)))
+                        .padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 15.dp, vertical = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = if (state.taskRunning) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = if (state.moduleInstalled && state.rootGranted) tokens.success else scheme.primary,
-                        )
-                        Spacer(Modifier.width(11.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(state.taskTitle, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                            Text(
-                                text = state.taskMessage,
-                                color = tokens.textSecondary,
-                                fontSize = 11.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = CircleShape, color = cardColor.copy(alpha = .72f)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(6.dp).background(if (state.moduleInstalled && state.rootGranted) tokens.success else tokens.warning, CircleShape))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    when {
+                                        state.loading -> "正在连接"
+                                        !state.moduleInstalled -> "等待模块"
+                                        !state.rootGranted -> "需要授权"
+                                        state.taskRunning -> "正在处理"
+                                        state.liveApplied -> "当前启动已挂载"
+                                        state.rebootRequired -> "等待重启"
+                                        else -> "模块已连接"
+                                    },
+                                    color = textPrimary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
                         }
-                        if (state.taskRunning) {
-                            Text("${state.taskProgress}%", fontWeight = FontWeight.Black)
+                        Spacer(Modifier.weight(1f))
+                        Text(state.version, color = textSecondary, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("当前字体", color = textSecondary, style = MaterialTheme.typography.bodySmall)
+                        Text(state.currentFont, color = textPrimary, fontSize = 24.sp, lineHeight = 32.sp,
+                            fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("字里行间，自有风格。", color = textPrimary, fontSize = 25.sp, lineHeight = 36.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text("Aa Bb  ·  0123456789", color = scheme.primary, fontSize = 19.sp,
+                            lineHeight = 28.sp, letterSpacing = .5.sp)
+                    }
+                    Button(
+                        onClick = next.onClick,
+                        enabled = next.enabled,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                        shape = LuoShuSmoothShape(18.dp),
+                    ) {
+                        LuoShuGlyph(next.icon, null, LuoShuIconTokens.ToolGlyph)
+                        Spacer(Modifier.width(8.dp))
+                        Text(next.actionLabel, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+        }
+        if (state.taskRunning || state.rebootRequired || state.error.isNotBlank()) {
+            item(key = "task-status") {
+                val failed = state.error.isNotBlank() && !state.taskRunning
+                Surface(
+                    color = if (failed) scheme.errorContainer else cardColor,
+                    shape = shape,
+                    border = BorderStroke(1.dp, if (failed) scheme.error.copy(alpha = .16f) else tokens.cardOutline),
+                    modifier = Modifier.fillMaxWidth().clip(shape).clickable(onClick = actions.openLogs),
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            LuoShuGlyph(
+                                if (failed) Icons.Rounded.Warning else if (state.rebootRequired) Icons.Rounded.RestartAlt else Icons.Rounded.Refresh,
+                                null, LuoShuIconTokens.StatusGlyph,
+                                tint = if (failed) scheme.error else scheme.primary,
+                            )
+                            Text(if (state.rebootRequired && !state.taskRunning) "重启后完整生效" else state.taskTitle,
+                                modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                                color = if (failed) scheme.onErrorContainer else textPrimary)
+                            if (state.taskRunning) Text("${state.taskProgress.coerceIn(0, 100)}%", color = scheme.primary,
+                                style = MaterialTheme.typography.titleSmall)
+                            LuoShuGlyph(Icons.Rounded.ChevronRight, null, LuoShuIconTokens.TrailingGlyph, tint = textSecondary)
+                        }
+                        Text(if (failed) state.error else next.description,
+                            color = if (failed) scheme.onErrorContainer else textSecondary,
+                            style = MaterialTheme.typography.bodySmall)
+                        if (state.taskRunning) LinearProgressIndicator(
+                            progress = { state.taskProgress.coerceIn(0, 100) / 100f },
+                            modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
+                        )
+                        if (state.liveApplied && state.rebootRequired && !state.taskRunning) {
+                            TextButton(
+                                onClick = actions.reboot,
+                                enabled = canChange && state.rebootRequired,
+                            ) {
+                                Text("立即重启")
+                            }
                         }
                     }
                 }
             }
         }
+        item(key = "font-actions") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LuoShuSectionHeading("我的字体", "从挑选到组合，让每一处文字更合心意")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HomeShortcut("字体库", "导入 · 预览 · 应用", Icons.Rounded.FontDownload, actions.openFontLibrary,
+                        Modifier.weight(1f))
+                    HomeShortcut("字体组合", "中文 · 英文 · 数字", Icons.Rounded.Layers, actions.openFontStudio,
+                        Modifier.weight(1f))
+                }
+            }
+        }
+        item(key = "device-details") {
+            Surface(shape = shape, color = cardColor, border = BorderStroke(1.dp, tokens.cardOutline)) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .semantics { stateDescription = if (deviceDetailsExpanded) "已展开" else "已收起" }
+                            .clickable(role = Role.Button) { deviceDetailsExpanded = !deviceDetailsExpanded }
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        LuoShuGlyph(Icons.Rounded.Security, null, LuoShuIconTokens.StatusGlyph, tint = scheme.primary)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("设备与生效状态", style = MaterialTheme.typography.titleSmall, color = textPrimary)
+                            Text(if (state.rootGranted && state.mountHealthy) "${state.rootManager} · 挂载正常" else "查看权限、挂载与字体检查",
+                                style = MaterialTheme.typography.bodySmall, color = textSecondary)
+                        }
+                        LuoShuGlyph(if (deviceDetailsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            null, LuoShuIconTokens.ToolGlyph, tint = textSecondary)
+                    }
+                    AnimatedVisibility(visible = deviceDetailsExpanded) {
+                        Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                MiuixStatusCell(Modifier.weight(1f), Icons.Rounded.Security, "Root",
+                                    if (state.rootGranted) state.rootManager else "未授权", state.rootGranted, textPrimary, textSecondary)
+                                MiuixStatusCell(Modifier.weight(1f), Icons.Rounded.Layers, "挂载",
+                                    state.mountEngine, state.mountHealthy, textPrimary, textSecondary)
+                            }
+                            trustContent()
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "restore") {
+            OutlinedButton(
+                onClick = actions.restoreDefault,
+                enabled = canChange,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                shape = LuoShuSmoothShape(18.dp),
+            ) {
+                LuoShuGlyph(Icons.Rounded.RestartAlt, null, LuoShuIconTokens.ToolGlyph)
+                Spacer(Modifier.width(8.dp))
+                Text("恢复系统字体")
+            }
+        }
     }
 }
 
 @Composable
-private fun MiuixMetricCard(
-    modifier: Modifier,
-    icon: ImageVector,
-    label: String,
-    value: String,
-    positive: Boolean,
-) {
+private fun HomeShortcut(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
     val tokens = LocalMiuixTokens.current
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+    val interactionSource = remember { MutableInteractionSource() }
+    Surface(
+        onClick = onClick,
+        interactionSource = interactionSource,
+        modifier = modifier.luoShuPressScale(interactionSource),
+        shape = LuoShuSmoothShape(24.dp),
+        color = tokens.cardBackground,
+        shadowElevation = 0.dp,
+        border = BorderStroke(1.dp, tokens.cardOutline),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Surface(
-                modifier = Modifier.size(44.dp),
-                shape = RoundedCornerShape(17.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(shape = LuoShuSmoothShape(15.dp), color = tokens.elevatedCardBackground) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                    LuoShuGlyph(icon, null, LuoShuIconTokens.StatusGlyph, tint = MaterialTheme.colorScheme.primary)
                 }
             }
-            Spacer(Modifier.height(14.dp))
-            Text(label, color = tokens.textSecondary, fontSize = 10.sp)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = tokens.textPrimary, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, color = tokens.textSecondary, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+private data class HomeNextStep(
+    val title: String,
+    val description: String,
+    val actionLabel: String,
+    val icon: ImageVector,
+    val enabled: Boolean = true,
+    val onClick: () -> Unit,
+)
+
+private fun nextStepFor(state: HomeUiState, actions: HomeActions): HomeNextStep = when {
+    state.taskRunning -> HomeNextStep(
+        title = "字体任务正在处理",
+        description = state.taskMessage.ifBlank { "可以离开 App，后台任务会继续运行" },
+        actionLabel = "查看任务",
+        icon = Icons.Rounded.Description,
+        onClick = actions.openLogs,
+    )
+    state.loading -> HomeNextStep(
+        title = "先浏览字体",
+        description = "正在核实模块状态，可以先打开字体库浏览与预览",
+        actionLabel = "打开字体库",
+        icon = Icons.Rounded.FontDownload,
+        onClick = actions.openFontLibrary,
+    )
+    !state.moduleInstalled || !state.rootGranted -> HomeNextStep(
+        title = "连接洛书模块",
+        description = "安装模块并授予 Root 权限后才能应用全局字体",
+        actionLabel = "重新检查",
+        icon = Icons.Rounded.Refresh,
+        onClick = actions.refresh,
+    )
+    state.liveApplied && state.rebootRequired -> HomeNextStep(
+        title = "当前启动已挂载",
+        description = "可以继续切换字体；完整重启后统一生效",
+        actionLabel = "继续切换字体",
+        icon = Icons.Rounded.FontDownload,
+        onClick = actions.openFontLibrary,
+    )
+    state.rebootRequired -> HomeNextStep(
+        title = "字体已经准备完成",
+        description = "执行一次完整重启后应用全局字体并自动验证",
+        actionLabel = "立即重启",
+        icon = Icons.Rounded.RestartAlt,
+        onClick = actions.reboot,
+    )
+    state.error.isNotBlank() -> HomeNextStep(
+        title = "发现需要处理的问题",
+        description = "打开任务中心查看错误原因与诊断信息",
+        actionLabel = "查看问题",
+        icon = Icons.Rounded.Warning,
+        onClick = actions.openLogs,
+    )
+    state.currentFont.contains("系统") -> HomeNextStep(
+        title = "选择一款字体",
+        description = "从字体库导入、预览并应用单字体",
+        actionLabel = "打开字体库",
+        icon = Icons.Rounded.FontDownload,
+        onClick = actions.openFontLibrary,
+    )
+    else -> HomeNextStep(
+        title = "继续调整当前字体",
+        description = "组合中文、英文与数字字体，或调整真实设计轴",
+        actionLabel = "打开组合",
+        icon = Icons.Rounded.Layers,
+        onClick = actions.openFontStudio,
+    )
+}
+
+
+private fun homeOpticalScale(icon: ImageVector): Float = when (icon) {
+    Icons.Rounded.Security -> .95f
+    Icons.Rounded.Layers -> .96f
+    Icons.Rounded.Description -> .96f
+    Icons.Rounded.FontDownload -> .98f
+    Icons.Rounded.Warning -> .96f
+    Icons.Rounded.RestartAlt -> .96f
+    else -> 1f
+}
+
+@Composable
+private fun MiuixStatusCell(
+    modifier: Modifier,
+    icon: ImageVector,
+    title: String,
+    value: String,
+    healthy: Boolean,
+    textPrimary: Color,
+    textSecondary: Color,
+) {
+    val accent = if (healthy) Color(0xFF21966C) else MaterialTheme.colorScheme.error
+    Row(
+        modifier = modifier.padding(horizontal = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = LuoShuSmoothShape(13.dp),
+            color = accent.copy(alpha = .09f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                LuoShuGlyph(
+                    imageVector = icon,
+                    contentDescription = null,
+                    size = LuoShuIconTokens.SectionGlyph,
+                    opticalScale = homeOpticalScale(icon),
+                    tint = accent,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
             Text(
-                text = value,
-                color = tokens.textPrimary,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Black,
+                value,
+                color = textPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = if (positive) "运行正常" else "需要检查",
-                color = if (positive) tokens.success else MaterialTheme.colorScheme.error,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
+                "$title · ${if (healthy) "正常" else "需检查"}",
+                color = if (healthy) textSecondary else accent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
             )
         }
-    }
-}
-
-private data class MiuixHomeAction(
-    val icon: ImageVector,
-    val title: String,
-    val description: String,
-    val onClick: () -> Unit,
-)
-
-@Composable
-private fun MiuixActionGroup(items: List<MiuixHomeAction>) {
-    val tokens = LocalMiuixTokens.current
-    Card(
-        shape = RoundedCornerShape(34.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 5.dp)) {
-            items.forEachIndexed { index, item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = item.onClick)
-                        .padding(horizontal = 2.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(17.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(25.dp),
-                            )
-                        }
-                    }
-                    Spacer(Modifier.width(13.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(item.title, color = tokens.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Black)
-                        Text(
-                            text = item.description,
-                            color = tokens.textSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Rounded.ChevronRight,
-                        contentDescription = null,
-                        tint = tokens.textSecondary,
-                    )
-                }
-                if (index != items.lastIndex) {
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 61.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun MiuixSectionTitle(eyebrow: String, title: String, subtitle: String) {
-    val tokens = LocalMiuixTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                eyebrow,
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.sp,
-            )
-            Text(title, color = tokens.textPrimary, fontSize = 25.sp, fontWeight = FontWeight.Black)
-        }
-        Text(subtitle, color = tokens.textSecondary, fontSize = 11.sp)
     }
 }

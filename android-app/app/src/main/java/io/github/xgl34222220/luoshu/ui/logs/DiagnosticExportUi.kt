@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Description
@@ -28,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 
@@ -161,11 +161,7 @@ internal fun DiagnosticExportButton(
         onClick = onClick,
         enabled = !state.busy,
         loading = state.busy,
-        containerColor = if (style == UiStyle.MIUIX) {
-            LocalMiuixTokens.current.elevatedCardBackground
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerHigh
-        },
+        containerColor = LocalMiuixTokens.current.elevatedCardBackground,
         modifier = modifier,
         opticalScale = .96f,
     )
@@ -180,7 +176,7 @@ internal fun DiagnosticExportDialog(
     val failed = state.error.isNotBlank()
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        shape = LuoShuSmoothShape(34.dp),
         icon = {
             Icon(
                 if (failed) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
@@ -202,7 +198,7 @@ internal fun DiagnosticExportDialog(
                     Spacer(Modifier.size(12.dp))
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
+                        shape = LuoShuSmoothShape(18.dp),
                         color = MaterialTheme.colorScheme.surfaceContainer,
                     ) {
                         Row(Modifier.padding(13.dp), verticalAlignment = Alignment.CenterVertically) {
