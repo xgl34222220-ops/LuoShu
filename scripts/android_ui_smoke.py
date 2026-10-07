@@ -464,6 +464,33 @@ class SmokeRun:
         return self.adb(*arguments, **kwargs).stdout.decode("utf-8", "replace")
 
     def hierarchy(self) -> ET.Element:
+        # A live UiAutomation connection can briefly expose only the Decor root
+        # after a display/configuration change (API 28 CI hierarchy-0042). Keep
+        # that raw snapshot, but wait for real descendants before using it as
+        # evidence that an action or a scroll container is absent.
+        started = time.monotonic()
+        deadline = started + 8
+        rejected = []
+        try:
+            while True:
+                root = self.hierarchy_once()
+                if len(list(root.iter("node"))) > 1:
+                    return root
+                rejected.append({"xml": f"hierarchy-{self.hierarchy_attempts:04d}.xml",
+                                 "elapsed_seconds": round(time.monotonic() - started, 3),
+                                 "reason": "Accessibility hierarchy contains only the window root"})
+                self.assert_running()
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Real accessibility content did not become ready within 8s: window root only")
+                time.sleep(.3)
+        finally:
+            if rejected:
+                (self.output / f"hierarchy-readiness-{self.hierarchy_attempts:04d}.json").write_text(
+                    json.dumps({"rejected_snapshots": rejected,
+                                "elapsed_seconds": round(time.monotonic() - started, 3)}, indent=2) + "\n",
+                    encoding="utf-8")
+
+    def hierarchy_once(self) -> ET.Element:
         self.hierarchy_attempts += 1
         if self.hierarchy_backend == "ui-automation-snapshot":
             return self.snapshot_hierarchy()
@@ -671,8 +698,12 @@ class SmokeRun:
                 low, high = rect[1] + int((rect[3] - rect[1]) * .25), rect[1] + int((rect[3] - rect[1]) * .76)
                 start, end = (high, low) if direction == "up" else (low, high)
                 budget.used += 1
-                gesture = {"from": [x, start], "to": [x, end], "duration_ms": 400}
-                self.adb("shell", "input", "swipe", str(x), str(start), str(x), str(end), "400")
+                # The software-rendered API 36 emulator recorded 1.2s frames:
+                # a 400ms drag moved only ~150px of a requested 1360px. Give one
+                # real drag time to deliver its motion while retaining the same
+                # live bounds, shared gesture/time limits and progress checks.
+                gesture = {"from": [x, start], "to": [x, end], "duration_ms": 2000}
+                self.adb("shell", "input", "swipe", str(x), str(start), str(x), str(end), "2000")
                 progress_deadline = min(budget.deadline, time.monotonic() + 12)
                 moved = False
                 settled = False

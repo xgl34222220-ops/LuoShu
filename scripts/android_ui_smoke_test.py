@@ -242,6 +242,7 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertEqual(2, run.adb.call_count)
             for call in run.adb.call_args_list:
                 self.assertEqual(("shell", "input", "swipe"), call.args[:3])
+                self.assertEqual("2000", call.args[-1])
                 self.assertEqual("540", call.args[3])
                 self.assertLess(int(call.args[4]), 1794)
                 self.assertGreater(int(call.args[6]), 140)
@@ -592,6 +593,44 @@ class UiSmokeHarnessTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No real active window"):
                 run.hierarchy()
             self.assertEqual([], run.checks)
+
+    def test_root_only_transient_snapshot_waits_for_real_content_without_a_gesture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None, Path("snapshot.apk"))
+            root_only = ET.fromstring(f'<hierarchy><node package="{PACKAGE}" '
+                                     'class="android.widget.FrameLayout" bounds="[0,0][1080,1920]" /></hierarchy>')
+            ready = self.scroll_hierarchy(target="收藏")
+            run.hierarchy_once = Mock(side_effect=[root_only, ready])
+            run.assert_running = Mock()
+            run.adb = Mock()
+            with patch("android_ui_smoke.time.sleep"):
+                self.assertIs(ready, run.hierarchy())
+            run.adb.assert_not_called()
+            run.assert_running.assert_called_once()
+            evidence = json.loads(next(output.glob("hierarchy-readiness-*.json")).read_text())
+            self.assertEqual(1, len(evidence["rejected_snapshots"]))
+            self.assertIsNotNone(visible_action(ready, "收藏", PACKAGE))
+
+    def test_persistent_root_only_snapshot_is_bounded_and_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            root_only = ET.fromstring(f'<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]" /></hierarchy>')
+            run.hierarchy_once = Mock(return_value=root_only)
+            run.assert_running = Mock()
+            with patch("android_ui_smoke.time.monotonic", side_effect=[0, 1, 9, 9]), \
+                    self.assertRaisesRegex(RuntimeError, "within 8s: window root only"):
+                run.hierarchy()
+            self.assertEqual(1, run.hierarchy_once.call_count)
+
+    def test_root_only_readiness_wait_does_not_hide_an_app_anr(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            run.hierarchy_once = Mock(return_value=ET.fromstring('<hierarchy><node /></hierarchy>'))
+            run.assert_running = Mock(side_effect=RuntimeError("App ANR recorded by ActivityManager"))
+            with self.assertRaisesRegex(RuntimeError, "App ANR"):
+                run.hierarchy()
+            self.assertEqual(1, run.hierarchy_once.call_count)
 
     def test_snapshot_wait_diagnostics_preserve_a_delayed_real_window_success(self):
         with tempfile.TemporaryDirectory() as temporary:

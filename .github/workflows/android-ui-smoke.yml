@@ -5,25 +5,17 @@ on:
     branches: [claude/laughing-hypatia-ogd2oz]
     paths:
       - android-app/**
+      - common/**
       - module.prop
-      - scripts/android_ui_smoke*.py
-      - scripts/android_startup_visual*.py
-      - scripts/startup_visual_fixtures/**
-      - scripts/google_font_compat_smoke.py
-      - scripts/ui_snapshot/**
-      - scripts/build_ui_snapshot_helper.sh
+      - scripts/**
       - .github/workflows/android-ui-smoke.yml
   pull_request:
     branches: [main]
     paths:
       - android-app/**
+      - common/**
       - module.prop
-      - scripts/android_ui_smoke*.py
-      - scripts/android_startup_visual*.py
-      - scripts/startup_visual_fixtures/**
-      - scripts/google_font_compat_smoke.py
-      - scripts/ui_snapshot/**
-      - scripts/build_ui_snapshot_helper.sh
+      - scripts/**
       - .github/workflows/android-ui-smoke.yml
   workflow_dispatch:
 
@@ -203,11 +195,16 @@ jobs:
       - name: Prepare every-frame visual acceptance and regression tests
         shell: bash
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg >/dev/null
           python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
           "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0
           echo "$RUNNER_TEMP/luoshu-startup-visual/bin" >> "$GITHUB_PATH"
           command -v ffmpeg
           command -v ffprobe
+          mkdir -p launch-visual-output
+          ffmpeg -version > launch-visual-output/ffmpeg-version.txt
+          ffprobe -version > launch-visual-output/ffprobe-version.txt
           "$RUNNER_TEMP/luoshu-startup-visual/bin/python" scripts/android_startup_visual_test.py
       - name: Enable KVM
         shell: bash

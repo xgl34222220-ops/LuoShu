@@ -43,6 +43,15 @@ class LegacyFontTaskLifecycle(unittest.TestCase):
             shutil.copyfile(ROOT / "common" / name, self.module / "common" / name)
         for name in ("font_mix_engine.sh", "font_mix_runtime.sh", "font_switch_safe.sh", "payload_clone.sh"):
             shutil.copyfile(ROOT / "common/legacy_v14_4" / name, self.module / "common/legacy_v14_4" / name)
+        # Cache identity requires these policy inputs even with fixture mappers.
+        # Keep the partial fixture so unrelated runtime helpers remain absent.
+        for name in ("legacy_v14_4/hyperos_full_coverage.sh", "legacy_v14_4/font_coverage.py",
+                     "hyperos_stage_complete.sh", "coloros_stage_complete.sh",
+                     "hyperos_metrics_batch.py", "coloros_metrics_batch.py",
+                     "font_metrics_normalize.py", "font_slot_coverage.py",
+                     "font_inventory.py", "font_inventory_scan.py",
+                     "hyperos_physical_policy.py", "hyperos_global.sh"):
+            shutil.copyfile(ROOT / "common" / name, self.module / "common" / name)
         shutil.copyfile(ROOT / "common/legacy_v14_4/font_mix_engine.sh", self.module / "common/font_mix_engine.sh")
         shutil.copyfile(ROOT / "common/legacy_v14_4/font_mix_runtime.sh", self.module / "common/font_mix.sh")
         utilities = '''get_weight_file() { printf '%s/fonts/%s-Regular.ttf\\n' "$LUOSHU_PUBLIC_DIR" "$1"; }
