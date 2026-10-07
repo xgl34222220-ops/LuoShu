@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
         launchController.install(
             skipExitAnimation = savedInstanceState != null || openTaskCenter,
+            startedAt = activityStartedAt,
             onComplete = ::requestImportNotificationPermissionWhenReady,
         )
         observeDisplayPreference()
@@ -67,7 +68,8 @@ class MainActivity : ComponentActivity() {
         val listener = ViewTreeObserver.OnDrawListener {
             if (!reported) {
                 reported = true
-                Log.i("LuoShuStartup", "activityFirstDrawMs=${SystemClock.elapsedRealtime() - startedAt}")
+                val elapsed = SystemClock.elapsedRealtime() - startedAt
+                Log.i("LuoShuStartup", "event=first_decor_draw elapsedMs=$elapsed activityFirstDrawMs=$elapsed")
                 // Android forbids removing an OnDrawListener while dispatching onDraw.
                 view.post {
                     removeFirstDrawListener()
