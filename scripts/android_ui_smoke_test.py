@@ -17,7 +17,7 @@ from android_ui_smoke import (
     legacy_manual_colors_ready, legacy_monet_unavailable,
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
     scroll_progress, visible_action, visible_text, ScrollBudget,
-    focused_component,
+    focused_component, main,
 )
 
 
@@ -530,13 +530,17 @@ class UiSmokeHarnessTest(unittest.TestCase):
                 "InsetsSource id=1 type=statusBars frame=[0,0][40,4] visible=true\n"
                 "InsetsSource id=2 type=navigationBars frame=[0,76][40,80] visible=true\n")
 
+    def baseline_batch(self, png, window=None):
+        window = self.baseline_window() if window is None else window
+        return window.encode() + b"\x00LUOSHU_HOME_BASELINE_PNG\x00" + png
+
     def test_home_baseline_requires_stable_real_content_and_preserves_raw_final_png(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
             captures = [self.baseline_png(10), self.baseline_png(20),
                         self.baseline_png(20, 1), self.baseline_png(20, 2)]
-            run.text = Mock(side_effect=["com.example.launcher/.Home\n"] + [self.baseline_window()] * 4)
-            run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, png, b"") for png in captures])
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, self.baseline_batch(png), b"") for png in captures])
             clock = [0.0]
             with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
                     patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
@@ -549,6 +553,14 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertEqual([0, 4, 40, 76], metadata["samples"][-1]["content_bounds"])
             self.assertEqual("com.example.launcher/com.example.launcher.Home",
                              focused_component(self.baseline_window("com.example.launcher/.Home")))
+            self.assertEqual(4, run.adb.call_count)
+            for call, png in zip(run.adb.call_args_list, captures):
+                self.assertEqual(("exec-out", "sh", "-c"), call.args[:3])
+                self.assertIn("dumpsys window displays", call.args[3])
+                self.assertIn("screencap -p", call.args[3])
+                self.assertLessEqual(call.kwargs["timeout"], 10)
+            self.assertEqual(self.baseline_batch(captures[-1]),
+                             (Path(temporary) / metadata["samples"][-1]["batch_raw"]).read_bytes())
 
     def test_visual_baseline_focus_or_motion_failure_never_starts_recording_and_keeps_deadline(self):
         for cause in ("wrong-focus", "moving-home"):
@@ -563,7 +575,7 @@ class UiSmokeHarnessTest(unittest.TestCase):
                 def capture(*args, **kwargs):
                     png = captures[count[0] % 2] if cause == "moving-home" else captures[0]
                     count[0] += 1
-                    return subprocess.CompletedProcess([], 0, png, b"")
+                    return subprocess.CompletedProcess([], 0, self.baseline_batch(png, home), b"")
                 run.adb = Mock(side_effect=capture)
                 run.begin_launch_recording = Mock()
                 run.launch_and_capture = Mock()
@@ -587,14 +599,94 @@ class UiSmokeHarnessTest(unittest.TestCase):
                 run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
                                record_launch=True, visual_launch_only=True)
                 run.adb = Mock()
-                run.text = Mock(side_effect=["36", missing_or_ambiguous])
+                run.text = Mock(side_effect=["36", missing_or_ambiguous, missing_or_ambiguous])
                 run.launch = Mock()
                 run.assert_running = Mock()
                 with patch("android_ui_smoke.time.sleep"), \
                         self.assertRaisesRegex(RuntimeError, "warm launch requires one existing App PID"):
                     run.run()
-                run.launch.assert_called_once_with("light-cold-start")
+                self.assertEqual(["light-cold-start", "dark-cold-start"], [call.args[0] for call in run.launch.call_args_list])
                 self.assertFalse(any(check["check"].endswith("same-process") for check in run.checks))
+
+    def test_baseline_combines_each_real_window_and_png_within_original_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            clock = [0.0]
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            png = self.baseline_png()
+            def capture(*args, **kwargs):
+                clock[0] += 2.5
+                return subprocess.CompletedProcess([], 0, self.baseline_batch(png), b"")
+            run.adb = Mock(side_effect=capture)
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
+                self.assertEqual(png, run.wait_home_baseline("light-cold-start"))
+            self.assertEqual(3, run.adb.call_count)
+            self.assertLess(clock[0], 10)
+            metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertEqual(10, metadata["timeout_seconds"])
+            self.assertEqual([1, 2, 3], [sample["stable_captures"] for sample in metadata["samples"]])
+
+    def test_missing_or_corrupt_batch_png_fails_before_recording_and_keeps_raw(self):
+        valid = self.baseline_png()
+        corrupted = bytearray(valid)
+        corrupted[40] ^= 1
+        malformed = (b"missing separator", self.baseline_batch(b"not PNG"),
+                     self.baseline_batch(bytes(corrupted)), self.baseline_batch(valid[:-20]),
+                     self.baseline_batch(valid) + b"\x00LUOSHU_HOME_BASELINE_PNG\x00")
+        for raw in malformed:
+            with self.subTest(raw_length=len(raw)), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                               record_launch=True, visual_launch_only=True)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, raw, b""))
+                run.begin_launch_recording = Mock()
+                run.launch_and_capture = Mock()
+                with self.assertRaisesRegex(RuntimeError, "HOME baseline failed"):
+                    run.launch("light-cold-start")
+                run.begin_launch_recording.assert_not_called()
+                run.launch_and_capture.assert_not_called()
+                self.assertEqual(raw, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
+                metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+                self.assertFalse(metadata["passed"])
+                self.assertEqual([], metadata["samples"])
+
+    def test_baseline_batch_timeout_keeps_partial_raw_and_never_records(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                           record_launch=True, visual_launch_only=True)
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            partial = self.baseline_batch(b"partial PNG")
+            def timeout(*args, **kwargs):
+                cause = subprocess.TimeoutExpired("adb", kwargs["timeout"], output=partial, stderr=b"partial stderr")
+                raise RuntimeError("adb timed out during baseline batch") from cause
+            run.adb = Mock(side_effect=timeout)
+            run.begin_launch_recording = Mock()
+            run.launch_and_capture = Mock()
+            with self.assertRaisesRegex(RuntimeError, "adb timed out during baseline batch"):
+                run.launch("light-cold-start")
+            run.begin_launch_recording.assert_not_called()
+            run.launch_and_capture.assert_not_called()
+            self.assertEqual(partial, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
+            self.assertEqual(b"partial stderr", (Path(temporary) / "light-cold-start-baseline-00-stderr.txt").read_bytes())
+
+    def test_cold_baseline_error_is_not_masked_by_missing_or_failed_warm_pid(self):
+        for pid_result in ("", RuntimeError("pidof connection timed out")):
+            with self.subTest(pid_result=str(pid_result)), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                               record_launch=True, visual_launch_only=True)
+                run.adb = Mock()
+                run.text = Mock(side_effect=["36", pid_result, ""])
+                run.launch = Mock(side_effect=RuntimeError("HOME baseline did not become focused and stable within 10s"))
+                run.assert_running = Mock(side_effect=RuntimeError("later pidof must not mask earlier error"))
+                with self.assertRaises(RuntimeError) as failure:
+                    run.run()
+                self.assertIn("light-cold-start: HOME baseline", str(failure.exception))
+                self.assertIn("warm recording skipped", str(failure.exception))
+                self.assertEqual(["light-cold-start", "dark-cold-start"], [call.args[0] for call in run.launch.call_args_list])
+                run.assert_running.assert_not_called()
+                self.assertEqual([], run.recordings)
+                self.assertFalse(any(check.get("passed") for check in run.checks))
 
     def test_warm_visual_launch_rejects_a_restarted_process(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -738,15 +830,15 @@ class UiSmokeHarnessTest(unittest.TestCase):
                           "INSTRUMENTATION_RESULT: root_source=focused-window:7\n"
                           f"INSTRUMENTATION_RESULT: root_package={PACKAGE}\n"
                           "INSTRUMENTATION_RESULT: snapshot=ok\nINSTRUMENTATION_CODE: -1\n")
-            run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, transcript.encode(), b""),
-                                       subprocess.CompletedProcess([], 0, ET.tostring(self.hierarchy()), b"")])
+            run.snapshot_session = Mock(nonce="test-session",
+                capture=Mock(return_value=(instrumentation_results(transcript), ET.tostring(self.hierarchy()).decode())))
             root = run.snapshot_hierarchy()
             self.assertTrue(page_ready(root, "首页", "当前字体", PACKAGE))
             metadata = json.loads((output / "hierarchy-snapshot-0002.json").read_text())
             self.assertEqual("13", metadata["attempts"])
             self.assertEqual("1200", metadata["wait_ms"])
             self.assertEqual("focused-window:7", metadata["root_source"])
-            self.assertEqual(20, run.adb.call_args_list[0].kwargs["timeout"])
+            run.snapshot_session.capture.assert_called_once_with("hierarchy-0002.xml")
             # A true system tree is still necessary; delayed success never skips
             # the selected-tab and actual-content checks used by the real run.
             self.assertFalse(page_ready(root, "字体库", "当前字体", PACKAGE))
@@ -767,10 +859,11 @@ class UiSmokeHarnessTest(unittest.TestCase):
                           'INSTRUMENTATION_RESULT: window_counts=[{"windows":0,"active":0,"focused":0}]\n'
                           "INSTRUMENTATION_RESULT: error=IllegalStateException: No active accessibility window\n"
                           "INSTRUMENTATION_RESULT: snapshot=failed\nINSTRUMENTATION_CODE: 0\n")
-            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, transcript.encode(), b""))
+            run.snapshot_session = Mock(nonce="test-session",
+                capture=Mock(return_value=(instrumentation_results(transcript), None)))
             with self.assertRaisesRegex(RuntimeError, "No active accessibility window"):
                 run.snapshot_hierarchy()
-            self.assertEqual(1, run.adb.call_count)
+            run.snapshot_session.capture.assert_called_once_with("hierarchy-0000.xml")
             metadata = json.loads((output / "hierarchy-snapshot-0000.json").read_text())
             self.assertEqual("8001", metadata["wait_ms"])
             self.assertEqual("79", metadata["attempts"])
@@ -779,6 +872,167 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertEqual("3", metadata["root_refresh_attempts"])
             self.assertEqual(0, json.loads(metadata["window_counts"])[0]["windows"])
             self.assertEqual("failed", instrumentation_results(transcript)["snapshot"])
+
+
+class SnapshotCleanupHarnessTest(unittest.TestCase):
+    def test_main_always_closes_session_and_preserves_primary_failure_and_anr(self):
+        for diagnostic_failure in (False, True):
+            with self.subTest(diagnostic_failure=diagnostic_failure), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary)
+                apk = output / "app.apk"
+                apk.write_bytes(b"APK path fixture")
+                run = SmokeRun(apk, output, PACKAGE, None)
+                run.run = Mock(side_effect=RuntimeError("real snapshot wait exhausted"))
+                run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, b"", b""))
+                def diagnostics():
+                    (output / "logcat.txt").write_text(f"ActivityManager: ANR in {PACKAGE}\n")
+                    if diagnostic_failure:
+                        raise OSError("diagnostic file error")
+                run.diagnostics = Mock(side_effect=diagnostics)
+                run.close_snapshot_session = Mock(side_effect=RuntimeError("owned helper cleanup failed"))
+                arguments = ["android_ui_smoke.py", "--apk", str(apk), "--output", str(output)]
+                with patch("android_ui_smoke.sys.argv", arguments), patch("android_ui_smoke.SmokeRun", return_value=run):
+                    self.assertEqual(1, main())
+                run.close_snapshot_session.assert_called_once()
+                summary = json.loads((output / "summary.json").read_text())
+                self.assertFalse(summary["passed"])
+                self.assertIn("real snapshot wait exhausted", summary["error"])
+                self.assertIn("owned helper cleanup failed", summary["error"])
+                self.assertIn("App ANR", summary["error"])
+                if diagnostic_failure:
+                    self.assertIn("diagnostic file error", summary["error"])
+
+    def test_cleanup_failure_alone_cannot_make_a_run_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            apk = output / "app.apk"
+            apk.write_bytes(b"APK path fixture")
+            run = SmokeRun(apk, output, PACKAGE, None)
+            run.run = Mock()
+            run.diagnostics = Mock()
+            run.close_snapshot_session = Mock(side_effect=RuntimeError("owned helper cleanup failed"))
+            arguments = ["android_ui_smoke.py", "--apk", str(apk), "--output", str(output)]
+            with patch("android_ui_smoke.sys.argv", arguments), patch("android_ui_smoke.SmokeRun", return_value=run):
+                self.assertEqual(1, main())
+            self.assertFalse(json.loads((output / "summary.json").read_text())["passed"])
+
+
+class QuickReturnHarnessTest(unittest.TestCase):
+    def hierarchy(self, *, dock: bool, offset: int = 0):
+        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" scrollable="true" bounds="[0,89][1080,1920]">
+            <node package="{PACKAGE}" text="管理字体库" bounds="[155,{389 + offset}][295,{450 + offset}]" />
+            <node package="{PACKAGE}" text="系统默认" bounds="[242,{848 + offset}][398,{909 + offset}]" />
+          </node>
+        </node></hierarchy>''')
+        if dock:
+            navigation = ET.SubElement(root[0], "node", {"package": PACKAGE, "bounds": "[60,1680][1020,1850]"})
+            for index, label in enumerate(("首页", "字体库", "组合", "设置")):
+                left = 60 + index * 240
+                item = ET.SubElement(navigation, "node", {"package": PACKAGE, "enabled": "true",
+                    "focusable": "true", "selected": "true" if label == "字体库" else "false",
+                    "clickable": "false" if label == "字体库" else "true",
+                    "bounds": f"[{left},1680][{left + 240},1850]"})
+                ET.SubElement(item, "node", {"package": PACKAGE, "text": label,
+                    "bounds": f"[{left + 60},1770][{left + 180},1830]"})
+        return root
+
+    def test_visible_navigation_needs_no_gesture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            ready = self.hierarchy(dock=True)
+            run.hierarchy = Mock(return_value=ready)
+            run.adb = Mock()
+            run.wait_ui = Mock()
+            self.assertIs(ready, run.ensure_dock())
+            run.adb.assert_not_called()
+            run.wait_ui.assert_not_called()
+
+    def test_slow_reverse_gesture_preserves_geometry_and_real_navigation_proof(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            before, ready = self.hierarchy(dock=False), self.hierarchy(dock=True, offset=60)
+            run.hierarchy = Mock(return_value=before)
+            clock = [0.0]
+            run.adb = Mock(side_effect=lambda *args, **kwargs: clock.__setitem__(0, 2.5))
+
+            def wait(predicate, description, timeout):
+                self.assertEqual("Quick Return navigation", description)
+                self.assertEqual(27.5, timeout)
+                clock[0] = 3.0
+                self.assertTrue(predicate(ready))
+                return ready
+
+            run.wait_ui = Mock(side_effect=wait)
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]):
+                self.assertIs(ready, run.ensure_dock())
+            run.adb.assert_called_once_with("shell", "input", "swipe", "540", "768", "540", "883", "2000")
+            evidence = json.loads((output / "quick-return-0001.json").read_text())
+            self.assertTrue(evidence["passed"])
+            self.assertEqual(2000, evidence["gesture"]["duration_ms"])
+            self.assertEqual(2.5, evidence["gesture_elapsed_seconds"])
+            self.assertEqual(3.0, evidence["elapsed_seconds"])
+            self.assertEqual({"首页", "字体库", "组合", "设置"}, set(evidence["navigation"]))
+            self.assertEqual("true", evidence["navigation"]["字体库"]["selected"])
+            self.assertEqual(ET.tostring(before), ET.tostring(ET.parse(output / evidence["before_xml"]).getroot()))
+            self.assertEqual(ET.tostring(ready), ET.tostring(ET.parse(output / evidence["after_xml"]).getroot()))
+
+    def test_failed_reveal_keeps_before_after_and_does_not_report_a_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            hidden = self.hierarchy(dock=False)
+            run.hierarchy = Mock(return_value=hidden)
+            run.adb = Mock()
+
+            def wait(predicate, description, timeout):
+                with self.assertRaises(ValueError):
+                    predicate(hidden)
+                raise RuntimeError("Quick Return navigation did not become ready")
+
+            run.wait_ui = Mock(side_effect=wait)
+            with self.assertRaisesRegex(RuntimeError, "Quick Return navigation did not become ready"):
+                run.ensure_dock()
+            evidence = json.loads((output / "quick-return-0001.json").read_text())
+            self.assertFalse(evidence["passed"])
+            self.assertTrue(evidence["after_snapshot_received"])
+            self.assertEqual(evidence["before_anchors"], evidence["after_anchors"])
+            self.assertIn("did not become ready", evidence["error"])
+            self.assertTrue((output / evidence["before_xml"]).is_file())
+            self.assertTrue((output / evidence["after_xml"]).is_file())
+
+    def test_gesture_time_counts_toward_the_existing_thirty_second_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            run.hierarchy = Mock(return_value=self.hierarchy(dock=False))
+            clock = [0.0]
+            run.adb = Mock(side_effect=lambda *args, **kwargs: clock.__setitem__(0, 31.0))
+            run.wait_ui = Mock()
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    self.assertRaisesRegex(RuntimeError, "exhausted its 30s budget"):
+                run.ensure_dock()
+            run.wait_ui.assert_not_called()
+            evidence = json.loads((output / "quick-return-0001.json").read_text())
+            self.assertFalse(evidence["passed"])
+            self.assertFalse(evidence["after_snapshot_received"])
+            self.assertEqual(30, evidence["timeout_seconds"])
+
+    def test_incomplete_navigation_returned_by_a_wait_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            run.hierarchy = Mock(return_value=self.hierarchy(dock=False))
+            run.adb = Mock()
+            incomplete = self.hierarchy(dock=True)
+            incomplete[0][-1].remove(incomplete[0][-1][-1])
+            run.wait_ui = Mock(return_value=incomplete)
+            with self.assertRaisesRegex(ValueError, "not found"):
+                run.ensure_dock()
+            evidence = json.loads((output / "quick-return-0001.json").read_text())
+            self.assertFalse(evidence["passed"])
+            self.assertTrue(evidence["after_snapshot_received"])
 
 
 if __name__ == "__main__":

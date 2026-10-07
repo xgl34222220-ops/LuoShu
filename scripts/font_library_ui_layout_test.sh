@@ -159,7 +159,10 @@ grep -q 'visibleState = dockVisibility' "$SHELL"
 grep -q 'currentVisible = dockVisibility.currentState' "$SHELL"
 grep -q 'targetVisible = dockVisibility.targetState' "$SHELL"
 grep -q 'transitionIdle = dockVisibility.isIdle' "$SHELL"
-grep -q 'val blurActive = appearance.blurEnabled && appearance.glassEnabled && dockCaptureRequired' "$SHELL"
+# Preserve all existing appearance/transition conditions and require the new
+# actual-first-frame guard before any offscreen capture or shader initialization.
+grep -q 'val blurActive = firstFrameCommitted && appearance.blurEnabled &&' "$SHELL"
+grep -q 'appearance.glassEnabled && dockCaptureRequired' "$SHELL"
 grep -q 'val dockHideThresholdPx = with(density) { 34.dp.toPx() }' "$SHELL"
 grep -q 'val dockShowThresholdPx = with(density) { 6.dp.toPx() }' "$SHELL"
 if grep -q 'dockScrollAccumulator' "$SHELL"; then

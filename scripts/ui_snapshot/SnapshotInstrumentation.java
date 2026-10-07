@@ -19,11 +19,16 @@ import org.xmlpull.v1.XmlSerializer;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Read a live AccessibilityNodeInfo tree without changing or launching App UI.
  *
@@ -35,6 +40,8 @@ import java.util.List;
 public final class SnapshotInstrumentation extends Instrumentation {
     private Bundle arguments;
     private int nodeCount;
+    private static final int PROTOCOL = 1;
+    private static final int ROOT_WAIT_MS = 8000;
 
     @Override
     public void onCreate(Bundle arguments) {
@@ -45,6 +52,131 @@ public final class SnapshotInstrumentation extends Instrumentation {
 
     @Override
     public void onStart() {
+        Bundle result;
+        try {
+            String nonce = arguments.getString("session_nonce");
+            if (nonce == null) {
+                result = snapshot(connectAutomation(), arguments.getString("filename", "hierarchy-0000.xml"),
+                        getContext().getFilesDir());
+            } else {
+                result = runSession(nonce);
+            }
+        } catch (Exception failure) {
+            result = new Bundle();
+            result.putString("snapshot", "failed");
+            result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
+        }
+        // Instrumentation.finish tears down this one public test connection.
+        finish("failed".equals(result.getString("snapshot")) ? Activity.RESULT_CANCELED : Activity.RESULT_OK, result);
+    }
+
+    private UiAutomation connectAutomation() {
+        UiAutomation automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
+        if (automation == null) throw new IllegalStateException("UiAutomation test connection failed");
+        AccessibilityServiceInfo service = automation.getServiceInfo();
+        service.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+                | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        automation.setServiceInfo(service);
+        return automation;
+    }
+
+    private Bundle runSession(String nonce) throws Exception {
+        if (!nonce.matches("[0-9a-f]{32}")) throw new IllegalArgumentException("Invalid session nonce");
+        File directory = new File(getContext().getFilesDir(), "ui-snapshot-session-" + nonce);
+        // A fresh private directory makes old ready/response/XML files unusable.
+        if (!directory.mkdir()) throw new IllegalStateException("Cannot create fresh session directory");
+        UiAutomation automation = connectAutomation();
+        writeJson(directory, "ready.json", envelope(nonce).put("state", "ready").put("root_wait_ms", ROOT_WAIT_MS));
+        Set<String> requests = new HashSet<>();
+        Set<String> filenames = new HashSet<>();
+        while (true) {
+            File stop = new File(directory, "stop.json");
+            if (stop.exists()) {
+                validateEnvelope(readJson(stop), nonce);
+                writeJson(directory, "closed.json", envelope(nonce).put("state", "closed"));
+                Bundle result = new Bundle();
+                result.putString("session", "finished");
+                result.putString("session_nonce", nonce);
+                return result;
+            }
+            File[] pending = directory.listFiles((parent, name) -> name.matches("request-[0-9a-f]{32}\\.json"));
+            if (pending == null) throw new IllegalStateException("Session request directory unavailable");
+            Arrays.sort(pending);
+            for (File file : pending) {
+                String requestId = file.getName().substring(8, 40);
+                if (requests.contains(requestId)) continue;
+                JSONObject request = readJson(file);
+                validateEnvelope(request, nonce);
+                if (!(request.get("request_id") instanceof String) || !requestId.equals(request.getString("request_id"))) {
+                    throw new IllegalArgumentException("Request ID does not match its private filename");
+                }
+                Object budget = request.get("root_wait_ms");
+                if (!(budget instanceof Integer) || ((Integer) budget) != ROOT_WAIT_MS) {
+                    throw new IllegalArgumentException("Snapshot root wait must remain 8000ms");
+                }
+                if (!(request.get("filename") instanceof String)) {
+                    throw new IllegalArgumentException("Snapshot filename must be a string");
+                }
+                String filename = request.getString("filename");
+                if (!filename.matches("hierarchy-[0-9]{4,8}\\.xml") || !filenames.add(filename)) {
+                    throw new IllegalArgumentException("Invalid or reused snapshot filename");
+                }
+                if (new File(directory, filename).exists()) {
+                    throw new IllegalStateException("Snapshot file cannot be reused");
+                }
+                requests.add(requestId);
+                Bundle result = snapshot(automation, filename, directory);
+                JSONObject values = new JSONObject();
+                for (String key : result.keySet()) values.put(key, result.getString(key));
+                int code = "ok".equals(result.getString("snapshot")) ? Activity.RESULT_OK : Activity.RESULT_CANCELED;
+                writeJson(directory, "response-" + requestId + ".json", envelope(nonce)
+                        .put("request_id", requestId).put("filename", filename).put("root_wait_ms", ROOT_WAIT_MS)
+                        .put("code", code).put("result", values));
+            }
+            Thread.sleep(50);
+        }
+    }
+
+    private static JSONObject envelope(String nonce) throws Exception {
+        return new JSONObject().put("protocol", PROTOCOL).put("nonce", nonce);
+    }
+
+    private static void validateEnvelope(JSONObject value, String nonce) throws Exception {
+        Object protocol = value.get("protocol");
+        if (!(protocol instanceof Integer) || ((Integer) protocol) != PROTOCOL
+                || !(value.get("nonce") instanceof String)
+                || !nonce.equals(value.getString("nonce"))) {
+            throw new IllegalArgumentException("Session envelope mismatch");
+        }
+    }
+
+    private static JSONObject readJson(File file) throws Exception {
+        try (FileInputStream input = new FileInputStream(file);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (output.size() + count > 16384) throw new IllegalArgumentException("Session request too large");
+                output.write(buffer, 0, count);
+            }
+            return new JSONObject(new String(output.toByteArray(), StandardCharsets.UTF_8));
+        }
+    }
+
+    private static void writeJson(File directory, String filename, JSONObject value) throws Exception {
+        File target = new File(directory, filename);
+        File temporary = new File(directory, filename + ".tmp");
+        if (target.exists() || temporary.exists()) throw new IllegalStateException("Session response cannot be reused");
+        try (FileOutputStream output = new FileOutputStream(temporary)) {
+            output.write(value.toString().getBytes(StandardCharsets.UTF_8));
+            output.getFD().sync();
+        }
+        if (!temporary.renameTo(target)) throw new IllegalStateException("Cannot publish atomic session response");
+    }
+
+    private Bundle snapshot(UiAutomation automation, String filename, File outputDirectory) {
+        nodeCount = 0;
         Bundle result = new Bundle();
         AccessibilityNodeInfo root = null;
         AccessibilityNodeInfo incompleteRoot = null;
@@ -63,22 +195,14 @@ public final class SnapshotInstrumentation extends Instrumentation {
         result.putString("root_observations", "[]");
         result.putString("window_counts", "[]");
         try {
-            String filename = arguments.getString("filename", "hierarchy-0000.xml");
             if (!filename.matches("hierarchy-[0-9]{4,8}\\.xml")) {
                 throw new IllegalArgumentException("Invalid snapshot filename");
             }
-            UiAutomation automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
-            if (automation == null) throw new IllegalStateException("UiAutomation test connection failed");
-            AccessibilityServiceInfo service = automation.getServiceInfo();
-            service.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-                    | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
-                    | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
-            automation.setServiceInfo(service);
             // On older APIs a fresh test connection can precede window tracking.
             // Keep this bounded and read only active/focused real windows; the
             // host still checks the App package, selected tab and page content.
             waitStarted = SystemClock.uptimeMillis();
-            long deadline = waitStarted + 8000;
+            long deadline = waitStarted + ROOT_WAIT_MS;
             while (root == null && SystemClock.uptimeMillis() < deadline) {
                 attempts++;
                 // refresh() re-queries this real node's current state rather
@@ -165,7 +289,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
             Display display = manager.getDefaultDisplay();
             Point size = new Point();
             display.getRealSize(size);
-            File file = new File(getContext().getFilesDir(), filename);
+            File file = new File(outputDirectory, filename);
             try (FileOutputStream output = new FileOutputStream(file);
                  OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
                 XmlSerializer xml = Xml.newSerializer();
@@ -184,7 +308,6 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("filename", filename);
             result.putString("nodes", Integer.toString(nodeCount));
             result.putString("root_package", text(root.getPackageName()));
-            finish(Activity.RESULT_OK, result);
         } catch (Exception failure) {
             if (waitStarted != 0) result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
             result.putString("attempts", Integer.toString(attempts));
@@ -192,11 +315,11 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("root_source", rootSource);
             result.putString("snapshot", "failed");
             result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
-            finish(Activity.RESULT_CANCELED, result);
         } finally {
             if (root != null) root.recycle();
             if (incompleteRoot != null) incompleteRoot.recycle();
         }
+        return result;
     }
 
     /** A new connection can see the window root before its live children arrive.

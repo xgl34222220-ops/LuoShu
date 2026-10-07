@@ -20,6 +20,8 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from ui_snapshot_session import UiSnapshotSession
+
 
 PAGES = (
     ("home", "首页", "当前字体"),
@@ -478,6 +480,7 @@ class SmokeRun:
         self.visual_launch_only = visual_launch_only
         self.api_level: int | None = None
         self.snapshot_apk = snapshot_apk
+        self.snapshot_session: UiSnapshotSession | None = None
         self.hierarchy_attempts = 0
         self.scroll_searches = 0
         self.hierarchy_backend = "uiautomator-cli"
@@ -575,24 +578,26 @@ class SmokeRun:
         raise RuntimeError(failure or "uiautomator did not produce a valid live hierarchy")
 
     def snapshot_hierarchy(self) -> ET.Element:
-        helper = "io.github.xgl34222220.luoshu.uisnapshot"
         filename = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
-        result = self.adb("shell", "am", "instrument", "-w", "-r", "-e", "filename", filename,
-                          f"{helper}/.SnapshotInstrumentation", timeout=20, check=False)
-        (self.output / f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.txt").write_bytes(result.stdout + result.stderr)
-        output = (result.stdout + result.stderr).decode("utf-8", "replace")
-        metadata = instrumentation_results(output)
+        if self.snapshot_session is None:
+            self.snapshot_session = UiSnapshotSession(self.adb_command, self.output)
+        metadata, xml = self.snapshot_session.capture(filename)
+        evidence = {"transport": "persistent-ui-automation", "session_nonce": self.snapshot_session.nonce,
+                    **metadata}
         (self.output / f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.json").write_text(
-            json.dumps({"returncode": result.returncode, **metadata}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        if result.returncode or metadata.get("snapshot") != "ok":
-            raise RuntimeError(f"Real UiAutomation snapshot failed ({result.returncode}): {output[-3000:]}")
-        xml = self.text("shell", "run-as", helper, "cat", f"files/{filename}")
+            json.dumps(evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if metadata.get("snapshot") != "ok" or xml is None:
+            raise RuntimeError("Real UiAutomation snapshot failed: " + json.dumps(metadata, ensure_ascii=False))
         root = ET.fromstring(xml)
         if root.tag != "hierarchy" or not list(root.iter("node")):
             raise RuntimeError("Real UiAutomation snapshot contains no accessible window nodes")
         (self.output / filename).write_text(xml, encoding="utf-8")
         (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
         return root
+
+    def close_snapshot_session(self) -> None:
+        if self.snapshot_session is not None:
+            self.snapshot_session.close()
 
     def logcat(self, filename: str = "logcat.txt") -> str:
         log = self.text("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime")
@@ -669,15 +674,68 @@ class SmokeRun:
         except ValueError:
             # Production Quick Return hides the dock after a real content scroll.
             # A short downward gesture reveals it; do not tap invisible coordinates.
-            rectangles = [bounds(node) for node in root.iter("node")
-                          if node.get("package") == self.package and BOUNDS.fullmatch(node.get("bounds", ""))
-                          and bounds(node)[2] > bounds(node)[0] and bounds(node)[3] > bounds(node)[1]]
-            if not rectangles:
-                raise RuntimeError("Cannot read actual App bounds for Quick Return")
-            width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)
-            self.adb("shell", "input", "swipe", str(width // 2), str(int(height * .40)),
-                     str(width // 2), str(int(height * .46)), "300")
-            return self.wait_ui(lambda root: tab_target(root, "首页", self.package) is not None, "Quick Return navigation")
+            started = time.monotonic()
+            deadline = started + 30
+            self.quick_return_attempts = getattr(self, "quick_return_attempts", 0) + 1
+            prefix = f"quick-return-{self.quick_return_attempts:04d}"
+            before_xml = f"{prefix}-before.xml"
+            after_xml = f"{prefix}-after.xml"
+            ET.ElementTree(root).write(self.output / before_xml, encoding="utf-8", xml_declaration=True)
+            evidence = {"passed": False, "timeout_seconds": 30, "before_xml": before_xml,
+                        "after_xml": after_xml, "before_anchors": {}, "after_snapshot_received": False}
+            try:
+                evidence["before_anchors"] = content_anchors(root, self.package)
+            except ValueError as error:
+                evidence["before_anchor_error"] = str(error)
+            last_root = root
+
+            def dock_ready(current: ET.Element) -> bool:
+                nonlocal last_root
+                last_root = current
+                evidence["after_snapshot_received"] = True
+                return tab_target(current, "首页", self.package) is not None
+
+            try:
+                rectangles = [bounds(node) for node in root.iter("node")
+                              if node.get("package") == self.package and BOUNDS.fullmatch(node.get("bounds", ""))
+                              and bounds(node)[2] > bounds(node)[0] and bounds(node)[3] > bounds(node)[1]]
+                if not rectangles:
+                    raise RuntimeError("Cannot read actual App bounds for Quick Return")
+                width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)
+                x, start, end = width // 2, int(height * .40), int(height * .46)
+                evidence["gesture"] = {"from": [x, start], "to": [x, end], "duration_ms": 2000}
+                gesture_started = time.monotonic()
+                # input swipe synchronously injects DOWN before its timed MOVE loop.
+                # A 300ms gesture can lose every MOVE while HWUI blocks that DOWN.
+                try:
+                    self.adb("shell", "input", "swipe", str(x), str(start), str(x), str(end), "2000")
+                finally:
+                    evidence["gesture_elapsed_seconds"] = round(time.monotonic() - gesture_started, 3)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("Quick Return navigation exhausted its 30s budget during the gesture")
+                ready = self.wait_ui(dock_ready, "Quick Return navigation", timeout=remaining)
+                dock_ready(ready)
+                evidence["navigation"] = {
+                    label: {"bounds": bounds(target), "selected": target.get("selected"),
+                            "clickable": target.get("clickable"), "enabled": target.get("enabled")}
+                    for _, label, _ in PAGES for target in [tab_target(ready, label, self.package)]
+                }
+                evidence["passed"] = True
+                return ready
+            except Exception as error:
+                evidence["error"] = f"{type(error).__name__}: {error}"
+                raise
+            finally:
+                ET.ElementTree(last_root).write(self.output / after_xml, encoding="utf-8", xml_declaration=True)
+                try:
+                    evidence["after_anchors"] = content_anchors(last_root, self.package)
+                except ValueError as error:
+                    evidence["after_anchors"] = {}
+                    evidence["after_anchor_error"] = str(error)
+                evidence["elapsed_seconds"] = round(time.monotonic() - started, 3)
+                (self.output / f"{prefix}.json").write_text(json.dumps(evidence, indent=2, ensure_ascii=False) + "\n",
+                                                         encoding="utf-8")
 
     def reach_content(self, predicate, description: str, *, direction: str = "up",
                       budget: ScrollBudget | None = None, root: ET.Element | None = None) -> ET.Element:
@@ -830,6 +888,10 @@ class SmokeRun:
         metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": []}
         previous = None
         stable = 0
+        separator = b"\x00LUOSHU_HOME_BASELINE_PNG\x00"
+        command = r"dumpsys window displays; printf '\000LUOSHU_HOME_BASELINE_PNG\000'; screencap -p"
+        metadata["capture_command"] = command
+        pending_sample = None
 
         def remaining() -> float:
             value = deadline - time.monotonic()
@@ -850,13 +912,31 @@ class SmokeRun:
             while True:
                 remaining()
                 index = len(metadata["samples"])
-                window = self.text("shell", "dumpsys", "window", timeout=remaining())
                 window_file = f"{name}-baseline-{index:02d}-window.txt"
-                (self.output / window_file).write_text(window, encoding="utf-8")
-                png = self.adb("exec-out", "screencap", "-p", timeout=remaining()).stdout
                 png_file = f"{name}-baseline-{index:02d}.png"
+                raw_file = f"{name}-baseline-{index:02d}-batch.bin"
+                stderr_file = f"{name}-baseline-{index:02d}-stderr.txt"
+                pending_sample = {"window": window_file, "screenshot": png_file,
+                                  "batch_raw": raw_file, "stderr": stderr_file}
+                # One fixed remote command avoids separate adb connections and
+                # unrelated full-window dump sections within the same 10s budget.
+                batch = self.adb("exec-out", "sh", "-c", command, timeout=remaining(), check=False)
+                (self.output / raw_file).write_bytes(batch.stdout)
+                (self.output / stderr_file).write_bytes(batch.stderr)
+                pending_sample["returncode"] = batch.returncode
+                if batch.returncode:
+                    raise RuntimeError(f"HOME baseline batch failed ({batch.returncode}): {batch.stderr.decode('utf-8', 'replace')}")
+                if batch.stdout.count(separator) != 1:
+                    raise RuntimeError("HOME baseline batch has missing or ambiguous raw PNG separator")
+                window_bytes, png = batch.stdout.split(separator)
+                (self.output / window_file).write_bytes(window_bytes)
                 (self.output / png_file).write_bytes(png)
+                window = window_bytes.decode("utf-8", "replace")
                 focused = focused_component(window)
+                if len(png) < 24 or not png.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise RuntimeError("HOME baseline batch did not contain a real PNG frame")
+                with Image.open(io.BytesIO(png)) as inspected:
+                    inspected.verify()
                 with Image.open(io.BytesIO(png)) as captured:
                     rect = home_content_bounds(window, captured.size)
                     pixels = captured.convert("RGB").crop(rect).tobytes()
@@ -865,6 +945,7 @@ class SmokeRun:
                 previous = signature if focused == home else None
                 metadata["samples"].append({"elapsed_seconds": round(time.monotonic() - started, 3),
                     "focused_component": focused, "window": window_file, "screenshot": png_file,
+                    "batch_raw": raw_file, "stderr": stderr_file,
                     "content_bounds": list(rect), "content_sha256": hashlib.sha256(pixels).hexdigest(),
                     "stable_captures": stable})
                 remaining()
@@ -874,6 +955,14 @@ class SmokeRun:
                 time.sleep(min(.4, remaining()))
         except Exception as error:
             metadata.update(passed=False, error=str(error))
+            if pending_sample is not None:
+                metadata["failed_sample"] = pending_sample
+                cause = error.__cause__
+                if isinstance(cause, subprocess.TimeoutExpired):
+                    if isinstance(cause.stdout, bytes):
+                        (self.output / pending_sample["batch_raw"]).write_bytes(cause.stdout)
+                    if isinstance(cause.stderr, bytes):
+                        (self.output / pending_sample["stderr"]).write_bytes(cause.stderr)
             raise RuntimeError(f"{name}: HOME baseline failed: {error}") from error
         finally:
             metadata["elapsed_seconds"] = round(time.monotonic() - started, 3)
@@ -1163,9 +1252,14 @@ class SmokeRun:
                     name = f"{theme}-{kind}-start"
                     previous_pid = None
                     if kind == "warm":
-                        previous_pid = self.text("shell", "pidof", self.package).strip()
+                        try:
+                            previous_pid = self.text("shell", "pidof", self.package, check=False).strip()
+                        except RuntimeError as error:
+                            errors.append(f"{name}: cannot establish existing App PID; warm recording skipped: {error}")
+                            continue
                         if re.fullmatch(r"[1-9]\d*", previous_pid) is None:
-                            raise RuntimeError(f"{name}: warm launch requires one existing App PID; pidof returned {previous_pid!r}")
+                            errors.append(f"{name}: warm launch requires one existing App PID; pidof returned {previous_pid!r}; warm recording skipped")
+                            continue
                         self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
                     self.adb("logcat", "-c")
                     try:
@@ -1173,14 +1267,18 @@ class SmokeRun:
                     except RuntimeError as error:
                         errors.append(f"{name}: {error}")
                     if kind == "warm":
-                        current_pid = self.text("shell", "pidof", self.package).strip()
+                        try:
+                            current_pid = self.text("shell", "pidof", self.package, check=False).strip()
+                        except RuntimeError as error:
+                            errors.append(f"{name}: cannot verify resumed App PID: {error}")
+                            continue
                         if current_pid != previous_pid:
                             errors.append(f"{name}: warm resume changed App PID {previous_pid} to {current_pid}")
                         else:
                             self.record(f"{name}-same-process", before_pid=previous_pid, after_pid=current_pid)
-            self.assert_running()
             if errors:
                 raise RuntimeError("; ".join(errors))
+            self.assert_running()
             return
         self.launch("cold-start")
         for theme in ("light", "dark"):
@@ -1304,10 +1402,24 @@ def main() -> int:
         except RuntimeError:
             pass
     finally:
-        run.diagnostics()
+        try:
+            run.diagnostics()
+        except Exception as failure:
+            diagnostic_error = f"diagnostics {type(failure).__name__}: {failure}"
+            print(diagnostic_error, file=sys.stderr, flush=True)
+            error = f"{error}; {diagnostic_error}" if error else diagnostic_error
+        finally:
+            try:
+                run.close_snapshot_session()
+            except Exception as failure:
+                cleanup_error = f"{type(failure).__name__}: {failure}"
+                print(cleanup_error, file=sys.stderr, flush=True)
+                error = f"{error}; {cleanup_error}" if error else cleanup_error
         final_log = run.output / "logcat.txt"
-        if error is None and final_log.is_file():
-            error = crash_reason(final_log.read_text(encoding="utf-8", errors="replace"), args.package)
+        if final_log.is_file():
+            final_crash = crash_reason(final_log.read_text(encoding="utf-8", errors="replace"), args.package)
+            if final_crash and (error is None or final_crash not in error):
+                error = f"{error}; {final_crash}" if error else final_crash
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
                    "mode": "visual-launch-only" if run.visual_launch_only else "functional-ui-smoke",
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",

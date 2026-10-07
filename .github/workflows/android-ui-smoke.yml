@@ -53,7 +53,9 @@ jobs:
           "$RUNNER_TEMP/luoshu-ui-host-tests/bin/pip" install Pillow==12.3.0
           echo "$RUNNER_TEMP/luoshu-ui-host-tests/bin" >> "$GITHUB_PATH"
       - name: Verify UI navigation and crash detection helpers
-        run: python3 scripts/android_ui_smoke_test.py
+        run: |
+          python3 scripts/android_ui_smoke_test.py
+          python3 scripts/ui_snapshot_session_test.py
       - name: Run current debug unit tests
         working-directory: android-app
         shell: bash
@@ -206,14 +208,17 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          # Preserve the exact stalled command instead of a silent ten-minute
+          # preparation timeout; this step contains no signing credentials.
+          set -x
           mkdir -p launch-visual-output
           # Bound mirror stalls and retain preparation errors alongside footage.
           if ! command -v ffmpeg || ! command -v ffprobe; then
-            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee launch-visual-output/decoder-apt-update.log
-            sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee launch-visual-output/decoder-apt-update.log
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
           fi
           python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
-          "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0
+          timeout 180s "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install --timeout 30 --retries 2 numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0
           echo "$RUNNER_TEMP/luoshu-startup-visual/bin" >> "$GITHUB_PATH"
           command -v ffmpeg
           command -v ffprobe

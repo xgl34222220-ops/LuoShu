@@ -80,3 +80,19 @@ API 36 保留真实同 PID ANR：主线程等待 `RenderProxy::setStopped`，Ren
 API 28 helper 在同一连接、原 8 秒内用 public `AccessibilityNodeInfo.refresh()` 重查保留的不完整真实节点，并输出 package、windowId、可见子节点、refresh 成败及窗口计数。过时或超期节点不能写成有效 XML。其缓存解释仍是待新运行检验的推断，失败门禁保持。视觉录制之前则在最多 10 秒内解析真实 HOME component、确认 Window 焦点，并要求排除真实系统栏后的原截图内容连续三次完全相同；所有原 PNG/Window 都保存。该等待发生在启动前，只为确定原录像基线，不改变 App 动画或 30 秒录制，也不能用它替代启动耗时。
 
 真实系统窗口缩放过渡使用有界统一变换匹配：scale .65–1.05（.005 步长），归一化 360 宽的 x±20/y±80；两个真实首页语义 crop 必须命中同一个 scale/dx/dy，取较低分数。完整原生/首页 .92、过渡 .72 的门槛不变；任意缩放徽标在首页之后或同 PID 热启动中出现仍失败。新回归夹具来自 `6af650c` 原视频，逐张记录视频 SHA、原帧、PTS 和 PNG SHA，没有按帧号/时间放行。20 项逐帧门禁回归通过，原 `1788866` 的真实回盖和黑帧仍拒绝；修正工具重读 `6af650c` 后仍拒绝暗冷的空背景/五个黑帧及亮热的未稳态基线。新的 App 修改必须重新录制验收，不以重读旧片通过替代。
+
+首帧修正 `a8ccc9c24e4f4539b5aed51a9c8a65d171724849` 的 UI CI 在 51 项辅助测试中因未安装 Pillow 报出三个 import errors；JUnit 与后继模拟器未运行，lint/APK 编译成功不能覆盖这些缺项。工作流补齐与逐帧任务相同的 Pillow 12.3.0，且两条工作流的 paths 相互包含，保证仅修改验收工作流也会生成同一准确 SHA 的候选与 UI 证据；不取消旧作业。
+
+同 SHA 的源码门禁在 671 项 Python 测试与字体缓存检查通过后，因 `font_library_ui_layout_test.sh` 的旧 `blurActive` 静态表达式断言而失败。独立 `sh -x` 复现了该位置；修正保留原 `appearance.blurEnabled`、`appearance.glassEnabled` 和 `dockCaptureRequired` 条件，同时明确要求新 `firstFrameCommitted` 条件，未删除布局或运行时门禁。该布局、六项玻璃层级与之后八个稳定性/缓存/安装器/任务交接/库存扫描脚本均通过本地主机回归；最终完整门禁与原录像仍以修正后的准确 SHA CI 为准。
+
+## 9dcd11d 终态与验收工具接续
+
+`9dcd11d8ffa089e76b98788895f05db205dc14cd` 的 candidate [37679734635](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37679734635) 与 UI [37679734873](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37679734873) 均已失败终态。candidate 的 38 suites / 671 tests 与字体验证缓存检查通过，随后命中上述旧布局文本断言。UI build 的 217 JVM tests、lint、helper 编译通过；API 36 在字体库实际滚动后，单次 300 ms 反向手势未移动可见锚点，30 秒内没有找到完整四项底栏，17 次捕获 / 11 项检查后失败。API 28 已通过库滚动、跨页、后台、旋转和两轮快速导航，最后第 70 次 hierarchy 请求在原 8 秒内始终没有实际可用子节点，28 次捕获 / 20 项检查后失败；未见 App ANR，不能直接归因为 App 卡死。原失败 ZIP、XML、日志完整保留。
+
+同 SHA 视觉任务在 App 启动之前无法于 10 秒内取得三次稳定 HOME 内容截图；随后热启动的空 pidof 错误掩盖了冷启动原因。没有生成原 MP4，故不能验收首帧修正，更不能把 build 或旧候选的绿色结果作为新启动视觉通过。新的基线采样在一次真实 adb exec-out 中执行 `dumpsys window displays` 与 `screencap -p`，保存整个二进制响应、Window、原 PNG 与 stderr，并严格检查唯一分隔符、PNG、真实 HOME 焦点和真实系统栏 Insets；仍保持原 10 秒及三次完全相同内容要求。冷启动失败链和暖启动 PID 缺失分别保留，不改变 App 启动或录像时序。
+
+UI helper 在原公开 UiAutomation 权限下改为一次真实长连接，nonce 私有目录与每次唯一请求 ID/文件名绑定；逐次读取真实树，不接受旧 XML、错配响应、部分 JSON 或失败根节点。原 8 秒根节点等待和整个首请求（含连接就绪）的 20 秒 host 上限保留，失败不重建连接掩盖现场。正常结束必须收到同 nonce 的关闭确认并清理自己的私有文件；退出失败仅停止该测试 helper，仍判失败，绝不停止 App、系统或 GMS。诊断失败也记录到失败 summary，保留原错误与 App ANR。
+
+QuickReturn 仍按真实 App 边界执行单次同方向/同距离反向滑动，仅将 300 ms 调整为已有搜索手势的 2000 ms，避免同步 DOWN 等待耗尽 MOVE 时段；原 30 秒总预算包含该手势。必须真实发现完整可用四项导航，不点击不可见坐标；前后原 XML、锚点、手势实际耗时和失败原因均归档。布局及六项玻璃源检查、启动源 11 项、UI host 62 项、长连接 host 14 项通过；真实 Java 编译、API 28/36 和亮暗冷热原录像仍待新准确 SHA CI，不能声称已通过。
+
+用户新增反馈作为独立优先项：HyperOS 与 ColorOS 的遗漏槽位和 ColorOS/Google 回退、连续 A→B→A/实时及重启后覆盖、整次切换及阶段计时、HyperOS 合成/应用生成超时与仅限拥有任务的清理、ColorOS 整机重启超过两分钟、App 加载耗时、全局字重移除。旧 600/630 秒属于合成/应用生成，97 秒首次 zygote 前异常和库存扫描启动计时都不等于整次手机 reboot；此前 45.31% 不等于手机整次提速。冻结 22 文件、1.1.1 挂载核心、nohook、玻璃和失败门禁均保持。新功能修正与真机证据分别报告。
