@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAIN = ROOT / "android-app/app/src/main"
 JAVA = MAIN / "java/io/github/xgl34222220/luoshu"
 ANDROID = "{http://schemas.android.com/apk/res/android}"
+AAPT = "{http://schemas.android.com/aapt}"
 
 
 def method(source: str, marker: str) -> str:
@@ -108,6 +109,58 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         self.assertEqual(items["android:windowBackground"], "@color/launch_background")
         self.assertEqual(items["android:windowSplashScreenAnimatedIcon"], "@drawable/ic_luoshu_launch")
         self.assertNotIn("android:windowSplashScreenBrandingImage", items)
+
+    def test_native_glass_emblem_uses_two_static_native_gradients(self):
+        icon = ET.parse(MAIN / "res/drawable/ic_luoshu_launch.xml").getroot()
+        self.assertEqual(icon.tag, "vector")
+        for key, value in (("width", "288dp"), ("height", "288dp"),
+                           ("viewportWidth", "108"), ("viewportHeight", "108")):
+            self.assertEqual(icon.get(ANDROID + key), value)
+        fills = icon.findall(".//" + AAPT + "attr")
+        self.assertEqual(len(fills), 2)
+        for fill in fills:
+            self.assertEqual(fill.get("name"), "android:fillColor")
+            gradient = fill.find("gradient")
+            self.assertEqual(gradient.get(ANDROID + "type"), "linear")
+            stops = gradient.findall("item")
+            self.assertEqual([stop.get(ANDROID + "offset") for stop in stops], ["0", "0.48", "1"])
+            self.assertEqual([stop.get(ANDROID + "color") for stop in stops],
+                             ["@color/launch_glass_top", "@color/launch_glass_center", "@color/launch_glass_bottom"])
+        self.assertIsNone(icon.find(".//animated-vector"))
+        self.assertIsNone(icon.find(".//bitmap"))
+
+    def test_glass_lens_fits_platform_safe_circle_without_enlarging_the_brand(self):
+        icon = ET.parse(MAIN / "res/drawable/ic_luoshu_launch.xml").getroot()
+        paths = {node.get(ANDROID + "name"): node for node in icon.findall(".//path")}
+        # 288dp canvas / 108 viewport: a 35-unit radius is 186.7dp across,
+        # inside the platform's 192dp safe circle. Rim adds only 0.375 units.
+        self.assertEqual(paths["diffuse_lens"].get(ANDROID + "pathData"),
+                         "M54,19a35,35 0,1 0,0 70a35,35 0,1 0,0 -70")
+        self.assertEqual(paths["glass_lens_rim"].get(ANDROID + "strokeWidth"), "0.75")
+        self.assertLessEqual(35 * 2 * 288 / 108, 192)
+        group = icon.find("group")
+        self.assertEqual(group.get(ANDROID + "scaleX"), "0.8")
+        self.assertEqual(group.get(ANDROID + "scaleY"), "0.8")
+        self.assertLessEqual(float(paths["glass_lens_rim"].get(ANDROID + "strokeAlpha")), .25)
+        self.assertLessEqual(float(paths["diffuse_lens"].get(ANDROID + "fillAlpha")), .24)
+        self.assertLessEqual(float(paths["glass_core_highlight"].get(ANDROID + "strokeAlpha")), .10)
+
+    def test_light_and_dark_native_glass_colors_resolve_with_legible_gold(self):
+        def luminance(rgb):
+            values = [int(rgb[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
+                      for value in values]
+            return sum(a * b for a, b in zip(linear, (.2126, .7152, .0722)))
+
+        resources = MAIN / "res"
+        for relative in ("values/themes.xml", "values-night/launch.xml"):
+            colors = {node.get("name"): node.text.strip()
+                      for node in ET.parse(resources / relative).getroot().findall("color")}
+            for name in ("launch_background", "launch_ink", "launch_gold", "launch_glass_top",
+                         "launch_glass_center", "launch_glass_bottom", "launch_glass_edge", "launch_glass_shadow"):
+                self.assertRegex(colors[name], r"^#[0-9A-Fa-f]{6}$")
+            first, second = sorted((luminance(colors["launch_gold"]), luminance(colors["launch_background"])))
+            self.assertGreaterEqual((second + .05) / (first + .05), 3)
 
     def test_single_launcher_activity_and_platform_api_are_preserved(self):
         manifest = ET.parse(MAIN / "AndroidManifest.xml").getroot()

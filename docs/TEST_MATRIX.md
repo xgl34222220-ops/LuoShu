@@ -59,6 +59,15 @@
 - 中文、英文和数字角色缺失时，在任务入队前直接拒绝；
 - 模块内 App 与独立正式 APK 使用相同签名和字节内容。
 
+## 单层启动视觉回归（2026-10-07）
+
+- Android 12+ 的最早系统 Splash 只支持不透明单色背景与中央图标；不以图片塞进背景、不添加第二品牌页或人为停留。系统底色取接近真实 App 弥散背景的中间色，静态玻璃徽标保留蓝金九宫与飘带。
+- 第一帧由 App 控制的 Window 与真实首页继续共用 `LuoShuGlassBackdropDrawable` 全屏弥散渐变。启动图标资源调整不改变此 Drawable、首页配色、退出时序、前台维护或 Root 操作。
+- `python3 scripts/android_launch_source_test.py` 校验单页接线、无额外动画/等待、平台安全圆、亮暗资源完整性及徽标基础对比度。SVG/Inkscape 源资源合成图仅用于静态设计审查，不充当 Android 截图或性能通过证据。
+- 真实冷启动仍需分别观察亮/暗系统屏、系统条文字、首内容帧、退场、重复冷启动及崩溃/ANR；一次静态资源调整不代表手机启动速度或 Google 字体复发已解决。
+
+平台边界依据：[Android Splash screens](https://developer.android.com/develop/ui/views/launch/splash-screen)。
+
 ## 真机验证进度
 
 | 系统 | Root 管理器 | 其他挂载组件 | 私有负载隔离 | 自挂载 | 字体应用 | 恢复/卸载 | 结果 |

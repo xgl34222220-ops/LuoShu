@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launch_background">#EEF1FA</color>
+    <!-- The platform splash accepts one color. Match the diffuse backdrop's centre
+         instead of showing a pale blank sheet before the first real App frame. -->
+    <color name="launch_background">#D7DAEE</color>
     <color name="launch_gradient_start">#CDDDF4</color>
     <color name="launch_gradient_center">#E2DDF3</color>
     <color name="launch_gradient_end">#D1E8ED</color>
-    <color name="launch_ink">#536B8E</color>
-    <color name="launch_gold">#B39864</color>
+    <color name="launch_ink">#435B80</color>
+    <color name="launch_gold">#8F733F</color>
+    <color name="launch_glass_top">#ECF2FF</color>
+    <color name="launch_glass_center">#D5D7F0</color>
+    <color name="launch_glass_bottom">#B8DFE5</color>
+    <color name="launch_glass_edge">#FFFFFF</color>
+    <color name="launch_glass_shadow">#526D99</color>
     <bool name="launch_light_system_bars">true</bool>
 
     <style name="Theme.LuoShuHybrid" parent="android:style/Theme.Material.Light.NoActionBar">
