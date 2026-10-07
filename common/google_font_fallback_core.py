@@ -264,9 +264,49 @@ def _legacy_link_matches(legacy: Path, directory: Path) -> bool:
 
 def _secure_store_parent(parent: Path) -> None:
     info = parent.lstat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-            or info.st_mode & 0o022):
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
         raise FallbackError('洛书恢复根目录所有者或权限不安全。')
+    if not info.st_mode & 0o022:
+        return
+    # Frozen mount helpers also use this shared root. mkdir -p inherits the
+    # Root manager's umask (000/002 can leave 0777/0775), and mkdir(exist_ok)
+    # does not correct it. Remove only group/other write; preserve mount read
+    # and traversal bits and every child inode. Never repair foreign owners,
+    # links, journals, or a root beneath an untrusted writable ancestor.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    ancestor_fd = os.open(parent.parent, flags)
+    try:
+        ancestor = os.fstat(ancestor_fd)
+        named_ancestor = parent.parent.lstat()
+        if (not stat.S_ISDIR(ancestor.st_mode) or ancestor.st_uid != os.geteuid()
+                or ancestor.st_mode & 0o022
+                or (ancestor.st_dev, ancestor.st_ino) !=
+                   (named_ancestor.st_dev, named_ancestor.st_ino)):
+            raise FallbackError('洛书恢复根目录所有者或权限不安全。')
+        fd = os.open(parent.name, flags, dir_fd=ancestor_fd)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.geteuid()
+                    or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)):
+                raise FallbackError('洛书恢复根目录已变化；未修复权限。')
+            os.fchmod(fd, stat.S_IMODE(opened.st_mode) & ~0o022)
+            os.fsync(fd)
+            secured = os.fstat(fd)
+            named = parent.lstat()
+            ancestor = os.fstat(ancestor_fd)
+            named_ancestor = parent.parent.lstat()
+            if (secured.st_uid != os.geteuid() or secured.st_mode & 0o022
+                    or not stat.S_ISDIR(named.st_mode) or named.st_mode & 0o022
+                    or (secured.st_dev, secured.st_ino) != (named.st_dev, named.st_ino)
+                    or ancestor.st_uid != os.geteuid() or ancestor.st_mode & 0o022
+                    or not stat.S_ISDIR(named_ancestor.st_mode)
+                    or (ancestor.st_dev, ancestor.st_ino) !=
+                       (named_ancestor.st_dev, named_ancestor.st_ino)):
+                raise FallbackError('洛书恢复根目录权限修复未核验通过。')
+        finally:
+            os.close(fd)
+    finally:
+        os.close(ancestor_fd)
 
 
 def prepare_store(directory: Path = STORE, legacy: Path = LEGACY_STORE) -> Path:
