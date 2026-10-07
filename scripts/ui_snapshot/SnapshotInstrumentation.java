@@ -83,6 +83,72 @@ public final class SnapshotInstrumentation extends Instrumentation {
         return automation;
     }
 
+    private static JSONObject serviceInfoEvidence(AccessibilityServiceInfo info) throws Exception {
+        JSONObject evidence = new JSONObject().put("flags", info.flags).put("event_types", info.eventTypes)
+                .put("feedback_type", info.feedbackType).put("notification_timeout", info.notificationTimeout)
+                .put("capabilities", info.getCapabilities());
+        if (info.packageNames == null) {
+            evidence.put("package_names", JSONObject.NULL);
+        } else {
+            JSONArray packages = new JSONArray();
+            for (String name : info.packageNames) packages.put(name);
+            evidence.put("package_names", packages);
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            evidence.put("interactive_ui_timeout", info.getInteractiveUiTimeoutMillis())
+                    .put("noninteractive_ui_timeout", info.getNonInteractiveUiTimeoutMillis());
+        }
+        return evidence;
+    }
+
+    private static void refreshLegacyAccessibilityCache(UiAutomation automation, Bundle result,
+            long deadline) throws Exception {
+        long started = SystemClock.uptimeMillis();
+        result.putString("accessibility_cache_refresh_method", "public-setServiceInfo-unchanged");
+        result.putString("accessibility_service_info_unchanged", "false");
+        try {
+            if (started >= deadline) throw new IllegalStateException("Snapshot root deadline expired before cache refresh");
+            AccessibilityServiceInfo info = automation.getServiceInfo();
+            if (info == null) throw new IllegalStateException("Cannot read this snapshot connection's service configuration");
+            int flags = info.flags;
+            int eventTypes = info.eventTypes;
+            int feedbackType = info.feedbackType;
+            long notificationTimeout = info.notificationTimeout;
+            int capabilities = info.getCapabilities();
+            String[] packageNames = info.packageNames == null ? null : info.packageNames.clone();
+            int interactiveTimeout = Build.VERSION.SDK_INT >= 29 ? info.getInteractiveUiTimeoutMillis() : -1;
+            int noninteractiveTimeout = Build.VERSION.SDK_INT >= 29 ? info.getNonInteractiveUiTimeoutMillis() : -1;
+            result.putString("accessibility_service_info_before", serviceInfoEvidence(info).toString());
+            if (SystemClock.uptimeMillis() >= deadline) {
+                throw new IllegalStateException("Snapshot root deadline expired before public service refresh");
+            }
+            // Android 9's public setter clears the client accessibility cache
+            // before forwarding the unchanged service info. This is confined to
+            // this existing test connection; no flags, events or packages change.
+            automation.setServiceInfo(info);
+            if (SystemClock.uptimeMillis() >= deadline) {
+                throw new IllegalStateException("Snapshot root deadline expired before service confirmation");
+            }
+            AccessibilityServiceInfo confirmed = automation.getServiceInfo();
+            if (confirmed == null) throw new IllegalStateException("Cannot confirm this snapshot connection's service configuration");
+            result.putString("accessibility_service_info_after", serviceInfoEvidence(confirmed).toString());
+            if (flags != confirmed.flags || eventTypes != confirmed.eventTypes ||
+                    feedbackType != confirmed.feedbackType || notificationTimeout != confirmed.notificationTimeout ||
+                    capabilities != confirmed.getCapabilities() || !Arrays.equals(packageNames, confirmed.packageNames) ||
+                    Build.VERSION.SDK_INT >= 29 && (interactiveTimeout != confirmed.getInteractiveUiTimeoutMillis() ||
+                            noninteractiveTimeout != confirmed.getNonInteractiveUiTimeoutMillis())) {
+                throw new IllegalStateException("Snapshot service configuration changed during public cache refresh");
+            }
+            if (SystemClock.uptimeMillis() >= deadline) {
+                throw new IllegalStateException("Snapshot root deadline expired during public service refresh");
+            }
+            result.putString("accessibility_service_info_unchanged", "true");
+            result.putString("accessibility_cache_cleared", "public-setServiceInfo-unchanged");
+        } finally {
+            result.putString("accessibility_cache_refresh_ms", Long.toString(SystemClock.uptimeMillis() - started));
+        }
+    }
+
     private Bundle runSession(String nonce) throws Exception {
         if (!nonce.matches("[0-9a-f]{32}")) throw new IllegalArgumentException("Invalid session nonce");
         File directory = new File(getContext().getFilesDir(), "ui-snapshot-session-" + nonce);
@@ -221,7 +287,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 result.putString("accessibility_cache_cleared", Boolean.toString(cleared));
                 if (!cleared) throw new IllegalStateException("Cannot clear this snapshot connection's node cache");
             } else {
-                result.putString("accessibility_cache_cleared", "unsupported-before-api34");
+                refreshLegacyAccessibilityCache(automation, result, deadline);
             }
             while (root == null && SystemClock.uptimeMillis() < deadline) {
                 attempts++;

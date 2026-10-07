@@ -215,7 +215,23 @@ jobs:
           # Bound mirror stalls and retain preparation errors alongside footage.
           if ! command -v ffmpeg || ! command -v ffprobe; then
             timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee launch-visual-output/decoder-apt-update.log
-            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y -qq --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
+            # Keep the original 180s cap and apt signature verification, but
+            # retain acquisition/dpkg progress: the 59cd6627 timeout produced
+            # an empty -qq log and cannot establish which phase stalled.
+            set +e
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
+            decoder_pipeline_status=("${PIPESTATUS[@]}")
+            decoder_install_status=${decoder_pipeline_status[0]}
+            decoder_log_status=${decoder_pipeline_status[1]}
+            set -e
+            if test "$decoder_install_status" -ne 0 || test "$decoder_log_status" -ne 0; then
+              # Read-only package/process state; command arguments and secrets
+              # are excluded. Do not stop package managers or clear caches.
+              dpkg-query -W -f='${Package}\t${Status}\t${Version}\n' ffmpeg libavcodec60 libavformat60 libavutil58 > launch-visual-output/decoder-package-state.txt 2>&1 || true
+              ps -eo pid,ppid,etimes,stat,comm > launch-visual-output/decoder-package-processes.txt 2>&1 || true
+              if test "$decoder_install_status" -ne 0; then exit "$decoder_install_status"; fi
+              exit "$decoder_log_status"
+            fi
           fi
           python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
           timeout 180s "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install --timeout 30 --retries 2 numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0

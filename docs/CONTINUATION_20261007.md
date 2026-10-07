@@ -142,3 +142,17 @@ HOME 基线改读原始 screencap 像素，保留 batch/独立 raw/窗口/stderr
 必要修正只调整证据采集：设备用 gzip -1 无损传输 packed screencap，以 mksh pipefail 拒绝捕获或压缩失败；保存原 batch、原压缩帧、严格单 member/CRC/ISIZE/EOF/无尾随数据校验后的原 raw、完整 RGB PNG、Window 和 stderr。每个 sample 的全新匹配 hierarchy 请求改在 raw 传输之前，仍与 HOME resolve、连接就绪、原始采集、解压、存盘、PNG 编码和稳定比较共享原十秒 deadline；不在预算外预热、不重连、复用旧 XML、调整视口或动画。PNG 先完整保存，随后才做实际系统栏与桌面验收，保证失败现场也有逐像素证据；三张内容完全一致、真实可见桌面和原八秒根节点条件不变。实际传输速度和四段新原录像仍必须由下一准确 SHA CI 检验，不能用本地主机压缩或回归数字宣布完成。
 
 本次两文件修正的适用 host 回归为 UI 帮助函数 72、会话 18、逐帧分类器 20、启动源约束 11，共 121 项全通过，原失败系统栏/桌面/共享 deadline 断言保留；实际 shell 管道还验证 Window 不进入 gzip，捕获退出码 7 由 pipefail 保留。该计数是本地主机工具回归，不能回填未生成的原录像或提前给下一批 CI 通过。
+
+## 59cd6627 的独立终态失败与旧 API 读取兼容
+
+同 SHA 的 [candidate 37696153142](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37696153142) 已成功终态，App、模块构建与最终包验收均完成；候选原 artifact 11516421640 为 12,340,203 bytes、SHA-256 `17412d64749d7ff5408c343b1d37c2bd850a3a0c5a2b8c9b4ada40379e7830c0`。这是该 SHA 的包构建结果，视觉失败仍禁止将其当作可安装交付。
+
+`59cd66273712a4d94052d0720c692155016b6248` 的 [UI 37696153318](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37696153318) 已失败终态。build 原 XML 为 34 suites / 217 tests、0 failure/error/skip，lint、完整 Android helper 编译与 72+18 host 回归通过。API 36 原 artifact 11515973109（50,879,859 bytes，SHA-256 `93c0d8b3c5b41619315ecead10db3744c5bf1fcf8a05f8ea59f3c2b22e4434b8`）通过 31 次捕获记录 / 30 张独立命名 PNG / 20 项检查，300.54 秒；包括字体库正文及 selected 属性、真实滚动与 QuickReturn、后台/旋转、连续导航和 Google 说明。这是无 Root 模拟器功能 UI，未执行手机字体替换。原日志有 Google 服务 ANR；未记录洛书 App ANR，不写成整个环境无 ANR。
+
+API 28 在原 45 秒首页门禁失败：四个同一会话、匹配请求各在原八秒窗口内未取得可访问性根节点，0 张验收截图 / 0 项完成检查。原 failure.png 实际是完整玻璃首页，原 am TotalTime 为 2568 ms；同 PID 4787 的系统 Displayed 为 +2.568 秒、内容 draw-return 日志约 2066 ms，最后 ANR 记录为空。截图和无 App ANR 均不替代层级门禁，也不能将失败直接归因为 App 卡死。原 artifact 11516170726（1,024,789 bytes，SHA-256 `9a92c9a93dd3a1f8e9dca2716b9382bce3e7ae93bbe5d4b093c29f6fa5f14074`）保留完整原日志和窗口诊断。
+
+API 34 前没有公开的 UiAutomation.clearCache。旧 API 的读取器现在在同一原八秒窗口中，使用公开 getServiceInfo / setServiceInfo 重新提交原配置对象，随后回读，严格比对 flags、eventTypes、feedbackType、notificationTimeout、packageNames、capabilities 及 API 29+ 的两项 UI timeout。配置为空、变化或任一阶段超预算均失败，保存前后配置与阶段耗时。Android 9 公开 setter 清除客户端可访问性节点缓存，但本次空根节点是否由缓存造成仍是推断，须由下一准确 SHA 的真实模拟器验证；不修改配置、重连、增加权限或清理 App/GMS/系统缓存。API 34+ 原公开 clearCache 分支保持。
+
+同 SHA 视觉作业在 ffmpeg 安装准备时于 180 秒退出 124，原 artifact 11515902600 为 300 bytes、SHA-256 `00d88ac5fd07cf0296856a7d34bf7e5efad392e7ca159d8aa1f026ab3515bb21`，仅两个空 apt 日志；模拟器、HOME 基线、gzip 传输和四段原录像均未执行。因此不评价新传输速度或首帧效果，更不交付安装包。后续仅去掉 install 的静默输出，保留原 180 秒/两次重试/网络单请求 30 秒预算及签名验证，并在失败时保存只读包状态和不含参数的进程表，保留安装与日志写入的真实退出码；不停止包管理器、不清缓存。原失败证据不覆盖，新 helper 的完整 SDK 编译、API 28/36 与原录像仍需下一准确 SHA 的完整 CI。
+
+修正后的适用 host 回归实际为 UI 工具 73、会话 18、逐帧分类器 20、启动源约束 11，共 122 项通过。新增一项 host 测试真实编译并执行生产 Java 方法与原 SDK 分支的 24 个配置/空值/预算/现代 clearCache 行为案例；这是 host 控制流测试，不是 Android 窗口验证。完整 SDK helper 编译本地未运行。实际 Bash 管道另验证 upstream 0/124 与日志写入 0/7 的退出码均保存，工作流 YAML 和真实准备脚本 bash -n 通过；未扩大任何验收预算。

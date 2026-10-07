@@ -10,6 +10,7 @@ import struct
 import gzip
 import os
 import sys
+import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -29,6 +30,142 @@ PACKAGE = "io.github.xgl34222220.luoshu.debug"
 
 
 class UiSmokeHarnessTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("java"), "Java runtime is required for public snapshot cache compatibility checks")
+    def test_java_snapshot_refresh_keeps_configuration_deadline_and_modern_clear_path(self):
+        # Compile the production methods against only the public-interface test
+        # doubles below. This tests host control flow, not Android window access.
+        source = (Path(__file__).parent / "ui_snapshot/SnapshotInstrumentation.java").read_text()
+        def production_method(marker):
+            start = source.index(marker)
+            opening = source.index("{", start)
+            depth, end = 1, opening + 1
+            while depth:
+                depth += (source[end] == "{") - (source[end] == "}")
+                end += 1
+            return source[start:end]
+        methods = production_method("private static JSONObject serviceInfoEvidence") + "\n" + production_method(
+            "private static void refreshLegacyAccessibilityCache")
+        start = source.index("if (Build.VERSION.SDK_INT >= 34)")
+        branch = source[start:source.index("while (root == null", start)]
+        harness = r'''
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.ArrayList;
+public class SnapshotCacheCompatibilityTest {
+  static class Build { static class VERSION { static int SDK_INT; } }
+  static class SystemClock { static long now; static long uptimeMillis() { return now; } }
+  static class Bundle extends LinkedHashMap<String, String> { void putString(String k, String v) { put(k, v); } }
+  static class JSONObject extends LinkedHashMap<String, Object> {
+    static final Object NULL = new Object();
+    public JSONObject put(String k, Object v) { super.put(k, v); return this; }
+  }
+  static class JSONArray extends ArrayList<Object> { JSONArray put(Object v) { add(v); return this; } }
+  static class AccessibilityServiceInfo {
+    int flags=83, eventTypes=63, feedbackType=16, capabilities=1, interactive=7, noninteractive=11;
+    long notificationTimeout=23;
+    String[] packageNames={"owned.test", "second.test"};
+    int getCapabilities() { return capabilities; }
+    int getInteractiveUiTimeoutMillis() { if (Build.VERSION.SDK_INT<29) throw new AssertionError("API29 getter on legacy28"); return interactive; }
+    int getNonInteractiveUiTimeoutMillis() { if (Build.VERSION.SDK_INT<29) throw new AssertionError("API29 getter on legacy28"); return noninteractive; }
+    AccessibilityServiceInfo copy() {
+      AccessibilityServiceInfo i=new AccessibilityServiceInfo();
+      i.flags=flags; i.eventTypes=eventTypes; i.feedbackType=feedbackType; i.capabilities=capabilities;
+      i.notificationTimeout=notificationTimeout; i.interactive=interactive; i.noninteractive=noninteractive;
+      i.packageNames=packageNames==null?null:packageNames.clone(); return i;
+    }
+  }
+  static class UiAutomation {
+    AccessibilityServiceInfo original=new AccessibilityServiceInfo(), confirmed=original.copy();
+    int reads, sets, clears, lateRead; boolean nativeClear=true, late, mutateInPlace;
+    AccessibilityServiceInfo getServiceInfo() {
+      reads++; SystemClock.now+=5; if(reads==lateRead)SystemClock.now=8100;
+      return sets==0?original:confirmed;
+    }
+    void setServiceInfo(AccessibilityServiceInfo info) {
+      if (info!=original) throw new AssertionError("Must resend the existing configuration object");
+      sets++; SystemClock.now+=5;
+      if (mutateInPlace) { original.flags++; confirmed=original; }
+      if (late) SystemClock.now=8100;
+    }
+    boolean clearCache() { clears++; return nativeClear; }
+  }
+  static void require(boolean ok,String detail) { if (!ok) throw new AssertionError(detail); }
+  static int cases;
+  static void expectFailure(UiAutomation a,long deadline,String text) throws Exception {
+    Bundle b=new Bundle();
+    try { refresh(a,b,deadline); throw new AssertionError("Accepted invalid refresh: "+text); }
+    catch (IllegalStateException e) { require(e.getMessage().contains(text),e.toString()); }
+    require(!"true".equals(b.get("accessibility_service_info_unchanged")),"Failed refresh reported unchanged");
+    cases++;
+  }
+  public static void main(String[] args) throws Exception {
+    for (int sdk:new int[]{28,29,33}) {
+      Build.VERSION.SDK_INT=sdk; SystemClock.now=0;
+      UiAutomation a=new UiAutomation(); Bundle b=new Bundle(); refresh(a,b,8000);
+      require(a.sets==1 && a.reads==2 && a.clears==0,"Legacy must use one public refresh/readback");
+      require(a.original.flags==83 && a.original.eventTypes==63 && a.original.packageNames.length==2,"Scope changed");
+      require("true".equals(b.get("accessibility_service_info_unchanged")),"Missing unchanged confirmation");
+      require(b.get("accessibility_service_info_before").equals(b.get("accessibility_service_info_after")),"Configuration evidence differs");
+      require("15".equals(b.get("accessibility_cache_refresh_ms")),"Refresh not measured inside deadline");
+      cases++;
+    }
+    Build.VERSION.SDK_INT=28;
+    SystemClock.now=0;UiAutomation unrestricted=new UiAutomation();Bundle unrestrictedResult=new Bundle();
+    unrestricted.original.packageNames=null;unrestricted.confirmed.packageNames=null;
+    refresh(unrestricted,unrestrictedResult,8000);
+    require(unrestricted.original.packageNames==null && unrestricted.confirmed.packageNames==null,"Null package scope changed");
+    require("true".equals(unrestrictedResult.get("accessibility_service_info_unchanged")),"Null scope not confirmed");cases++;
+    for (int failure=0; failure<8; failure++) {
+      SystemClock.now=0; UiAutomation a=new UiAutomation();
+      switch(failure) {
+        case 0:a.confirmed.flags++;break; case 1:a.confirmed.eventTypes++;break;
+        case 2:a.confirmed.feedbackType++;break; case 3:a.confirmed.notificationTimeout++;break;
+        case 4:a.confirmed.capabilities++;break; case 5:a.confirmed.packageNames=new String[]{"expanded.scope"};break;
+        case 6:a.confirmed.packageNames=null;break; case 7:a.mutateInPlace=true;break;
+      }
+      expectFailure(a,8000,"configuration changed"); require(a.sets==1 && a.reads==2,"Unexpected reconnect or retry");
+    }
+    for(int failure=0;failure<2;failure++) {
+      Build.VERSION.SDK_INT=33;SystemClock.now=0;UiAutomation a=new UiAutomation();
+      if(failure==0)a.confirmed.interactive++;else a.confirmed.noninteractive++;
+      expectFailure(a,8000,"configuration changed");
+    }
+    Build.VERSION.SDK_INT=28;SystemClock.now=0;UiAutomation missing=new UiAutomation();missing.original=null;
+    expectFailure(missing,8000,"Cannot read");require(missing.sets==0,"Null configuration was submitted");
+    SystemClock.now=0;UiAutomation unconfirmed=new UiAutomation();unconfirmed.confirmed=null;
+    expectFailure(unconfirmed,8000,"Cannot confirm");require(unconfirmed.sets==1,"Unexpected retry");
+    SystemClock.now=8000;UiAutomation expired=new UiAutomation();expectFailure(expired,8000,"deadline expired before cache");
+    require(expired.reads==0 && expired.sets==0,"Work after deadline");
+    SystemClock.now=0;UiAutomation initialReadLate=new UiAutomation();initialReadLate.lateRead=1;
+    expectFailure(initialReadLate,8000,"deadline expired before public");
+    require(initialReadLate.sets==0 && initialReadLate.reads==1,"Refresh continued after initial read exhausted deadline");
+    SystemClock.now=0;UiAutomation late=new UiAutomation();late.late=true;
+    expectFailure(late,8000,"deadline expired before service confirmation");
+    require(late.reads==1 && late.sets==1,"Confirmation attempted after setter exhausted deadline");
+    SystemClock.now=0;UiAutomation confirmationLate=new UiAutomation();confirmationLate.lateRead=2;
+    expectFailure(confirmationLate,8000,"deadline expired during");
+    for(int sdk:new int[]{34,36}) {
+      Build.VERSION.SDK_INT=sdk;SystemClock.now=0;UiAutomation a=new UiAutomation();Bundle b=new Bundle();refresh(a,b,8000);
+      require(a.clears==1 && a.sets==0 && a.reads==0,"Modern public clear path changed");
+      require("true".equals(b.get("accessibility_cache_cleared")),"Missing native clear result");cases++;
+      UiAutomation bad=new UiAutomation();bad.nativeClear=false;expectFailure(bad,8000,"Cannot clear");
+    }
+    System.out.println("Passed "+cases+" production Java compatibility cases");
+  }
+''' + methods + "\nstatic void refresh(UiAutomation automation, Bundle result, long deadline) throws Exception {\n" + branch + "\n}\n}\n"
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            file = directory / "SnapshotCacheCompatibilityTest.java"
+            file.write_text(harness)
+            java = shutil.which("java")
+            compiled = subprocess.run([java, "--module", "jdk.compiler/com.sun.tools.javac.Main", "-d", str(directory), str(file)],
+                                      capture_output=True, timeout=30)
+            self.assertEqual(0, compiled.returncode, compiled.stderr.decode())
+            exercised = subprocess.run([java, "-cp", str(directory), "SnapshotCacheCompatibilityTest"],
+                                       capture_output=True, timeout=10)
+            self.assertEqual(0, exercised.returncode, exercised.stderr.decode())
+            self.assertIn("Passed 24 production Java compatibility cases", exercised.stdout.decode())
+
     def hierarchy(self, selected="首页"):
         # Reduced from the API 36 CI XML: the selected tab is focusable but not
         # clickable; the three unselected sibling tabs are clickable. Preserve
