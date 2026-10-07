@@ -15,7 +15,7 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 
-def dump(states=None, modern=True):
+def dump(states=None, modern=True, update_time=None, code_path=None):
     states = states or {0: 0, 10: 2}
     head = ('Registered ContentProviders:\n'
             '  com.google.android.gms/.fonts.provider.FontsProvider:\n'
@@ -23,6 +23,10 @@ def dump(states=None, modern=True):
             'Packages:\n'
             '  Package [com.google.android.gms] (abc):\n'
             '    userId=10123\n    versionCode=123456 minSdk=28 targetSdk=36\n')
+    if update_time is not None:
+        head += f'    lastUpdateTime={update_time}\n'
+    if code_path is not None:
+        head += f'    codePath={code_path}\n'
     if not modern:
         head += '    firstInstallTime=2026-01-01 12:00:00\n'
     for user, state in states.items():
@@ -90,6 +94,26 @@ class FallbackTest(unittest.TestCase):
         data = m.parse_snapshot(dump({0: 1}, modern=False), 0)
         self.assertEqual(data['componentState'], 1)
         self.assertEqual(data['firstInstallTime'], '2026-01-01 12:00:00')
+
+    def test_update_time_comes_only_from_the_live_package_header(self):
+        text = dump(update_time='2026-10-07 12:00:00').replace(
+            'Hidden system packages:', 'Hidden system packages:\n    lastUpdateTime=2099-01-01 00:00:00')
+        self.assertEqual(m.parse_snapshot(text, 0)['lastUpdateTime'], '2026-10-07 12:00:00')
+        self.assertIsNone(m.parse_snapshot(dump(), 0)['lastUpdateTime'])
+
+    def test_unknown_or_ambiguous_update_times_never_become_update_evidence(self):
+        for value in ('unknown', '2026-02-30 12:00:00', '2026-1-1 00:00:00',
+                      '2026-10-07 12:00:00\n    lastUpdateTime=2026-10-08 12:00:00'):
+            with self.subTest(value=value):
+                self.assertIsNone(m.parse_snapshot(dump(update_time=value), 0)['lastUpdateTime'])
+
+    def test_installed_apk_path_is_optional_unique_and_not_a_foreign_or_relative_path(self):
+        self.assertEqual(m.parse_snapshot(dump(code_path='/data/app/~~abc/gms-install/base'), 0)['codePath'],
+                         '/data/app/~~abc/gms-install/base')
+        for path in (None, '../gms', '/data/app/../foreign', '/system/app/GmsCore',
+                     '/data/app/a\n    codePath=/data/app/b', '/data/app/path with spaces'):
+            with self.subTest(path=path):
+                self.assertIsNone(m.parse_snapshot(dump(code_path=path), 0)['codePath'])
 
     def test_missing_or_error_dump_never_assumes_enabled(self):
         for data in ('', 'DUMP TIMEOUT', dump().split('Packages:')[0], dump().replace('userId=10123','')):

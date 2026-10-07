@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -50,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
@@ -81,6 +83,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Velocity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
@@ -252,45 +258,58 @@ internal fun LuoShuAppShell(
     val quickReturnEnabled = appearance.floatingDock &&
         showDock &&
         page in listOf(AppPage.Library, AppPage.Studio, AppPage.Settings)
-    var dockHiddenByScroll by remember(page) { mutableStateOf(false) }
-    var dockScrollAccumulator by remember(page) { mutableFloatStateOf(0f) }
     val density = LocalDensity.current
     val dockHideThresholdPx = with(density) { 34.dp.toPx() }
-    val dockShowThresholdPx = with(density) { 20.dp.toPx() }
-    val dockScrollConnection = remember(page, quickReturnEnabled, dockHideThresholdPx, dockShowThresholdPx) {
+    val dockShowThresholdPx = with(density) { 6.dp.toPx() }
+    val dockScrollPolicy = remember(page, dockHideThresholdPx, dockShowThresholdPx) {
+        QuickReturnDockPolicy(dockHideThresholdPx, dockShowThresholdPx)
+    }
+    var dockHiddenByScroll by remember(dockScrollPolicy) { mutableStateOf(false) }
+    val dockScrollConnection = remember(dockScrollPolicy, quickReturnEnabled) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (!quickReturnEnabled) return Offset.Zero
-                when {
-                    available.y < -1f -> {
-                        if (dockScrollAccumulator < 0f) dockScrollAccumulator = 0f
-                        dockScrollAccumulator += -available.y
-                        if (dockScrollAccumulator >= dockHideThresholdPx) {
-                            dockHiddenByScroll = true
-                            dockScrollAccumulator = 0f
-                        }
-                    }
-                    available.y > 1f -> {
-                        if (dockScrollAccumulator > 0f) dockScrollAccumulator = 0f
-                        dockScrollAccumulator -= available.y
-                        if (-dockScrollAccumulator >= dockShowThresholdPx) {
-                            dockHiddenByScroll = false
-                            dockScrollAccumulator = 0f
-                        }
-                    }
-                }
+                // A short reverse drag restores navigation. The padding animation and
+                // residual fling are SideEffect scrolls and cannot immediately hide it again.
+                dockHiddenByScroll = dockScrollPolicy.onScroll(
+                    deltaY = available.y,
+                    userInput = source == NestedScrollSource.UserInput,
+                )
                 return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                dockScrollPolicy.finishGesture()
+                return Velocity.Zero
             }
         }
     }
-    LaunchedEffect(quickReturnEnabled, showDock) {
+    LaunchedEffect(dockScrollPolicy, quickReturnEnabled, showDock) {
         if (!quickReturnEnabled || !showDock) {
+            dockScrollPolicy.reset()
             dockHiddenByScroll = false
-            dockScrollAccumulator = 0f
         }
     }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, dockScrollPolicy) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                dockScrollPolicy.reset()
+                dockHiddenByScroll = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val dockActuallyVisible = showDock && !dockHiddenByScroll
-    val blurActive = appearance.blurEnabled && appearance.glassEnabled && showDock
+    val dockVisibility = remember { MutableTransitionState(dockActuallyVisible) }
+        .apply { targetState = dockActuallyVisible }
+    val dockCaptureRequired = dockBackdropCaptureRequired(
+        currentVisible = dockVisibility.currentState,
+        targetVisible = dockVisibility.targetState,
+        transitionIdle = dockVisibility.isIdle,
+    )
+    val blurActive = appearance.blurEnabled && appearance.glassEnabled && dockCaptureRequired
     val hazeState = rememberHazeState(blurEnabled = blurActive)
     val liquidBackdrop = rememberLayerBackdrop()
     val liquidGlassSupported = blurActive &&
@@ -419,7 +438,11 @@ internal fun LuoShuAppShell(
                                         logsReturnPage = AppPage.Settings
                                         page = AppPage.Logs
                                     },
-                                    onDetailChanged = { settingsDetailVisible = it },
+                                    onDetailChanged = {
+                                        settingsDetailVisible = it
+                                        dockScrollPolicy.reset()
+                                        dockHiddenByScroll = false
+                                    },
                                 )
                             }
                         }
@@ -430,7 +453,7 @@ internal fun LuoShuAppShell(
 
         val dockPage = if (page in dockPages) page else logsReturnPage
         AnimatedVisibility(
-            visible = dockActuallyVisible,
+            visibleState = dockVisibility,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(tween(180)) + slideInVertically(tween(210, easing = FastOutSlowInEasing)) { it / 2 },
             exit = fadeOut(tween(150)) + slideOutVertically(tween(190, easing = FastOutSlowInEasing)) { it },

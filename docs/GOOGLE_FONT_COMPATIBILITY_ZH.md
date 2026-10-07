@@ -18,7 +18,9 @@
 
 字体效果回退不一定代表组件开关被重置。Google 应用可能仍持有先前打开的字体文件或内存字体，也可能使用自己打包的字体；关闭再开启兼容会触发 Android 组件状态变化，相关 GMS 进程可能重建，因此暂时恢复不能证明具体原因。
 
-洛书现在为已保存的合法恢复记录提供一次维护：模块启用且使用自定义字体、GMS 仍是同一安装、版本确实比最后核验时更新，并且原来是 default 的组件也回到了 default 时，可恢复之前已授权的兼容设置。组件仍停用时只记录已经核验的新版本，不反复切换。没有记录、同版本改动、明确启用的外部改动或重新安装的 GMS 均不会自动接管。
+洛书现在为已保存的合法恢复记录提供一次维护：模块启用且使用自定义字体、GMS 仍是同一安装，且版本确实比最后核验时更新，或同版本的软件包更新时间变新且安装 APK 路径同时改变，并且原来是 default 的组件也回到了 default 时，可恢复之前已授权的兼容设置。组件仍停用时只记录已经核验的新修订，不反复切换。没有记录、与最后一次核验相同修订的手动改动、明确启用的外部改动或重新安装的 GMS 均不会自动接管。同版本恢复必须同时有合法更新时间和不同的安装 APK 路径；时间缺失、格式不明、仅时区变化或只有路径变化都不会作为自动恢复依据。旧恢复记录缺少这些字段时，保持原有保守行为；组件仍停用的下次核验会记录当前修订，原始恢复设置不会丢失。
+
+更新时间和安装路径只能证明核验期间发生过软件包修订，不能证明默认状态一定是更新重置。如果更新后、下次核验前又通过其他工具手动设为 default，当前读数可能无法与更新重置区分。请通过洛书的「恢复原设置」退出此已授权维护；明确的外部 enable 状态仍不会覆盖。「已开启」且组件仍停用时，效果回退需另外排查旧句柄、应用内置字体或网页字体，不能一概视为开关被重置。
 
 维护在现有开机/应用字体任务、返回洛书前台及能收到的 GMS 升级事件执行一次，不启动常驻监听或轮询。Android 可能推迟后台广播，洛书进程不存活时也不能即时接收；再次打开洛书会补做核验。
 
@@ -46,6 +48,7 @@
 
 沿用之前独立工具的可恢复事务实现。组件停用路线参考 MrCarb0n/killgmsfont，但不采用其清理缓存和停用调度组件的逻辑。
 
+- Android PackageInfo 的 lastUpdateTime（软件包最后更新时间，独立于版本号）: https://developer.android.com/reference/android/content/pm/PackageInfo#lastUpdateTime
 - Android PackageManager: https://developer.android.com/reference/android/content/pm/PackageManager
 - Android 下载字体: https://developer.android.com/develop/ui/views/text-and-emoji/downloadable-fonts
 - 参考项目: https://github.com/MrCarb0n/killgmsfont

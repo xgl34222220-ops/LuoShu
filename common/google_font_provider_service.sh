@@ -75,8 +75,8 @@ if [ -z "$_provider_active" ] || [ "$_provider_active" = default ] || \
 fi
 
 # This remains a finite boot/apply pass. Only a validated existing undo record
-# with a same-install GMS upgrade reset can cause a component write. A missing
-# record, unchanged version or an explicit external edit remains untouched.
+# with a same-install verified GMS package update reset can cause a component
+# write. A missing record, unchanged revision or explicit enable stays untouched.
 _provider_fallback_rc=0
 if [ -f "$FALLBACK" ]; then
     _provider_fallback_log="${LUOSHU_LOG_DIR:-$MODDIR/logs}/google-font-compatibility.log"

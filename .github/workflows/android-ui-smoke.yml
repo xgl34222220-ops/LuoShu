@@ -155,6 +155,8 @@ jobs:
           disable-animations: false
           disable-linux-hw-accel: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # Functional acceptance has no video encoder load. Startup recordings
+          # run on their own emulator below and never substitute for these checks.
           script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output ui-smoke-output --serial emulator-5554
       - name: Upload screenshots, hierarchy and crash evidence
         if: always()
@@ -162,5 +164,57 @@ jobs:
         with:
           name: LuoShu-UI-Smoke-API-${{ matrix.api }}
           path: ui-smoke-output/
+          if-no-files-found: warn
+          retention-days: 14
+
+  launch-visual:
+    name: Startup visual evidence API 36
+    needs: build
+    if: ${{ !cancelled() && needs.build.outputs.apk_built == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-APK
+          path: ui-smoke-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Snapshot-Test-Helper
+          path: ui-snapshot-apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Record real light and dark native artwork handoffs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 600
+          disable-animations: false
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # Encoding is bounded to 30 seconds per launch. App timing is unchanged;
+          # raw frames and logs establish what actually appeared, not a mock splash.
+          script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only
+      - name: Upload separate startup recordings and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-Startup-Visual-API-36
+          path: launch-visual-output/
           if-no-files-found: warn
           retention-days: 14

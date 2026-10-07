@@ -240,8 +240,46 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run.launch_and_capture.assert_called_once_with("cold-start")
             run.record_launch = True
             self.assertIs(root, run.launch("cold-start"))
-            run.begin_launch_recording.assert_called_once()
-            run.finish_launch_recording.assert_called_once_with(run.begin_launch_recording.return_value)
+            run.begin_launch_recording.assert_called_once_with("cold-start")
+            run.finish_launch_recording.assert_called_once_with(run.begin_launch_recording.return_value, "cold-start")
+            run.begin_launch_recording.reset_mock()
+            run.finish_launch_recording.reset_mock()
+            self.assertIs(root, run.launch("repeat-cold-start"))
+            run.begin_launch_recording.assert_called_once_with("repeat-cold-start")
+            run.finish_launch_recording.assert_called_once_with(run.begin_launch_recording.return_value, "repeat-cold-start")
+
+    def test_repeat_recording_has_distinct_file_and_waits_for_the_bounded_encoder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            process = Mock(returncode=0)
+            process.communicate.return_value = (b"", b"")
+            def pull(*args, **kwargs):
+                self.assertEqual(args[:2], ("pull", "/sdcard/luoshu-repeat-cold-start.mp4"))
+                Path(args[2]).write_bytes(b"\x00\x00\x00\x18ftypmp42")
+                return subprocess.CompletedProcess([], 0, b"", b"")
+            run.adb = Mock(side_effect=pull)
+            run.finish_launch_recording(process, "repeat-cold-start")
+            process.communicate.assert_called_once_with(timeout=35)
+            self.assertTrue(run.recordings[0]["available"])
+            self.assertEqual(run.recordings[0]["file"], "repeat-cold-start.mp4")
+            self.assertEqual(run.recordings[0]["time_limit_seconds"], 30)
+
+    def test_visual_only_run_captures_both_themes_without_repeating_functional_suite(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                           record_launch=True, visual_launch_only=True)
+            run.adb = Mock()
+            run.text = Mock(return_value="36")
+            run.launch = Mock()
+            run.assert_running = Mock()
+            run.verify_rapid_navigation = Mock(side_effect=AssertionError("Functional regression is a separate run"))
+            run.run()
+            self.assertEqual([call.args[0] for call in run.launch.call_args_list],
+                             ["cold-start", "repeat-cold-start"])
+            self.assertTrue(any(call.args == ("shell", "cmd", "uimode", "night", "yes")
+                                for call in run.adb.call_args_list))
+            run.verify_rapid_navigation.assert_not_called()
+            run.assert_running.assert_called_once()
 
     def test_successful_platform_dump_stays_on_normal_backend_and_keeps_cli_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:

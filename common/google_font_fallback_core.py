@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from datetime import datetime
 import fcntl
 import json
 import os
@@ -33,6 +34,25 @@ SCHEMA = 'luoshu-google-font-fallback-v1'
 
 class FallbackError(RuntimeError):
     pass
+
+
+def validated_update_time(value: Any) -> str | None:
+    """dumpsys uses this sortable format; unknown metadata is not evidence."""
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', value):
+        return None
+    try:
+        datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+    return value
+
+
+def validated_code_path(value: Any) -> str | None:
+    if (not isinstance(value, str) or not value.startswith(('/data/app/', '/mnt/expand/'))
+            or any(char.isspace() or ord(char) < 32 for char in value)
+            or any(part in ('.', '..', '') for part in value.split('/')[1:])):
+        return None
+    return value
 
 
 def parse_snapshot(text: str, user: int) -> dict[str, Any]:
@@ -71,6 +91,14 @@ def parse_snapshot(text: str, user: int) -> dict[str, Any]:
         first = re.search(r'^\s+firstInstallTime=([^\n]+)', package[:users[0].start()], re.M)
     if first is None:
         raise FallbackError('当前用户的 GMS 安装身份不完整；未修改组件。')
+    # Package revision is separate from versionCode: a replacement of the same
+    # version can still reset component overrides. Never borrow a user's nested
+    # metadata or the Hidden system packages copy. Old/unknown ROM output keeps
+    # version-only behavior rather than inventing a newer package revision.
+    updates = re.findall(r'(?m)^    lastUpdateTime=([^\n]+)$', package[:users[0].start()])
+    updated = validated_update_time(updates[0]) if len(updates) == 1 else None
+    paths = re.findall(r'(?m)^    codePath=([^\n]+)$', package[:users[0].start()])
+    code_path = validated_code_path(paths[0]) if len(paths) == 1 else None
     # Nested user components have greater indentation than the User header.
     user_indent = len(entry[1])
     state_value = 0
@@ -112,6 +140,8 @@ def parse_snapshot(text: str, user: int) -> dict[str, Any]:
                               + re.escape(PROVIDER) + r'|\.fonts\.provider\.FontsProvider)'
                               + r'(?=[\s}\]])', prefix))
     return {'user': user, 'appId': int(appid[1]), 'versionCode': int(version[1]),
+            'lastUpdateTime': updated,
+            'codePath': code_path,
             'firstInstallTime': first[1].strip(), 'packageState': int(app_enabled[1]),
             'component': COMPONENT, 'componentState': state_value, 'declared': declared}
 

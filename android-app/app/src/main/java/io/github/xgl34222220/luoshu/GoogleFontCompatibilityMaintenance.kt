@@ -40,7 +40,7 @@ internal class GoogleFontCompatibilityMaintenance(
                 intent.data?.schemeSpecificPart != GMS_PACKAGE
             ) return
             // This system broadcast is only a trigger. The backend independently
-            // verifies the install, newer version and owned undo before writing.
+            // verifies the install, package revision and owned undo before writing.
             if (!closed && gate.packageReplaced()) startRequest()
         }
     }
@@ -102,7 +102,7 @@ internal class GoogleFontCompatibilityMaintenance(
                     if (response.optString("status") == "error") {
                         Log.w(TAG, "Owned Google font maintenance could not verify component state")
                     } else if (response.optBoolean("recoveredAfterUpgrade", false)) {
-                        Log.i(TAG, "Verified owned Google font compatibility after GMS upgrade")
+                        Log.i(TAG, "Verified owned Google font compatibility after GMS package update")
                     }
                 }
             } catch (cancelled: CancellationException) {

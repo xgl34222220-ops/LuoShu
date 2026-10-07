@@ -267,7 +267,7 @@ def instrumentation_results(output: str) -> dict[str, str]:
 
 class SmokeRun:
     def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None,
-                 record_launch: bool = False):
+                 record_launch: bool = False, visual_launch_only: bool = False):
         self.apk = apk
         self.output = output
         self.package = package
@@ -277,6 +277,7 @@ class SmokeRun:
         self.checks: list[dict[str, object]] = []
         self.recordings: list[dict[str, object]] = []
         self.record_launch = record_launch
+        self.visual_launch_only = visual_launch_only
         self.api_level: int | None = None
         self.snapshot_apk = snapshot_apk
         self.hierarchy_attempts = 0
@@ -488,44 +489,44 @@ class SmokeRun:
         print(f"Verified {name}", flush=True)
 
     def launch(self, name: str) -> ET.Element:
-        recording = self.begin_launch_recording() if name == "cold-start" and self.record_launch else None
+        recording = self.begin_launch_recording(name) if name in ("cold-start", "repeat-cold-start") and self.record_launch else None
         try:
             return self.launch_and_capture(name)
         finally:
             if recording is not None:
-                self.finish_launch_recording(recording)
+                self.finish_launch_recording(recording, name)
 
-    def begin_launch_recording(self):
+    def begin_launch_recording(self, name: str = "cold-start"):
         """Record a bounded real launch concurrently; evidence failure is not App failure."""
         try:
-            self.adb("shell", "rm", "-f", "/sdcard/luoshu-cold-start.mp4", check=False)
-            process = subprocess.Popen(self.adb_command + ["shell", "screenrecord", "--time-limit", "12",
-                "--bit-rate", "2000000", "--size", "720x1560", "/sdcard/luoshu-cold-start.mp4"],
+            self.adb("shell", "rm", "-f", f"/sdcard/luoshu-{name}.mp4", check=False)
+            process = subprocess.Popen(self.adb_command + ["shell", "screenrecord", "--time-limit", "30",
+                "--bit-rate", "2000000", "--size", "720x1560", f"/sdcard/luoshu-{name}.mp4"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             time.sleep(.2)
             return process
         except (OSError, RuntimeError) as error:
-            self.recordings.append({"recording": "cold-start", "available": False, "error": str(error)})
+            self.recordings.append({"recording": name, "available": False, "error": str(error)})
             return None
 
-    def finish_launch_recording(self, process) -> None:
-        evidence = {"recording": "cold-start", "available": False, "time_limit_seconds": 12,
+    def finish_launch_recording(self, process, name: str = "cold-start") -> None:
+        evidence = {"recording": name, "available": False, "time_limit_seconds": 30,
                     "scope": "raw device screenrecord; no guaranteed artwork frame; App timing and animations unchanged"}
         try:
-            stdout, stderr = process.communicate(timeout=15)
-            (self.output / "cold-start-recording.txt").write_bytes(stdout + stderr)
+            stdout, stderr = process.communicate(timeout=35)
+            (self.output / f"{name}-recording.txt").write_bytes(stdout + stderr)
             evidence["returncode"] = process.returncode
             if process.returncode:
                 raise RuntimeError((stdout + stderr).decode("utf-8", "replace"))
-            video = self.output / "cold-start.mp4"
-            pulled = self.adb("pull", "/sdcard/luoshu-cold-start.mp4", str(video), check=False, timeout=30)
+            video = self.output / f"{name}.mp4"
+            pulled = self.adb("pull", f"/sdcard/luoshu-{name}.mp4", str(video), check=False, timeout=30)
             if pulled.returncode or not video.is_file() or b"ftyp" not in video.read_bytes()[:64]:
                 raise RuntimeError("Device launch recording was not returned as a valid MP4")
             evidence.update(available=True, file=video.name, bytes=video.stat().st_size)
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
             if process.poll() is None:
                 try:
-                    process.kill()  # Only this host adb reader; device recorder has its own 12s limit.
+                    process.kill()  # Only this host adb reader; device recorder has its own 30s limit.
                     process.communicate(timeout=3)
                 except (OSError, subprocess.TimeoutExpired) as cleanup_error:
                     evidence["cleanup_error"] = str(cleanup_error)
@@ -766,6 +767,14 @@ class SmokeRun:
         self.adb("shell", "wm", "dismiss-keyguard")
         self.adb("shell", "cmd", "uimode", "night", "no")
         self.launch("cold-start")
+        if self.visual_launch_only:
+            # This separate evidence run never encodes during the main UI
+            # regression run. Both launches still use real readiness/crash checks.
+            self.adb("shell", "cmd", "uimode", "night", "yes")
+            self.adb("shell", "am", "force-stop", self.package)
+            self.launch("repeat-cold-start")
+            self.assert_running()
+            return
         for theme in ("light", "dark"):
             if theme == "dark":
                 self.adb("shell", "cmd", "uimode", "night", "yes")
@@ -859,7 +868,11 @@ def main() -> int:
                         help="Independent UiAutomation test APK for reading live hierarchy when the platform dump cannot reach global idle")
     parser.add_argument("--record-launch", action="store_true",
                         help="Optional raw cold-start video evidence; disabled by default to keep encoding load out of UI validation")
+    parser.add_argument("--visual-launch-only", action="store_true",
+                        help="Separate light/dark cold-start evidence run; does not replace the functional UI regression suite")
     args = parser.parse_args()
+    if args.visual_launch_only and not args.record_launch:
+        parser.error("--visual-launch-only requires --record-launch")
     if not args.apk.is_file():
         parser.error(f"APK does not exist: {args.apk}")
     if args.snapshot_apk is not None and not args.snapshot_apk.is_file():
@@ -868,7 +881,7 @@ def main() -> int:
         parser.error("Invalid Android package name")
     run = SmokeRun(args.apk.resolve(), args.output.resolve(), args.package, args.serial,
                    args.snapshot_apk.resolve() if args.snapshot_apk is not None else None,
-                   record_launch=args.record_launch)
+                   record_launch=args.record_launch, visual_launch_only=args.visual_launch_only)
     error = None
     try:
         run.run()
@@ -888,6 +901,7 @@ def main() -> int:
         if error is None and final_log.is_file():
             error = crash_reason(final_log.read_text(encoding="utf-8", errors="replace"), args.package)
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
+                   "mode": "visual-launch-only" if run.visual_launch_only else "functional-ui-smoke",
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
                    "hierarchy_backend": run.hierarchy_backend,
                    "launch_recording_enabled": run.record_launch,

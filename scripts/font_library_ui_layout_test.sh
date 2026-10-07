@@ -149,6 +149,23 @@ grep -q 'if (dockHiddenByScroll) 28.dp else 108.dp' "$SHELL"
 grep -q 'Modifier.nestedScroll(dockScrollConnection)' "$SHELL"
 grep -q 'dockHideThresholdPx' "$SHELL"
 grep -q 'dockShowThresholdPx' "$SHELL"
+# Only direct user intent drives Quick Return. Capturing the page backdrop stays
+# enabled until the existing enter/exit transition has actually finished.
+grep -q 'userInput = source == NestedScrollSource.UserInput' "$SHELL"
+grep -q 'dockScrollPolicy.finishGesture()' "$SHELL"
+grep -q 'Lifecycle.Event.ON_RESUME' "$SHELL"
+grep -q 'dockScrollPolicy.reset()' "$SHELL"
+grep -q 'visibleState = dockVisibility' "$SHELL"
+grep -q 'currentVisible = dockVisibility.currentState' "$SHELL"
+grep -q 'targetVisible = dockVisibility.targetState' "$SHELL"
+grep -q 'transitionIdle = dockVisibility.isIdle' "$SHELL"
+grep -q 'val blurActive = appearance.blurEnabled && appearance.glassEnabled && dockCaptureRequired' "$SHELL"
+grep -q 'val dockHideThresholdPx = with(density) { 34.dp.toPx() }' "$SHELL"
+grep -q 'val dockShowThresholdPx = with(density) { 6.dp.toPx() }' "$SHELL"
+if grep -q 'dockScrollAccumulator' "$SHELL"; then
+  echo 'Quick Return must keep per-scroll accumulation outside Compose state.' >&2
+  exit 1
+fi
 [ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 5 ]
 grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 

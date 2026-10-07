@@ -20,11 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 class RecoveryAndroid(FakeAndroid):
     version = 123456
     package_state = 0
+    updated_at = '2026-01-02 12:00:00'
+    code_path = '/data/app/gms-install-a'
 
     def snapshot(self, user):
         current = super().snapshot(user)
         current['versionCode'] = self.version
         current['packageState'] = self.package_state
+        current['lastUpdateTime'] = self.updated_at
+        current['codePath'] = self.code_path
         return current
 
 class IntegrationTest(unittest.TestCase):
@@ -214,6 +218,195 @@ class OwnedRecoveryTest(unittest.TestCase):
         self.backend.states[0] = 0
         self.assertEqual(self.reconcile()['status'], 'unchanged')
         self.assertEqual(self.backend.calls, [], 'a previous upgrade must not justify a later edit')
+
+    def test_same_version_package_replacement_reset_recovers_once(self):
+        self.enable()
+        original = self.journal.read()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        result = self.reconcile()
+        self.assertEqual(result['status'], 'component-disabled')
+        self.assertEqual(result['recoveryReason'], 'same-version-package-update')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        saved = self.journal.read()
+        for key, value in original.items():
+            self.assertEqual(saved[key], value)
+        self.assertEqual(saved['lastVerifiedUpdateTime'], self.backend.updated_at)
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_same_version_replacement_explicit_external_enable_remains_untouched(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 1
+        before = self.journal.path.read_bytes()
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_same_revision_default_edit_and_unknown_update_evidence_remain_untouched(self):
+        for update in ('2026-01-02 12:00:00', '2026-01-01 12:00:00', None,
+                       'unknown', '2026-02-30 12:00:00'):
+            with self.subTest(update=update):
+                self.journal.clear()
+                self.enable()
+                self.backend.updated_at = update
+                self.backend.states[0] = 0
+                before = self.journal.path.read_bytes()
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_legacy_record_without_update_time_does_not_guess_same_version_recovery(self):
+        self.enable()
+        saved = self.journal.read()
+        saved.pop('lastUpdateTime')
+        self.journal.save(saved)
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_disabled_same_version_update_checkpoints_without_restart_or_later_override(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.journal.read()['lastVerifiedUpdateTime'], self.backend.updated_at)
+        self.assertEqual(self.backend.calls, [])
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_same_version_replacement_race_is_rejected_before_any_write(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        snapshot, count = self.backend.snapshot, 0
+        def raced(user):
+            nonlocal count
+            count += 1
+            if count == 2:
+                self.backend.updated_at = '2026-01-04 12:00:00'
+                self.backend.code_path = '/data/app/gms-install-c'
+            return snapshot(user)
+        self.backend.snapshot = raced
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_timezone_or_clock_format_change_without_apk_replacement_never_authorizes_write(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-02 20:00:00'
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_missing_or_untrusted_apk_path_never_authorizes_same_version_write(self):
+        for path in (None, '/data/app/../foreign', '/data/app/new\npath', '/system/app/GmsCore'):
+            with self.subTest(path=path):
+                self.journal.clear()
+                self.enable()
+                self.backend.updated_at = '2026-01-03 12:00:00'
+                self.backend.code_path = path
+                self.backend.states[0] = 0
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+
+    def test_revision_changed_after_disable_never_rolls_back_a_new_package_override(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        before = self.journal.path.read_bytes()
+        change = self.backend.change
+        def replaced_after_change(user, state):
+            change(user, state)
+            self.backend.updated_at = '2026-01-04 12:00:00'
+            self.backend.code_path = '/data/app/gms-install-c'
+            self.backend.states[user] = 1  # A new revision/external explicit enable.
+        self.backend.change = replaced_after_change
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        self.assertEqual(self.backend.states[0], 1)
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_package_enable_race_before_recovery_never_writes(self):
+        self.enable()
+        self.upgrade_reset()
+        before = self.journal.path.read_bytes()
+        snapshot, count = self.backend.snapshot, 0
+        def raced(user):
+            nonlocal count
+            count += 1
+            if count == 2:
+                self.backend.package_state = 1
+            return snapshot(user)
+        self.backend.snapshot = raced
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_package_disable_after_failed_open_never_rolls_back(self):
+        self.enable()
+        before = self.journal.path.read_bytes()
+        change = self.backend.change
+        def failed_open(user, state):
+            change(user, state)
+            self.backend.package_state = 2
+            raise m.FallbackError('failed open with external package disable')
+        self.backend.change = failed_open
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [(0, 0)])
+        self.assertEqual(self.backend.package_state, 2)
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_revision_changed_during_rollback_does_not_claim_verified_success(self):
+        self.enable()
+        before = self.journal.path.read_bytes()
+        change, attempts = self.backend.change, 0
+        def fault(user, state):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                self.backend.calls.append((user, state))
+                raise m.FallbackError('failed final disable')
+            change(user, state)
+            if attempts == 3:
+                self.backend.updated_at = '2026-01-04 12:00:00'
+                self.backend.code_path = '/data/app/gms-install-c'
+        self.backend.change = fault
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [(0, 0), (0, 2), (0, 2)])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_lost_revision_metadata_is_cleared_without_losing_original_snapshot(self):
+        self.enable()
+        original = self.journal.read()
+        self.backend.updated_at, self.backend.code_path = None, None
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        saved = self.journal.read()
+        self.assertIsNone(saved['lastVerifiedUpdateTime'])
+        self.assertIsNone(saved['lastVerifiedCodePath'])
+        for key, value in original.items():
+            self.assertEqual(saved[key], value)
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
 
     def test_unchanged_or_older_version_never_overwrites_an_external_reset(self):
         for delta in (0, -1):
