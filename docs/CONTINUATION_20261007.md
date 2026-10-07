@@ -96,3 +96,27 @@ UI helper 在原公开 UiAutomation 权限下改为一次真实长连接，nonce
 QuickReturn 仍按真实 App 边界执行单次同方向/同距离反向滑动，仅将 300 ms 调整为已有搜索手势的 2000 ms，避免同步 DOWN 等待耗尽 MOVE 时段；原 30 秒总预算包含该手势。必须真实发现完整可用四项导航，不点击不可见坐标；前后原 XML、锚点、手势实际耗时和失败原因均归档。布局及六项玻璃源检查、启动源 11 项、UI host 62 项、长连接 host 14 项通过；真实 Java 编译、API 28/36 和亮暗冷热原录像仍待新准确 SHA CI，不能声称已通过。
 
 用户新增反馈作为独立优先项：HyperOS 与 ColorOS 的遗漏槽位和 ColorOS/Google 回退、连续 A→B→A/实时及重启后覆盖、整次切换及阶段计时、HyperOS 合成/应用生成超时与仅限拥有任务的清理、ColorOS 整机重启超过两分钟、App 加载耗时、全局字重移除。旧 600/630 秒属于合成/应用生成，97 秒首次 zygote 前异常和库存扫描启动计时都不等于整次手机 reboot；此前 45.31% 不等于手机整次提速。冻结 22 文件、1.1.1 挂载核心、nohook、玻璃和失败门禁均保持。新功能修正与真机证据分别报告。
+
+## OEM 覆盖、全局字重与切换阶段的功能接续
+
+HyperOS 补齐来源现在复用 ColorOS 已有可信库存证据：真实实体目标、扫描/XML UI 文本槽、直立单字体 TTF/OTF、face 0、可信原厂度量、安全分区清单以及独立暂存包含关系。Redmi 历史 engine ZIP（SHA-256 `e5b3501c6be89727d5ff7ab528c11c74520b8b72dbf44cf986a7d3d040aad9f7`）内 51 个 UI 库存路径中，原物理文件名规则涵盖 30 个，另有 16 个可信但遗漏的槽，5 个因集合/斜体/藏文时钟排除。主机使用占位实体路径与真实合成 TTF 供体复现后生成 46 个库存别名、16 个补齐槽、0 个度量 fallback；没有读取当前手机文件系统或原厂字体字节，不能称为手机覆盖率。框架动态别名和 nohook 保留。
+
+ColorOS Google/Latin 主槽现在使用既有可证明的 stock CJK 路由：仅移走本次确实已生成的 fallback 供体覆盖的新增 Han/标点，保留 stock 标点、Latin/数字/全角、UVS 及不能证明有 fallback 的字形。缺乏 fallback 时仍保留原 Han。跨字体 A→B→A 的主机字体输出与复制回归通过。共享暂存写入拒绝分区父目录/字体 store 链接外逃；度量报告用唯一排他临时文件和原子替换，别名临时叶先隔离旧链接，原 live/外部 inode 不被软硬链接或中断残留文件改动。最终 ColorOS 27、HyperOS 28、CJK 25，共 80 项通过；独立核对实际 stage_verify→不可变 live 代→冻结 atomic bind/visibility 枚举保留新槽。内核挂载是主机替身，真机覆盖仍待验证。
+
+全局字重界面原已移除，但后端仍可写系统 secure 值。此次删除后端实现；旧 set/reset/status action 在任何 helper/公共目录迁移之前直接返回已移除，备份不再导出/恢复旧字重配置。冻结核心内的旧回放/卸载恢复字节未改；正常模块入口通过非冻结 util/uninstall 包装中仅拒绝 `put secure font_weight_adjustment` 的 Shell 函数阻止回放（含 --user），其他 settings 参数和返回码原样传递。没有改系统二进制、跨进程 hook、用户已有值或旧记录；冻结安装器仍可能复制旧记录，但模块正常运行不会应用。实际冻结 service/uninstall 路径的拥有/无拥有配置测试和备份回归通过。Google/Provider 等相邻主机 207 项、修订字重策略 8 项通过；真实 mount namespace 因主机权限明确跳过，不提高权限。
+
+安全切换 worker 添加 `[SAFE-TIMING]`：以 `/proc/uptime` 的 Shell 内建读取记录同任务初始化、源查找/验证、预热、锁恢复、克隆、清理旧文本、缓存恢复、映射、ROM 补齐、缓存保存、校验、状态/事务提交、实时挂载、收尾与 EXIT 清理的单调阶段及总毫秒。总记录明确 `scope=safe-switch-worker`，不包括独立合成或整次手机 reboot；子进程回收以外层同 token 的 `.cleanup.json` 为准。取消/超时真实主机行为回归清理 double-fork/setsid/忽略 TERM 的拥有子进程，保留无关 sentinel，8 项通过，没有复现当前进程泄漏，未扩大清理范围。初始化日志/trap 建立之前的失败仍只由 supervisor 清理证据覆盖。变化的 mapper 身份会使旧缓存一次失效，确保新覆盖策略不能复用旧负载；更新后的首次生成耗时须单列。
+
+本次最终 safe-switch 字节的 [再次阶段基准](performance/safe-switch-20261007-current.json) 保留原 32 MiB/2 供体/39 别名、11 轮交错、基线 1788866：热验证/等待/恢复中位数 76.064→37.938 ms（-50.12%），当前最慢 44.414 ms 小于基线最快 68.139 ms。物理映射 248.234→256.781 ms（+3.44%）且样本重叠/噪声较大，不声称冷映射提速。此轮同样只是 host 合成字节夹具的子阶段，不证明手机整次切换、生成或 reboot 提速；旧 45.31% 原始数据不替换。
+
+验收工具提交 `03cf4b38dcc0be3bd38c7fa847373daf69855d3a` 的 UI [37686345563](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37686345563) 在 App JVM/lint/APK 与 62+14 host 回归通过后，独立 helper 直接 android.jar 编译缺少 lambda 的 LambdaMetafactory 而失败；完整模拟器和原录像未运行。将唯一文件过滤 lambda 改为等价 FilenameFilter 匿名类，保留私有 nonce/request/20 秒及 8 秒协议不变，重新编译仍以新 SHA CI 为准。该中间提交 candidate [37686345456](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37686345456) 此时仍在运行，不取消，不提前记成功。
+
+## 实际 App 多字重合成链修正
+
+实际 App 路由为 font_mix_controller→legacy mix_router→v14_mix→v143/v142；既有 common/multiweight_mix_task 的 prepared-v8 静态合约并不执行这条链。真实小型 VF 复现 v143 完整 worker：旧 helper 无变量隔离，在首档后将外层 family/role 与 CJK/Latin/Digit 改为临时路径，200 字重查源失败（rc 1、仅 3 次实例化）。prepare_source/run_instance/build_composite_cached 改用 POSIX 子 shell 隔离，完整九档名字、字重及保存的原组合 family 都有行为回归，不以字符串 grep 代替 worker 执行。
+
+同一任务的 fixed 源选择首次绑定后使用私有不可变快照。初次复制必须满足 source-before SHA、copy SHA、source-after SHA 一致，才发布；key 含源内容、角色、完整有效轴与实际实例生成器摘要，生成器变化、错误输出与失败验证拒绝发布。已准备字体命中也执行真实验证，损坏会重建；自动字重轴各自分键，不串用。快照/准备缓存优先放进 supervisor 拥有的 task tmp，取消/超时后连同后代回收，不加大超时、不清除其他任务/GMS/系统缓存。
+
+[合成准备证据](performance/legacy-mix-prepare-20261007.json) 中独立成功的同输入 driver：中文 auto、Latin/digit fixed 的九档准备由 27→11 次实例化、5.1431→2.6819 秒，27 个输出总 240408 字节，前后 SHA-256 均 `251b6bace0ac2faf01103bcc59aabda97ea2a314ad4f06dabbad49692af1cedc`。单 fixed 槽由 9→1 次、1.6774→0.4338 秒，九份均 8904 字节且摘要一致。完整旧 worker 已失败，不能用这些数字声称旧完整任务提速；修复后完整 worker 九档成功、11 次调用、4.4446 秒只是当前 host 夹具结果。11 项新行为回归通过并独立复核，包括源删除/复制竞态、不同轴/角色/任务、损坏缓存、生成器竞态、真实 timeout/cancel 清理。没有 Android/手机生成耗时证明，也没有历史 600/630 秒现场收据，未把它定为历史超时根因。
+
+未活跃 common/multiweight_mix_task 仍存在类似的旧 helper 全局状态问题，本次未重复重写该未由 App 执行的链；其静态合约仍保留，不能代替上述活跃链行为证明。最终候选 ZIP、mksh、Java helper 编译、API 28/36、亮暗冷热逐帧结论必须由随后提交准确 SHA 的 CI 固定。ColorOS 整机两分多钟、97 秒 prezygote 根因、两台手机实际字形/Google 回退/实时与重启后覆盖、完整切换前后计时都明确保留待真机验证。

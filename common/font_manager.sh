@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # LuoShu native App font-manager router.
-# Inventory, preview, delete and weight actions stay on the current manager.
+# Inventory, preview and delete actions stay on the current manager.
 # Final font apply uses the isolated safe physical switch core, which builds the
 # next-boot payload off-line and never rewrites the source tree mounted by this boot.
 # Source-check compatibility markers owned by font_manager_v4.sh: native-v3 manifest-fast

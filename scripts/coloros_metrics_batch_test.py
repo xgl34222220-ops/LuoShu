@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,12 +16,18 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+from font_inventory import _read_metrics
 import coloros_metrics_batch as batch
 
 
-def font_file(path, top=800, cff=False):
+def font_file(path, top=800, cff=False, points=None, variable=False, uvs=False):
     path.parent.mkdir(parents=True, exist_ok=True)
-    order = ['.notdef', 'A', 'one', 'uni4E2D']
+    if points is None:
+        points = (65, 49, 0x4E2D)
+    original_names = {65: 'A', 49: 'one', 0x4E2D: 'uni4E2D'}
+    cmap = {cp: original_names.get(cp, f'u{cp:X}') for cp in points}
+    order = ['.notdef', *cmap.values()]
     glyphs = {}
     for name in order:
         pen = T2CharStringPen(600, None) if cff else TTGlyphPen(None)
@@ -28,7 +35,7 @@ def font_file(path, top=800, cff=False):
         pen.lineTo((500, top)); pen.lineTo((0, top)); pen.closePath()
         glyphs[name] = pen.getCharString() if cff else pen.glyph()
     fb = FontBuilder(1000, isTTF=not cff)
-    fb.setupGlyphOrder(order); fb.setupCharacterMap({65: 'A', 49: 'one', 0x4E2D: 'uni4E2D'})
+    fb.setupGlyphOrder(order); fb.setupCharacterMap(cmap)
     if cff:
         fb.setupCFF('ColorOSFixture', {'FullName': 'ColorOSFixture'}, glyphs, {})
     else:
@@ -38,7 +45,17 @@ def font_file(path, top=800, cff=False):
     fb.setupOS2(sTypoAscender=1600, sTypoDescender=-600,
                usWinAscent=1700, usWinDescent=700)
     fb.setupNameTable({'familyName': 'ColorOSFixture', 'styleName': 'Regular'})
-    fb.setupPost(); fb.setupMaxp(); fb.save(path)
+    fb.setupPost(); fb.setupMaxp()
+    if variable:
+        fb.setupFvar([('wght', 100, 400, 900, 'Weight')], [])
+        fb.setupGvar({name: [] for name in order})
+    if uvs:
+        table = CmapSubtable.newSubtable(14)
+        table.platformID = 0; table.platEncID = 5; table.language = 0
+        table.cmap = {}
+        table.uvsDict = {0xFE00: [(0x56FD, None)]}
+        fb.font['cmap'].tables.append(table)
+    fb.save(path)
 
 
 def stock(ascent=920, descent=-240, head=(-250, 1050), upem=1000):
@@ -292,6 +309,29 @@ class ColorOSMetricsTest(unittest.TestCase):
         self.assertFalse(list(self.stage.glob('.coloros-metrics-*')))
         self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
 
+    def test_report_and_stale_report_temp_cannot_mutate_live_inodes(self):
+        font_file(self.target())
+        self.inventory({'/system/fonts/SysSans-Hans-Regular.ttf': stock()})
+        live = self.module / '.luoshu-payload'; live.mkdir()
+        sentinel = live / '.luoshu-metrics-report.json'
+        sentinel.write_bytes(b'live-record-must-stay-unchanged')
+        report = self.stage / '.luoshu-metrics-report.json'
+        for link in ('symlink', 'hardlink', 'stale-temp-symlink', 'stale-temp-hardlink'):
+            with self.subTest(link=link):
+                report.unlink(missing_ok=True)
+                leaf = report.with_name(report.name + f'.tmp.{os.getpid()}') if link.startswith('stale-temp') else report
+                leaf.unlink(missing_ok=True)
+                if link.endswith('symlink'):
+                    leaf.symlink_to(sentinel)
+                else:
+                    os.link(sentinel, leaf)
+                batch.build(self.module, self.stage)
+                self.assertEqual(sentinel.read_bytes(), b'live-record-must-stay-unchanged')
+                self.assertFalse(report.is_symlink())
+                self.assertNotEqual(report.stat().st_ino, sentinel.stat().st_ino)
+                self.assertEqual(len(self.report()), 1)
+                leaf.unlink(missing_ok=True)
+
     def test_rejects_live_and_module_roots(self):
         for target in (self.module, self.module / '.luoshu-payload',
                        self.module / '.luoshu-payload/system'):
@@ -350,6 +390,178 @@ class ColorOSMetricsTest(unittest.TestCase):
         result = subprocess.run(['sh', '-c', code + '\ngetprop() { echo marker; }\ncomplete_coloros_stage'],
             env={**os.environ, 'REALMOD': str(self.module), 'MIX_STAGE': str(self.stage)})
         self.assertEqual(result.returncode, 0)
+
+
+class ColorOSRoutingTest(unittest.TestCase):
+    """Cmap behavior in real staged mixed fonts, not OEM phone measurements."""
+    HAN, EXTRA_HAN, UVS_HAN, PUNCT = 0x4E2D, 0x20000, 0x56FD, 0x3001
+    MAIN = '/system/fonts/SysSans-Hans-Regular.ttf'
+    GOOGLE = '/product/fonts/GoogleSansText-Regular.ttf'
+    POINTS = (65, 49, 0xFF11, HAN, EXTRA_HAN, UVS_HAN, PUNCT)
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.module = self.root / 'module'
+        self.stage = self.module / '.luoshu-payload-next'
+        self.fonts = self.stage / 'system/fonts'
+        self.fonts.mkdir(parents=True)
+        (self.module / 'config').mkdir()
+        self.slots = {}
+        env = {'LUOSHU_BUILD_KEY': 'coloros-routing'}
+        for partition in ('system', 'product'):
+            stock_root = self.root / 'stock' / partition
+            stock_root.mkdir(parents=True)
+            env[f'LUOSHU_{partition.upper()}_FONTS_ROOT'] = str(stock_root)
+        self.env = patch.dict(os.environ, env)
+        self.env.start(); self.addCleanup(self.env.stop)
+
+    def stock(self, logical, points, families=('sans-serif',)):
+        part, name = logical.split('/')[1], Path(logical).name
+        path = self.root / 'stock' / part / name
+        font_file(path, points=points)
+        fmt, metrics = _read_metrics(path)
+        self.slots[logical] = {'path': logical, 'families': list(families),
+                               'format': fmt, 'metrics': metrics, 'source': 'xml'}
+        return path
+
+    def pair(self, *, cff=False, variable=False, uvs=False):
+        font_file(self.fonts / '.luoshu-font-store/regular.font', points=self.POINTS,
+                  cff=cff, variable=variable, uvs=uvs)
+        font_file(self.fonts / 'SysSans-Hans-Regular.ttf', points=self.POINTS,
+                  cff=cff, variable=variable, uvs=uvs)
+        self.stock(self.MAIN, self.POINTS)
+        self.stock(self.GOOGLE, (65, 49), ('google-sans-text',))
+
+    def build(self, main=MAIN, build='coloros-routing'):
+        (self.module / 'config/device_font_inventory.json').write_text(json.dumps({
+            'schema': 'device-font-inventory-v1', 'inventoryRevision': 1,
+            'state': 'ready', 'buildKey': build, 'mainSlotPath': main, 'slots': self.slots}))
+        result = batch.build(self.module, self.stage)
+        self.reports = {row['slot']: row for row in json.loads(
+            (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
+        return result
+
+    def test_existing_latin_and_completed_google_alias_route_only_proven_cjk(self):
+        self.pair()
+        name = 'SysSans-En-Regular.ttf'
+        font_file(self.fonts / name, points=self.POINTS)
+        self.stock('/system/fonts/' + name, (65, 49))
+        donor = self.fonts / '.luoshu-font-store/regular.font'
+        before = donor.read_bytes()
+        result = self.build()
+        self.assertEqual(result['mapped'], 3)
+        for path in (self.fonts / name, self.stage / 'product/fonts/GoogleSansText-Regular.ttf'):
+            with TTFont(path) as font:
+                self.assertNotIn(self.HAN, font.getBestCmap())
+                self.assertNotIn(self.EXTRA_HAN, font.getBestCmap())
+                for cp in (65, 49, 0xFF11):
+                    self.assertIn(cp, font.getBestCmap())
+        with TTFont(self.fonts / 'SysSans-Hans-Regular.ttf') as fallback:
+            self.assertIn(self.HAN, fallback.getBestCmap())
+            self.assertIn(self.EXTRA_HAN, fallback.getBestCmap())
+        self.assertEqual(donor.read_bytes(), before)
+        self.assertEqual(self.reports[self.GOOGLE]['cjkRoutingReason'], 'stock-latin-primary')
+        self.assertEqual(self.reports[self.GOOGLE]['slotSource'], 'stock-inventory')
+
+    def test_cff_and_variable_retained_outlines_and_variants_survive(self):
+        for cff, variable in ((True, False), (False, True)):
+            with self.subTest(cff=cff, variable=variable):
+                self.pair(cff=cff, variable=variable, uvs=True)
+                self.build()
+                donor = self.fonts / '.luoshu-font-store/regular.font'
+                with TTFont(donor, lazy=True) as source, \
+                        TTFont(self.stage / 'product/fonts/GoogleSansText-Regular.ttf') as primary, \
+                        TTFont(self.fonts / 'SysSans-Hans-Regular.ttf', lazy=True) as fallback:
+                    self.assertNotIn(self.HAN, primary.getBestCmap())
+                    self.assertIn(self.UVS_HAN, primary.getBestCmap(), 'unproven variants keep their base')
+                    variants = next(table for table in primary['cmap'].tables if table.format == 14)
+                    self.assertEqual(variants.uvsDict[0xFE00], [(self.UVS_HAN, None)])
+                    from fontTools.pens.recordingPen import RecordingPen
+                    for cp in (65, 49, 0xFF11, self.UVS_HAN):
+                        actual, expected = RecordingPen(), RecordingPen()
+                        primary.getGlyphSet()[primary.getBestCmap()[cp]].draw(actual)
+                        source.getGlyphSet()[source.getBestCmap()[cp]].draw(expected)
+                        self.assertEqual(actual.value, expected.value)
+                    for tag in ('glyf', 'loca', 'CFF ', 'gvar'):
+                        if tag in source:
+                            self.assertEqual(fallback.reader[tag], source.reader[tag], tag)
+
+    def test_missing_physical_fallback_keeps_google_han(self):
+        self.pair()
+        (self.fonts / 'SysSans-Hans-Regular.ttf').unlink()
+        (self.root / 'stock/system/SysSans-Hans-Regular.ttf').unlink()
+        self.build()
+        with TTFont(self.stage / 'product/fonts/GoogleSansText-Regular.ttf') as primary:
+            self.assertIn(self.HAN, primary.getBestCmap())
+        self.assertEqual(self.reports[self.GOOGLE]['cjkRoutingReason'], 'no-staged-cjk-fallback')
+
+    def test_latin_only_generated_fallback_cannot_remove_google_han(self):
+        self.pair()
+        font_file(self.fonts / 'SysSans-Hans-Regular.ttf', points=(65, 49))
+        self.build()
+        with TTFont(self.stage / 'product/fonts/GoogleSansText-Regular.ttf') as primary:
+            self.assertIn(self.HAN, primary.getBestCmap())
+        self.assertEqual(self.reports[self.GOOGLE]['removedCjkMappings'], 0)
+
+    def test_partial_fallback_and_stock_punctuation_are_preserved(self):
+        self.pair()
+        font_file(self.fonts / 'SysSans-Hans-Regular.ttf', points=(65, 49, self.HAN, self.PUNCT))
+        self.stock(self.GOOGLE, (65, 49, self.PUNCT), ('google-sans-text',))
+        self.build()
+        with TTFont(self.stage / 'product/fonts/GoogleSansText-Regular.ttf') as primary:
+            self.assertNotIn(self.HAN, primary.getBestCmap())
+            self.assertIn(self.EXTRA_HAN, primary.getBestCmap(), 'fallback has not proved this glyph')
+            self.assertIn(self.PUNCT, primary.getBestCmap(), 'keep stock primary punctuation')
+        self.assertEqual(self.reports[self.GOOGLE]['removedCjkMappings'], 1)
+
+    def test_old_coverage_and_unrelated_display_family_do_not_prove_fallback(self):
+        self.pair()
+        for slot in self.slots.values():
+            slot['metrics'].pop('coverage')
+        self.build()
+        with TTFont(self.stage / 'product/fonts/GoogleSansText-Regular.ttf') as primary:
+            self.assertIn(self.HAN, primary.getBestCmap())
+        self.assertEqual(self.reports[self.GOOGLE]['cjkRoutingReason'], 'stock-coverage-refresh-pending')
+        self.pair()
+        self.build(main='/system/fonts/PrivateDisplay.ttf')
+        with TTFont(self.stage / 'product/fonts/GoogleSansText-Regular.ttf') as primary:
+            self.assertIn(self.HAN, primary.getBestCmap())
+        self.assertEqual(self.reports[self.GOOGLE]['cjkRoutingReason'], 'no-staged-cjk-fallback')
+
+    def test_many_latin_contracts_compact_each_shared_donor_once(self):
+        self.pair()
+        for index in range(10):
+            logical = f'/product/fonts/GoogleSansText-Extra{index}.ttf'
+            self.stock(logical, (65, 49), ('google-sans-text',))
+            self.slots[logical]['metrics']['hhea']['ascent'] += index + 1
+        with patch.object(batch, 'compact_routed_source', wraps=batch.compact_routed_source) as compact:
+            result = self.build()
+        self.assertEqual(result['mapped'], 12)
+        self.assertEqual(compact.call_count, 1)
+        self.assertFalse(list(self.stage.glob('.coloros-metrics-*')))
+
+    def test_rebuilt_a_b_a_stages_and_copied_payload_keep_selected_glyphs(self):
+        # This models independent precommit/reboot payload reconstruction; it
+        # cannot prove Android process refresh or the phone's mounted view.
+        for index, top in enumerate((730, 940, 730)):
+            self.stage = self.module / f'.luoshu-payload-next-{index}'
+            self.fonts = self.stage / 'system/fonts'; self.fonts.mkdir(parents=True)
+            self.pair()
+            for name in ('SysSans-Hans-Regular.ttf', '.luoshu-font-store/regular.font'):
+                font_file(self.fonts / name, top=top, points=self.POINTS)
+            self.build()
+            copied = self.root / f'restored-boot-payload-{index}'
+            shutil.copytree(self.stage, copied)
+            with TTFont(copied / 'system/fonts/SysSans-Hans-Regular.ttf') as cjk, \
+                    TTFont(copied / 'product/fonts/GoogleSansText-Regular.ttf') as latin:
+                self.assertIn(self.HAN, cjk.getBestCmap())
+                self.assertNotIn(self.HAN, latin.getBestCmap())
+                for cp in (65, 49, 0xFF11):
+                    self.assertEqual(latin['glyf'][latin.getBestCmap()[cp]].yMax, top)
+                self.assertEqual(cjk['glyf'][cjk.getBestCmap()[self.HAN]].yMax, top)
+                self.assertEqual(latin['hhea'].ascent, self.slots[self.GOOGLE]['metrics']['hhea']['ascent'])
 
 
 if __name__ == '__main__':

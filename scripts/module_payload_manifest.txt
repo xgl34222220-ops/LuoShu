@@ -63,6 +63,7 @@ common/stock_inventory_scan.py
 common/font_library_cache.sh
 common/font_manager.sh
 common/font_manager_v4.sh
+common/font_settings_policy.sh
 common/font_metadata.py
 common/font_metrics_normalize.py
 common/font_mix.sh

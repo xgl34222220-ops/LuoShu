@@ -324,11 +324,28 @@ class RoutingTest(unittest.TestCase):
 
     def test_no_staged_fallback_keeps_primary_han(self):
         self.default_pair()
+        # An omitted filename alone no longer proves absence: trusted current
+        # inventory completes such targets. A physically missing fallback does.
+        (self.root / 'stock/system/MiSansVF.ttf').unlink()
         self.build(['Roboto-Regular.ttf'])
         with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
             self.assertIn(HAN, font.getBestCmap())
         self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],
                          'no-staged-cjk-fallback')
+
+    def test_inventory_completes_fallback_omitted_from_filename_list_before_routing(self):
+        self.default_pair()
+        result = self.build(['Roboto-Regular.ttf'])
+        self.assertEqual(result['mapped'], 2)
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as primary, \
+                TTFont(self.fonts / 'MiSansVF.ttf') as fallback:
+            self.assertNotIn(HAN, primary.getBestCmap())
+            self.assertIn(HAN, fallback.getBestCmap())
+            self.assertIn(LATIN, primary.getBestCmap())
+            self.assertIn(48, primary.getBestCmap())
+        self.assertEqual(self.reports['/system/fonts/MiSansVF.ttf']['slotSource'], 'stock-inventory')
+        self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],
+                         'stock-latin-primary')
 
     def test_unrelated_named_han_family_is_not_proof_of_system_fallback(self):
         make_font(self.fonts / '400.ttf')

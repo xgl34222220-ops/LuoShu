@@ -5,6 +5,7 @@
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
+[ ! -f "$MODDIR/common/font_settings_policy.sh" ] || . "$MODDIR/common/font_settings_policy.sh"
 # Stop verified tasks before undoing mounts so an in-flight FontTools/bind
 # child cannot recreate a view after restore completes.
 [ ! -f "$MODDIR/common/font_switch_lock.sh" ] || . "$MODDIR/common/font_switch_lock.sh"

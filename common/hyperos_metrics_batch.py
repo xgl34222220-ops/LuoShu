@@ -18,6 +18,9 @@ import tempfile
 from fontTools.ttLib import TTFont
 from fontTools import subset
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
+from font_inventory import (LOGICAL_FONT_ROOTS, _generic_font_name_candidate,
+                            _generic_text_slot_candidate, _heuristic_candidate)
+from font_inventory_scan import _is_ui_family, _safe_dynamic_partition_name
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
 from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name
@@ -58,6 +61,90 @@ def pick_source(fonts: Path, name: str) -> Path:
         if nonempty(path):
             return path
     raise ValueError(f'没有可用的源字体：{name}')
+
+
+def inventory_font_roots(module: Path) -> dict[str, Path]:
+    """Canonical stock roots plus the scanner's safe partition manifest."""
+    roots = dict(LOGICAL_FONT_ROOTS)
+    try:
+        partitions = (module / 'config/device_font_partitions.conf').read_text().splitlines()
+    except OSError:
+        partitions = []
+    for partition in partitions:
+        if _safe_dynamic_partition_name(partition):
+            roots[partition] = Path('/') / partition / 'fonts'
+    return roots
+
+
+def inventory_completion_slot(slot: object, logical: str) -> bool:
+    """Reuse stock scan evidence without widening the physical name policy."""
+    if not isinstance(slot, dict) or slot.get('path', logical) != logical:
+        return False
+    name = Path(logical).name
+    # A single-face donor cannot preserve a collection's other face references.
+    if (Path(name).suffix.lower() not in {'.ttf', '.otf'} or
+            slot.get('format') in {'TTC', 'OTC'} or slot.get('faceIndex', 0) != 0 or
+            slot.get('style', 'normal') != 'normal' or not _generic_font_name_candidate(name)):
+        return False
+    families = slot.get('families', [])
+    return (_heuristic_candidate(name) or
+            (isinstance(families, list) and any(
+                isinstance(family, str) and _is_ui_family(family) for family in families)) or
+            (slot.get('source') == 'verified-scan' and
+             _generic_text_slot_candidate(name, slot.get('metrics', {}))))
+
+
+def inventory_completion_source(fonts: Path, slot: dict, name: str) -> Path:
+    """Honor the inventory weight even when an OEM filename omits its style."""
+    weight = slot.get('weight', weight_for_name(name))
+    if type(weight) is not int or not 1 <= weight <= 1000:
+        weight = weight_for_name(name)
+    role = {100: 'thin', 200: 'extralight', 300: 'light', 400: 'regular',
+            500: 'medium', 600: 'semibold', 700: 'bold', 800: 'extrabold', 900: 'black'}.get(weight)
+    store = fonts / '.luoshu-font-store'
+    candidates = [store / f'wght-{weight}.font', fonts / f'LuoShu-{weight}.ttf']
+    if role:
+        candidates.append(store / f'{role}.font')
+    candidates.extend((fonts / f'{weight}.ttf', fonts / name,
+                       store / 'mix-composite.font', store / 'regular.font',
+                       store / 'compact-regular.font', fonts / '400.ttf',
+                       fonts / 'MiSansVF.ttf', fonts / 'Roboto-Regular.ttf'))
+    for path in candidates:
+        if nonempty(path):
+            return path
+    raise ValueError(f'没有可用的源字体：{name}')
+
+
+def inventory_completion_jobs(module: Path, stage: Path, inventory: dict, seen: set) -> list:
+    """Complete only trusted, real, nonsymlink stock slots in isolated staging."""
+    indexed = inventory.get('slots', {})
+    if not isinstance(indexed, dict):
+        return []
+    resolved = stage.resolve()
+    roots = inventory_font_roots(module)
+    jobs = []
+    for logical, slot in sorted(indexed.items()):
+        if (not isinstance(logical, str) or logical in seen or
+                preserved_dynamic_alias(inventory, logical) or
+                not inventory_completion_slot(slot, logical)):
+            continue
+        parts = Path(logical).parts
+        if (len(parts) != 4 or parts[0] != '/' or parts[2] != 'fonts' or parts[1] not in roots
+                or str(Path(logical)) != logical or parts[3] in {'.', '..'}):
+            continue
+        partition, name = parts[1], parts[3]
+        contract = contract_for_slot(inventory, logical)
+        if contract[-1] != 'stock':
+            continue
+        stock_root = Path(os.environ.get(f'LUOSHU_{partition.upper()}_FONTS_ROOT', str(roots[partition])))
+        stock = stock_root / name
+        if not stock.is_file() or stock.is_symlink():
+            continue
+        destination = stage / partition / 'fonts' / name
+        if resolved not in destination.parent.resolve().parents:
+            raise ValueError('字体暂存槽位指向隔离目录之外')
+        jobs.append((inventory_completion_source(stage / 'system/fonts', slot, name), destination, contract))
+    return jobs
 
 
 def read_inventory(module: Path) -> dict:
@@ -276,6 +363,9 @@ def link_copy(source: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     temporary = dest.with_name(dest.name + f'.tmp.{os.getpid()}')
     try:
+        # A previous interrupted writer may leave a linked temporary leaf.
+        # Never let the copy fallback overwrite its shared/live inode.
+        temporary.unlink(missing_ok=True)
         try:
             os.link(source, temporary)
         except OSError:
@@ -382,8 +472,12 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
 
 
 def build(module: Path, stage: Path, names: list[str]) -> dict:
-    if stage.resolve() == (module / '.luoshu-payload').resolve():
+    resolved = stage.resolve()
+    live = (module / '.luoshu-payload').resolve()
+    if resolved == module.resolve() or resolved == live or live in resolved.parents:
         raise ValueError('拒绝修改本次启动正在使用的字体负载')
+    if not stage.is_dir():
+        raise ValueError('HyperOS 字体暂存目录不存在')
     fonts = stage / 'system/fonts'
     data = read_inventory(module)
     jobs = []
@@ -392,6 +486,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
+        # Resolve before existence checks: a symlinked partition may lead to an
+        # outside directory whose fonts child has not been created yet.
+        if staged_fonts.is_symlink() or resolved not in staged_fonts.resolve().parents:
+            raise ValueError('字体暂存槽位指向隔离目录之外')
         if staged_fonts.is_dir():
             for alias in staged_fonts.iterdir():
                 if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
@@ -414,10 +512,19 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             if (root / name).exists():
                 jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
                              contract_for_slot(data, logical)))
+    # Filename discovery serves known boot-repair aliases. Trusted inventory
+    # also contains XML UI faces and verified upright text with other OEM names.
+    seen = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in jobs}
+    seen.update('/' + dest.relative_to(stage).as_posix() for dest in preserved_aliases + excluded_aliases)
+    completed = inventory_completion_jobs(module, stage, data, seen)
+    jobs.extend(completed)
+    completed_slots = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in completed}
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
     cjk_fallback = _staged_cjk_fallback(data, jobs, stage)
     store = fonts / '.luoshu-font-store'
+    if store.is_symlink() or resolved not in store.resolve().parents:
+        raise ValueError('字体暂存供体目录指向隔离目录之外')
     store.mkdir(parents=True, exist_ok=True)
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
     cache = {}
@@ -457,6 +564,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             fallback += contract[-1] == 'fallback'
             slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
                                 'metricsSource': contract[-1],
+                                'slotSource': 'stock-inventory' if logical in completed_slots else 'physical-mapper',
                                 'referenceUpem': contract[0],
                                 'hhea': list(contract[1:4]),
                                 'typo': list(contract[4:7]),
@@ -473,15 +581,23 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             # untouched in per-file bind mode. Framework changes keep working.
             alias.unlink(missing_ok=True)
         report = stage / '.luoshu-metrics-report.json'
-        report.write_text(json.dumps({'schema': 'luoshu-slot-metrics-v1',
-                                      'slots': slot_report,
-                                      'preservedDynamicAliases': [
-                                          '/' + alias.relative_to(stage).as_posix()
-                                          for alias in preserved_aliases],
-                                      'preservedStockAliases': sorted({
-                                          '/' + alias.relative_to(stage).as_posix()
-                                          for alias in excluded_aliases if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')
-        report.chmod(0o644)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=report.name + '.tmp.', dir=stage)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
+                json.dump({'schema': 'luoshu-slot-metrics-v1',
+                           'slots': slot_report,
+                           'preservedDynamicAliases': [
+                               '/' + alias.relative_to(stage).as_posix()
+                               for alias in preserved_aliases],
+                           'preservedStockAliases': sorted({
+                               '/' + alias.relative_to(stage).as_posix()
+                               for alias in excluded_aliases if alias.parent.is_dir()})},
+                          stream, ensure_ascii=False)
+            temporary.chmod(0o644)
+            os.replace(temporary, report)
+        finally:
+            temporary.unlink(missing_ok=True)
     finally:
         # Every prepared result has its own hard link (or copy) in the final
         # alias. Keeping these temporary names after success only enlarges

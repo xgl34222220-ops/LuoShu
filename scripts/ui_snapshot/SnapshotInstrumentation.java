@@ -23,6 +23,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.FilenameFilter;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -100,7 +101,14 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 result.putString("session_nonce", nonce);
                 return result;
             }
-            File[] pending = directory.listFiles((parent, name) -> name.matches("request-[0-9a-f]{32}\\.json"));
+            // The independent helper is compiled directly against android.jar
+            // without the App's desugaring pass; avoid LambdaMetafactory here.
+            File[] pending = directory.listFiles(new FilenameFilter() {
+                @Override
+                public boolean accept(File parent, String name) {
+                    return name.matches("request-[0-9a-f]{32}\\.json");
+                }
+            });
             if (pending == null) throw new IllegalStateException("Session request directory unavailable");
             Arrays.sort(pending);
             for (File file : pending) {

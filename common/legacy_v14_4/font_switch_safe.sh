@@ -4,6 +4,11 @@
 # current Android boot. It builds .luoshu-payload-next off-line; post-fs-data activates
 # that tree before LuoShu mounts fonts on the following complete boot.
 set +e
+# Keep the worker entry time before runtime-path and helper initialization. A
+# shell read avoids starting a clock process; wall-clock changes cannot affect
+# the phase durations recorded below.
+_SAFE_SWITCH_ENTRY_UPTIME=''
+IFS=' ' read -r _SAFE_SWITCH_ENTRY_UPTIME _safe_entry_unused < /proc/uptime 2>/dev/null || true
 
 # Composite compatibility workers execute inside .legacy-v14-runtime and pass that
 # directory as MODDIR. Their actual module is exported as LUOSHU_REAL_MODDIR. Always
@@ -65,6 +70,73 @@ case "$SWITCH_CACHE_MAX_KB" in ''|*[!0-9]*) SWITCH_CACHE_MAX_KB=786432 ;; esac
 PREWARM_LOCK="$LUOSHU_TASKS_DIR/safe-switch-prewarm.lock"
 LOCK_HELD=false
 PREWARM_LOCK_HELD=false
+
+# These records measure this switch worker, including its EXIT cleanup. The
+# supervisor's .cleanup.json remains the proof of descendant reaping; synthesis,
+# supervisor cleanup and a complete phone reboot are separate measurements.
+SAFE_TIMING_ENABLED=false
+SAFE_TIMING_PHASE=''
+SAFE_CLEANUP_DONE=false
+safe_timing_clock() {
+    _stc_raw="${1:-}"
+    if [ -z "$_stc_raw" ]; then
+        IFS=' ' read -r _stc_raw _stc_unused < /proc/uptime 2>/dev/null || return 1
+    fi
+    case "$_stc_raw" in *.*) ;; *) return 1 ;; esac
+    _stc_s=${_stc_raw%%.*}; _stc_fraction=${_stc_raw#*.}
+    case "$_stc_s:$_stc_fraction" in :*|*:|*[!0-9:]*) return 1 ;; esac
+    _stc_fraction="${_stc_fraction}000"
+    _stc_fraction=${_stc_fraction%"${_stc_fraction#???}"}
+    SAFE_TIMING_NOW_S=$_stc_s
+    SAFE_TIMING_NOW_MS=$((1$_stc_fraction - 1000))
+    SAFE_TIMING_NOW_UPTIME=$_stc_raw
+}
+
+safe_timing_elapsed() {
+    # Subtract seconds before multiplying: mksh uses 32-bit arithmetic, so an
+    # absolute uptime in milliseconds can overflow on a long-running phone.
+    SAFE_TIMING_ELAPSED_MS=$(((SAFE_TIMING_NOW_S - $1) * 1000 + SAFE_TIMING_NOW_MS - $2))
+    [ "$SAFE_TIMING_ELAPSED_MS" -ge 0 ] 2>/dev/null || SAFE_TIMING_ELAPSED_MS=0
+}
+
+safe_timing_record() {
+    # Android mksh has builtin print, while printf can be an external command.
+    # Keep each phase transition free of clock/logging subprocesses.
+    if [ -n "${KSH_VERSION:-}" ]; then print -r -- "$1"
+    else printf '%s\n' "$1"; fi >> "$LOG_FILE" 2>/dev/null || true
+}
+
+safe_timing_phase_end() {
+    [ "$SAFE_TIMING_ENABLED" = true ] && [ -n "$SAFE_TIMING_PHASE" ] || return 0
+    safe_timing_clock || return 0
+    safe_timing_elapsed "$SAFE_TIMING_PHASE_S" "$SAFE_TIMING_PHASE_MS"
+    safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=end phase=$SAFE_TIMING_PHASE status=${1:-completed} uptime=$SAFE_TIMING_NOW_UPTIME elapsedMs=$SAFE_TIMING_ELAPSED_MS"
+    SAFE_TIMING_PHASE=''
+}
+
+safe_timing_phase() {
+    [ "$SAFE_TIMING_ENABLED" = true ] || return 0
+    safe_timing_phase_end completed
+    safe_timing_clock || return 0
+    SAFE_TIMING_PHASE="$1"
+    SAFE_TIMING_PHASE_S=$SAFE_TIMING_NOW_S
+    SAFE_TIMING_PHASE_MS=$SAFE_TIMING_NOW_MS
+    safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=begin phase=$SAFE_TIMING_PHASE uptime=$SAFE_TIMING_NOW_UPTIME"
+}
+
+safe_timing_start() {
+    safe_timing_clock "$_SAFE_SWITCH_ENTRY_UPTIME" || return 0
+    SAFE_TIMING_ENABLED=true
+    SAFE_TIMING_TASK="${LUOSHU_TASK_SCOPE_TASK:-unscoped}"
+    SAFE_TIMING_START_S=$SAFE_TIMING_NOW_S
+    SAFE_TIMING_START_MS=$SAFE_TIMING_NOW_MS
+    SAFE_TIMING_PHASE=initialization
+    SAFE_TIMING_PHASE_S=$SAFE_TIMING_NOW_S
+    SAFE_TIMING_PHASE_MS=$SAFE_TIMING_NOW_MS
+    safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=begin phase=initialization scope=safe-switch-worker clock=proc-uptime uptime=$SAFE_TIMING_NOW_UPTIME"
+}
+
+case "${1:-}:${2:-}" in action:switch) safe_timing_start ;; esac
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/util_functions.sh" ] && . "$LEGACY_DIR/util_functions.sh"
@@ -475,6 +547,7 @@ progress() {
 }
 
 safe_error() {
+    safe_timing_phase_end failed
     progress 100 "$1"
     printf '{"status":"error","message":"%s","pipeline":"next-boot-stage"}\n' "$(json_escape "$1")"
     return 1
@@ -567,10 +640,25 @@ cleanup_stale_stages() {
     done
 }
 
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup' EXIT
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 129' HUP
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 130' INT
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 143' TERM
+safe_exit_cleanup() {
+    _sec_result="$1"; _sec_status="$2"
+    [ "$SAFE_CLEANUP_DONE" != true ] || return 0
+    SAFE_CLEANUP_DONE=true
+    safe_timing_phase_end "$_sec_status"
+    safe_timing_phase worker_cleanup
+    luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true
+    cleanup_stage; prewarm_lock_cleanup; lock_cleanup
+    safe_timing_phase_end finished
+    if [ "$SAFE_TIMING_ENABLED" = true ] && safe_timing_clock; then
+        safe_timing_elapsed "$SAFE_TIMING_START_S" "$SAFE_TIMING_START_MS"
+        safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=total scope=safe-switch-worker status=$_sec_status result=$_sec_result uptime=$SAFE_TIMING_NOW_UPTIME elapsedMs=$SAFE_TIMING_ELAPSED_MS"
+    fi
+}
+
+trap '_safe_exit_rc=$?; if [ "$_safe_exit_rc" -eq 0 ]; then safe_exit_cleanup "$_safe_exit_rc" completed; else safe_exit_cleanup "$_safe_exit_rc" failed; fi' EXIT
+trap 'safe_exit_cleanup 129 interrupted; exit 129' HUP
+trap 'safe_exit_cleanup 130 interrupted; exit 130' INT
+trap 'safe_exit_cleanup 143 interrupted; exit 143' TERM
 
 find_text_font_file() {
     _wanted="$1"
@@ -880,6 +968,7 @@ switch_font() {
 
     _source=''
     if [ "$_font" != default ]; then
+        safe_timing_phase source_lookup_validation
         progress 6 '正在查找并校验字体文件'
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
@@ -887,18 +976,22 @@ switch_font() {
             safe_error "${FONT_CHECK_ERROR:-字体校验失败}"
             return 1
         fi
+        safe_timing_phase prewarm_wait
         progress 14 '正在检查本机字体预热缓存'
         wait_for_prewarm_cache "$_source" "$_font" >/dev/null 2>&1 || true
     fi
 
+    safe_timing_phase lock_recovery
     progress 20 '正在获取字体切换锁'
     lock_acquire || return 1
     luoshu_next_transaction_recover "$MODDIR" || { safe_error '上一字体事务尚未完成清理，请稍后重试'; return 1; }
     cleanup_stale_stages
     resolve_previous_state
 
+    safe_timing_phase clone_payload
     progress 28 '正在保留非字体负载并建立安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
+    safe_timing_phase clear_text_payload
     progress 36 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
 
@@ -906,9 +999,11 @@ switch_font() {
         PAYLOAD_ROOT="$STAGE_PAYLOAD"
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
+        safe_timing_phase cache_restore
         if safe_switch_cache_restore "$_source" "$_font"; then
             progress 80 '已复用本机字体对齐缓存'
         else
+            safe_timing_phase map_rom
             progress 48 '正在生成 ROM 核心字体映射'
             type apply_font_by_rom >/dev/null 2>&1 || { safe_error '缺少 ROM 字体映射器'; return 1; }
             _switch_cache_key=$(safe_switch_cache_key "$_source" "$_font") || _switch_cache_key=''
@@ -916,33 +1011,40 @@ switch_font() {
                 safe_error 'ROM 字体映射失败，当前启动字体未被改动'
                 return 1
             fi
+            safe_timing_phase mirror_targets
             progress 66 '正在补齐系统分区同名字体槽位'
             mirror_existing_targets
             if [ "${IS_HYPEROS:-false}" = true ]; then
+                safe_timing_phase complete_hyperos
                 progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
                 stage_hyperos_complete || {
                     safe_error 'HyperOS 字体槽位或度量处理失败，请查看字体切换日志'
                     return 1
                 }
             elif [ "${IS_COLOROS:-false}" = true ]; then
+                safe_timing_phase complete_coloros
                 progress 76 '正在按原厂槽位对齐 ColorOS 字体度量'
                 stage_coloros_complete || {
                     safe_error 'ColorOS 字体度量处理失败，请查看字体切换日志'
                     return 1
                 }
             fi
+            safe_timing_phase cache_store
             progress 82 '正在保存本机字体对齐缓存'
             safe_switch_cache_store "$_source" "$_font" "$_switch_cache_key" >/dev/null 2>&1 || true
         fi
+        safe_timing_phase verify_payload
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
     fi
 
+    safe_timing_phase prepare_next_payload
     progress 94 '正在提交下一启动字体负载'
     prepare_next_payload "$_active_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
         safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
         return 1
     }
+    safe_timing_phase write_state
     progress 98 '正在保存字体选择状态'
     if ! write_runtime_state "$_active_label"; then
         cancel_next_payload
@@ -950,11 +1052,13 @@ switch_font() {
         return 1
     fi
 
+    safe_timing_phase commit_transaction
     if ! luoshu_next_transaction_mix_receipt "$MODDIR" || ! luoshu_next_transaction_commit "$MODDIR"; then
         cancel_next_payload
         safe_error '字体事务提交失败，已恢复上次字体选择'
         return 1
     fi
+    safe_timing_phase live_mount
     progress 99 '正在挂载当前启动字体；已有字体缓存将在重启后完整更新'
     _live_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_live_switch.sh" 2>> "$LOG_FILE")
     _live_applied=false
@@ -964,6 +1068,7 @@ switch_font() {
         _activation=live-mounted
     fi
     printf '[LIVE-SWITCH] %s\n' "$_live_result" >> "$LOG_FILE" 2>/dev/null || true
+    safe_timing_phase finalize
     printf '%s\n' "$_active_label" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
     if [ "$_live_applied" = true ]; then

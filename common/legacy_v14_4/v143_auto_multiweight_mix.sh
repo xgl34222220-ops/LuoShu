@@ -203,7 +203,7 @@ find_best_source() {
     fi
 }
 
-run_instance() {
+run_instance() (
     _source="$1"
     _destination="$2"
     _role="$3"
@@ -220,9 +220,11 @@ run_instance() {
     [ "$_code" -eq 0 ] && [ -s "$_destination" ] || return 1
     rm -f "${_destination}.err" 2>/dev/null || true
     chmod 0644 "$_destination" 2>/dev/null || true
-}
+)
 
-prepare_source() {
+prepare_source() (
+    # Helpers have private shell variables: _family/_role/_weight also belong
+    # to the nine-weight worker. A global assignment corrupts its next slot.
     _role="$1"
     _family="$2"
     _axes="$3"
@@ -232,17 +234,89 @@ prepare_source() {
     _effective="$_axes"
     [ "$_mode" != auto ] || _effective=$(with_weight "$_axes" "$_target")
     _lookup=$(safe_weight "$_effective")
-    _source=$(find_best_source "$_family" "$_lookup")
-    [ -f "$_source" ] || return 1
-    font_validate "$_source" text || return 1
-    if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_source" "$_destination" "$_role" "$_effective"
-    else
-        mkdir -p "${_destination%/*}" 2>/dev/null || return 1
-        cp -f "$_source" "$_destination" 2>/dev/null || return 1
-        chmod 0644 "$_destination" 2>/dev/null || true
+
+    # Snapshot each selected public source once per task. The fixed slots of a
+    # mixed auto/fixed task then share an exact instance across all nine weights
+    # without repeatedly hashing a large public font or trusting its mtime.
+    # Replacements in public storage belong to the next task, never half a font
+    # family. A real worker keeps these caches in its supervisor-owned temporary
+    # directory, which is retired after descendants exit even on timeout/KILL.
+    [ -n "${_root:-}" ] && [ -d "$_root" ] || return 1
+    _prepare_root="${LUOSHU_TASK_SCOPE_TMPDIR:-$_root}"
+    [ -d "$_prepare_root" ] || return 1
+    _snapshot_dir="$_prepare_root/source-snapshots"
+    _prepared_dir="$_prepare_root/prepared-cache"
+    mkdir -p "$_snapshot_dir" "$_prepared_dir" 2>/dev/null || return 1
+    # Pin source selection too: deleting/renaming the public file or adding a
+    # preferred face must not change an already selected slot halfway through.
+    _selection_key=$(printf '%s\000%s\000%s' "$_role" "$_family" "$_lookup" | hash_text)
+    [ -n "$_selection_key" ] || return 1
+    _selection="$_snapshot_dir/selection-${_selection_key}"
+    _snapshot_key=$(cat "$_selection" 2>/dev/null)
+    if [ -z "$_snapshot_key" ]; then
+        _source=$(find_best_source "$_family" "$_lookup")
+        [ -f "$_source" ] || return 1
+        _snapshot_key=$(printf '%s\000%s' "$_role" "$_source" | hash_text)
     fi
-}
+    [ -n "$_snapshot_key" ] || return 1
+    _snapshot="$_snapshot_dir/${_snapshot_key}.font"
+    _snapshot_digest_file="${_snapshot}.sha256"
+    _source_digest=$(cat "$_snapshot_digest_file" 2>/dev/null)
+    if [ ! -s "$_snapshot" ] || [ -z "$_source_digest" ]; then
+        # Publish only a copy matching stable public content on both sides of
+        # cp; header validation alone cannot reject a mixed in-place rewrite.
+        [ -n "${_source:-}" ] && [ -f "$_source" ] || return 1
+        _before_digest=$(hash_file "$_source")
+        [ -n "$_before_digest" ] || return 1
+        _snapshot_tmp="${_snapshot}.tmp.$$"
+        cp -f "$_source" "$_snapshot_tmp" 2>/dev/null || return 1
+        font_validate "$_snapshot_tmp" text || { rm -f "$_snapshot_tmp"; return 1; }
+        _source_digest=$(hash_file "$_snapshot_tmp")
+        _after_digest=$(hash_file "$_source")
+        [ -n "$_source_digest" ] && [ "$_before_digest" = "$_source_digest" ] &&
+            [ "$_after_digest" = "$_source_digest" ] || { rm -f "$_snapshot_tmp"; return 1; }
+        chmod 0444 "$_snapshot_tmp" 2>/dev/null || true
+        mv -f "$_snapshot_tmp" "$_snapshot" 2>/dev/null || return 1
+        printf '%s\n' "$_source_digest" > "${_snapshot_digest_file}.tmp.$$" &&
+            mv -f "${_snapshot_digest_file}.tmp.$$" "$_snapshot_digest_file" || return 1
+    fi
+    [ -s "$_selection" ] || {
+        printf '%s\n' "$_snapshot_key" > "${_selection}.tmp.$$" &&
+            mv -f "${_selection}.tmp.$$" "$_selection" || return 1
+    }
+    _generator_digest=$(hash_file "$INSTANCE_PY")
+    [ -n "$_generator_digest" ] || return 1
+    _prepared_key=$(printf '%s\000%s\000%s\000%s' \
+        "$_source_digest" "$_role" "$_effective" "$_generator_digest" | hash_text)
+    [ -n "$_prepared_key" ] || return 1
+    _prepared="$_prepared_dir/${_prepared_key}.font"
+    if [ -s "$_prepared" ] && font_validate "$_prepared" text; then
+        [ "$(hash_file "$INSTANCE_PY")" = "$_generator_digest" ] || return 1
+        mkdir -p "${_destination%/*}" 2>/dev/null || return 1
+        link_or_copy "$_prepared" "$_destination"
+        return $?
+    fi
+    _prepared_tmp="${_prepared}.tmp.$$"
+    rm -f "$_prepared_tmp" "${_prepared_tmp}.err" 2>/dev/null || true
+    font_validate "$_snapshot" text || return 1
+    if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
+        run_instance "$_snapshot" "$_prepared_tmp" "$_role" "$_effective" || {
+            rm -f "$_prepared_tmp" "${_prepared_tmp}.err"; return 1;
+        }
+    else
+        cp -f "$_snapshot" "$_prepared_tmp" 2>/dev/null || return 1
+    fi
+    font_validate "$_prepared_tmp" text || { rm -f "$_prepared_tmp"; return 1; }
+    # A generator replaced while Python was running cannot publish under the
+    # identity captured before the call.
+    [ "$(hash_file "$INSTANCE_PY")" = "$_generator_digest" ] || {
+        rm -f "$_prepared_tmp"; return 1;
+    }
+    chmod 0644 "$_prepared_tmp" 2>/dev/null || true
+    mv -f "$_prepared_tmp" "$_prepared" 2>/dev/null || return 1
+    mkdir -p "${_destination%/*}" 2>/dev/null || return 1
+    link_or_copy "$_prepared" "$_destination"
+)
 
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -278,7 +352,9 @@ prune_composite_cache() {
     done
 }
 
-build_composite_cached() {
+build_composite_cached() (
+    # The worker retains family names in _cjk/_latin/_digit for the next weight
+    # and its saved public config; only this call uses prepared file paths.
     _cjk="$1"
     _latin="$2"
     _digit="$3"
@@ -317,7 +393,7 @@ build_composite_cached() {
     link_or_copy "$_cached" "$_output" || return 1
     chmod 0644 "$_output" 2>/dev/null || true
     prune_composite_cache
-}
+)
 
 save_mix_config() {
     _tmp="$MIX_CONF.auto.$$"
