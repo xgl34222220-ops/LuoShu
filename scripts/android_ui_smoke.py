@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
 
 from ui_snapshot_session import UiSnapshotSession
@@ -99,6 +100,18 @@ def decode_raw_screencap(raw: bytes, api_level: int):
                    "colorspace_id": colorspace, "raw_bytes": len(raw),
                    "raw_sha256": hashlib.sha256(raw).hexdigest(),
                    "rgb_sha256": hashlib.sha256(image.tobytes()).hexdigest()}
+
+
+def decompress_screencap_gzip(compressed: bytes) -> bytes:
+    """Accept exactly one complete gzip member with its CRC and size checked."""
+    try:
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        raw = decoder.decompress(compressed) + decoder.flush()
+    except zlib.error as error:
+        raise RuntimeError(f"Raw screencap gzip integrity failure: {error}") from error
+    if not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise RuntimeError("Raw screencap gzip must contain one complete member without trailing bytes")
+    return raw
 
 
 def home_launcher_content(root: ET.Element, home: str) -> list[dict[str, object]]:
@@ -961,10 +974,11 @@ class SmokeRun:
         metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": []}
         previous = None
         stable = 0
-        separator = b"\x00LUOSHU_HOME_BASELINE_RAW\x00"
-        command = r"dumpsys window displays; printf '\000LUOSHU_HOME_BASELINE_RAW\000'; screencap"
+        separator = b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00"
+        command = (r"set -o pipefail || exit; dumpsys window displays && "
+                   r"printf '\000LUOSHU_HOME_BASELINE_RAW_GZIP\000' && screencap | gzip -1")
         metadata["capture_command"] = command
-        metadata["screenshot_source"] = "real packed adb screencap; exact RGB PNG encoding on host"
+        metadata["screenshot_source"] = "real packed screencap through lossless device gzip -1; exact RGB PNG encoding on host"
         pending_sample = None
 
         def remaining() -> float:
@@ -1003,13 +1017,26 @@ class SmokeRun:
                 png_file = f"{name}-baseline-{index:02d}.png"
                 raw_file = f"{name}-baseline-{index:02d}-batch.bin"
                 frame_file = f"{name}-baseline-{index:02d}-screencap.raw"
+                compressed_file = f"{name}-baseline-{index:02d}-screencap.raw.gz"
                 stderr_file = f"{name}-baseline-{index:02d}-stderr.txt"
                 pending_sample = {"window": window_file, "screenshot": png_file,
                                   "batch_raw": raw_file, "screencap_raw": frame_file, "stderr": stderr_file,
-                                  "stage": "capture"}
+                                  "screencap_gzip": compressed_file, "stage": "hierarchy"}
+                # Start/read the one owned connection inside this same deadline,
+                # before the screenshot transfer consumes the remaining time.
+                # Every sample gets a fresh matching request and XML.
+                hierarchy_started = time.monotonic()
+                self.hierarchy_attempts += 1
+                pending_sample["hierarchy"] = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
+                pending_sample["hierarchy_metadata"] = f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.json"
+                root = self.snapshot_hierarchy(deadline=deadline)
+                pending_sample["hierarchy_seconds"] = round(time.monotonic() - hierarchy_started, 6)
+                launcher_content = home_launcher_content(root, home)
+                remaining()
                 # One fixed remote command avoids separate adb connections and
                 # unrelated full-window dump sections within the same 10s budget.
                 batch_started = time.monotonic()
+                pending_sample["stage"] = "capture"
                 pending_sample["capture_started_elapsed_seconds"] = round(batch_started - started, 6)
                 pending_sample["capture_timeout_seconds"] = remaining()
                 batch = self.adb("exec-out", "sh", "-c", command,
@@ -1022,44 +1049,56 @@ class SmokeRun:
                 pending_sample["returncode"] = batch.returncode
                 pending_sample["batch_bytes"] = len(batch.stdout)
                 if batch.returncode:
+                    if batch.stdout.count(separator) == 1:
+                        failed_window, failed_gzip = batch.stdout.split(separator)
+                        (self.output / window_file).write_bytes(failed_window)
+                        (self.output / compressed_file).write_bytes(failed_gzip)
                     raise RuntimeError(f"HOME baseline batch failed ({batch.returncode}): {batch.stderr.decode('utf-8', 'replace')}")
                 if batch.stdout.count(separator) != 1:
                     raise RuntimeError("HOME baseline batch has missing or ambiguous raw frame separator")
-                window_bytes, raw = batch.stdout.split(separator)
+                window_bytes, compressed = batch.stdout.split(separator)
                 (self.output / window_file).write_bytes(window_bytes)
+                (self.output / compressed_file).write_bytes(compressed)
+                pending_sample["gzip_bytes"] = len(compressed)
+                pending_sample["gzip_sha256"] = hashlib.sha256(compressed).hexdigest()
+                raw_write_seconds = time.monotonic() - persistence_started
+                pending_sample["stage"] = "gzip-decode"
+                gzip_started = time.monotonic()
+                raw = decompress_screencap_gzip(compressed)
+                gzip_finished = time.monotonic()
+                pending_sample["gzip_decode_seconds"] = round(gzip_finished - gzip_started, 6)
                 (self.output / frame_file).write_bytes(raw)
-                pending_sample["raw_persistence_seconds"] = round(time.monotonic() - persistence_started, 6)
+                pending_sample["raw_persistence_seconds"] = round(
+                    raw_write_seconds + time.monotonic() - gzip_finished, 6)
                 window = window_bytes.decode("utf-8", "replace")
                 focused = focused_component(window)
                 decode_started = time.monotonic()
                 pending_sample["stage"] = "raw-decode"
                 captured, raw_metadata = decode_raw_screencap(raw, self.api_level)
                 pending_sample["raw_frame"] = raw_metadata
+                pending_sample["raw_decode_seconds"] = round(time.monotonic() - decode_started, 6)
                 with captured:
-                    rect = home_content_bounds(window, captured.size)
-                    pixels = captured.crop(rect).tobytes()
-                    signature = (captured.size, rect, pixels)
-                    pending_sample["decode_compare_seconds"] = round(time.monotonic() - decode_started, 6)
+                    # Preserve the exact full frame even when HOME geometry or
+                    # readiness fails; encoding remains inside the same 10s.
                     png_started = time.monotonic()
                     pending_sample["stage"] = "png-encode"
                     encoded = io.BytesIO()
                     captured.save(encoded, format="PNG", compress_level=1)
                     png = encoded.getvalue()
-                pending_sample["png_encode_seconds"] = round(time.monotonic() - png_started, 6)
-                (self.output / png_file).write_bytes(png)
-                pending_sample["png_bytes"] = len(png)
-                pending_sample["png_sha256"] = hashlib.sha256(png).hexdigest()
+                    pending_sample["png_encode_seconds"] = round(time.monotonic() - png_started, 6)
+                    (self.output / png_file).write_bytes(png)
+                    pending_sample["png_bytes"] = len(png)
+                    pending_sample["png_sha256"] = hashlib.sha256(png).hexdigest()
+                    remaining()
+                    pending_sample["stage"] = "content-bounds"
+                    compare_started = time.monotonic()
+                    rect = home_content_bounds(window, captured.size)
+                    pixels = captured.crop(rect).tobytes()
+                    signature = (captured.size, rect, pixels)
+                    pending_sample["decode_compare_seconds"] = round(
+                        pending_sample["raw_decode_seconds"] + time.monotonic() - compare_started, 6)
                 remaining()
-                hierarchy_started = time.monotonic()
-                pending_sample["stage"] = "hierarchy"
-                self.hierarchy_attempts += 1
-                hierarchy_file = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
-                pending_sample["hierarchy"] = hierarchy_file
-                pending_sample["hierarchy_metadata"] = f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.json"
-                root = self.snapshot_hierarchy(deadline=deadline)
-                pending_sample["hierarchy_seconds"] = round(time.monotonic() - hierarchy_started, 6)
                 pending_sample["stage"] = "stability-verification"
-                launcher_content = home_launcher_content(root, home)
                 ready = focused == home and bool(launcher_content)
                 stable = stable + 1 if ready and signature == previous else int(ready)
                 previous = signature if ready else None
@@ -1080,14 +1119,15 @@ class SmokeRun:
                 cause = error.__cause__
                 if pending_sample["stage"] == "hierarchy":
                     pending_sample["hierarchy_seconds"] = round(time.monotonic() - hierarchy_started, 6)
-                if isinstance(cause, subprocess.TimeoutExpired) and "returncode" not in pending_sample:
+                if isinstance(cause, subprocess.TimeoutExpired) and \
+                        "capture_started_elapsed_seconds" in pending_sample and "returncode" not in pending_sample:
                     pending_sample["capture_seconds"] = round(time.monotonic() - batch_started, 6)
                     if isinstance(cause.stdout, bytes):
                         (self.output / pending_sample["batch_raw"]).write_bytes(cause.stdout)
                         if cause.stdout.count(separator) == 1:
                             partial_window, partial_frame = cause.stdout.split(separator)
                             (self.output / pending_sample["window"]).write_bytes(partial_window)
-                            (self.output / pending_sample["screencap_raw"]).write_bytes(partial_frame)
+                            (self.output / pending_sample["screencap_gzip"]).write_bytes(partial_frame)
                     if isinstance(cause.stderr, bytes):
                         (self.output / pending_sample["stderr"]).write_bytes(cause.stderr)
                 pending_sample["failed_elapsed_seconds"] = round(time.monotonic() - started, 6)

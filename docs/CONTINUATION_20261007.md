@@ -132,3 +132,13 @@ ColorOS Google/Latin 主槽现在使用既有可证明的 stock CJK 路由：仅
 API 28 的再次冷启动原 am 输出为 ThisTime 2202 / TotalTime 173202 / WaitTime 2729 ms。同 PID 9449 在 21:43:28.994 创建，首 draw-return 内容日志约 1997 ms，21:43:31.193 的系统 Displayed 为本次 +2.202 秒并另列 total +2m53.202s。TotalTime 不能冒充本次命令等待或手机 reboot；累计起点遗留仅是解释这一平台字段的推断。脚本原 ui_ready_seconds 23.587 包含启动、层级等待、截图和日志/窗口采集，不是纯首帧耗时。API 28 的 draw-return、API 29+ 的 swap-chain 提交、系统 Displayed、原录像实际可见内容仍分开记录，普通本轮启动不能解决旧 97 秒 prezygote 异常。
 
 HOME 基线改读原始 screencap 像素，保留 batch/独立 raw/窗口/stderr，并按实际 SDK 解码明确的 header、RGB/RGBX/不透明 RGBA 与 sRGB，拒绝未知格式、色域、alpha、截断或尾随字节。官方 Android 8.0 是十二字节 header，8.1 起是十六字节；主机 PNG 只逐像素无缩放编码，记录原 raw 与 RGB 摘要，不能作为原生 PNG 冒充设备输出。仍只排除实际系统栏、保持十秒内三张内容完全一致的帧，另要求 resolved Launcher 的真实可见 workspace/hotseat 与带文字的有效点击后代，不能把 Launcher 中央图标当就绪桌面。解析、存盘、原始采集和匹配的真实层级读取都共享该十秒预算；会话可选更短 host deadline，默认二十秒与设备八秒 root wait不增加，也不重连。切入独立读取后继续使用同一 backend，避免 CLI 抢占连接。新增阶段耗时将 HOME resolve/采集/解码/PNG/层级，以及 App 命令/页面等待/截图/证据采集分别记清。68 项工具与 18 项会话行为回归通过，实际速度和四段原录像仍须新 SHA CI 验证。
+
+## ee7de2bb 真实采集阻塞与无损传输接续
+
+`ee7de2bb38729e7104e0d3f90a1e8a4627254c48` 的 [candidate 37693635259](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37693635259) 已成功终态，实际两轮源码检查各 41 suites / 721 tests / 41 OK，补充 4 suites / 54 tests / 4 OK，最终包验证 9 suites / 204 tests / 9 OK；签名 App 和模块均构建成功。同 SHA [UI 37693635213](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37693635213) 的 build 完成实际 XML 34 suites / 217 tests、0 failure/error/skip，lint、Java helper 与 68+18 host 回归通过。API 36 完成 31 屏 / 20 项功能检查（238.46 秒），包括实际字体库选中与正文、滚动、跨页、后台、旋转、连续导航与 Google 说明入口；这是非 Root 模拟器 UI 证据，不能替代 Google 字形或 OEM 挂载验收。API 28 在写入这条记录时仍运行，不能提前填写通过。
+
+启动视觉任务已失败终态，原 artifact 11514602583 为 4,884,277 bytes、SHA-256 `c0b2ca344d77b71d46877de9181ca4a5f998a3ab5954842a68c509e237a63d57`，32 个成员、0 MP4。独立审阅实际查看了原暗色 PNG 和亮色 raw 的原尺寸精确 RGB 解码图：都只有壁纸及中央 Launcher 图形，没有桌面 workspace/hotseat 内容。亮色首个 17,988,814 字节 batch 耗时 6.145695 秒，当时 navigationBars 是零尺寸且 invisible，6.587 秒在系统栏裁剪校验处失败。暗色首个 batch 耗时 6.618339 秒，系统栏已有真实尺寸，但首次测试连接握手只剩约 2.750414 秒，于总 10.004 秒超时。两个 samples 都为空，warm App PID 也未建立；不能把它当成新 App 黑帧、卡死或启动视觉成功。原 GMS persistent ANR 保留，尚不能归因于洛书或证明它就是采集阻塞根因。
+
+必要修正只调整证据采集：设备用 gzip -1 无损传输 packed screencap，以 mksh pipefail 拒绝捕获或压缩失败；保存原 batch、原压缩帧、严格单 member/CRC/ISIZE/EOF/无尾随数据校验后的原 raw、完整 RGB PNG、Window 和 stderr。每个 sample 的全新匹配 hierarchy 请求改在 raw 传输之前，仍与 HOME resolve、连接就绪、原始采集、解压、存盘、PNG 编码和稳定比较共享原十秒 deadline；不在预算外预热、不重连、复用旧 XML、调整视口或动画。PNG 先完整保存，随后才做实际系统栏与桌面验收，保证失败现场也有逐像素证据；三张内容完全一致、真实可见桌面和原八秒根节点条件不变。实际传输速度和四段新原录像仍必须由下一准确 SHA CI 检验，不能用本地主机压缩或回归数字宣布完成。
+
+本次两文件修正的适用 host 回归为 UI 帮助函数 72、会话 18、逐帧分类器 20、启动源约束 11，共 121 项全通过，原失败系统栏/桌面/共享 deadline 断言保留；实际 shell 管道还验证 Window 不进入 gzip，捕获退出码 7 由 pipefail 保留。该计数是本地主机工具回归，不能回填未生成的原录像或提前给下一批 CI 通过。

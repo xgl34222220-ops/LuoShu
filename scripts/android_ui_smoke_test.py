@@ -7,6 +7,9 @@ import xml.etree.ElementTree as ET
 import json
 import subprocess
 import struct
+import gzip
+import os
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -18,7 +21,7 @@ from android_ui_smoke import (
     legacy_manual_colors_ready, legacy_monet_unavailable,
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
     scroll_progress, visible_action, visible_text, ScrollBudget,
-    focused_component, decode_raw_screencap, home_launcher_content, main,
+    focused_component, decode_raw_screencap, decompress_screencap_gzip, home_launcher_content, main,
 )
 
 
@@ -549,7 +552,7 @@ class UiSmokeHarnessTest(unittest.TestCase):
 
     def baseline_batch(self, raw, window=None):
         window = self.baseline_window() if window is None else window
-        return window.encode() + b"\x00LUOSHU_HOME_BASELINE_RAW\x00" + raw
+        return window.encode() + b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00" + gzip.compress(raw, compresslevel=1, mtime=0)
 
     def test_raw_screencap_preserves_every_rgb_pixel_and_uses_sdk_header(self):
         from PIL import Image
@@ -644,13 +647,17 @@ class UiSmokeHarnessTest(unittest.TestCase):
             for call, png in zip(run.adb.call_args_list, captures):
                 self.assertEqual(("exec-out", "sh", "-c"), call.args[:3])
                 self.assertIn("dumpsys window displays", call.args[3])
-                self.assertTrue(call.args[3].endswith("; screencap"))
+                self.assertTrue(call.args[3].endswith("screencap | gzip -1"))
+                self.assertTrue(call.args[3].startswith("set -o pipefail || exit;"))
                 self.assertNotIn("screencap -p", call.args[3])
                 self.assertLessEqual(call.kwargs["timeout"], 10)
             self.assertEqual(4, run.snapshot_hierarchy.call_count)
             self.assertTrue(all(call.kwargs == {"deadline": 10} for call in run.snapshot_hierarchy.call_args_list))
             self.assertEqual(self.baseline_batch(captures[-1]),
                              (Path(temporary) / metadata["samples"][-1]["batch_raw"]).read_bytes())
+            self.assertEqual(captures[-1], decompress_screencap_gzip(
+                (Path(temporary) / metadata["samples"][-1]["screencap_gzip"]).read_bytes()))
+            self.assertEqual(4, len({sample["hierarchy"] for sample in metadata["samples"]}))
             self.assertEqual("ui-automation-snapshot", run.hierarchy_backend)
             run.hierarchy_once()
             self.assertEqual(4, run.adb.call_count)  # No competing uiautomator connection.
@@ -733,7 +740,7 @@ class UiSmokeHarnessTest(unittest.TestCase):
         corrupted[8] ^= 64
         malformed = (b"missing separator", self.baseline_batch(b"not PNG"),
                      self.baseline_batch(bytes(corrupted)), self.baseline_batch(valid[:-20]),
-                     self.baseline_batch(valid) + b"\x00LUOSHU_HOME_BASELINE_RAW\x00")
+                     self.baseline_batch(valid) + b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00")
         for raw in malformed:
             with self.subTest(raw_length=len(raw)), tempfile.TemporaryDirectory() as temporary:
                 run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
@@ -771,7 +778,9 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run.launch_and_capture.assert_not_called()
             self.assertEqual(partial, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
             self.assertEqual(b"partial stderr", (Path(temporary) / "light-cold-start-baseline-00-stderr.txt").read_bytes())
-            self.assertEqual(b"partial PNG", (Path(temporary) / "light-cold-start-baseline-00-screencap.raw").read_bytes())
+            self.assertEqual(gzip.compress(b"partial PNG", compresslevel=1, mtime=0),
+                             (Path(temporary) / "light-cold-start-baseline-00-screencap.raw.gz").read_bytes())
+            self.assertFalse((Path(temporary) / "light-cold-start-baseline-00-screencap.raw").exists())
 
     def test_baseline_hierarchy_timeout_cannot_overwrite_the_raw_capture_or_record(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -784,7 +793,11 @@ class UiSmokeHarnessTest(unittest.TestCase):
             def timeout(**kwargs):
                 cause = subprocess.TimeoutExpired("adb", 1, output=b"hierarchy response", stderr=b"hierarchy stderr")
                 raise RuntimeError("hierarchy deadline expired") from cause
-            run.snapshot_hierarchy = Mock(side_effect=timeout)
+            calls = [0]
+            def second_hierarchy(**kwargs):
+                calls[0] += 1
+                return self.baseline_hierarchy() if calls[0] == 1 else timeout(**kwargs)
+            run.snapshot_hierarchy = Mock(side_effect=second_hierarchy)
             run.begin_launch_recording = Mock()
             run.launch_and_capture = Mock()
             with self.assertRaisesRegex(RuntimeError, "hierarchy deadline expired"):
@@ -795,8 +808,10 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertEqual(b"capture stderr", (Path(temporary) / "light-cold-start-baseline-00-stderr.txt").read_bytes())
             metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
             self.assertFalse(metadata["passed"])
-            self.assertIn("capture_seconds", metadata["failed_sample"])
+            self.assertIn("capture_seconds", metadata["samples"][0])
             self.assertIn("hierarchy", metadata["failed_sample"])
+            self.assertFalse((Path(temporary) / "light-cold-start-baseline-01-batch.bin").exists())
+            self.assertEqual("hierarchy", metadata["failed_sample"]["stage"])
 
     def test_baseline_shared_deadline_includes_every_live_hierarchy_read(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -826,7 +841,108 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertFalse(metadata["passed"])
             self.assertEqual(10, metadata["timeout_seconds"])
             self.assertEqual(3, metadata["required_stable_captures"])
-            self.assertEqual([.7, .7, .7], [sample["hierarchy_seconds"] for sample in metadata["samples"]])
+            self.assertEqual([.7, .7], [sample["hierarchy_seconds"] for sample in metadata["samples"]])
+            self.assertEqual(.7, metadata["failed_sample"]["hierarchy_seconds"])
+
+    def test_screencap_gzip_is_lossless_and_rejects_crc_size_truncation_and_extra_members(self):
+        raw = self.baseline_raw()
+        compressed = gzip.compress(raw, compresslevel=1, mtime=0)
+        self.assertEqual(raw, decompress_screencap_gzip(compressed))
+        crc = bytearray(compressed)
+        crc[-8] ^= 1
+        size = bytearray(compressed)
+        size[-4] ^= 1
+        malformed = (b"", compressed[:9], compressed[:-1], compressed[:-8],
+                     bytes(crc), bytes(size), compressed + b"\x00",
+                     compressed + compressed, raw)
+        for frame in malformed:
+            with self.subTest(frame_length=len(frame)), self.assertRaises(RuntimeError):
+                decompress_screencap_gzip(frame)
+
+    def test_baseline_unpresented_system_bars_fail_and_keep_exact_full_png_and_raw(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                           record_launch=True, visual_launch_only=True)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            # The ee7de2bb light sample's actual failure: an explicit zero-sized,
+            # invisible navigation source must not become a guessed crop.
+            window = self.baseline_window().replace(
+                "type=navigationBars frame=[0,76][40,80] visible=true",
+                "type=navigationBars frame=[0,0][0,0] visible=false")
+            raw = self.baseline_raw()
+            batch = self.baseline_batch(raw, window)
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, batch, b""))
+            run.begin_launch_recording = Mock()
+            run.launch_and_capture = Mock()
+            with self.assertRaisesRegex(RuntimeError, "Cannot identify real HOME system bars"):
+                run.launch("light-cold-start")
+            run.begin_launch_recording.assert_not_called()
+            run.launch_and_capture.assert_not_called()
+            self.assertEqual(batch, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
+            self.assertEqual(raw, (Path(temporary) / "light-cold-start-baseline-00-screencap.raw").read_bytes())
+            with Image.open(Path(temporary) / "light-cold-start-baseline-00.png") as png:
+                self.assertEqual((40, 80), png.size)
+                self.assertEqual(decode_raw_screencap(raw, 36)[0].tobytes(), png.convert("RGB").tobytes())
+            metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertFalse(metadata["passed"])
+            self.assertEqual([], metadata["samples"])
+            self.assertEqual("content-bounds", metadata["failed_sample"]["stage"])
+            self.assertIn("png_encode_seconds", metadata["failed_sample"])
+
+    def test_baseline_capture_pipeline_failure_or_corrupt_gzip_never_records_and_keeps_bytes(self):
+        raw = self.baseline_raw()
+        valid_batch = self.baseline_batch(raw)
+        for cause in ("capture-failed", "bad-gzip"):
+            with self.subTest(cause=cause), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                               record_launch=True, visual_launch_only=True)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                batch = valid_batch if cause == "capture-failed" else valid_batch[:-1]
+                run.adb = Mock(return_value=subprocess.CompletedProcess(
+                    [], 1 if cause == "capture-failed" else 0, batch, b"real capture stderr"))
+                run.begin_launch_recording = Mock()
+                run.launch_and_capture = Mock()
+                with self.assertRaisesRegex(RuntimeError, "HOME baseline failed"):
+                    run.launch("light-cold-start")
+                run.begin_launch_recording.assert_not_called()
+                run.launch_and_capture.assert_not_called()
+                self.assertEqual(batch, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
+                self.assertEqual(b"real capture stderr", (Path(temporary) / "light-cold-start-baseline-00-stderr.txt").read_bytes())
+                compressed = batch.split(b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00")[1]
+                self.assertEqual(compressed, (Path(temporary) / "light-cold-start-baseline-00-screencap.raw.gz").read_bytes())
+                self.assertFalse((Path(temporary) / "light-cold-start-baseline-00-screencap.raw").exists())
+
+    def test_capture_shell_frames_only_screencap_bytes_and_preserves_pipeline_failure(self):
+        # Exercise the generated shell pipeline on the host. AOSP tag evidence
+        # establishes Android mksh/gzip availability; this is not a device run.
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = SmokeRun(Path("app.apk"), directory, PACKAGE, None)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            raw = self.baseline_raw()
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b""))
+            with patch("android_ui_smoke.time.sleep"):
+                run.wait_home_baseline("light-cold-start")
+            command = run.adb.call_args.args[3]
+            binaries = directory / "bin"
+            binaries.mkdir()
+            dumpsys = binaries / "dumpsys"
+            dumpsys.write_text(f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write({self.baseline_window().encode()!r})\n")
+            dumpsys.chmod(0o755)
+            screencap = binaries / "screencap"
+            for exit_code in (0, 7):
+                screencap.write_text(f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write({raw!r})\nsys.exit({exit_code})\n")
+                screencap.chmod(0o755)
+                environment = {**os.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"]}
+                result = subprocess.run(["bash", "-c", command], env=environment, capture_output=True, timeout=5)
+                self.assertEqual(exit_code, result.returncode)
+                window, compressed = result.stdout.split(b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00")
+                self.assertEqual(self.baseline_window().encode(), window)
+                self.assertEqual(raw, decompress_screencap_gzip(compressed))
 
     def test_launch_stage_host_timings_do_not_treat_am_total_time_as_current_elapsed(self):
         with tempfile.TemporaryDirectory() as temporary:
