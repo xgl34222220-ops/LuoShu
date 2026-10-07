@@ -336,7 +336,7 @@ private fun TaskCard(task: TaskCenterItem) {
     val color = when (task.phase) {
         TaskPhase.FAILED -> MaterialTheme.colorScheme.error
         TaskPhase.SUCCESS -> tokens.success
-        TaskPhase.WAITING_REBOOT -> tokens.warning
+        TaskPhase.WAITING_REBOOT, TaskPhase.WAITING_CONFIRMATION -> tokens.warning
         TaskPhase.INFO -> tokens.textSecondary
         else -> MaterialTheme.colorScheme.primary
     }
@@ -441,5 +441,6 @@ private fun taskKindIcon(kind: TaskKind): ImageVector = when (kind) {
     TaskKind.MIX -> Icons.Rounded.Layers
     TaskKind.DELETE -> Icons.Rounded.Delete
     TaskKind.REBOOT -> Icons.Rounded.RestartAlt
+    TaskKind.TEMPLATE -> Icons.Rounded.Description
     TaskKind.DIAGNOSTIC -> Icons.Rounded.Description
 }

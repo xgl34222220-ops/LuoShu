@@ -10,6 +10,7 @@ internal enum class TaskKind(val label: String) {
     MIX("字体组合"),
     DELETE("删除字体"),
     REBOOT("设备重启"),
+    TEMPLATE("原厂槽位检查"),
     DIAGNOSTIC("后台任务"),
 }
 
@@ -20,6 +21,7 @@ internal enum class TaskPhase(val label: String) {
     SUCCESS("已完成"),
     FAILED("失败"),
     WAITING_REBOOT("等待重启"),
+    WAITING_CONFIRMATION("等待挂载确认"),
     INFO("记录"),
 }
 
@@ -48,9 +50,14 @@ private val internalMixTelemetry = Regex("^\\[[^]]+]\\s+mix\\s+(?:stage=|start:)
 internal fun taskKindFor(message: String, type: String = ""): TaskKind {
     val normalized = "$type $message".lowercase()
     return when {
-        type == "mix" || "复合" in normalized || "组合" in normalized || " mix" in normalized -> TaskKind.MIX
+        type == "mix" -> TaskKind.MIX
         type == "switch" && ("default" in normalized || "恢复" in normalized) -> TaskKind.RESTORE
-        type == "switch" || "应用" in normalized || "切换" in normalized || "switch" in normalized -> TaskKind.APPLY
+        type == "switch" || "字体应用失败" in normalized -> TaskKind.APPLY
+        // SERVICE checks may mention a later explicit apply. That wording does
+        // not make the background template check a user-requested font apply.
+        "原厂字体槽位模板" in normalized || "原厂模板" in normalized -> TaskKind.TEMPLATE
+        "复合" in normalized || "组合" in normalized || " mix" in normalized -> TaskKind.MIX
+        "应用" in normalized || "切换" in normalized || "switch" in normalized -> TaskKind.APPLY
         "恢复" in normalized || "系统字体" in normalized && "默认" in normalized -> TaskKind.RESTORE
         "导入" in normalized || "import" in normalized || "提取字体" in normalized -> TaskKind.IMPORT
         "删除" in normalized || "delete" in normalized -> TaskKind.DELETE
@@ -67,6 +74,7 @@ internal fun taskPhaseFor(level: String, message: String, state: String = ""): T
         // can remove it from the active count; old success/error wording cannot.
         state == "cleanup-pending" -> TaskPhase.WAITING_CLEANUP
         "failed" in normalized || "error" in normalized || "失败" in normalized || "错误" in normalized -> TaskPhase.FAILED
+        "等待主命名空间挂载确认" in normalized -> TaskPhase.WAITING_CONFIRMATION
         "重启后" in normalized || "等待重启" in normalized || "reboot required" in normalized -> TaskPhase.WAITING_REBOOT
         state == "queued" || "queued" in normalized || "排队" in normalized || "等待执行" in normalized -> TaskPhase.QUEUED
         state == "running" || "running" in normalized || "正在" in normalized || "开始" in normalized || "处理中" in normalized -> TaskPhase.RUNNING
@@ -82,6 +90,7 @@ internal fun taskTitle(kind: TaskKind, phase: TaskPhase): String = when (phase) 
     TaskPhase.SUCCESS -> "${kind.label}已完成"
     TaskPhase.FAILED -> "${kind.label}失败"
     TaskPhase.WAITING_REBOOT -> "${kind.label}等待重启"
+    TaskPhase.WAITING_CONFIRMATION -> "${kind.label}等待挂载确认"
     TaskPhase.INFO -> kind.label
 }
 
@@ -108,7 +117,9 @@ internal fun parseTaskLogItems(content: String, limit: Int = 18): List<TaskCente
             title = taskTitle(kind, phase),
             message = message,
             progress = progress,
-            timeLabel = time,
+            // Early boot can log before wall-clock synchronization. Do not
+            // present the epoch date as a measured reboot completion time.
+            timeLabel = if (time.startsWith("1970-")) "开机早期，时间未同步" else time,
         )
     }.toList().asReversed()
 

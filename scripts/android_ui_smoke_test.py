@@ -7,13 +7,15 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from android_ui_smoke import (
     action_disabled, anchors_preserved, app_labels, center, choice_selected, content_anchors,
     crash_reason, label_target, orientation_matches, page_ready, tab_target,
     SmokeRun, instrumentation_results, library_state_preserved, assert_single_stage_startup,
     legacy_manual_colors_ready, legacy_monet_unavailable,
+    app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
+    scroll_progress, visible_action, visible_text, ScrollBudget,
 )
 
 
@@ -148,6 +150,204 @@ class UiSmokeHarnessTest(unittest.TestCase):
         self.assertFalse(anchors_preserved(before, {"系统默认字体": (200, 700)}))
         self.assertFalse(anchors_preserved(before, {"系统默认字体": (200, 830), "清除筛选": (400, 1100)}))
         self.assertFalse(anchors_preserved({}, {}))
+
+    def scroll_hierarchy(self, offset=0, target=None, selected=True):
+        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+          <node package="{PACKAGE}" text="fixed header" bounds="[40,70][600,120]" />
+          <node package="{PACKAGE}" scrollable="true" bounds="[0,140][1080,1794]">
+            <node package="{PACKAGE}" text="anchor one" bounds="[40,{300 + offset}][700,{360 + offset}]" />
+            <node package="{PACKAGE}" text="anchor two" bounds="[40,{800 + offset}][700,{860 + offset}]" />
+            <node package="{PACKAGE}" scrollable="true" bounds="[40,500][1040,600]" />
+          </node>
+          <node package="com.android.systemui" text="system" bounds="[0,1794][1080,1920]" />
+        </node></hierarchy>''')
+        if target:
+            ET.SubElement(root[0][1], "node", {"package": PACKAGE, "text": target,
+                "bounds": "[40,1200][600,1320]", "clickable": "true", "enabled": "true",
+                "selected": "true" if selected else "false"})
+        return root
+
+    def test_scroll_geometry_uses_logical_override_and_current_rotation_not_screenshot_size(self):
+        root = self.scroll_hierarchy()
+        wm = "Physical size: 1440x3120\nOverride size: 1080x1920\n"
+        self.assertEqual((1080, 1920), logical_input_size(wm, app_window_bounds(root, PACKAGE)))
+        self.assertEqual((1920, 1080), logical_input_size(wm, (0, 0, 1920, 1080)))
+        with self.assertRaisesRegex(RuntimeError, "exceeds logical"):
+            logical_input_size(wm, (0, 0, 1440, 3120))
+        with self.assertRaisesRegex(RuntimeError, "Cannot verify"):
+            logical_input_size("unknown screen size", (0, 0, 1080, 1920))
+
+    def test_scroll_geometry_uses_actual_vertical_container_and_excludes_header_system_and_chips(self):
+        root = self.scroll_hierarchy()
+        node, rect = scroll_content(root, PACKAGE)
+        self.assertIs(root[0][1], node)
+        self.assertEqual((0, 140, 1080, 1794), rect)
+        self.assertEqual({"anchor one": (370, 330), "anchor two": (370, 830)},
+                         visible_scroll_anchors(root, PACKAGE))
+        root[0][1].set("scrollable", "false")
+        with self.assertRaisesRegex(RuntimeError, "vertical App"):
+            scroll_content(root, PACKAGE)
+
+    def test_visible_targets_reject_offscreen_and_disabled_semantics(self):
+        root = self.scroll_hierarchy(target="收藏")
+        self.assertIsNotNone(visible_action(root, "收藏", PACKAGE))
+        self.assertTrue(visible_text(root, "收藏", PACKAGE))
+        target = root[0][1][-1]
+        target.set("bounds", "[40,20][600,80]")
+        self.assertFalse(visible_text(root, "收藏", PACKAGE))
+        with self.assertRaisesRegex(ValueError, "outside visible"):
+            visible_action(root, "收藏", PACKAGE)
+        target.set("bounds", "[40,120][600,200]")
+        with self.assertRaisesRegex(ValueError, "outside visible"):
+            visible_action(root, "收藏", PACKAGE)
+        target.set("bounds", "[40,1200][600,1320]")
+        target.set("enabled", "false")
+        with self.assertRaisesRegex(ValueError, "Enabled action"):
+            visible_action(root, "收藏", PACKAGE)
+
+    def test_scroll_progress_uses_directional_visible_anchor_positions_not_node_counts(self):
+        before = {"a": (40, 600), "b": (40, 1000)}
+        stationary_extra_nodes = {**before, "new asynchronous status": (40, 1400)}
+        self.assertFalse(scroll_progress(before, stationary_extra_nodes, "up"))
+        self.assertFalse(scroll_progress(before, {"a": (40, 650), "b": (40, 1050)}, "up"))
+        self.assertTrue(scroll_progress(before, {"a": (40, 550), "b": (40, 950)}, "up"))
+        self.assertFalse(scroll_progress({}, {}, "up"))
+        self.assertFalse(scroll_progress(before, {}, "up"))
+        with self.assertRaises(ValueError):
+            scroll_progress(before, before, "sideways")
+
+    def test_legacy_decor_navigation_bar_cannot_count_as_scroll_content_or_action_visibility(self):
+        root = self.scroll_hierarchy(target="收藏")
+        root[0][1].set("bounds", "[0,63][1080,1920]")
+        root[0][-1].set("package", PACKAGE)
+        root[0][-1].set("resource-id", "android:id/navigationBarBackground")
+        self.assertEqual((0, 63, 1080, 1794), scroll_content(root, PACKAGE)[1])
+        root[0][1][-1].set("bounds", "[40,1820][600,1900]")
+        with self.assertRaisesRegex(ValueError, "outside visible"):
+            visible_action(root, "收藏", PACKAGE)
+
+    def test_bounded_scroll_waits_for_measured_settled_progress_and_keeps_each_xml(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            initial = self.scroll_hierarchy()
+            moved = self.scroll_hierarchy(offset=-100)
+            reached = self.scroll_hierarchy(offset=-200, target="收藏")
+            run.text = Mock(return_value="Physical size: 1440x3120\nOverride size: 1080x1920\n")
+            run.adb = Mock()
+            run.assert_running = Mock()
+            run.hierarchy = Mock(side_effect=[initial, initial, moved, moved, reached])
+            with patch("android_ui_smoke.time.sleep"):
+                result = run.reach_content(lambda root: visible_action(root, "收藏", PACKAGE), "favorite row")
+            self.assertIs(reached, result)
+            self.assertEqual(2, run.adb.call_count)
+            for call in run.adb.call_args_list:
+                self.assertEqual(("shell", "input", "swipe"), call.args[:3])
+                self.assertEqual("540", call.args[3])
+                self.assertLess(int(call.args[4]), 1794)
+                self.assertGreater(int(call.args[6]), 140)
+            evidence = json.loads((Path(temporary) / "scroll-search-0001.json").read_text())
+            self.assertTrue(evidence["passed"])
+            self.assertEqual(5, len(evidence["samples"]))
+            self.assertEqual([1080, 1920], evidence["samples"][0]["input_size"])
+            self.assertTrue(all((Path(temporary) / sample["xml"]).is_file() for sample in evidence["samples"]))
+
+    def test_bounded_scroll_stagnation_or_boundary_cannot_report_a_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            root = self.scroll_hierarchy()
+            run.text = Mock(return_value="Physical size: 1080x1920\n")
+            run.adb = Mock()
+            run.assert_running = Mock()
+            run.hierarchy = Mock(return_value=root)
+            with patch("android_ui_smoke.time.sleep"), self.assertRaisesRegex(RuntimeError, "stalled or reached a boundary"):
+                run.reach_content(lambda current: visible_text(current, "missing restoration help", PACKAGE), "help")
+            self.assertEqual(1, run.adb.call_count)
+            evidence = json.loads((Path(temporary) / "scroll-search-0001.json").read_text())
+            self.assertFalse(evidence["passed"])
+            self.assertEqual(9, len(evidence["samples"]))
+
+    def test_bounded_scroll_gesture_and_total_time_exhaustion_cannot_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            run.text = Mock(return_value="Physical size: 1080x1920\n")
+            run.adb = Mock()
+            run.assert_running = Mock()
+            run.hierarchy = Mock(return_value=self.scroll_hierarchy())
+            with self.assertRaisesRegex(RuntimeError, "gesture budget exhausted"):
+                run.reach_content(lambda current: False, "help", budget=ScrollBudget(max_gestures=0))
+            budget = ScrollBudget()
+            budget.deadline = 0
+            with self.assertRaisesRegex(RuntimeError, "time budget exhausted"):
+                run.reach_content(lambda current: True, "already visible but expired", budget=budget)
+            run.adb.assert_not_called()
+
+    def test_find_choice_never_turns_visible_unselected_filter_into_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            run.reach_content = Mock(return_value=self.scroll_hierarchy(target="收藏", selected=False))
+            with self.assertRaisesRegex(RuntimeError, "no longer selected"):
+                run.find_choice("收藏", direction="down")
+            self.assertEqual("down", run.reach_content.call_args.kwargs["direction"])
+
+    def test_bounded_scroll_preserves_app_anr_failure_even_when_target_is_visible(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            run.text = Mock(return_value="Physical size: 1080x1920\n")
+            run.hierarchy = Mock(return_value=self.scroll_hierarchy(target="收藏"))
+            run.assert_running = Mock(side_effect=RuntimeError("App ANR recorded by ActivityManager"))
+            with self.assertRaisesRegex(RuntimeError, "App ANR"):
+                run.reach_content(lambda root: visible_action(root, "收藏", PACKAGE), "favorite")
+            self.assertFalse(json.loads((Path(temporary) / "scroll-search-0001.json").read_text())["passed"])
+
+    def test_google_help_keeps_one_budget_real_export_entry_toggle_and_restoration_marker(self):
+        from google_font_compat_smoke import CompatibilitySmokeRun
+        with tempfile.TemporaryDirectory() as temporary:
+            run = CompatibilitySmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            entry = self.scroll_hierarchy(target="Google 字体兼容")
+            status = self.scroll_hierarchy()
+            for label in ("当前状态", "恢复原设置", "重新检测"):
+                ET.SubElement(status[0][1], "node", {"package": PACKAGE, "text": label,
+                    "bounds": "[40,1100][600,1160]"})
+            diagnostic = self.scroll_hierarchy(target="导出复发诊断")
+            toggle = self.scroll_hierarchy(target="详细原理与影响范围")
+            expanded = self.scroll_hierarchy(target="收起技术说明")
+            help_root = self.scroll_hierarchy(target="停用或卸载洛书前，请先恢复原设置。")
+            run.hierarchy = Mock(side_effect=[entry, status])
+            run.assert_running = Mock()
+            run.adb = Mock()
+            run.capture = Mock()
+            run.reach_content = Mock(side_effect=[diagnostic, toggle, help_root])
+            run.wait_ui = Mock(return_value=expanded)
+            with patch.object(SmokeRun, "run"):
+                run.run()
+            calls = run.reach_content.call_args_list
+            self.assertEqual(3, len(calls))
+            budget = calls[0].kwargs["budget"]
+            self.assertTrue(all(call.kwargs["budget"] is budget for call in calls))
+            self.assertEqual(8, budget.max_gestures)
+            self.assertIsNotNone(calls[0].args[0](diagnostic))
+            self.assertIsNotNone(calls[1].args[0](toggle))
+            self.assertTrue(calls[2].args[0](help_root))
+            self.assertFalse(calls[2].args[0](expanded))
+            self.assertTrue(run.wait_ui.call_args.args[0](expanded))
+            self.assertFalse(run.wait_ui.call_args.args[0](toggle))
+            taps = [call for call in run.adb.call_args_list if call.args[:3] == ("shell", "input", "tap")]
+            self.assertEqual(2, len(taps))  # Settings entry and real details toggle; export never tapped.
+            self.assertIn(("google-font-diagnostic-entry", diagnostic), [call.args for call in run.capture.call_args_list])
+            self.assertIn(("google-font-chinese-help", help_root), [call.args for call in run.capture.call_args_list])
+
+    def test_reach_content_shared_budget_cannot_restart_gesture_allowance_for_later_help_stages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            run.text = Mock(return_value="Physical size: 1080x1920\n")
+            run.hierarchy = Mock(return_value=self.scroll_hierarchy())
+            run.assert_running = Mock()
+            run.adb = Mock()
+            budget = ScrollBudget(max_gestures=1)
+            budget.used = 1
+            with self.assertRaisesRegex(RuntimeError, "gesture budget exhausted"):
+                run.reach_content(lambda current: False, "later help stage", budget=budget)
+            run.adb.assert_not_called()
 
     def test_orientation_uses_real_app_bounds(self):
         self.assertTrue(orientation_matches(self.hierarchy(), PACKAGE, landscape=False))

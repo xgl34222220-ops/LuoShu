@@ -172,8 +172,12 @@ capture_template() {
     fi
 
     if ! mkdir "$LOCK" 2>/dev/null; then
-        log_template '已有模板采集任务在运行'
-        return 0
+        # An occupied directory is not evidence that a usable template exists.
+        # Keep the frozen snapshot and the unknown lock owner intact; a caller
+        # must not commit an uncertain payload on a false successful ensure.
+        mark_pending template-capture-busy "$_dft_rom" || true
+        log_template '原厂模板采集锁被占用，未确认可信模板，保留已有快照'
+        return 2
     fi
     trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT HUP INT TERM
 

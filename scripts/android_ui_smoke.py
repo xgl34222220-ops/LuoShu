@@ -210,6 +210,153 @@ def anchors_preserved(before: dict[str, tuple[int, int]], after: dict[str, tuple
     )
 
 
+def app_window_bounds(root: ET.Element, package: str) -> tuple[int, int, int, int]:
+    """Use the real accessibility window, not physical screenshot dimensions."""
+    parents = {child: parent for parent in root.iter() for child in parent}
+    windows = []
+    for node in root.iter("node"):
+        if node.get("package") != package or parents.get(node, root).get("package") == package:
+            continue
+        try:
+            windows.append(bounds(node))
+        except ValueError:
+            pass
+    if not windows:
+        raise RuntimeError("No visible App accessibility window for a scroll gesture")
+    return max(windows, key=lambda rect: (rect[2] - rect[0]) * (rect[3] - rect[1]))
+
+
+def logical_input_size(wm_size: str, window: tuple[int, int, int, int]) -> tuple[int, int]:
+    """Android input uses the rotated logical override; screencap may be letterboxed."""
+    sizes = {
+        kind: (int(width), int(height))
+        for kind, width, height in re.findall(r"(Physical|Override) size:\s*(\d+)x(\d+)", wm_size)
+    }
+    size = sizes.get("Override", sizes.get("Physical"))
+    if size is None:
+        raise RuntimeError(f"Cannot verify logical input dimensions from adb wm size: {wm_size.strip()}")
+    width, height = size
+    if (window[2] - window[0] > window[3] - window[1]) != (width > height):
+        width, height = height, width
+    if window[0] < 0 or window[1] < 0 or window[2] > width or window[3] > height:
+        raise RuntimeError(f"App hierarchy window {window} exceeds logical input display {width}x{height}")
+    return width, height
+
+
+def scroll_content(root: ET.Element, package: str) -> tuple[ET.Element, tuple[int, int, int, int]]:
+    """Choose the vertical content container, excluding horizontal chip rows and dock."""
+    window = app_window_bounds(root, package)
+    candidates = []
+    for node in root.iter("node"):
+        if node.get("package") != package or node.get("scrollable") != "true":
+            continue
+        try:
+            rect = bounds(node)
+        except ValueError:
+            continue
+        rect = (max(rect[0], window[0]), max(rect[1], window[1]),
+                min(rect[2], window[2]), min(rect[3], window[3]))
+        if rect[2] > rect[0] and rect[3] - rect[1] >= (window[3] - window[1]) * .25:
+            candidates.append((node, rect))
+    if not candidates:
+        raise RuntimeError("No visible vertical App scroll container")
+    node, rect = max(candidates, key=lambda item: (item[1][2] - item[1][0]) * (item[1][3] - item[1][1]))
+    # Older Android exposes these Decor-owned bars in the App window tree. They
+    # remain outside content even when screencap returns a letterboxed surface.
+    for bar in root.iter("node"):
+        if bar.get("resource-id") not in ("android:id/navigationBarBackground", "android:id/statusBarBackground"):
+            continue
+        try:
+            left, top, right, bottom = bounds(bar)
+        except ValueError:
+            continue
+        if left <= rect[0] and right >= rect[2]:
+            if top <= rect[1] < bottom < rect[3]:
+                rect = (rect[0], bottom, rect[2], rect[3])
+            elif rect[1] < top < rect[3] <= bottom:
+                rect = (*rect[:3], top)
+        elif top <= rect[1] and bottom >= rect[3]:
+            if left <= rect[0] < right < rect[2]:
+                rect = (right, rect[1], rect[2], rect[3])
+            elif rect[0] < left < rect[2] <= right:
+                rect = (rect[0], rect[1], left, rect[3])
+    try:
+        dock_top = min(bounds(tab_target(root, label, package))[1] for _, label, _ in PAGES)
+        if rect[1] < dock_top < rect[3]:
+            rect = (*rect[:3], dock_top)
+    except ValueError:
+        pass  # Detail pages legitimately have no dock.
+    if rect[3] - rect[1] < 80 or rect[2] - rect[0] < 40:
+        raise RuntimeError("Visible App scroll content is too small for a safe gesture")
+    return node, rect
+
+
+def visible_scroll_anchors(root: ET.Element, package: str) -> dict[str, tuple[int, int]]:
+    node, rect = scroll_content(root, package)
+    anchors: dict[str, tuple[int, int]] = {}
+    duplicates = set()
+    for child in node.iter("node"):
+        if child.get("package") != package:
+            continue
+        try:
+            position = center(child)
+        except ValueError:
+            continue
+        if not (rect[0] <= position[0] < rect[2] and rect[1] <= position[1] < rect[3]):
+            continue
+        for label in labels(child) - {page[1] for page in PAGES}:
+            if label in anchors:
+                duplicates.add(label)
+            anchors[label] = position
+    return {label: position for label, position in anchors.items() if label not in duplicates}
+
+
+def scroll_progress(before: dict[str, tuple[int, int]], after: dict[str, tuple[int, int]],
+                    direction: str, tolerance: int = 12) -> bool:
+    if direction not in ("up", "down"):
+        raise ValueError(f"Unknown scroll direction: {direction}")
+    shared = set(before) & set(after)
+    deltas = [after[label][1] - before[label][1] for label in shared]
+    if deltas:
+        expected = (lambda delta: delta < -tolerance) if direction == "up" else (lambda delta: delta > tolerance)
+        return any(expected(delta) for delta in deltas) and not any(expected(-delta) for delta in deltas)
+    # A full viewport replacement is real content evidence, not a node count.
+    return bool(before and after and set(before) != set(after))
+
+
+def visible_action(root: ET.Element, label: str, package: str) -> ET.Element:
+    target = label_target(root, label, package)
+    _, rect = scroll_content(root, package)
+    left, top, right, bottom = bounds(target)
+    if not (rect[0] <= left < right <= rect[2] and rect[1] <= top < bottom <= rect[3]):
+        raise ValueError(f"Enabled action for {label!r} is outside visible scroll content")
+    return target
+
+
+def visible_text(root: ET.Element, marker: str, package: str) -> bool:
+    _, rect = scroll_content(root, package)
+    for node in root.iter("node"):
+        if node.get("package") != package or not any(marker in value for value in labels(node)):
+            continue
+        try:
+            x, y = center(node)
+        except ValueError:
+            continue
+        if rect[0] <= x < rect[2] and rect[1] <= y < rect[3]:
+            return True
+    return False
+
+
+class ScrollBudget:
+    """A shared hard search budget, including waits and all stages of a help flow."""
+    def __init__(self, timeout: float = 90, max_gestures: int = 8):
+        if timeout <= 0 or max_gestures < 0:
+            raise ValueError("Scroll search requires a positive timeout and nonnegative gesture budget")
+        self.deadline = time.monotonic() + timeout
+        self.max_gestures = max_gestures
+        self.used = 0
+
+
 def library_state_preserved(root: ET.Element, before: dict[str, tuple[int, int]], package: str) -> bool:
     """Require the real page, selected filter and every saved visible anchor."""
     return (page_ready(root, "字体库", "筛选结果", package)
@@ -302,6 +449,7 @@ class SmokeRun:
         self.api_level: int | None = None
         self.snapshot_apk = snapshot_apk
         self.hierarchy_attempts = 0
+        self.scroll_searches = 0
         self.hierarchy_backend = "uiautomator-cli"
         self.started_at = time.monotonic()
 
@@ -343,6 +491,7 @@ class SmokeRun:
             elif failure is None:
                 xml = result.stdout.decode("utf-8", "replace")
                 root = ET.fromstring(xml)
+                (self.output / f"hierarchy-{self.hierarchy_attempts:04d}.xml").write_text(xml, encoding="utf-8")
                 (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
                 return root
         except (RuntimeError, ET.ParseError) as error:
@@ -384,6 +533,7 @@ class SmokeRun:
         root = ET.fromstring(xml)
         if root.tag != "hierarchy" or not list(root.iter("node")):
             raise RuntimeError("Real UiAutomation snapshot contains no accessible window nodes")
+        (self.output / filename).write_text(xml, encoding="utf-8")
         (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
         return root
 
@@ -472,20 +622,101 @@ class SmokeRun:
                      str(width // 2), str(int(height * .46)), "300")
             return self.wait_ui(lambda root: tab_target(root, "首页", self.package) is not None, "Quick Return navigation")
 
-    def find_choice(self, label: str, *, scroll_attempts: int = 8) -> ET.Element:
-        for attempt in range(scroll_attempts + 1):
-            root = self.hierarchy()
+    def reach_content(self, predicate, description: str, *, direction: str = "up",
+                      budget: ScrollBudget | None = None, root: ET.Element | None = None) -> ET.Element:
+        """Reach an actual visible predicate; stop hard on no progress, time or gesture limits."""
+        if direction not in ("up", "down"):
+            raise ValueError(f"Unknown scroll direction: {direction}")
+        budget = budget or ScrollBudget()
+        self.scroll_searches += 1
+        prefix = f"scroll-search-{self.scroll_searches:04d}"
+        started = time.monotonic()
+        samples = []
+        wm_size = self.text("shell", "wm", "size")
+        metadata = {"description": description, "direction": direction, "wm_size": wm_size,
+                    "max_gestures": budget.max_gestures, "samples": samples, "passed": False}
+
+        def save(current: ET.Element, phase: str, **extra: object) -> dict[str, tuple[int, int]]:
+            filename = f"{prefix}-{len(samples):03d}.xml"
+            ET.ElementTree(current).write(self.output / filename, encoding="utf-8", xml_declaration=True)
+            window = app_window_bounds(current, self.package)
+            input_size = logical_input_size(wm_size, window)
+            _, rect = scroll_content(current, self.package)
+            anchors = visible_scroll_anchors(current, self.package)
+            samples.append({"phase": phase, "xml": filename, "elapsed_seconds": round(time.monotonic() - started, 3),
+                            "input_size": input_size, "window_bounds": window, "content_bounds": rect,
+                            "anchors": anchors, "gestures_used": budget.used, **extra})
+            return anchors
+
+        def ready(current: ET.Element) -> bool:
             try:
-                label_target(root, label, self.package)
+                result = predicate(current)
+                return result is not None if isinstance(result, ET.Element) else bool(result)
             except ValueError:
-                if attempt == scroll_attempts:
-                    raise
-                self.scroll(root)
-                continue
-            if not choice_selected(root, label, self.package):
-                raise RuntimeError(f"Saved choice {label!r} is no longer selected")
-            return root
-        raise RuntimeError(f"Saved choice {label!r} could not be inspected")
+                return False
+
+        try:
+            current = root if root is not None else self.hierarchy()
+            before = save(current, "initial")
+            while True:
+                self.assert_running()
+                if time.monotonic() >= budget.deadline:
+                    raise RuntimeError(f"{description}: total scroll search time budget exhausted")
+                if ready(current):
+                    metadata["passed"] = True
+                    return current
+                if budget.used >= budget.max_gestures:
+                    raise RuntimeError(f"{description}: scroll gesture budget exhausted before the visible target")
+                if not before:
+                    raise RuntimeError(f"{description}: no visible content anchors to establish scroll progress")
+                _, rect = scroll_content(current, self.package)
+                x = (rect[0] + rect[2]) // 2
+                low, high = rect[1] + int((rect[3] - rect[1]) * .25), rect[1] + int((rect[3] - rect[1]) * .76)
+                start, end = (high, low) if direction == "up" else (low, high)
+                budget.used += 1
+                gesture = {"from": [x, start], "to": [x, end], "duration_ms": 400}
+                self.adb("shell", "input", "swipe", str(x), str(start), str(x), str(end), "400")
+                progress_deadline = min(budget.deadline, time.monotonic() + 12)
+                moved = False
+                settled = False
+                previous = before
+                for _ in range(8):
+                    if time.monotonic() >= progress_deadline:
+                        break
+                    time.sleep(.25)
+                    self.assert_running()
+                    current = self.hierarchy()
+                    after = save(current, "after-gesture", gesture=gesture)
+                    if time.monotonic() >= budget.deadline:
+                        raise RuntimeError(f"{description}: total scroll search time budget exhausted")
+                    if ready(current):
+                        metadata["passed"] = True
+                        return current
+                    moved = moved or scroll_progress(before, after, direction)
+                    settled = bool(moved and set(previous) == set(after) and anchors_preserved(previous, after, tolerance=4))
+                    previous = after
+                    if settled:
+                        before = after
+                        break
+                if not moved:
+                    raise RuntimeError(f"{description}: scroll stalled or reached a boundary without the visible target")
+                if not settled:
+                    raise RuntimeError(f"{description}: visible scroll content did not settle within the progress deadline")
+        except Exception as error:
+            metadata["error"] = str(error)
+            raise
+        finally:
+            metadata["gestures_used"] = budget.used
+            metadata["elapsed_seconds"] = round(time.monotonic() - started, 3)
+            (self.output / f"{prefix}.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def find_choice(self, label: str, *, scroll_attempts: int = 8, direction: str = "up") -> ET.Element:
+        root = self.reach_content(lambda current: visible_action(current, label, self.package),
+                                  f"Saved choice {label!r}", direction=direction,
+                                  budget=ScrollBudget(timeout=90, max_gestures=scroll_attempts))
+        if not choice_selected(root, label, self.package):
+            raise RuntimeError(f"Saved choice {label!r} is no longer selected")
+        return root
 
     def scroll(self, root: ET.Element, direction: str = "up") -> None:
         rectangles = []
@@ -732,12 +963,9 @@ class SmokeRun:
                 lambda root: orientation_matches(root, self.package, landscape=False),
                 "Actual portrait configuration",
             )
-            # Landscape required a content scroll to reach the filter; return to
-            # the top before inspecting the preserved choice in portrait.
-            for _ in range(3):
-                self.scroll(root, "down")
-                root = self.hierarchy()
-            root = self.find_choice("收藏")
+            # Reach the real filter from the rotated scroll position. A fixed
+            # number of swipes cannot establish that the selected row is visible.
+            root = self.find_choice("收藏", direction="down")
             self.capture("library-portrait-return", root)
             self.logcat("portrait-return-startup-logcat.txt")
             self.record("library-rotation-return", selected_label="收藏", rotations=["landscape", "portrait"])

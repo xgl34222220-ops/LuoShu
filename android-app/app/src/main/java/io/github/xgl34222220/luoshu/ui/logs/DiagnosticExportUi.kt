@@ -54,6 +54,9 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         read_value() {
             sed -n "s/^${'$'}2=//p" "${'$'}1" 2>/dev/null | head -n1 | tr -d '\r\n'
         }
+        safe_uint() {
+            case "${'$'}1" in ''|*[!0-9]*) printf unknown ;; *) printf '%s' "${'$'}1" ;; esac
+        }
         version="${'$'}(read_value "${'$'}MOD/module.prop" version)"
         versionCode="${'$'}(read_value "${'$'}MOD/module.prop" versionCode)"
         active="${'$'}(head -n1 "${'$'}CFG/active_font.conf" 2>/dev/null | tr -d '\r\n')"
@@ -66,6 +69,53 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         [ -s "${'$'}CFG/device_font_inventory.json" ] && inventory=available
         engine="${'$'}(read_value "${'$'}CFG/device-font-engine.conf" state)"
         template="${'$'}(read_value "${'$'}CFG/device-font-template.state" state)"
+        legacyMode=no
+        [ -f "${'$'}CFG/font_runtime_legacy_v14_4.conf" ] && legacyMode=yes
+        stockScanPending=no
+        [ -f "${'$'}CFG/stock_inventory_scan_pending" ] && stockScanPending=yes
+        templatePresent=no
+        [ -s "${'$'}CFG/device-font-template.json" ] && templatePresent=yes
+        templatePending="${'$'}(read_value "${'$'}CFG/device-font-template-pending.conf" state)"
+        case "${'$'}templatePending" in ''|pending-stock-boot) ;; *) templatePending=unknown ;; esac
+        templatePendingReason="${'$'}(read_value "${'$'}CFG/device-font-template-pending.conf" reason)"
+        case "${'$'}templatePendingReason" in
+            '') templatePendingReason=none ;;
+            active-font:*) templatePendingReason=active-font ;;
+            payload-transaction:*) templatePendingReason=payload-transaction ;;
+            module-font-payload:*) templatePendingReason=module-font-payload ;;
+            module-xml-payload:*) templatePendingReason=module-xml-payload ;;
+            device-payload-installed|template-capture-busy) ;;
+            *) templatePendingReason=unknown ;;
+        esac
+        bootScanResult="${'$'}(read_value "${'$'}CFG/boot-stock-scan.state" result)"
+        case "${'$'}bootScanResult" in success|busy|timeout|cleanup-pending|failed) ;; *) bootScanResult=unknown ;; esac
+        bootScanPublished="${'$'}(read_value "${'$'}CFG/boot-stock-scan.state" inventoryPublished)"
+        case "${'$'}bootScanPublished" in yes|no) ;; *) bootScanPublished=unknown ;; esac
+        bootScanSchema="${'$'}(read_value "${'$'}CFG/boot-stock-scan.state" schema)"
+        bootScanBudget="${'$'}(safe_uint "${'$'}(read_value "${'$'}CFG/boot-stock-scan.state" budgetSeconds)")"
+        bootScanElapsed="${'$'}(safe_uint "${'$'}(read_value "${'$'}CFG/boot-stock-scan.state" elapsedSeconds)")"
+        bootScanCurrentBoot=unknown
+        if [ "${'$'}bootScanSchema" = luoshu-boot-stock-scan-v1 ]; then
+            scanBoot="${'$'}(read_value "${'$'}CFG/boot-stock-scan.state" bootId)"
+            currentBoot="${'$'}(head -n1 /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')"
+            if [ -n "${'$'}scanBoot" ] && [ -n "${'$'}currentBoot" ]; then
+                bootScanCurrentBoot=no
+                [ "${'$'}scanBoot" != "${'$'}currentBoot" ] || bootScanCurrentBoot=yes
+            fi
+        else
+            bootScanSchema=unknown
+            bootScanResult=unknown
+            bootScanPublished=unknown
+            bootScanBudget=unknown
+            bootScanElapsed=unknown
+        fi
+        payloadBootState="${'$'}(read_value "${'$'}CFG/font-payload-boot.conf" state)"
+        case "${'$'}payloadBootState" in prepared|booting|confirmed|failed) ;; *) payloadBootState=unknown ;; esac
+        rebootPending=no
+        [ -f "${'$'}CFG/text_reboot_required.conf" ] && rebootPending=yes
+        bootComplete="${'$'}(getprop sys.boot_completed 2>/dev/null)"
+        case "${'$'}bootComplete" in 0|1) ;; *) bootComplete=unknown ;; esac
+        uptimeSeconds="${'$'}(cut -d. -f1 /proc/uptime 2>/dev/null)"
         alignment="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" state)"
         alignmentMode="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" mode)"
         alignmentReason="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" reason)"
@@ -108,6 +158,23 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'inventory=%s\n' "${'$'}inventory"
             printf 'engineState=%s\n' "${'$'}{engine:-missing}"
             printf 'templateState=%s\n' "${'$'}{template:-missing}"
+            printf 'legacyMode=%s\n' "${'$'}legacyMode"
+            printf 'stockScanPending=%s\n' "${'$'}stockScanPending"
+            printf 'templatePresent=%s\n' "${'$'}templatePresent"
+            printf 'templateCaptureRevision=%s\n' "${'$'}(safe_uint "${'$'}(read_value "${'$'}CFG/device-font-template.state" captureRevision)")"
+            printf 'templatePendingState=%s\n' "${'$'}{templatePending:-none}"
+            printf 'templatePendingReason=%s\n' "${'$'}templatePendingReason"
+            printf 'bootScanResult=%s\n' "${'$'}bootScanResult"
+            printf 'bootScanReceiptSchema=%s\n' "${'$'}bootScanSchema"
+            printf 'bootScanCurrentBoot=%s\n' "${'$'}bootScanCurrentBoot"
+            printf 'bootScanBudgetSeconds=%s\n' "${'$'}bootScanBudget"
+            printf 'bootScanElapsedSeconds=%s\n' "${'$'}bootScanElapsed"
+            printf 'bootScanInventoryPublished=%s\n' "${'$'}bootScanPublished"
+            printf 'bootScanTimingScope=stock-scan-launcher-including-cleanup; not phone boot duration\n'
+            printf 'payloadBootState=%s\n' "${'$'}payloadBootState"
+            printf 'rebootPending=%s\n' "${'$'}rebootPending"
+            printf 'sysBootCompleted=%s\n' "${'$'}bootComplete"
+            printf 'uptimeSeconds=%s\n' "${'$'}(safe_uint "${'$'}uptimeSeconds")"
             printf 'alignmentState=%s\n' "${'$'}{alignment:-pending}"
             printf 'alignmentMode=%s\n' "${'$'}{alignmentMode:-compatibility}"
             printf 'alignmentReason=%s\n' "${'$'}{alignmentReason:-none}"

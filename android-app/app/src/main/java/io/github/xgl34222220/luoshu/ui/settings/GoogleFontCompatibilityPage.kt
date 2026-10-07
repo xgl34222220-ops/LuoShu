@@ -122,6 +122,17 @@ internal fun GoogleFontCompatibilityPage() {
             }
         }
         item {
+            GoogleCompatibilityCard("复发现场") {
+                GoogleCompatibilityText("再次变回默认时，先别重开兼容或重启，导出一次现场。只读采样，不改设置。")
+                OutlinedButton(enabled = idle, onClick = { model.exportDiagnostic(context) },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    Text(if (model.diagnosticBusy) "正在采集现场…" else "导出复发诊断")
+                }
+                if (model.diagnosticPath.isNotBlank()) GoogleCompatibilityText("已保存：${model.diagnosticPath}")
+                if (model.diagnosticError.isNotBlank()) Text(model.diagnosticError, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+            }
+        }
+        item {
             GoogleCompatibilityCard("怎么用") {
                 GoogleCompatibilityText("只在谷歌应用英文、数字反复恢复默认，而中文仍正常时使用。")
                 GoogleStepCard("1", "先应用字体", "在洛书应用需要的中文、英文和数字字体，并按提示完成重启。")
@@ -151,17 +162,6 @@ internal fun GoogleFontCompatibilityPage() {
                         lineHeight = 20.sp,
                     )
                 }
-            }
-        }
-        item {
-            GoogleCompatibilityCard("复发现场") {
-                GoogleCompatibilityText("一加或其他系统用一会又回到默认时，先保持现场，别关闭重开兼容或重启。导出这一个文件即可区分组件设置回退和字体缓存、挂载或系统路由问题。")
-                GoogleCompatibilityText("只读采样当前用户的 Google 字体状态；报告不含账户、缓存正文、聊天或原字体名称，也不会切换兼容、清缓存或重启应用。进入洛书维护前的采样会另附时间和阶段，不当作当前效果已通过。")
-                OutlinedButton(enabled = idle, onClick = { model.exportDiagnostic(context) }, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (model.diagnosticBusy) "正在采集现场…" else "导出复发诊断")
-                }
-                if (model.diagnosticPath.isNotBlank()) GoogleCompatibilityText("已保存：${model.diagnosticPath}")
-                if (model.diagnosticError.isNotBlank()) Text(model.diagnosticError, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
             }
         }
         item {
@@ -201,6 +201,8 @@ internal fun GoogleFontCompatibilityPage() {
                         GoogleCompatibilityText("此设置跨重启保留。停用模块不会保证自动撤销；停用或卸载洛书前，请先点击「恢复原设置」并完整重启；卸载脚本也会尝试恢复有记录的设置。")
                         GoogleCompatibilityText("自动维护只处理有软件包更新证据的已授权组件默认回退，不覆盖明确启用或与最后核验相同修订的外部修改。组件仍停用但字体回退，需要另查资源和缓存。洛书退出后不常驻监听，下次开机、应用字体或进入洛书时再核验。")
                         GoogleCompatibilityText("不保证替换应用内置字体、网页指定字体或已经打开的旧字体，也不会自动封禁联网或强停前台应用。")
+                        GoogleCompatibilityText("复发诊断仅采样当前用户的 Google 组件、字体资源身份与挂载状态，帮助区分设置回退和缓存、系统路由问题；不含账户、缓存正文、聊天或原字体名称。")
+                        GoogleCompatibilityText("报告另附进入洛书维护前采样的时间与阶段，不将旧采样当作当前字体显示已通过。采集不会切换兼容、清缓存或重启应用。")
                     }
                 }
             }
