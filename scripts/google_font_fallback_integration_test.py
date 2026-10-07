@@ -392,7 +392,7 @@ class OwnedRecoveryTest(unittest.TestCase):
                 patch.object(m, 'MODULE', self.module), \
                 patch('sys.argv', ['google_font_fallback.py', 'reconcile-owned', '--user', '0', '--json']), \
                 contextlib.redirect_stdout(output):
-            self.assertIs(m.locked_store.__globals__['os'], os)
+            self.assertIs(m.locked_store.__wrapped__.__globals__['os'], os)
             self.assertEqual(m.main(), 0, output.getvalue())
         result = json.loads(output.getvalue())
         self.assertTrue(result['recoveredAfterUpgrade'])

@@ -228,6 +228,21 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertIn("encoder not available", run.recordings[0]["error"])
             self.assertEqual([], run.checks)
 
+    def test_launch_recording_is_opt_in_without_replacing_the_real_launch_checks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            root = self.hierarchy()
+            run.launch_and_capture = Mock(return_value=root)
+            run.begin_launch_recording = Mock(return_value=Mock())
+            run.finish_launch_recording = Mock()
+            self.assertIs(root, run.launch("cold-start"))
+            run.begin_launch_recording.assert_not_called()
+            run.launch_and_capture.assert_called_once_with("cold-start")
+            run.record_launch = True
+            self.assertIs(root, run.launch("cold-start"))
+            run.begin_launch_recording.assert_called_once()
+            run.finish_launch_recording.assert_called_once_with(run.begin_launch_recording.return_value)
+
     def test_successful_platform_dump_stays_on_normal_backend_and_keeps_cli_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)

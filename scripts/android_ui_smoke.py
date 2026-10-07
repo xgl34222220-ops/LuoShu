@@ -266,7 +266,8 @@ def instrumentation_results(output: str) -> dict[str, str]:
 
 
 class SmokeRun:
-    def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None):
+    def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None,
+                 record_launch: bool = False):
         self.apk = apk
         self.output = output
         self.package = package
@@ -275,6 +276,7 @@ class SmokeRun:
         self.results: list[dict[str, object]] = []
         self.checks: list[dict[str, object]] = []
         self.recordings: list[dict[str, object]] = []
+        self.record_launch = record_launch
         self.api_level: int | None = None
         self.snapshot_apk = snapshot_apk
         self.hierarchy_attempts = 0
@@ -486,7 +488,7 @@ class SmokeRun:
         print(f"Verified {name}", flush=True)
 
     def launch(self, name: str) -> ET.Element:
-        recording = self.begin_launch_recording() if name == "cold-start" else None
+        recording = self.begin_launch_recording() if name == "cold-start" and self.record_launch else None
         try:
             return self.launch_and_capture(name)
         finally:
@@ -825,6 +827,10 @@ class SmokeRun:
         for filename, arguments in (
             ("logcat.txt", ("logcat", "-b", "all", "-d", "-v", "threadtime")),
             ("activity.txt", ("shell", "dumpsys", "activity", "activities")),
+            ("last-anr.txt", ("shell", "dumpsys", "activity", "lastanr")),
+            ("anr-traces.txt", ("shell", "dumpsys", "activity", "lastanr-traces")),
+            ("window.txt", ("shell", "dumpsys", "window")),
+            ("dropbox-anr.txt", ("shell", "dumpsys", "dropbox", "--print", "data_app_anr")),
             ("memory.txt", ("shell", "dumpsys", "meminfo", self.package)),
             ("uimode.txt", ("shell", "dumpsys", "uimode")),
             ("device.txt", ("shell", "getprop")),
@@ -843,6 +849,8 @@ def main() -> int:
     parser.add_argument("--serial")
     parser.add_argument("--snapshot-apk", type=Path,
                         help="Independent UiAutomation test APK for reading live hierarchy when the platform dump cannot reach global idle")
+    parser.add_argument("--record-launch", action="store_true",
+                        help="Optional raw cold-start video evidence; disabled by default to keep encoding load out of UI validation")
     args = parser.parse_args()
     if not args.apk.is_file():
         parser.error(f"APK does not exist: {args.apk}")
@@ -851,7 +859,8 @@ def main() -> int:
     if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+", args.package):
         parser.error("Invalid Android package name")
     run = SmokeRun(args.apk.resolve(), args.output.resolve(), args.package, args.serial,
-                   args.snapshot_apk.resolve() if args.snapshot_apk is not None else None)
+                   args.snapshot_apk.resolve() if args.snapshot_apk is not None else None,
+                   record_launch=args.record_launch)
     error = None
     try:
         run.run()
@@ -873,6 +882,7 @@ def main() -> int:
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
                    "hierarchy_backend": run.hierarchy_backend,
+                   "launch_recording_enabled": run.record_launch,
                    "screens": run.results, "checks": run.checks, "recordings": run.recordings}
         (run.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 0 if error is None else 1
