@@ -9,6 +9,7 @@ import stat
 import subprocess
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 from google_font_fallback_test import m, FakeAndroid
@@ -381,18 +382,40 @@ class OwnedRecoveryTest(unittest.TestCase):
         self.enable()
         self.upgrade_reset()
         output = io.StringIO()
-        with patch.object(m, 'Android', return_value=self.backend), \
+        # Mock only the CLI's privileged-caller boundary. Replacing its os
+        # reference keeps the standalone core's real getuid/file-owner/lock
+        # checks intact on both root containers and non-root CI runners.
+        with patch.object(m, 'os', SimpleNamespace(geteuid=lambda: 0)), \
+                patch.object(m, 'Android', return_value=self.backend), \
                 patch.object(m, 'STORE', self.store), \
                 patch.object(m, 'LEGACY_STORE', self.root / 'legacy'), \
                 patch.object(m, 'MODULE', self.module), \
                 patch('sys.argv', ['google_font_fallback.py', 'reconcile-owned', '--user', '0', '--json']), \
                 contextlib.redirect_stdout(output):
-            self.assertEqual(m.main(), 0)
+            self.assertIs(m.locked_store.__globals__['os'], os)
+            self.assertEqual(m.main(), 0, output.getvalue())
         result = json.loads(output.getvalue())
         self.assertTrue(result['recoveredAfterUpgrade'])
         self.assertEqual(result['current']['state'], 'enabled')
         self.assertTrue(result['current']['canReapply'])
         self.assertEqual(self.backend.calls, [(0, 2)])
+
+    def test_non_root_cli_recovery_refuses_before_any_backend_or_journal_mutation(self):
+        self.enable()
+        self.upgrade_reset()
+        before = self.journal.path.read_bytes()
+        output = io.StringIO()
+        with patch.object(m, 'os', SimpleNamespace(geteuid=lambda: 1001)), \
+                patch.object(m, 'Android') as backend, \
+                patch('sys.argv', ['google_font_fallback.py', 'reconcile-owned', '--user', '0', '--json']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(m.main(), 1, output.getvalue())
+            backend.assert_not_called()
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('需要 Root', result['message'])
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
 
 
 class JournalMigrationTest(unittest.TestCase):
