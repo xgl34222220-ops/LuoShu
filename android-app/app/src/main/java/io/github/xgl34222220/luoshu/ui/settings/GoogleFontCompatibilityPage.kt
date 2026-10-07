@@ -65,6 +65,7 @@ internal fun GoogleFontCompatibilityPage() {
     val model: GoogleFontCompatibilityModel = viewModel()
     val state = model.ui
     val owner = LocalLifecycleOwner.current
+    val context = LocalContext.current.applicationContext
     val maintenanceCompletion = (LocalContext.current.applicationContext as? LuoShuApplication)
         ?.maintenanceCompletion?.collectAsStateWithLifecycle()?.value ?: 0L
     var confirmAction by rememberSaveable { mutableStateOf<String?>(null) }
@@ -77,7 +78,7 @@ internal fun GoogleFontCompatibilityPage() {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
-    val idle = !state.loading && !state.busy
+    val idle = !state.loading && !state.busy && !model.diagnosticBusy
     LazyColumn(
         contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp,
             bottom = maxOf(LocalDockContentPadding.current, 24.dp)),
@@ -153,6 +154,17 @@ internal fun GoogleFontCompatibilityPage() {
             }
         }
         item {
+            GoogleCompatibilityCard("复发现场") {
+                GoogleCompatibilityText("一加或其他系统用一会又回到默认时，先保持现场，别关闭重开兼容或重启。导出这一个文件即可区分组件设置回退和字体缓存、挂载或系统路由问题。")
+                GoogleCompatibilityText("只读采样当前用户的 Google 字体状态；报告不含账户、缓存正文、聊天或原字体名称，也不会切换兼容、清缓存或重启应用。进入洛书维护前的采样会另附时间和阶段，不当作当前效果已通过。")
+                OutlinedButton(enabled = idle, onClick = { model.exportDiagnostic(context) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (model.diagnosticBusy) "正在采集现场…" else "导出复发诊断")
+                }
+                if (model.diagnosticPath.isNotBlank()) GoogleCompatibilityText("已保存：${model.diagnosticPath}")
+                if (model.diagnosticError.isNotBlank()) Text(model.diagnosticError, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+            }
+        }
+        item {
             GoogleCompatibilityCard("影响与恢复") {
                 Row(
                     modifier = Modifier
@@ -187,7 +199,7 @@ internal fun GoogleFontCompatibilityPage() {
                         GoogleCompatibilityText("只停用当前用户的 Google 下载字体提供组件，不停用整个谷歌服务，不删除字体缓存、账户或应用数据。")
                         GoogleCompatibilityText("会影响该用户所有依赖 GMS 下载字体的应用，可能涉及下载式表情字体；修改时相关 GMS 进程可能重启。")
                         GoogleCompatibilityText("此设置跨重启保留。停用模块不会保证自动撤销；停用或卸载洛书前，请先点击「恢复原设置」并完整重启；卸载脚本也会尝试恢复有记录的设置。")
-                        GoogleCompatibilityText("自动维护仅处理同一安装身份的 GMS 新版本重置，不覆盖明确启用或同版本外部修改。洛书进程退出后不会常驻监听更新，下次开机、应用字体或进入洛书时再核验。")
+                        GoogleCompatibilityText("自动维护只处理有软件包更新证据的已授权组件默认回退，不覆盖明确启用或与最后核验相同修订的外部修改。组件仍停用但字体回退，需要另查资源和缓存。洛书退出后不常驻监听，下次开机、应用字体或进入洛书时再核验。")
                         GoogleCompatibilityText("不保证替换应用内置字体、网页指定字体或已经打开的旧字体，也不会自动封禁联网或强停前台应用。")
                     }
                 }

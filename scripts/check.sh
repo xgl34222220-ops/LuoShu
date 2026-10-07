@@ -33,6 +33,7 @@ python3 -m py_compile \
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py" "$ROOT/common/font_live_payload.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
 python3 "$ROOT/scripts/apk_packaging_metadata_test.py"
+python3 "$ROOT/scripts/android_launch_source_test.py"
 sh "$ROOT/scripts/font_next_transaction_test.sh"
 python3 "$ROOT/scripts/font_live_switch_test.py"
 sh "$ROOT/scripts/runtime_paths_test.sh"
@@ -278,6 +279,8 @@ python3 "$ROOT/scripts/font_inventory_symlink_test.py"
 python3 "$ROOT/scripts/hyperos_cjk_routing_test.py"
 python3 "$ROOT/scripts/google_font_fallback_test.py"
 python3 "$ROOT/scripts/google_font_fallback_integration_test.py"
+python3 "$ROOT/scripts/google_font_diagnostic_test.py"
+python3 "$ROOT/scripts/google_font_diagnostic_app_test.py"
 python3 "$ROOT/scripts/google_font_provider_lifecycle_test.py"
 python3 "$ROOT/scripts/google_font_refresh_test.py"
 python3 "$ROOT/scripts/google_font_provider_journal_test.py"
@@ -348,4 +351,3 @@ grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
 grep -q 'prepared-v8' common/multiweight_mix_task.sh
-

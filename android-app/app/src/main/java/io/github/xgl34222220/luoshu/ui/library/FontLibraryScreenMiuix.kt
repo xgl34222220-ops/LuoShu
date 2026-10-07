@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -134,7 +135,8 @@ internal fun FontLibraryScreenMiuix(
             TextField(
                 value = state.query,
                 onValueChange = actions.setQuery,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
+                textStyle = MaterialTheme.typography.bodyMedium,
                 singleLine = true,
                 shape = LuoShuSmoothShape(20.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
@@ -392,7 +394,9 @@ private fun MiuixFontRow(
             if (font.valid) {
                 Surface(
                     shape = LuoShuSmoothShape(18.dp),
-                    color = if (active) scheme.primary.copy(alpha = .07f) else textPrimary.copy(alpha = .035f),
+                    color = LocalMiuixTokens.current.insetBackground,
+                    border = BorderStroke(1.dp, if (active) scheme.primary.copy(alpha = .20f)
+                        else LocalMiuixTokens.current.insetOutline),
                 ) {
                     NativeFontPreview(
                         font = font,
@@ -455,13 +459,28 @@ private fun ChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
         animationSpec = tween(LuoShuMotionTokens.Fast),
         label = "fontFilterColor",
     )
-    Surface(
-        modifier = Modifier.clip(LuoShuSmoothShape(16.dp)).selectable(selected = active, role = Role.Tab, onClick = onClick),
-        shape = LuoShuSmoothShape(16.dp),
-        color = containerColor,
+    // A compact visible pill keeps the full 48 dp selectable touch region.
+    Box(
+        modifier = Modifier.defaultMinSize(minHeight = 48.dp).clip(LuoShuSmoothShape(16.dp))
+            .selectable(selected = active, role = Role.Tab, onClick = onClick)
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
-            Text(label, color = if (active) scheme.onPrimary else scheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Surface(
+            shape = LuoShuSmoothShape(14.dp),
+            color = containerColor,
+            border = BorderStroke(1.dp, if (active) scheme.primary.copy(alpha = .28f)
+                else LocalMiuixTokens.current.insetOutline),
+        ) {
+            Row(
+                Modifier.heightIn(min = 40.dp).padding(horizontal = 14.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (active) Icon(Icons.Rounded.Check, null, tint = scheme.onPrimary, modifier = Modifier.size(14.dp))
+                Text(label, color = if (active) scheme.onPrimary else LocalMiuixTokens.current.textPrimary,
+                    style = MaterialTheme.typography.labelLarge, fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium)
+            }
         }
     }
 }

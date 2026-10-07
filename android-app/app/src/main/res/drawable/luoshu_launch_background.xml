@@ -1,14 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <shape android:shape="rectangle">
-            <gradient android:angle="315" android:startColor="@color/launch_gradient_start"
-                android:centerColor="@color/launch_gradient_center" android:endColor="@color/launch_gradient_end" />
-        </shape>
-    </item>
-    <item
-        android:width="288dp"
-        android:height="288dp"
-        android:gravity="center"
-        android:drawable="@drawable/ic_luoshu_launch" />
-</layer-list>
+<!-- The legacy starting window and App theme contain only a gradient, never another logo page. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:angle="315" android:startColor="@color/launch_gradient_start"
+        android:centerColor="@color/launch_gradient_center" android:endColor="@color/launch_gradient_end" />
+</shape>

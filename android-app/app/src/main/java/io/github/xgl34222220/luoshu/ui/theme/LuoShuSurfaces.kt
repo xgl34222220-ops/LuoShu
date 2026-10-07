@@ -48,6 +48,30 @@ internal fun Modifier.luoShuGlassHighlight(
     }
 }
 
+/** A quiet inner layer for samples and summaries, without another shadow or blur pass. */
+@Composable
+internal fun LuoShuInsetPanel(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val tokens = LocalMiuixTokens.current
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = LuoShuSmoothShape(18.dp),
+        color = tokens.insetBackground,
+        contentColor = tokens.textPrimary,
+        border = BorderStroke(1.dp, tokens.insetOutline),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
+}
+
 /** A shared translucent material without a blur pass or frame producer for every card. */
 @Composable
 internal fun LuoShuSurfaceCard(

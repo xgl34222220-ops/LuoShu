@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -153,9 +155,11 @@ private fun MiuixCompositionMap(state: FontStudioUiState, actions: FontStudioAct
                 .padding(20.dp),
         ) {
             Text("组合你的专属字体", color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text("中文、英文、数字，分别挑选喜欢的样子。", color = tokens.textSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("中文、英文、数字，分别挑选喜欢的样子。", color = tokens.textSecondary,
+                style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.slots.forEach { slot ->
                     MiuixSlotSummary(slot, Modifier.weight(1f), !state.busy && !state.operationBusy) { actions.pickSlot(slot.slot) }
                 }
@@ -170,12 +174,13 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enable
     Surface(
         onClick = onSelect,
         enabled = enabled,
-        modifier = modifier,
+        modifier = modifier.fillMaxHeight(),
         shape = LuoShuSmoothShape(16.dp),
-        color = if (slot.font == null) tokens.textPrimary.copy(alpha = .045f)
-        else MaterialTheme.colorScheme.primary.copy(alpha = .11f),
+        color = tokens.insetBackground,
+        border = BorderStroke(1.dp, if (slot.font != null) MaterialTheme.colorScheme.primary.copy(alpha = .24f)
+            else tokens.insetOutline),
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 when (slot.slot) {
                     MixSlot.Cjk -> "中"
@@ -184,14 +189,15 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enable
                 },
                 color = MaterialTheme.colorScheme.primary,
                 fontSize = 24.sp,
+                lineHeight = 30.sp,
                 fontWeight = FontWeight.Medium,
             )
-            Spacer(Modifier.height(5.dp))
-            Text(slot.title, color = tokens.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(slot.title, color = tokens.textPrimary, style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold)
             Text(
                 slot.font?.name ?: "未选择",
                 color = tokens.textSecondary,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

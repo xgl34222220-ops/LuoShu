@@ -12,7 +12,7 @@ from unittest.mock import Mock
 from android_ui_smoke import (
     action_disabled, anchors_preserved, app_labels, center, choice_selected, content_anchors,
     crash_reason, label_target, orientation_matches, page_ready, tab_target,
-    SmokeRun, instrumentation_results, library_state_preserved,
+    SmokeRun, instrumentation_results, library_state_preserved, assert_single_stage_startup,
     legacy_manual_colors_ready, legacy_monet_unavailable,
 )
 
@@ -227,6 +227,39 @@ class UiSmokeHarnessTest(unittest.TestCase):
             self.assertFalse(run.recordings[0]["available"])
             self.assertIn("encoder not available", run.recordings[0]["error"])
             self.assertEqual([], run.checks)
+
+    def startup_log(self, events, pid="123"):
+        return "\n".join(f"10-07 12:37:43.668 {pid} {pid} I LuoShuStartup: event={event} elapsedMs=12"
+                         for event in events)
+
+    def test_single_stage_startup_requires_current_pid_and_actual_content_evidence(self):
+        events = ["first_decor_draw", "native_exit_received", "native_removed",
+                  "content_draw_delivered", "launch_complete"]
+        log = self.startup_log(events)
+        self.assertEqual(events, assert_single_stage_startup(log, "123", 36))
+        with self.assertRaisesRegex(RuntimeError, "missing startup evidence"):
+            assert_single_stage_startup(log, "999", 36)
+        with self.assertRaisesRegex(RuntimeError, "content_draw_delivered"):
+            assert_single_stage_startup(self.startup_log(["first_decor_draw", "launch_complete"]), "123", 28)
+
+    def test_single_stage_startup_rejects_a_second_brand_layer_and_deferred_native_exit(self):
+        events = ["first_decor_draw", "content_draw_delivered", "launch_complete"]
+        with self.assertRaisesRegex(RuntimeError, "second branded"):
+            assert_single_stage_startup(self.startup_log(events + ["art_fade_start"]), "123", 36)
+        with self.assertRaisesRegex(RuntimeError, "matching removal"):
+            assert_single_stage_startup(self.startup_log(events + ["native_exit_received"]), "123", 36)
+        with self.assertRaisesRegex(RuntimeError, "deferred"):
+            assert_single_stage_startup(self.startup_log(["first_decor_draw", "native_exit_received",
+                "content_draw_delivered", "native_removed", "launch_complete"]), "123", 36)
+
+    def test_single_stage_startup_legacy_and_late_native_callback_both_work(self):
+        events = ["first_decor_draw", "content_draw_delivered", "launch_complete"]
+        self.assertEqual(events, assert_single_stage_startup(self.startup_log(events), "123", 30))
+        late = events + ["native_exit_received", "native_removed"]
+        self.assertEqual(late, assert_single_stage_startup(self.startup_log(late), "123", 36))
+        # Earlier-process art events cannot contaminate the current process's verdict.
+        log = self.startup_log(["art_fade_start"], "999") + "\n" + self.startup_log(late)
+        self.assertEqual(late, assert_single_stage_startup(log, "123", 36))
 
     def test_launch_recording_is_opt_in_without_replacing_the_real_launch_checks(self):
         with tempfile.TemporaryDirectory() as temporary:

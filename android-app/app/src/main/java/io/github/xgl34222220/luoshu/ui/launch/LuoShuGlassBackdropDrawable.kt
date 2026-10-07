@@ -12,7 +12,7 @@ import android.graphics.drawable.Drawable
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlassPalette
 import kotlin.math.max
 
-/** Responsive diffuse light shared by the native launch artwork and the real App backdrop. */
+/** Responsive diffuse light shared by the first App Window frame and the real App backdrop. */
 class LuoShuGlassBackdropDrawable(
     private val dark: Boolean,
     private val pureBlack: Boolean = false,

@@ -69,6 +69,7 @@ import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuInsetPanel
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
@@ -133,8 +134,8 @@ internal fun HomeScreenMiuix(
                 Column(
                     Modifier.fillMaxWidth()
                         .background(Brush.linearGradient(listOf(scheme.primary.copy(alpha = .045f), Color.Transparent)))
-                        .padding(22.dp),
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                        .padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(shape = CircleShape, color = cardColor.copy(alpha = .72f)) {
@@ -161,14 +162,14 @@ internal fun HomeScreenMiuix(
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("当前字体", color = textSecondary, style = MaterialTheme.typography.bodySmall)
-                        Text(state.currentFont, color = textPrimary, fontSize = 24.sp, lineHeight = 32.sp,
+                        Text(state.currentFont, color = textPrimary, fontSize = 22.sp, lineHeight = 30.sp,
                             fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("字里行间，自有风格。", color = textPrimary, fontSize = 25.sp, lineHeight = 36.sp,
+                    LuoShuInsetPanel {
+                        Text("字里行间，自有风格。", color = textPrimary, fontSize = 23.sp, lineHeight = 33.sp,
                             fontWeight = FontWeight.Medium)
-                        Text("Aa Bb  ·  0123456789", color = scheme.primary, fontSize = 19.sp,
-                            lineHeight = 28.sp, letterSpacing = .5.sp)
+                        Text("Aa Bb  ·  0123456789", color = scheme.primary, fontSize = 17.sp,
+                            lineHeight = 25.sp, letterSpacing = .5.sp)
                     }
                     Button(
                         onClick = next.onClick,
@@ -302,14 +303,18 @@ private fun HomeShortcut(title: String, subtitle: String, icon: ImageVector, onC
         shadowElevation = tokens.cardShadowElevation,
         border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
-        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(shape = LuoShuSmoothShape(15.dp), color = tokens.elevatedCardBackground) {
-                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
-                    LuoShuGlyph(icon, null, LuoShuIconTokens.StatusGlyph, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = LuoShuSmoothShape(14.dp), color = tokens.insetBackground) {
+                    Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                        LuoShuGlyph(icon, null, LuoShuIconTokens.StatusGlyph, tint = MaterialTheme.colorScheme.primary)
+                    }
                 }
+                Spacer(Modifier.weight(1f))
+                LuoShuGlyph(Icons.Rounded.ChevronRight, null, LuoShuIconTokens.TrailingGlyph, tint = tokens.textSecondary)
             }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, color = tokens.textPrimary, style = MaterialTheme.typography.titleMedium)
+                Text(title, color = tokens.textPrimary, style = MaterialTheme.typography.titleSmall)
                 Text(subtitle, color = tokens.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }

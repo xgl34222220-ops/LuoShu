@@ -24,12 +24,12 @@ import io.github.xgl34222220.luoshu.ui.appearance.AppearanceRepository
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.launch.LuoShuLaunchController
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var openTaskCenter by mutableStateOf(false)
     private var firstDrawListener: ViewTreeObserver.OnDrawListener? = null
+    private var firstDrawCallback: Runnable? = null
     private var firstContentDrawn = false
     private val launchController by lazy(LazyThreadSafetyMode.NONE) {
         LuoShuLaunchController(this)
@@ -50,7 +50,6 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
         launchController.install(
-            skipExitAnimation = savedInstanceState != null || openTaskCenter,
             startedAt = activityStartedAt,
             onComplete = ::requestImportNotificationPermissionWhenReady,
         )
@@ -58,7 +57,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             if (openTaskCenter) TaskCenterHost() else LuoShuHost()
         }
-        launchController.attachArtwork()
         observeFirstDraw(activityStartedAt)
     }
 
@@ -71,12 +69,15 @@ class MainActivity : ComponentActivity() {
                 val elapsed = SystemClock.elapsedRealtime() - startedAt
                 Log.i("LuoShuStartup", "event=first_decor_draw elapsedMs=$elapsed activityFirstDrawMs=$elapsed")
                 // Android forbids removing an OnDrawListener while dispatching onDraw.
-                view.post {
+                firstDrawCallback = Runnable {
+                    firstDrawCallback = null
                     removeFirstDrawListener()
-                    firstContentDrawn = true
-                    launchController.onContentDrawn()
-                    requestImportNotificationPermissionWhenReady()
-                }
+                    if (!isFinishing && !isDestroyed) {
+                        firstContentDrawn = true
+                        launchController.onContentDrawn()
+                        requestImportNotificationPermissionWhenReady()
+                    }
+                }.also { view.post(it) }
             }
         }
         firstDrawListener = listener
@@ -92,6 +93,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        firstDrawCallback?.let(window.decorView::removeCallbacks)
+        firstDrawCallback = null
         removeFirstDrawListener()
         launchController.dispose()
         super.onDestroy()
@@ -105,7 +108,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         displayPerformanceController.onResume()
-        launchController.resume()
         requestImportNotificationPermissionWhenReady()
     }
 
@@ -167,17 +169,16 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 appearanceRepository.settings
-                    .map { settings -> Triple(settings.highRefreshRate, settings.themeMode, settings.amoledBlack) }
                     .distinctUntilChanged()
-                    .collect { (highRefresh, themeMode, amoledBlack) ->
-                        displayPerformanceController.setHighRefreshEnabled(highRefresh)
-                        val dark = when (themeMode) {
+                    .collect { settings ->
+                        displayPerformanceController.setHighRefreshEnabled(settings.highRefreshRate)
+                        val dark = when (settings.themeMode) {
                             ThemeMode.LIGHT -> false
                             ThemeMode.DARK -> true
                             ThemeMode.SYSTEM -> resources.configuration.uiMode and
                                 Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
                         }
-                        launchController.applyAppearance(dark, dark && amoledBlack)
+                        launchController.applyAppearance(dark, dark && settings.amoledBlack, settings.glassEnabled)
                     }
             }
         }

@@ -105,6 +105,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuInsetPanel
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 
 data class AppearanceActions(
@@ -342,8 +343,8 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
                 }
                 Icon(Icons.Rounded.ChevronRight, null, tint = tokens.textSecondary, modifier = Modifier.size(22.dp))
             }
-            Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .045f)) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            LuoShuInsetPanel {
+                Column(Modifier.fillMaxWidth()) {
                     Text("当前字体", color = tokens.textSecondary, fontSize = 12.sp)
                     Spacer(Modifier.height(3.dp))
                     Text(
@@ -437,7 +438,7 @@ private fun SettingsNavigationRow(
                 }
             }
             Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(title, color = tokens.textPrimary, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium)
                 Text(
                     subtitle,

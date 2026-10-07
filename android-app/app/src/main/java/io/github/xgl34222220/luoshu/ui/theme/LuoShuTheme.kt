@@ -63,6 +63,8 @@ data class MiuixTokens(
     val glassHighlight: Color = Color.Transparent,
     val glassOutlineBrush: Brush = Brush.linearGradient(listOf(cardOutline, cardOutline)),
     val cardShadowElevation: Dp = 0.dp,
+    val insetBackground: Color = elevatedCardBackground,
+    val insetOutline: Color = cardOutline,
     val success: Color = Color(0xFF27BE83),
     val warning: Color = Color(0xFFF0A532),
 ) {
@@ -142,7 +144,7 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
     val lightFill = Color(0xFFF8FAFF)
     val darkFill = if (pureBlack) Color(0xFF181C26) else Color(0xFF222A3B)
     val cardOutline = if (glass) {
-        Color.White.copy(alpha = if (dark) .16f else .75f)
+        Color.White.copy(alpha = if (dark) .18f else .58f)
     } else {
         scheme.onSurface.copy(alpha = if (dark) .10f else .07f)
     }
@@ -153,14 +155,14 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
             else -> Color(LuoShuGlassPalette.LightBackground)
         },
         cardBackground = when {
-            glass && dark -> darkFill.copy(alpha = .70f)
-            glass -> lightFill.copy(alpha = .72f)
+            glass && dark -> darkFill.copy(alpha = .80f)
+            glass -> lightFill.copy(alpha = .82f)
             dark -> darkFill
             else -> lightFill
         },
         elevatedCardBackground = when {
-            glass && dark -> Color(0xFF35405A).copy(alpha = .72f)
-            glass -> Color.White.copy(alpha = .66f)
+            glass && dark -> Color(0xFF35405A).copy(alpha = .78f)
+            glass -> Color.White.copy(alpha = .78f)
             dark -> Color(0xFF30384A)
             else -> lerp(lightFill, scheme.primaryContainer, .06f)
         },
@@ -174,17 +176,25 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
             dark -> darkFill
             else -> lightFill
         },
-        glassHighlight = if (glass) Color.White.copy(alpha = if (dark) .07f else .28f) else Color.Transparent,
+        glassHighlight = if (glass) Color.White.copy(alpha = if (dark) .045f else .14f) else Color.Transparent,
         glassOutlineBrush = Brush.linearGradient(
             if (glass) {
                 listOf(
-                    Color.White.copy(alpha = if (dark) .24f else .90f),
-                    Color.White.copy(alpha = if (dark) .055f else .30f),
-                    Color(LuoShuGlassPalette.BlueGlow).copy(alpha = if (dark) .22f else .20f),
+                    Color.White.copy(alpha = if (dark) .22f else .64f),
+                    Color.White.copy(alpha = if (dark) .065f else .22f),
+                    Color(LuoShuGlassPalette.BlueGlow).copy(alpha = if (dark) .18f else .14f),
                 )
             } else listOf(cardOutline, cardOutline),
         ),
-        cardShadowElevation = if (glass) if (dark) 1.dp else 2.dp else 0.dp,
+        // One quiet edge separates cards; inset content does not stack another shadow.
+        cardShadowElevation = if (glass) 1.dp else 0.dp,
+        insetBackground = when {
+            glass && dark -> Color(0xFF343F55).copy(alpha = .60f)
+            glass -> Color(0xFFEEF2FA).copy(alpha = .84f)
+            dark -> Color(0xFF303A4E)
+            else -> Color(0xFFEEF2FA)
+        },
+        insetOutline = scheme.onSurface.copy(alpha = if (dark) .08f else .045f),
         success = if (dark) Color(0xFF69D9AD) else Color(0xFF187B58),
         warning = if (dark) Color(0xFFF3C378) else Color(0xFF956319),
     )

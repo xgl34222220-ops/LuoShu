@@ -271,9 +271,9 @@ grep -q 'rememberSaveable' "$ROUTE"
 grep -q 'selected = active, role = Role.Tab' "$MIUIX"
 grep -q 'LuoShuSmoothShape(24.dp)' "$MIUIX"
 grep -q 'defaultElevation = tokens.cardShadowElevation' "$MIUIX"
-grep -q 'cardShadowElevation = if (glass) if (dark) 1.dp else 2.dp else 0.dp' "$THEME"
-grep -q 'glass && dark -> darkFill.copy(alpha = .70f)' "$THEME"
-grep -q 'glass -> lightFill.copy(alpha = .72f)' "$THEME"
+# Validate translucent light/dark roles and a low-cost elevation range instead
+# of pinning the old decorative opacity and oversized bright-mode shadow.
+python3 "$ROOT/scripts/glass_visual_hierarchy_test.py"
 grep -q 'glassOutlineBrush = Brush.linearGradient' "$THEME"
 for SCREEN in "$MIUIX" "$HOME_MIUIX" "$STUDIO_MIUIX" "$LOGS_MIUIX" "$SETTINGS"; do
     grep -q 'glassOutlineBrush' "$SCREEN"

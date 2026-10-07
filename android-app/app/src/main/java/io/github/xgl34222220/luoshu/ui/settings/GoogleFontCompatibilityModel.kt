@@ -1,12 +1,14 @@
 package io.github.xgl34222220.luoshu.ui.settings
 
 import android.os.Process
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.xgl34222220.luoshu.RootShell
+import io.github.xgl34222220.luoshu.GoogleFontDiagnosticEvidence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -80,6 +82,36 @@ internal class GoogleFontCompatibilityModel : ViewModel() {
         private set
     private var running = false
     private var refreshPending = false
+    var diagnosticBusy by mutableStateOf(false)
+        private set
+    var diagnosticPath by mutableStateOf("")
+        private set
+    var diagnosticError by mutableStateOf("")
+        private set
+
+    fun exportDiagnostic(context: Context) {
+        if (running) return
+        running = true
+        diagnosticBusy = true
+        diagnosticPath = ""
+        diagnosticError = ""
+        viewModelScope.launch {
+            try {
+                diagnosticPath = GoogleFontDiagnosticEvidence(context).export(appUser)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnosticError = error.message ?: "复发诊断生成失败，请重试。"
+            } finally {
+                diagnosticBusy = false
+                running = false
+                if (refreshPending) {
+                    refreshPending = false
+                    request("status")
+                }
+            }
+        }
+    }
 
     fun refresh() {
         // A maintenance completion may arrive while an older read still owns

@@ -1,7 +1,6 @@
 package io.github.xgl34222220.luoshu
 
 import android.app.Activity
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -84,11 +83,9 @@ internal fun LuoShuHost() {
             }
         }
 
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(pageBackground),
-        ) {
+        // The Window owns the edge-to-edge backdrop. Keep the inset host clear
+        // so status-bar and side insets show that same material.
+        Box(modifier = Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

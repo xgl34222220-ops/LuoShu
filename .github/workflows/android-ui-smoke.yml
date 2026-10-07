@@ -141,6 +141,15 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          # udev trigger queues work; wait for the existing permission rule before
+          # asserting readiness. Keep KVM mandatory and expose the actual device
+          # state on failure instead of silently skipping the emulator.
+          sudo udevadm settle --timeout=15
+          for attempt in 1 2 3 4 5; do
+            if test -r /dev/kvm && test -w /dev/kvm; then break; fi
+            sleep 1
+          done
+          ls -l /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
       - name: Capture and verify real App and Google compatibility screens
         uses: reactivecircus/android-emulator-runner@v2
@@ -193,6 +202,15 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          # udev trigger queues work; wait for the existing permission rule before
+          # asserting readiness. Keep KVM mandatory and expose the actual device
+          # state on failure instead of silently skipping the emulator.
+          sudo udevadm settle --timeout=15
+          for attempt in 1 2 3 4 5; do
+            if test -r /dev/kvm && test -w /dev/kvm; then break; fi
+            sleep 1
+          done
+          ls -l /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
       - name: Record real light and dark native artwork handoffs
         uses: reactivecircus/android-emulator-runner@v2

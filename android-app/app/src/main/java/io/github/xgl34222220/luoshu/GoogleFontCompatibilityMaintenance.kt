@@ -26,6 +26,7 @@ internal class GoogleFontCompatibilityMaintenance(
     private val context = context.applicationContext
     private val appUser = Process.myUid() / 100000
     private val gate = GoogleFontMaintenanceGate()
+    private val evidence = GoogleFontDiagnosticEvidence(this.context)
     private val _completion = MutableStateFlow(0L)
     val completion: StateFlow<Long> = _completion.asStateFlow()
     private var registered = false
@@ -90,6 +91,16 @@ internal class GoogleFontCompatibilityMaintenance(
             try {
                 if (!trustedSnapshot) return@launch
                 attempted = true
+                // Preserve the observed state before reconcile can repair it or
+                // checkpoint a new revision. A missing/partial diagnostic must
+                // never silently become proof that the phone's fonts are fixed.
+                try {
+                    evidence.captureBeforeMaintenance(appUser)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.w(TAG, "Pre-maintenance font evidence unavailable: ${error.javaClass.simpleName}")
+                }
                 val result = RootShell.exec(
                     googleFontCommand("reconcile-owned", appUser),
                     timeoutMs = 180_000L,

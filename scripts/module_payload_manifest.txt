@@ -78,6 +78,8 @@ common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
 common/google_font_provider_service.sh
 common/google_font_watch_wait.py
+common/google_font_diagnostic.py
+common/google_font_diagnostic.sh
 common/font_role_check.py
 common/font_role_check.sh
 common/font_runtime_cleanup.sh

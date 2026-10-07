@@ -265,6 +265,27 @@ def instrumentation_results(output: str) -> dict[str, str]:
     return dict(re.findall(r"^INSTRUMENTATION_RESULT: ([A-Za-z_]\w*)=(.*)$", output, re.MULTILINE))
 
 
+def assert_single_stage_startup(log: str, pid: str, api_level: int) -> list[str]:
+    """Inspect this launch's real process events without accepting evidence from an old PID."""
+    events = re.findall(
+        rf"^\S+\s+\S+\s+{re.escape(pid)}\s+\d+\s+I\s+LuoShuStartup\s*:\s+event=(\w+)",
+        log, re.MULTILINE,
+    )
+    if any(event.startswith("art_") for event in events):
+        raise RuntimeError("A second branded App launch layer was reported")
+    for event in ("first_decor_draw", "content_draw_delivered", "launch_complete"):
+        if event not in events:
+            raise RuntimeError(f"Current launch is missing startup evidence: {event}")
+    if api_level >= 31:
+        received = [index for index, event in enumerate(events) if event == "native_exit_received"]
+        removed = [index for index, event in enumerate(events) if event == "native_removed"]
+        if not received or len(received) != len(removed):
+            raise RuntimeError("The system splash did not report matching removal")
+        if any(index + 1 >= len(events) or events[index + 1] != "native_removed" for index in received):
+            raise RuntimeError("The system splash exit was deferred instead of removed in its callback")
+    return events
+
+
 class SmokeRun:
     def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None,
                  record_launch: bool = False, visual_launch_only: bool = False):
@@ -544,7 +565,11 @@ class SmokeRun:
         self.capture(f"{name}-home", root)
         # Keep this launch's events before later system traffic replaces the
         # main log buffer; normal crash checks continue to read every buffer.
-        self.logcat(f"{name}-startup-logcat.txt")
+        startup_log = self.logcat(f"{name}-startup-logcat.txt")
+        pid = self.text("shell", "pidof", self.package).strip().split()[0]
+        events = assert_single_stage_startup(startup_log, pid, self.api_level or 28)
+        self.record(f"{name}-single-stage-startup", events=events,
+                    scope="Current App PID logs plus source gates; raw recording supplies visual evidence")
         self.record(name, ui_ready_seconds=round(time.monotonic() - start, 3),
                     am_total_time_ms=re.search(r"TotalTime:\s*(\d+)", launch).group(1) if re.search(r"TotalTime:\s*(\d+)", launch) else None)
         return root
