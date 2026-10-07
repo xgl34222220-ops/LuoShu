@@ -346,7 +346,9 @@ sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"
 sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
 sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
-sh "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
+# The prior module-build rerun exited inside this gate without identifying the
+# failing command. Trace its isolated fixture; preserve every assertion.
+sh -x "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
 sh "$ROOT/scripts/stock_scan_lock_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"

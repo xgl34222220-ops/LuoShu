@@ -13,12 +13,17 @@ import tempfile
 import time
 import unittest
 
+import fontTools
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE = Path(os.environ.get("LUOSHU_REUSE_TEST_ENGINE", ROOT / "common/legacy_v14_4/v143_auto_multiweight_mix.sh"))
+# check.sh supplies pure FontTools via PYTHONPATH when the host interpreter has
+# no installed copy. Resolve that already imported package for every real child
+# rather than inheriting the Android runtime path set by production run_instance.
+HOST_FONTTOOLS_SITE = str(Path(fontTools.__file__).resolve().parent.parent)
 
 
 def variable_font(path: Path, top: int = 700) -> None:
@@ -69,9 +74,12 @@ class LegacyMixPrepareReuse(unittest.TestCase):
         (self.module / "common/background_task.sh").write_text(
             "luoshu_clear_task_pid() { return 0; }\n")
         self.calls = self.root / "instance-calls.jsonl"
+        self.child_errors = self.root / "instance-errors.jsonl"
         wrapper = self.module / "common/python/bin/luoshu-python"
-        wrapper.write_text('#!/bin/sh\nunset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH\nexec "$HOST_PYTHON" "$MODDIR/common/host-instance.py" "$@"\n')
-        (self.module / "common/host-instance.py").write_text('''import json, os, sys, time
+        wrapper.write_text('#!/bin/sh\nunset PYTHONHOME LD_LIBRARY_PATH\n'
+                           'PYTHONPATH="$REUSE_HOST_FONTTOOLS_SITE"\nexport PYTHONPATH\n'
+                           'exec "$HOST_PYTHON" "$MODDIR/common/host-instance.py" "$@"\n')
+        (self.module / "common/host-instance.py").write_text('''import json, os, subprocess, sys, time
 from pathlib import Path
 if sys.argv[1].endswith('font_instance.py'):
     args = sys.argv[2:]
@@ -86,9 +94,17 @@ if sys.argv[1].endswith('font_instance.py'):
     if os.environ.get('REUSE_CHANGE_GENERATOR') == '1':
         with Path(sys.argv[1]).open('a') as stream:
             stream.write('\\n# generator changed during invocation\\n')
-for name in ('PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH'):
+for name in ('PYTHONHOME', 'LD_LIBRARY_PATH'):
     os.environ.pop(name, None)
-os.execv(sys.executable, [sys.executable, *sys.argv[1:]])
+os.environ['PYTHONPATH'] = os.environ['REUSE_HOST_FONTTOOLS_SITE']
+# The production shell removes its temporary .err on failure. Retain the real
+# Python diagnostic in this isolated fixture before forwarding it unchanged.
+result = subprocess.run([sys.executable, *sys.argv[1:]], stderr=subprocess.PIPE, text=True)
+if result.returncode:
+    with Path(os.environ['REUSE_ERRORS']).open('a') as stream:
+        stream.write(json.dumps({'code': result.returncode, 'stderr': result.stderr}, ensure_ascii=False) + '\\n')
+sys.stderr.write(result.stderr)
+sys.exit(result.returncode)
 ''')
         wrapper.chmod(0o755)
         (self.module / "common/luoshu_composite.sh").write_text(
@@ -103,6 +119,7 @@ printf '%s\\n' '{"status":"ok"}'
         self.env = {**os.environ, "MODDIR": str(self.module), "LUOSHU_PUBLIC_DIR": str(self.public),
                     "LUOSHU_TASK_SCOPE_PIDFILE": str(self.module / ".luoshu-state/tasks/auto_multiweight_worker.pid"),
                     "REUSE_CALLS": str(self.calls), "REUSE_CAPTURED": str(self.captured),
+                    "REUSE_ERRORS": str(self.child_errors), "REUSE_HOST_FONTTOOLS_SITE": HOST_FONTTOOLS_SITE,
                     "HOST_PYTHON": sys.executable}
         definitions = self.script.read_text().split('case "${1:-config}" in', 1)[0]
         self.definitions = self.module / "common/definitions.sh"
@@ -111,13 +128,26 @@ printf '%s\\n' '{"status":"ok"}'
     def instance_calls(self):
         return [json.loads(line) for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
 
+    def child_diagnostics(self):
+        if not self.child_errors.exists():
+            return ""
+        records = [json.loads(line) for line in self.child_errors.read_text().splitlines()]
+        return "".join(f"font_instance exited {record['code']}:\n{record['stderr']}" for record in records)
+
     def prepare(self, requests, *, root=None, extra_env=None):
         root = root or self.taskroot
         root.mkdir(parents=True, exist_ok=True)
         driver = self.module / "prepare.sh"
         driver.write_text('. "$MODDIR/common/definitions.sh"\n_root="$REUSE_ROOT"\n' + requests)
-        return subprocess.run(["sh", str(driver)], env={**self.env, "REUSE_ROOT": str(root), **(extra_env or {})},
-                              capture_output=True, text=True, timeout=20)
+        result = subprocess.run(["sh", str(driver)], env={**self.env, "REUSE_ROOT": str(root), **(extra_env or {})},
+                                capture_output=True, text=True, timeout=20)
+        if result.returncode:
+            result.stderr += self.child_diagnostics()
+        return result
+
+    def assert_prepared(self, requests, *, root=None):
+        result = self.prepare(requests, root=root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_fixed_slot_reuses_exact_instance_and_bytes(self):
         started = time.monotonic()
@@ -179,7 +209,7 @@ done
                           "state": state["state"], "message": state["message"],
                           "instanceCalls": len(self.instance_calls()),
                           "elapsedSeconds": round(time.monotonic() - started, 4)}, ensure_ascii=False), flush=True)
-        self.assertEqual(result.returncode, 0, task.read_text() + result.stderr)
+        self.assertEqual(result.returncode, 0, task.read_text() + result.stderr + self.child_diagnostics())
         self.assertEqual(state["state"], "success")
         roles = {100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular", 500: "Medium",
                  600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black"}
@@ -232,22 +262,22 @@ prepare_source latin Latin wght=500 fixed 100 "$REUSE_ROOT/500-new-generator.ttf
 
     def test_public_replacement_uses_stable_task_snapshot_and_new_task_reloads(self):
         requests = 'prepare_source latin Latin wght=400 fixed 100 "$REUSE_ROOT/result.ttf"\n'
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         first = (self.taskroot / "result.ttf").read_bytes()
         variable_font(self.public / "fonts/Latin-Variable.ttf", top=820)
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         self.assertEqual((self.taskroot / "result.ttf").read_bytes(), first)
         another = self.module / "cache/task-two"
-        self.assertEqual(self.prepare(requests, root=another).returncode, 0)
+        self.assert_prepared(requests, root=another)
         self.assertNotEqual((another / "result.ttf").read_bytes(), first)
         self.assertEqual(len(self.instance_calls()), 2)
 
     def test_selected_public_source_can_be_removed_without_changing_task(self):
         requests = 'prepare_source latin Latin wght=400 fixed 100 "$REUSE_ROOT/result.ttf"\n'
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         first = (self.taskroot / "result.ttf").read_bytes()
         (self.public / "fonts/Latin-Variable.ttf").unlink()
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         self.assertEqual((self.taskroot / "result.ttf").read_bytes(), first)
         self.assertEqual(len(self.instance_calls()), 1)
 
@@ -272,17 +302,17 @@ case "$*" in *source-snapshots*) "{real_cp}" "$REUSE_REPLACEMENT" "$REUSE_PUBLIC
         self.assertFalse((self.taskroot / "result.ttf").exists())
         self.assertEqual(self.instance_calls(), [])
         self.assertFalse(list((self.taskroot / "source-snapshots").glob("*.font")))
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         self.assertEqual(len(self.instance_calls()), 1)
 
     def test_corrupt_prepared_output_is_validated_and_rebuilt(self):
         requests = 'prepare_source latin Latin wght=400 fixed 100 "$REUSE_ROOT/result.ttf"\n'
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         original = (self.taskroot / "result.ttf").read_bytes()
         # Outputs may be hardlinks; corruption must not turn the next hit into
         # a success merely because a nonempty prepared entry exists.
         (self.taskroot / "result.ttf").write_bytes(b"damaged")
-        self.assertEqual(self.prepare(requests).returncode, 0)
+        self.assert_prepared(requests)
         self.assertEqual((self.taskroot / "result.ttf").read_bytes(), original)
         self.assertEqual(len(self.instance_calls()), 2)
 

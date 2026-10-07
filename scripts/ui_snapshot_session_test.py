@@ -185,6 +185,50 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.popen.assert_called_once()
         self.assertTrue(all(0 < timeout <= 20 for _, timeout in self.protocol.calls))
 
+    def test_caller_deadline_covers_first_connection_request_and_matching_response(self):
+        self.protocol.ready_delay = 1.5
+        self.protocol.response_transform = lambda response: None
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.session.capture('hierarchy-0001.xml', deadline=102)
+        self.assertLessEqual(self.clock.now, 102.001)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.popen.assert_called_once()
+        self.assertTrue(all(0 < timeout <= 2 for _, timeout in self.protocol.calls))
+        self.assertEqual(8000, self.protocol.requests[0]['root_wait_ms'])
+        with self.assertRaises(RuntimeError):
+            self.session.capture('hierarchy-0002.xml', deadline=110)
+        self.popen.assert_called_once()  # A deadline failure cannot reconnect.
+
+    def test_later_caller_deadline_cannot_expand_the_original_twenty_second_ceiling(self):
+        self.protocol.response_transform = lambda response: None
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.session.capture('hierarchy-0001.xml', deadline=150)
+        self.assertLessEqual(self.clock.now, 120.001)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.assertTrue(all(0 < timeout <= 20 for _, timeout in self.protocol.calls))
+
+    def test_expired_caller_deadline_never_starts_or_publishes_a_request(self):
+        with self.assertRaisesRegex(RuntimeError, 'timed out before starting'):
+            self.session.capture('hierarchy-0001.xml', deadline=100)
+        self.popen.assert_not_called()
+        self.assertEqual([], self.protocol.requests)
+        self.assertEqual([], self.protocol.calls)
+        self.assertEqual([], self.protocol.xml_reads)
+
+    def test_matching_xml_that_finishes_after_caller_deadline_is_rejected(self):
+        original = self.protocol.run
+        def late_xml(command, **kwargs):
+            result = original(command, **kwargs)
+            if command[-1].endswith('.xml'):
+                self.clock.now = 102.01
+            return result
+        self.adb.side_effect = late_xml
+        with self.assertRaisesRegex(RuntimeError, 'timed out while reading matching XML'):
+            self.session.capture('hierarchy-0001.xml', deadline=102)
+        self.assertEqual(1, len(self.protocol.xml_reads))
+        self.assertTrue((self.output / 'hierarchy-0001-session-response.json').is_file())
+        self.assertIsNotNone(self.session.fatal_error)
+
     def test_direct_start_failure_poisoned_and_no_restart(self):
         self.protocol.files['ready.json'] = b'null'
         with self.assertRaises(RuntimeError):

@@ -120,3 +120,15 @@ ColorOS Google/Latin 主槽现在使用既有可证明的 stock CJK 路由：仅
 [合成准备证据](performance/legacy-mix-prepare-20261007.json) 中独立成功的同输入 driver：中文 auto、Latin/digit fixed 的九档准备由 27→11 次实例化、5.1431→2.6819 秒，27 个输出总 240408 字节，前后 SHA-256 均 `251b6bace0ac2faf01103bcc59aabda97ea2a314ad4f06dabbad49692af1cedc`。单 fixed 槽由 9→1 次、1.6774→0.4338 秒，九份均 8904 字节且摘要一致。完整旧 worker 已失败，不能用这些数字声称旧完整任务提速；修复后完整 worker 九档成功、11 次调用、4.4446 秒只是当前 host 夹具结果。11 项新行为回归通过并独立复核，包括源删除/复制竞态、不同轴/角色/任务、损坏缓存、生成器竞态、真实 timeout/cancel 清理。没有 Android/手机生成耗时证明，也没有历史 600/630 秒现场收据，未把它定为历史超时根因。
 
 未活跃 common/multiweight_mix_task 仍存在类似的旧 helper 全局状态问题，本次未重复重写该未由 App 执行的链；其静态合约仍保留，不能代替上述活跃链行为证明。最终候选 ZIP、mksh、Java helper 编译、API 28/36、亮暗冷热逐帧结论必须由随后提交准确 SHA 的 CI 固定。ColorOS 整机两分多钟、97 秒 prezygote 根因、两台手机实际字形/Google 回退/实时与重启后覆盖、完整切换前后计时都明确保留待真机验证。
+
+## bdc0267 的真实终态与验收读取修正
+
+`bdc026796efc095651cc83a2ef03670bf9bfd2d9` 的 [candidate 37689177978](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37689177978) 在新合成夹具中 10/11 项失败。原始生产生成器子进程实际报 `ModuleNotFoundError: No module named 'fontTools'`：源码门禁通过 PYTHONPATH 提供 pure FontTools，夹具却清除该路径，开发主机的全局安装掩盖了错误。相同无全局 FontTools 的 venv、外置 pure 4.63.0 复现原夹具 10 项失败，修正为显式使用已导入包的真实目录后原 11 项全通过，真实生成器、字节/轴/九档输出、超时与取消清理断言均保留；生产代码和预算未为此更改。夹具同时保存真实子进程 stderr，避免生产临时错误文件删除后失去原因。
+
+同 SHA 的 [UI 37689178038](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37689178038) 终态失败。App 的 217 项 JVM、lint、APK、独立 Java helper 编译及 62+14 项 host 回归通过；API 28 完成 35 屏、24 项真实 UI 检查，包含滚动、跨页/后台、旋转、连续导航、旧主题和 Google 兼容入口。API 36 仅完成冷启动和首页，随后 45 秒字体库门禁失败。原 hierarchy 10/20/42 已有字体库正文和搜索文案，但底栏仍返回旧首页的 selected/clickable 状态；这支持持久连接缓存未更新的假设，尚非已证根因。读取器在 API 34+ 的原八秒预算内通过公开 UiAutomation.clearCache 清理**本连接的节点缓存**，失败直接拒绝并记录结果，API 28 保持原读取路径。没有清理 App、GMS、系统的文件缓存、重连、注入状态或采用 shell 权限；仍要求实际选中属性与正文同时正确，效果以新 SHA CI 为准。
+
+本批启动视觉在 HOME 基线阶段未达到十秒内三张稳定帧，四段 App MP4 均未开始录制，不能称为启动视觉通过。原 batch、两张完整 PNG、截断输出、窗口、错误、完整作业日志和 ZIP 均保留。先前 `03cf4b3` candidate 的模块重跑在 legacy_mix_finalize_race_test 内静默退出；原 nested handoff 与 34% 进度门禁均已通过，具体内部断言没有被日志记录，十一轮有限 sh -x 复现全通过。此次仅让该隔离夹具在源码门禁保留命令追踪，不降低断言或据此修改生产 finalizer。
+
+API 28 的再次冷启动原 am 输出为 ThisTime 2202 / TotalTime 173202 / WaitTime 2729 ms。同 PID 9449 在 21:43:28.994 创建，首 draw-return 内容日志约 1997 ms，21:43:31.193 的系统 Displayed 为本次 +2.202 秒并另列 total +2m53.202s。TotalTime 不能冒充本次命令等待或手机 reboot；累计起点遗留仅是解释这一平台字段的推断。脚本原 ui_ready_seconds 23.587 包含启动、层级等待、截图和日志/窗口采集，不是纯首帧耗时。API 28 的 draw-return、API 29+ 的 swap-chain 提交、系统 Displayed、原录像实际可见内容仍分开记录，普通本轮启动不能解决旧 97 秒 prezygote 异常。
+
+HOME 基线改读原始 screencap 像素，保留 batch/独立 raw/窗口/stderr，并按实际 SDK 解码明确的 header、RGB/RGBX/不透明 RGBA 与 sRGB，拒绝未知格式、色域、alpha、截断或尾随字节。官方 Android 8.0 是十二字节 header，8.1 起是十六字节；主机 PNG 只逐像素无缩放编码，记录原 raw 与 RGB 摘要，不能作为原生 PNG 冒充设备输出。仍只排除实际系统栏、保持十秒内三张内容完全一致的帧，另要求 resolved Launcher 的真实可见 workspace/hotseat 与带文字的有效点击后代，不能把 Launcher 中央图标当就绪桌面。解析、存盘、原始采集和匹配的真实层级读取都共享该十秒预算；会话可选更短 host deadline，默认二十秒与设备八秒 root wait不增加，也不重连。切入独立读取后继续使用同一 backend，避免 CLI 抢占连接。新增阶段耗时将 HOME resolve/采集/解码/PNG/层级，以及 App 命令/页面等待/截图/证据采集分别记清。68 项工具与 18 项会话行为回归通过，实际速度和四段原录像仍须新 SHA CI 验证。

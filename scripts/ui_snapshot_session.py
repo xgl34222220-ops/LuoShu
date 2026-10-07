@@ -67,6 +67,8 @@ class UiSnapshotSession:
                                timeout=remaining)
             if not result.returncode:
                 evidence.write_bytes(result.stdout)
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"UiAutomation session timed out while reading {basename}")
                 try:
                     value = json.loads(result.stdout)
                 except (ValueError, UnicodeDecodeError) as error:
@@ -103,7 +105,7 @@ class UiSnapshotSession:
             self._event("start-failed", error=str(error))
             raise
 
-    def capture(self, filename: str) -> tuple[dict[str, str], str | None]:
+    def capture(self, filename: str, *, deadline: float | None = None) -> tuple[dict[str, str], str | None]:
         if not re.fullmatch(r"hierarchy-[0-9]{4,8}\.xml", filename):
             raise ValueError("Invalid real snapshot filename")
         if filename in self.filenames:
@@ -113,13 +115,17 @@ class UiSnapshotSession:
         self.filenames.add(filename)
         request_id = uuid.uuid4().hex
         started = time.monotonic()
+        # A caller may share its original absolute deadline with this read.
+        # The normal twenty-second host ceiling and server root wait stay fixed.
+        deadline = min(started + 20, deadline) if deadline is not None else started + 20
         envelope = {"protocol": PROTOCOL, "nonce": self.nonce, "request_id": request_id,
                     "filename": filename, "root_wait_ms": ROOT_WAIT_MS}
         prefix = self.output / filename.removesuffix(".xml")
         prefix.with_name(prefix.name + "-session-request.json").write_text(
             json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
         try:
-            deadline = time.monotonic() + 20  # Original host instrument command limit.
+            if time.monotonic() >= deadline:
+                raise RuntimeError("UiAutomation session timed out before starting its capture")
             self.start(deadline)
             if time.monotonic() >= deadline:
                 raise RuntimeError("UiAutomation session timed out before publishing its request")
@@ -139,6 +145,8 @@ class UiSnapshotSession:
             self._event("response", request_id=request_id, filename=filename,
                         snapshot=result["snapshot"], wait_ms=result.get("wait_ms"),
                         elapsed_seconds=time.monotonic() - started)
+            if time.monotonic() >= deadline:
+                raise RuntimeError("UiAutomation session timed out after its matching response")
             if code != -1:
                 return result, None
             remaining = deadline - time.monotonic()
@@ -147,6 +155,8 @@ class UiSnapshotSession:
             xml = self._run(["shell", "run-as", HELPER, "cat", f"{self.directory}/{filename}"], timeout=remaining)
             if xml.returncode:
                 raise RuntimeError("UiAutomation session did not return its matching XML")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("UiAutomation session timed out while reading matching XML")
             return result, xml.stdout.decode("utf-8")
         except (OSError, RuntimeError, ValueError) as error:
             self.fatal_error = str(error)

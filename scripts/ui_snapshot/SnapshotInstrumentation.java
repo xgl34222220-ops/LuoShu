@@ -8,6 +8,7 @@ import android.content.Context;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.os.Build;
 import android.os.SystemClock;
 import android.util.Xml;
 import android.view.Display;
@@ -211,6 +212,17 @@ public final class SnapshotInstrumentation extends Instrumentation {
             // host still checks the App package, selected tab and page content.
             waitStarted = SystemClock.uptimeMillis();
             long deadline = waitStarted + ROOT_WAIT_MS;
+            // A persistent test connection can retain an obsolete tab node
+            // while a different subtree already reflects the new page. Clear
+            // only this connection's accessibility-node cache before querying
+            // live state; never infer selection from the page marker alone.
+            if (Build.VERSION.SDK_INT >= 34) {
+                boolean cleared = automation.clearCache();
+                result.putString("accessibility_cache_cleared", Boolean.toString(cleared));
+                if (!cleared) throw new IllegalStateException("Cannot clear this snapshot connection's node cache");
+            } else {
+                result.putString("accessibility_cache_cleared", "unsupported-before-api34");
+            }
             while (root == null && SystemClock.uptimeMillis() < deadline) {
                 attempts++;
                 // refresh() re-queries this real node's current state rather

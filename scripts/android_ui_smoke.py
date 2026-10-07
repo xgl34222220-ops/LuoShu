@@ -2,8 +2,8 @@
 """Capture real emulator screens and fail on navigation, process, crash or ANR errors.
 
 Requires an already booted emulator and an installable debug APK. This checks the
-unrooted App UI, not font replacement on HyperOS/ColorOS. Screenshots are raw adb
-screencap output; no mock data, screenshots or crash suppression are injected.
+unrooted App UI, not font replacement on HyperOS/ColorOS. Screenshots come from
+real adb screencap pixels; no mock data, screenshots or crash suppression are injected.
 """
 
 from __future__ import annotations
@@ -61,6 +61,79 @@ def home_content_bounds(window: str, size: tuple[int, int]) -> tuple[int, int, i
     if not status_found or not navigation_found or top >= bottom:
         raise RuntimeError("Cannot identify real HOME system bars for baseline stability")
     return 0, top, width, bottom
+
+
+def decode_raw_screencap(raw: bytes, api_level: int):
+    """Decode only exact packed 8-bit RGB pixels; never guess a header or gamut.
+
+    AOSP screencap writes native uint32 width/height/format and, since API 27,
+    colorspace, then width * bytesPerPixel bytes per row (no stride padding).
+    Android CI's x86/arm targets are little endian. See cmds/screencap/screencap.cpp
+    in android-8.0.0_r1, android-8.1.0_r1 and android-16.0.0_r2.
+    """
+    from PIL import Image
+
+    if type(api_level) is not int or api_level <= 0:
+        raise RuntimeError("Raw screencap requires the actual Android API level")
+    header_bytes = 16 if api_level >= 27 else 12
+    if len(raw) < header_bytes:
+        raise RuntimeError("Raw screencap header is truncated")
+    width, height, pixel_format = struct.unpack_from("<III", raw)
+    # After checking opaque RGBA, RGBX decoding only drops its fourth byte.
+    formats = {1: (4, "RGBX"), 2: (4, "RGBX"), 3: (3, "RGB")}
+    if width == 0 or height == 0 or pixel_format not in formats:
+        raise RuntimeError("Raw screencap has invalid dimensions or unsupported pixel format")
+    colorspace = struct.unpack_from("<I", raw, 12)[0] if header_bytes == 16 else None
+    if colorspace is not None and colorspace != 1:
+        raise RuntimeError("Raw screencap colorspace is not explicit sRGB")
+    bytes_per_pixel, raw_mode = formats[pixel_format]
+    expected = header_bytes + width * height * bytes_per_pixel
+    if len(raw) != expected:
+        raise RuntimeError(f"Raw screencap length mismatch: expected {expected}, received {len(raw)}")
+    pixels = raw[header_bytes:]
+    if pixel_format == 1 and pixels[3::4].count(255) != width * height:
+        raise RuntimeError("Raw screencap contains nonopaque premultiplied RGBA pixels")
+    image = Image.frombytes("RGB", (width, height), pixels, "raw", raw_mode)
+    return image, {"api_level": api_level, "header_bytes": header_bytes,
+                   "width": width, "height": height, "pixel_format": pixel_format,
+                   "colorspace_id": colorspace, "raw_bytes": len(raw),
+                   "raw_sha256": hashlib.sha256(raw).hexdigest(),
+                   "rgb_sha256": hashlib.sha256(image.tobytes()).hexdigest()}
+
+
+def home_launcher_content(root: ET.Element, home: str) -> list[dict[str, object]]:
+    """Require live visible Launcher workspace/hotseat actions, beyond its splash.
+
+    The independent snapshot reader includes view IDs and only visible children.
+    An activity root, a centered logo, or actions from another package do not
+    establish that the resolved Launcher has rendered its desktop content.
+    """
+    package = home.split("/", 1)[0]
+    evidence = []
+    for container in root.iter("node"):
+        resource = container.get("resource-id", "")
+        if container.get("package") != package or resource not in (
+                f"{package}:id/workspace", f"{package}:id/hotseat"):
+            continue
+        try:
+            container_bounds = bounds(container)
+        except ValueError:
+            continue
+        for node in container.iter("node"):
+            if node is container or node.get("package") != package or not labels(node) or \
+                    node.get("clickable") != "true" or node.get("enabled") != "true":
+                continue
+            try:
+                node_bounds = bounds(node)
+            except ValueError:
+                continue
+            left, top, right, bottom = node_bounds
+            if left < container_bounds[0] or top < container_bounds[1] or \
+                    right > container_bounds[2] or bottom > container_bounds[3]:
+                continue
+            evidence.append({"container": resource, "bounds": list(node_bounds),
+                             "labels": sorted(labels(node))})
+    return evidence
 
 
 def labels(node: ET.Element) -> set[str]:
@@ -577,11 +650,12 @@ class SmokeRun:
             return root
         raise RuntimeError(failure or "uiautomator did not produce a valid live hierarchy")
 
-    def snapshot_hierarchy(self) -> ET.Element:
+    def snapshot_hierarchy(self, *, deadline: float | None = None) -> ET.Element:
         filename = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
         if self.snapshot_session is None:
             self.snapshot_session = UiSnapshotSession(self.adb_command, self.output)
-        metadata, xml = self.snapshot_session.capture(filename)
+        metadata, xml = (self.snapshot_session.capture(filename) if deadline is None else
+                         self.snapshot_session.capture(filename, deadline=deadline))
         evidence = {"transport": "persistent-ui-automation", "session_nonce": self.snapshot_session.nonce,
                     **metadata}
         (self.output / f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.json").write_text(
@@ -880,17 +954,17 @@ class SmokeRun:
         return root
 
     def wait_home_baseline(self, name: str) -> bytes:
-        """Require actual HOME focus and three stable raw captures before recording."""
-        from PIL import Image
+        """Require real Launcher content and three stable captures within 10s."""
 
         started = time.monotonic()
         deadline = started + 10
         metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": []}
         previous = None
         stable = 0
-        separator = b"\x00LUOSHU_HOME_BASELINE_PNG\x00"
-        command = r"dumpsys window displays; printf '\000LUOSHU_HOME_BASELINE_PNG\000'; screencap -p"
+        separator = b"\x00LUOSHU_HOME_BASELINE_RAW\x00"
+        command = r"dumpsys window displays; printf '\000LUOSHU_HOME_BASELINE_RAW\000'; screencap"
         metadata["capture_command"] = command
+        metadata["screenshot_source"] = "real packed adb screencap; exact RGB PNG encoding on host"
         pending_sample = None
 
         def remaining() -> float:
@@ -900,52 +974,98 @@ class SmokeRun:
             return value
 
         try:
+            resolve_started = time.monotonic()
             resolved = self.text("shell", "cmd", "package", "resolve-activity", "--brief",
                                  "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME",
                                  timeout=remaining())
+            metadata["home_resolve_seconds"] = round(time.monotonic() - resolve_started, 6)
             (self.output / f"{name}-baseline-home.txt").write_text(resolved, encoding="utf-8")
             components = re.findall(r"^([\w.$]+/[\w.$]+)$", resolved, re.MULTILINE)
             if len(components) != 1 or components[0].startswith("android/"):
                 raise RuntimeError("Actual HOME activity did not resolve to one Launcher component")
             home = canonical_component(components[0])
             metadata["home_component"] = home
+            if self.api_level is None:
+                sdk_started = time.monotonic()
+                self.api_level = int(self.text("shell", "getprop", "ro.build.version.sdk", timeout=remaining()).strip())
+                metadata["sdk_read_seconds"] = round(time.monotonic() - sdk_started, 6)
+            if self.snapshot_apk is None:
+                raise RuntimeError("Real Launcher baseline requires the independent visible hierarchy reader")
+            # Reuse this one public test connection for subsequent App reads;
+            # the uiautomator CLI must not compete with the baseline session.
+            self.hierarchy_backend = "ui-automation-snapshot"
+            metadata["hierarchy_backend"] = self.hierarchy_backend
+            metadata["hierarchy_backend_reason"] = "Live visible Launcher content within the shared baseline deadline"
             while True:
                 remaining()
                 index = len(metadata["samples"])
                 window_file = f"{name}-baseline-{index:02d}-window.txt"
                 png_file = f"{name}-baseline-{index:02d}.png"
                 raw_file = f"{name}-baseline-{index:02d}-batch.bin"
+                frame_file = f"{name}-baseline-{index:02d}-screencap.raw"
                 stderr_file = f"{name}-baseline-{index:02d}-stderr.txt"
                 pending_sample = {"window": window_file, "screenshot": png_file,
-                                  "batch_raw": raw_file, "stderr": stderr_file}
+                                  "batch_raw": raw_file, "screencap_raw": frame_file, "stderr": stderr_file,
+                                  "stage": "capture"}
                 # One fixed remote command avoids separate adb connections and
                 # unrelated full-window dump sections within the same 10s budget.
-                batch = self.adb("exec-out", "sh", "-c", command, timeout=remaining(), check=False)
+                batch_started = time.monotonic()
+                pending_sample["capture_started_elapsed_seconds"] = round(batch_started - started, 6)
+                pending_sample["capture_timeout_seconds"] = remaining()
+                batch = self.adb("exec-out", "sh", "-c", command,
+                                 timeout=pending_sample["capture_timeout_seconds"], check=False)
+                pending_sample["capture_seconds"] = round(time.monotonic() - batch_started, 6)
+                pending_sample["stage"] = "raw-persistence"
+                persistence_started = time.monotonic()
                 (self.output / raw_file).write_bytes(batch.stdout)
                 (self.output / stderr_file).write_bytes(batch.stderr)
                 pending_sample["returncode"] = batch.returncode
+                pending_sample["batch_bytes"] = len(batch.stdout)
                 if batch.returncode:
                     raise RuntimeError(f"HOME baseline batch failed ({batch.returncode}): {batch.stderr.decode('utf-8', 'replace')}")
                 if batch.stdout.count(separator) != 1:
-                    raise RuntimeError("HOME baseline batch has missing or ambiguous raw PNG separator")
-                window_bytes, png = batch.stdout.split(separator)
+                    raise RuntimeError("HOME baseline batch has missing or ambiguous raw frame separator")
+                window_bytes, raw = batch.stdout.split(separator)
                 (self.output / window_file).write_bytes(window_bytes)
-                (self.output / png_file).write_bytes(png)
+                (self.output / frame_file).write_bytes(raw)
+                pending_sample["raw_persistence_seconds"] = round(time.monotonic() - persistence_started, 6)
                 window = window_bytes.decode("utf-8", "replace")
                 focused = focused_component(window)
-                if len(png) < 24 or not png.startswith(b"\x89PNG\r\n\x1a\n"):
-                    raise RuntimeError("HOME baseline batch did not contain a real PNG frame")
-                with Image.open(io.BytesIO(png)) as inspected:
-                    inspected.verify()
-                with Image.open(io.BytesIO(png)) as captured:
+                decode_started = time.monotonic()
+                pending_sample["stage"] = "raw-decode"
+                captured, raw_metadata = decode_raw_screencap(raw, self.api_level)
+                pending_sample["raw_frame"] = raw_metadata
+                with captured:
                     rect = home_content_bounds(window, captured.size)
-                    pixels = captured.convert("RGB").crop(rect).tobytes()
+                    pixels = captured.crop(rect).tobytes()
                     signature = (captured.size, rect, pixels)
-                stable = stable + 1 if focused == home and signature == previous else int(focused == home)
-                previous = signature if focused == home else None
-                metadata["samples"].append({"elapsed_seconds": round(time.monotonic() - started, 3),
-                    "focused_component": focused, "window": window_file, "screenshot": png_file,
-                    "batch_raw": raw_file, "stderr": stderr_file,
+                    pending_sample["decode_compare_seconds"] = round(time.monotonic() - decode_started, 6)
+                    png_started = time.monotonic()
+                    pending_sample["stage"] = "png-encode"
+                    encoded = io.BytesIO()
+                    captured.save(encoded, format="PNG", compress_level=1)
+                    png = encoded.getvalue()
+                pending_sample["png_encode_seconds"] = round(time.monotonic() - png_started, 6)
+                (self.output / png_file).write_bytes(png)
+                pending_sample["png_bytes"] = len(png)
+                pending_sample["png_sha256"] = hashlib.sha256(png).hexdigest()
+                remaining()
+                hierarchy_started = time.monotonic()
+                pending_sample["stage"] = "hierarchy"
+                self.hierarchy_attempts += 1
+                hierarchy_file = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
+                pending_sample["hierarchy"] = hierarchy_file
+                pending_sample["hierarchy_metadata"] = f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.json"
+                root = self.snapshot_hierarchy(deadline=deadline)
+                pending_sample["hierarchy_seconds"] = round(time.monotonic() - hierarchy_started, 6)
+                pending_sample["stage"] = "stability-verification"
+                launcher_content = home_launcher_content(root, home)
+                ready = focused == home and bool(launcher_content)
+                stable = stable + 1 if ready and signature == previous else int(ready)
+                previous = signature if ready else None
+                metadata["samples"].append({**pending_sample,
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "focused_component": focused, "launcher_content": launcher_content,
                     "content_bounds": list(rect), "content_sha256": hashlib.sha256(pixels).hexdigest(),
                     "stable_captures": stable})
                 remaining()
@@ -958,11 +1078,19 @@ class SmokeRun:
             if pending_sample is not None:
                 metadata["failed_sample"] = pending_sample
                 cause = error.__cause__
-                if isinstance(cause, subprocess.TimeoutExpired):
+                if pending_sample["stage"] == "hierarchy":
+                    pending_sample["hierarchy_seconds"] = round(time.monotonic() - hierarchy_started, 6)
+                if isinstance(cause, subprocess.TimeoutExpired) and "returncode" not in pending_sample:
+                    pending_sample["capture_seconds"] = round(time.monotonic() - batch_started, 6)
                     if isinstance(cause.stdout, bytes):
                         (self.output / pending_sample["batch_raw"]).write_bytes(cause.stdout)
+                        if cause.stdout.count(separator) == 1:
+                            partial_window, partial_frame = cause.stdout.split(separator)
+                            (self.output / pending_sample["window"]).write_bytes(partial_window)
+                            (self.output / pending_sample["screencap_raw"]).write_bytes(partial_frame)
                     if isinstance(cause.stderr, bytes):
                         (self.output / pending_sample["stderr"]).write_bytes(cause.stderr)
+                pending_sample["failed_elapsed_seconds"] = round(time.monotonic() - started, 6)
             raise RuntimeError(f"{name}: HOME baseline failed: {error}") from error
         finally:
             metadata["elapsed_seconds"] = round(time.monotonic() - started, 3)
@@ -1010,11 +1138,15 @@ class SmokeRun:
     def launch_and_capture(self, name: str) -> ET.Element:
         start = time.monotonic()
         launch = self.text("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
+        am_finished = time.monotonic()
         (self.output / f"{name}-launch.txt").write_text(launch, encoding="utf-8")
         if "Status: ok" not in launch or "Error:" in launch:
             raise RuntimeError(f"MainActivity launch failed: {launch}")
+        page_started = time.monotonic()
         root = self.wait_page("首页", "当前字体")
+        page_finished = time.monotonic()
         self.capture(f"{name}-home", root)
+        capture_finished = time.monotonic()
         # Keep this launch's events before later system traffic replaces the
         # main log buffer; normal crash checks continue to read every buffer.
         startup_log = self.logcat(f"{name}-startup-logcat.txt")
@@ -1022,10 +1154,16 @@ class SmokeRun:
         events = [] if "warm" in name else assert_single_stage_startup(startup_log, pid, self.api_level or 28)
         window = self.text("shell", "dumpsys", "window")
         (self.output / f"{name}-startup-window.txt").write_text(window, encoding="utf-8")
+        evidence_finished = time.monotonic()
         self.record(f"{name}-startup-content-delivery", events=events, pid=pid,
                     system_displayed=bool(re.search(rf"Displayed\s+{re.escape(self.package)}/", startup_log)),
                     scope="Current App PID content events and real window/system logs; visual acceptance is separate")
         self.record(name, ui_ready_seconds=round(time.monotonic() - start, 3),
+                    ui_ready_seconds_scope="Host am command, page wait, screenshot and startup evidence collection through record",
+                    am_command_seconds=round(am_finished - start, 3),
+                    page_wait_seconds=round(page_finished - page_started, 3),
+                    home_capture_seconds=round(capture_finished - page_finished, 3),
+                    startup_evidence_seconds=round(evidence_finished - capture_finished, 3),
                     am_total_time_ms=re.search(r"TotalTime:\s*(\d+)", launch).group(1) if re.search(r"TotalTime:\s*(\d+)", launch) else None)
         return root
 

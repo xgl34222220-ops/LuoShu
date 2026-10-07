@@ -6,6 +6,7 @@ import io
 import xml.etree.ElementTree as ET
 import json
 import subprocess
+import struct
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -17,7 +18,7 @@ from android_ui_smoke import (
     legacy_manual_colors_ready, legacy_monet_unavailable,
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
     scroll_progress, visible_action, visible_text, ScrollBudget,
-    focused_component, main,
+    focused_component, decode_raw_screencap, home_launcher_content, main,
 )
 
 
@@ -530,23 +531,109 @@ class UiSmokeHarnessTest(unittest.TestCase):
                 "InsetsSource id=1 type=statusBars frame=[0,0][40,4] visible=true\n"
                 "InsetsSource id=2 type=navigationBars frame=[0,76][40,80] visible=true\n")
 
-    def baseline_batch(self, png, window=None):
+    def baseline_raw(self, content=20, clock=0):
+        from PIL import Image
+        with Image.open(io.BytesIO(self.baseline_png(content, clock))) as image:
+            return struct.pack("<IIII", 40, 80, 1, 1) + image.convert("RGBA").tobytes()
+
+    def baseline_hierarchy(self):
+        return ET.fromstring('''<hierarchy><node package="com.example.launcher" bounds="[0,0][40,80]">
+          <node package="com.example.launcher" resource-id="com.example.launcher:id/workspace" bounds="[0,4][40,76]">
+            <node package="com.example.launcher" text="Maps" clickable="true" enabled="true" bounds="[3,40][12,55]" />
+          </node></node></hierarchy>''')
+
+    def prepare_baseline_reader(self, run):
+        run.api_level = 36
+        run.snapshot_apk = Path("reader.apk")
+        run.snapshot_hierarchy = Mock(side_effect=lambda **kwargs: self.baseline_hierarchy())
+
+    def baseline_batch(self, raw, window=None):
         window = self.baseline_window() if window is None else window
-        return window.encode() + b"\x00LUOSHU_HOME_BASELINE_PNG\x00" + png
+        return window.encode() + b"\x00LUOSHU_HOME_BASELINE_RAW\x00" + raw
+
+    def test_raw_screencap_preserves_every_rgb_pixel_and_uses_sdk_header(self):
+        from PIL import Image
+        rgb = bytes((3, 79, 251, 99, 0, 7, 211, 68, 145, 6, 234, 57))
+        for sdk, header_bytes in ((25, 12), (26, 12), (27, 16), (28, 16), (36, 16)):
+            for pixel_format in (1, 2, 3):
+                with self.subTest(sdk=sdk, pixel_format=pixel_format):
+                    pixels = rgb if pixel_format == 3 else b"".join(
+                        rgb[index:index + 3] + bytes((255 if pixel_format == 1 else 0,))
+                        for index in range(0, len(rgb), 3))
+                    header = struct.pack("<III", 2, 2, pixel_format)
+                    raw = header + (struct.pack("<I", 1) if header_bytes == 16 else b"") + pixels
+                    image, metadata = decode_raw_screencap(raw, sdk)
+                    self.assertEqual((2, 2), image.size)
+                    self.assertEqual(rgb, image.tobytes())
+                    encoded = io.BytesIO()
+                    image.save(encoded, format="PNG", compress_level=1)
+                    with Image.open(io.BytesIO(encoded.getvalue())) as png:
+                        self.assertEqual((2, 2), png.size)
+                        self.assertEqual(rgb, png.convert("RGB").tobytes())
+                    self.assertEqual(header_bytes, metadata["header_bytes"])
+                    self.assertEqual(1 if header_bytes == 16 else None, metadata["colorspace_id"])
+
+    def test_raw_screencap_rejects_unknown_layout_gamut_alpha_and_exact_length_errors(self):
+        valid = struct.pack("<IIII", 2, 1, 1, 1) + bytes((1, 2, 3, 255, 4, 5, 6, 255))
+        malformed = [b"", valid[:15], valid[:-1], valid + b"x", valid[:12] + valid[16:],
+                     struct.pack("<IIII", 0, 1, 1, 1),
+                     struct.pack("<IIII", 2, 1, 4, 1) + b"\x00" * 4,
+                     struct.pack("<IIII", 2, 1, 5, 1) + valid[16:],
+                     struct.pack("<IIII", 2, 1, 1, 0) + valid[16:],
+                     struct.pack("<IIII", 2, 1, 1, 2) + valid[16:],
+                     valid[:-1] + b"\x7f", struct.pack(">IIII", 2, 1, 1, 1) + valid[16:]]
+        for raw in malformed:
+            with self.subTest(raw=raw), self.assertRaises(RuntimeError):
+                decode_raw_screencap(raw, 36)
+        with self.assertRaises(RuntimeError):
+            decode_raw_screencap(valid, 25)
+        for missing_sdk in (None, 0, True):
+            with self.subTest(sdk=missing_sdk), self.assertRaises(RuntimeError):
+                decode_raw_screencap(valid, missing_sdk)
+
+    def test_launcher_readiness_rejects_root_logo_wrong_package_and_unusable_actions(self):
+        home = "com.example.launcher/com.example.launcher.Home"
+        self.assertTrue(home_launcher_content(self.baseline_hierarchy(), home))
+        for failure in ("root", "logo", "wrong-package", "empty-container", "disabled", "not-clickable", "empty-label", "bad-bounds"):
+            root = self.baseline_hierarchy()
+            container, action = root[0][0], root[0][0][0]
+            if failure == "root":
+                root[0].remove(container)
+            elif failure == "logo":
+                container.set("resource-id", "com.example.launcher:id/splash_icon")
+            elif failure == "wrong-package":
+                action.set("package", PACKAGE)
+            elif failure == "empty-container":
+                container.remove(action)
+            elif failure == "disabled":
+                action.set("enabled", "false")
+            elif failure == "not-clickable":
+                action.set("clickable", "false")
+            elif failure == "empty-label":
+                action.set("text", "")
+            elif failure == "bad-bounds":
+                action.set("bounds", "[0,0][0,0]")
+            with self.subTest(failure=failure):
+                self.assertEqual([], home_launcher_content(root, home))
 
     def test_home_baseline_requires_stable_real_content_and_preserves_raw_final_png(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
-            captures = [self.baseline_png(10), self.baseline_png(20),
-                        self.baseline_png(20, 1), self.baseline_png(20, 2)]
+            self.prepare_baseline_reader(run)
+            captures = [self.baseline_raw(10), self.baseline_raw(20),
+                        self.baseline_raw(20, 1), self.baseline_raw(20, 2)]
             run.text = Mock(return_value="com.example.launcher/.Home\n")
             run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, self.baseline_batch(png), b"") for png in captures])
             clock = [0.0]
             with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
                     patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
                 baseline = run.wait_home_baseline("light-cold-start")
-            self.assertEqual(captures[-1], baseline)
-            self.assertEqual(captures[-1], (Path(temporary) / "light-cold-start-baseline-03.png").read_bytes())
+            from PIL import Image
+            with Image.open(io.BytesIO(baseline)) as png:
+                self.assertEqual((40, 80), png.size)
+                self.assertEqual(decode_raw_screencap(captures[-1], 36)[0].tobytes(), png.convert("RGB").tobytes())
+            self.assertEqual(baseline, (Path(temporary) / "light-cold-start-baseline-03.png").read_bytes())
+            self.assertEqual(captures[-1], (Path(temporary) / "light-cold-start-baseline-03-screencap.raw").read_bytes())
             metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
             self.assertEqual([1, 1, 2, 3], [sample["stable_captures"] for sample in metadata["samples"]])
             self.assertTrue(metadata["passed"])
@@ -557,20 +644,29 @@ class UiSmokeHarnessTest(unittest.TestCase):
             for call, png in zip(run.adb.call_args_list, captures):
                 self.assertEqual(("exec-out", "sh", "-c"), call.args[:3])
                 self.assertIn("dumpsys window displays", call.args[3])
-                self.assertIn("screencap -p", call.args[3])
+                self.assertTrue(call.args[3].endswith("; screencap"))
+                self.assertNotIn("screencap -p", call.args[3])
                 self.assertLessEqual(call.kwargs["timeout"], 10)
+            self.assertEqual(4, run.snapshot_hierarchy.call_count)
+            self.assertTrue(all(call.kwargs == {"deadline": 10} for call in run.snapshot_hierarchy.call_args_list))
             self.assertEqual(self.baseline_batch(captures[-1]),
                              (Path(temporary) / metadata["samples"][-1]["batch_raw"]).read_bytes())
+            self.assertEqual("ui-automation-snapshot", run.hierarchy_backend)
+            run.hierarchy_once()
+            self.assertEqual(4, run.adb.call_count)  # No competing uiautomator connection.
 
     def test_visual_baseline_focus_or_motion_failure_never_starts_recording_and_keeps_deadline(self):
-        for cause in ("wrong-focus", "moving-home"):
+        for cause in ("wrong-focus", "moving-home", "launcher-splash"):
             with self.subTest(cause=cause), tempfile.TemporaryDirectory() as temporary:
                 run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
                                record_launch=True, visual_launch_only=True)
-                home = self.baseline_window() if cause == "moving-home" else self.baseline_window(f"{PACKAGE}/.MainActivity")
+                self.prepare_baseline_reader(run)
+                if cause == "launcher-splash":
+                    run.snapshot_hierarchy = Mock(return_value=ET.fromstring('<hierarchy><node package="com.example.launcher" bounds="[0,0][40,80]" /></hierarchy>'))
+                home = self.baseline_window(f"{PACKAGE}/.MainActivity") if cause == "wrong-focus" else self.baseline_window()
                 run.text = Mock(side_effect=lambda *args, **kwargs:
                                 "com.example.launcher/.Home\n" if "resolve-activity" in args else home)
-                captures = [self.baseline_png(20), self.baseline_png(30)]
+                captures = [self.baseline_raw(20), self.baseline_raw(30)]
                 count = [0]
                 def capture(*args, **kwargs):
                     png = captures[count[0] % 2] if cause == "moving-home" else captures[0]
@@ -611,33 +707,38 @@ class UiSmokeHarnessTest(unittest.TestCase):
     def test_baseline_combines_each_real_window_and_png_within_original_budget(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            self.prepare_baseline_reader(run)
             clock = [0.0]
             run.text = Mock(return_value="com.example.launcher/.Home\n")
-            png = self.baseline_png()
+            raw = self.baseline_raw()
             def capture(*args, **kwargs):
                 clock[0] += 2.5
-                return subprocess.CompletedProcess([], 0, self.baseline_batch(png), b"")
+                return subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b"")
             run.adb = Mock(side_effect=capture)
             with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
                     patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
-                self.assertEqual(png, run.wait_home_baseline("light-cold-start"))
+                png = run.wait_home_baseline("light-cold-start")
+                self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
             self.assertEqual(3, run.adb.call_count)
             self.assertLess(clock[0], 10)
             metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
             self.assertEqual(10, metadata["timeout_seconds"])
             self.assertEqual([1, 2, 3], [sample["stable_captures"] for sample in metadata["samples"]])
+            self.assertEqual([2.5, 2.5, 2.5], [sample["capture_seconds"] for sample in metadata["samples"]])
+            self.assertTrue(all(sample["launcher_content"] for sample in metadata["samples"]))
 
     def test_missing_or_corrupt_batch_png_fails_before_recording_and_keeps_raw(self):
-        valid = self.baseline_png()
+        valid = self.baseline_raw()
         corrupted = bytearray(valid)
-        corrupted[40] ^= 1
+        corrupted[8] ^= 64
         malformed = (b"missing separator", self.baseline_batch(b"not PNG"),
                      self.baseline_batch(bytes(corrupted)), self.baseline_batch(valid[:-20]),
-                     self.baseline_batch(valid) + b"\x00LUOSHU_HOME_BASELINE_PNG\x00")
+                     self.baseline_batch(valid) + b"\x00LUOSHU_HOME_BASELINE_RAW\x00")
         for raw in malformed:
             with self.subTest(raw_length=len(raw)), tempfile.TemporaryDirectory() as temporary:
                 run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
                                record_launch=True, visual_launch_only=True)
+                self.prepare_baseline_reader(run)
                 run.text = Mock(return_value="com.example.launcher/.Home\n")
                 run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, raw, b""))
                 run.begin_launch_recording = Mock()
@@ -655,6 +756,7 @@ class UiSmokeHarnessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
                            record_launch=True, visual_launch_only=True)
+            self.prepare_baseline_reader(run)
             run.text = Mock(return_value="com.example.launcher/.Home\n")
             partial = self.baseline_batch(b"partial PNG")
             def timeout(*args, **kwargs):
@@ -669,6 +771,96 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run.launch_and_capture.assert_not_called()
             self.assertEqual(partial, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
             self.assertEqual(b"partial stderr", (Path(temporary) / "light-cold-start-baseline-00-stderr.txt").read_bytes())
+            self.assertEqual(b"partial PNG", (Path(temporary) / "light-cold-start-baseline-00-screencap.raw").read_bytes())
+
+    def test_baseline_hierarchy_timeout_cannot_overwrite_the_raw_capture_or_record(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                           record_launch=True, visual_launch_only=True)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            batch = self.baseline_batch(self.baseline_raw())
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, batch, b"capture stderr"))
+            def timeout(**kwargs):
+                cause = subprocess.TimeoutExpired("adb", 1, output=b"hierarchy response", stderr=b"hierarchy stderr")
+                raise RuntimeError("hierarchy deadline expired") from cause
+            run.snapshot_hierarchy = Mock(side_effect=timeout)
+            run.begin_launch_recording = Mock()
+            run.launch_and_capture = Mock()
+            with self.assertRaisesRegex(RuntimeError, "hierarchy deadline expired"):
+                run.launch("light-cold-start")
+            run.begin_launch_recording.assert_not_called()
+            run.launch_and_capture.assert_not_called()
+            self.assertEqual(batch, (Path(temporary) / "light-cold-start-baseline-00-batch.bin").read_bytes())
+            self.assertEqual(b"capture stderr", (Path(temporary) / "light-cold-start-baseline-00-stderr.txt").read_bytes())
+            metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertFalse(metadata["passed"])
+            self.assertIn("capture_seconds", metadata["failed_sample"])
+            self.assertIn("hierarchy", metadata["failed_sample"])
+
+    def test_baseline_shared_deadline_includes_every_live_hierarchy_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None,
+                           record_launch=True, visual_launch_only=True)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            clock = [0.0]
+            def capture(*args, **kwargs):
+                clock[0] += 2.5
+                return subprocess.CompletedProcess([], 0, self.baseline_batch(self.baseline_raw()), b"")
+            def hierarchy(**kwargs):
+                self.assertEqual(10, kwargs["deadline"])
+                clock[0] += .7
+                return self.baseline_hierarchy()
+            run.adb = Mock(side_effect=capture)
+            run.snapshot_hierarchy = Mock(side_effect=hierarchy)
+            run.begin_launch_recording = Mock()
+            run.launch_and_capture = Mock()
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)), \
+                    self.assertRaisesRegex(RuntimeError, "within 10s"):
+                run.launch("light-cold-start")
+            run.begin_launch_recording.assert_not_called()
+            run.launch_and_capture.assert_not_called()
+            metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertFalse(metadata["passed"])
+            self.assertEqual(10, metadata["timeout_seconds"])
+            self.assertEqual(3, metadata["required_stable_captures"])
+            self.assertEqual([.7, .7, .7], [sample["hierarchy_seconds"] for sample in metadata["samples"]])
+
+    def test_launch_stage_host_timings_do_not_treat_am_total_time_as_current_elapsed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            clock = [0.0]
+            def text(*args, **kwargs):
+                if "start" in args:
+                    clock[0] += 2
+                    return "Status: ok\nTotalTime: 173202\nWaitTime: 2729\n"
+                clock[0] += 1 if "pidof" in args else 2
+                return "9449" if "pidof" in args else "real window transcript"
+            def page(*args):
+                clock[0] += 3
+                return self.hierarchy()
+            def capture(*args):
+                clock[0] += 4
+            def logcat(*args):
+                clock[0] += 2
+                return f"Displayed {PACKAGE}/.MainActivity: +2s202ms"
+            run.text = Mock(side_effect=text)
+            run.wait_page = Mock(side_effect=page)
+            run.capture = Mock(side_effect=capture)
+            run.logcat = Mock(side_effect=logcat)
+            run.record = Mock()
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]):
+                run.launch_and_capture("warm-start")
+            timing = run.record.call_args.kwargs
+            self.assertEqual(14, timing["ui_ready_seconds"])
+            self.assertEqual(2, timing["am_command_seconds"])
+            self.assertEqual(3, timing["page_wait_seconds"])
+            self.assertEqual(4, timing["home_capture_seconds"])
+            self.assertEqual(5, timing["startup_evidence_seconds"])
+            self.assertEqual("173202", timing["am_total_time_ms"])
+            self.assertIn("startup evidence collection", timing["ui_ready_seconds_scope"])
 
     def test_cold_baseline_error_is_not_masked_by_missing_or_failed_warm_pid(self):
         for pid_result in ("", RuntimeError("pidof connection timed out")):
