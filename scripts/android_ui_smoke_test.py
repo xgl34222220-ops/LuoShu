@@ -12,7 +12,7 @@ from unittest.mock import Mock
 from android_ui_smoke import (
     action_disabled, anchors_preserved, app_labels, center, choice_selected, content_anchors,
     crash_reason, label_target, orientation_matches, page_ready, tab_target,
-    SmokeRun,
+    SmokeRun, instrumentation_results,
 )
 
 
@@ -217,6 +217,47 @@ class UiSmokeHarnessTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No real active window"):
                 run.hierarchy()
             self.assertEqual([], run.checks)
+
+    def test_snapshot_wait_diagnostics_preserve_a_delayed_real_window_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None, Path("snapshot.apk"))
+            run.hierarchy_attempts = 2
+            transcript = ("INSTRUMENTATION_RESULT: wait_ms=1200\n"
+                          "INSTRUMENTATION_RESULT: attempts=13\n"
+                          "INSTRUMENTATION_RESULT: root_source=focused-window:7\n"
+                          f"INSTRUMENTATION_RESULT: root_package={PACKAGE}\n"
+                          "INSTRUMENTATION_RESULT: snapshot=ok\nINSTRUMENTATION_CODE: -1\n")
+            run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, transcript.encode(), b""),
+                                       subprocess.CompletedProcess([], 0, ET.tostring(self.hierarchy()), b"")])
+            root = run.snapshot_hierarchy()
+            self.assertTrue(page_ready(root, "首页", "当前字体", PACKAGE))
+            metadata = json.loads((output / "hierarchy-snapshot-0002.json").read_text())
+            self.assertEqual("13", metadata["attempts"])
+            self.assertEqual("1200", metadata["wait_ms"])
+            self.assertEqual("focused-window:7", metadata["root_source"])
+            self.assertEqual(20, run.adb.call_args_list[0].kwargs["timeout"])
+            # A true system tree is still necessary; delayed success never skips
+            # the selected-tab and actual-content checks used by the real run.
+            self.assertFalse(page_ready(root, "字体库", "当前字体", PACKAGE))
+
+    def test_exhausted_snapshot_wait_preserves_diagnostics_and_fails(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None, Path("snapshot.apk"))
+            transcript = ("INSTRUMENTATION_RESULT: wait_ms=8001\nINSTRUMENTATION_RESULT: attempts=79\n"
+                          "INSTRUMENTATION_RESULT: root_source=unavailable\n"
+                          "INSTRUMENTATION_RESULT: error=IllegalStateException: No active accessibility window\n"
+                          "INSTRUMENTATION_RESULT: snapshot=failed\nINSTRUMENTATION_CODE: 0\n")
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, transcript.encode(), b""))
+            with self.assertRaisesRegex(RuntimeError, "No active accessibility window"):
+                run.snapshot_hierarchy()
+            self.assertEqual(1, run.adb.call_count)
+            metadata = json.loads((output / "hierarchy-snapshot-0000.json").read_text())
+            self.assertEqual("8001", metadata["wait_ms"])
+            self.assertEqual("79", metadata["attempts"])
+            self.assertEqual("failed", metadata["snapshot"])
+            self.assertEqual("failed", instrumentation_results(transcript)["snapshot"])
 
 
 if __name__ == "__main__":

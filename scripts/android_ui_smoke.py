@@ -238,6 +238,10 @@ def crash_reason(log: str, package: str) -> str | None:
     return None
 
 
+def instrumentation_results(output: str) -> dict[str, str]:
+    return dict(re.findall(r"^INSTRUMENTATION_RESULT: ([A-Za-z_]\w*)=(.*)$", output, re.MULTILINE))
+
+
 class SmokeRun:
     def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None):
         self.apk = apk
@@ -323,7 +327,10 @@ class SmokeRun:
                           f"{helper}/.SnapshotInstrumentation", timeout=20, check=False)
         (self.output / f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.txt").write_bytes(result.stdout + result.stderr)
         output = (result.stdout + result.stderr).decode("utf-8", "replace")
-        if result.returncode or "INSTRUMENTATION_RESULT: snapshot=ok" not in output:
+        metadata = instrumentation_results(output)
+        (self.output / f"hierarchy-snapshot-{self.hierarchy_attempts:04d}.json").write_text(
+            json.dumps({"returncode": result.returncode, **metadata}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if result.returncode or metadata.get("snapshot") != "ok":
             raise RuntimeError(f"Real UiAutomation snapshot failed ({result.returncode}): {output[-3000:]}")
         xml = self.text("shell", "run-as", helper, "cat", f"files/{filename}")
         root = ET.fromstring(xml)

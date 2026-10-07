@@ -8,10 +8,12 @@ import android.content.Context;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Xml;
 import android.view.Display;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
 import org.xmlpull.v1.XmlSerializer;
 
@@ -19,6 +21,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /** Read a live AccessibilityNodeInfo tree without changing or launching App UI.
  *
@@ -42,6 +45,9 @@ public final class SnapshotInstrumentation extends Instrumentation {
     public void onStart() {
         Bundle result = new Bundle();
         AccessibilityNodeInfo root = null;
+        long waitStarted = 0;
+        int attempts = 0;
+        String rootSource = "unavailable";
         try {
             String filename = arguments.getString("filename", "hierarchy-0000.xml");
             if (!filename.matches("hierarchy-[0-9]{4,8}\\.xml")) {
@@ -51,14 +57,45 @@ public final class SnapshotInstrumentation extends Instrumentation {
             if (automation == null) throw new IllegalStateException("UiAutomation test connection failed");
             AccessibilityServiceInfo service = automation.getServiceInfo();
             service.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-                    | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+                    | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+                    | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
             automation.setServiceInfo(service);
-            // Connecting the public test bridge is asynchronous. Retry a null
-            // root only; do not stop animations or alter accessibility settings.
-            for (int attempt = 0; attempt < 5 && root == null; attempt++) {
+            // On older APIs a fresh test connection can precede window tracking.
+            // Keep this bounded and read only active/focused real windows; the
+            // host still checks the App package, selected tab and page content.
+            waitStarted = SystemClock.uptimeMillis();
+            long deadline = waitStarted + 8000;
+            while (root == null && SystemClock.uptimeMillis() < deadline) {
+                attempts++;
                 root = automation.getRootInActiveWindow();
-                if (root == null) Thread.sleep(100);
+                if (root != null) {
+                    rootSource = "getRootInActiveWindow";
+                    break;
+                }
+                List<AccessibilityWindowInfo> windows = automation.getWindows();
+                try {
+                    // Prefer active over merely focused if both are reported.
+                    for (int priority = 0; priority < 2 && root == null; priority++) {
+                        for (AccessibilityWindowInfo window : windows) {
+                            if (!(priority == 0 ? window.isActive() : window.isFocused())) continue;
+                            root = window.getRoot();
+                            if (root != null) {
+                                rootSource = (priority == 0 ? "active-window:" : "focused-window:") + window.getId();
+                                break;
+                            }
+                        }
+                    }
+                } finally {
+                    for (AccessibilityWindowInfo window : windows) window.recycle();
+                }
+                if (root == null) {
+                    long remaining = deadline - SystemClock.uptimeMillis();
+                    if (remaining > 0) Thread.sleep(Math.min(100, remaining));
+                }
             }
+            result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
+            result.putString("attempts", Integer.toString(attempts));
+            result.putString("root_source", rootSource);
             if (root == null) throw new IllegalStateException("No active accessibility window");
             WindowManager manager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
             Display display = manager.getDefaultDisplay();
@@ -85,6 +122,9 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("root_package", text(root.getPackageName()));
             finish(Activity.RESULT_OK, result);
         } catch (Exception failure) {
+            if (waitStarted != 0) result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
+            result.putString("attempts", Integer.toString(attempts));
+            result.putString("root_source", rootSource);
             result.putString("snapshot", "failed");
             result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
             finish(Activity.RESULT_CANCELED, result);
