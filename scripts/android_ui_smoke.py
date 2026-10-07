@@ -783,9 +783,17 @@ class SmokeRun:
                 return tab_target(current, "首页", self.package) is not None
 
             try:
-                rectangles = [bounds(node) for node in root.iter("node")
-                              if node.get("package") == self.package and BOUNDS.fullmatch(node.get("bounds", ""))
-                              and bounds(node)[2] > bounds(node)[0] and bounds(node)[3] > bounds(node)[1]]
+                rectangles = []
+                for node in root.iter("node"):
+                    if node.get("package") != self.package:
+                        continue
+                    try:
+                        rectangles.append(bounds(node))
+                    except ValueError:
+                        # A clipped offscreen descendant is not a gesture target.
+                        # Keep strict bounds for every actual navigation target
+                        # and refuse the gesture if no real App rectangle exists.
+                        continue
                 if not rectangles:
                     raise RuntimeError("Cannot read actual App bounds for Quick Return")
                 width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)

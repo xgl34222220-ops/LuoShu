@@ -1447,6 +1447,57 @@ class QuickReturnHarnessTest(unittest.TestCase):
             self.assertTrue((output / evidence["before_xml"]).is_file())
             self.assertTrue((output / evidence["after_xml"]).is_file())
 
+    def test_original_api28_resize_ignores_offscreen_rectangles_but_requires_real_dock(self):
+        fixture = Path(__file__).parent / "ui_smoke_fixtures/api28-resize-hidden-nodes-942255ab.xml"
+        before = ET.parse(fixture).getroot()
+        app_nodes = [node for node in before.iter("node") if node.get("package") == PACKAGE]
+        self.assertEqual(45, len(app_nodes))
+        self.assertEqual(15, sum(node.get("bounds") == "[0,0][0,0]" for node in app_nodes))
+        self.assertEqual((0, 0, 1080, 1920), app_window_bounds(before, PACKAGE))
+        with self.assertRaises(ValueError):
+            tab_target(before, "首页", PACKAGE)
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            run.hierarchy = Mock(return_value=before)
+            run.adb = Mock()
+            ready = self.hierarchy(dock=True)
+            def wait(predicate, description, timeout):
+                with self.assertRaises(ValueError):
+                    predicate(before)
+                self.assertTrue(predicate(ready))
+                self.assertLessEqual(timeout, 30)
+                return ready
+            run.wait_ui = Mock(side_effect=wait)
+            self.assertIs(ready, run.ensure_dock())
+            run.adb.assert_called_once_with("shell", "input", "swipe", "540", "768", "540", "883", "2000")
+            evidence = json.loads((output / "quick-return-0001.json").read_text())
+            self.assertTrue(evidence["passed"])
+            self.assertTrue(evidence["after_snapshot_received"])
+            self.assertEqual({"首页", "字体库", "组合", "设置"}, set(evidence["navigation"]))
+            self.assertEqual(ET.tostring(before), ET.tostring(ET.parse(output / evidence["before_xml"]).getroot()))
+
+    def test_all_invisible_app_rectangles_refuse_gesture_and_preserve_failure(self):
+        fixture = Path(__file__).parent / "ui_smoke_fixtures/api28-resize-hidden-nodes-942255ab.xml"
+        invisible = ET.parse(fixture).getroot()
+        for node in invisible.iter("node"):
+            node.set("bounds", "[0,0][0,0]")
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            run.hierarchy = Mock(return_value=invisible)
+            run.adb = Mock()
+            run.wait_ui = Mock()
+            with self.assertRaisesRegex(RuntimeError, "Cannot read actual App bounds"):
+                run.ensure_dock()
+            run.adb.assert_not_called()
+            run.wait_ui.assert_not_called()
+            evidence = json.loads((output / "quick-return-0001.json").read_text())
+            self.assertFalse(evidence["passed"])
+            self.assertNotIn("gesture", evidence)
+            self.assertFalse(evidence["after_snapshot_received"])
+            self.assertEqual(ET.tostring(invisible), ET.tostring(ET.parse(output / evidence["after_xml"]).getroot()))
+
     def test_gesture_time_counts_toward_the_existing_thirty_second_budget(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)

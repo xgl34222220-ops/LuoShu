@@ -32,19 +32,73 @@ class UiSnapshotSession:
         self.fatal_error: str | None = None
         self.filenames: set[str] = set()
         self.events: list[dict[str, object]] = []
+        self.commands: list[dict[str, object]] = []
+        self.diagnostic_errors: list[str] = []
+
+    def _diagnostic_write(self, path: Path, content: bytes) -> None:
+        try:
+            path.write_bytes(content)
+        except Exception as error:
+            # Evidence cannot replace a command's real result or primary error.
+            self.diagnostic_errors.append(f"{path.name}: {type(error).__name__}: {error}")
 
     def _event(self, event: str, **details: object) -> None:
         self.events.append({"event": event, "monotonic_seconds": time.monotonic(), **details})
-        (self.output / "ui-snapshot-session.json").write_text(json.dumps(
-            {"protocol": PROTOCOL, "nonce": self.nonce, "events": self.events},
-            ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        self._diagnostic_write(self.output / "ui-snapshot-session.json", (json.dumps(
+            {"protocol": PROTOCOL, "nonce": self.nonce, "events": self.events,
+             "diagnostic_errors": self.diagnostic_errors},
+            ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
+
+    def _record_command(self, record: dict[str, object], stdout: bytes, stderr: bytes) -> None:
+        index = len(self.commands) + 1
+        prefix = f"ui-snapshot-command-{self.nonce}-{index:04d}"
+        record.update({"index": index, "stdout": prefix + "-stdout.bin",
+                       "stderr": prefix + "-stderr.bin", "stdout_bytes": len(stdout),
+                       "stderr_bytes": len(stderr)})
+        self.commands.append(record)
+        self._diagnostic_write(self.output / str(record["stdout"]), stdout)
+        self._diagnostic_write(self.output / str(record["stderr"]), stderr)
+        self._diagnostic_write(self.output / "ui-snapshot-commands.json", (json.dumps(
+            {"protocol": PROTOCOL, "nonce": self.nonce, "commands": self.commands,
+             "diagnostic_errors": self.diagnostic_errors},
+            ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
 
     def _run(self, arguments: list[str], *, timeout: float, payload: bytes | None = None):
+        command = self.adb_command + arguments
+        record: dict[str, object] = {"arguments": command, "timeout_seconds": timeout,
+                                    "started_unix_seconds": time.time()}
+        stdout = stderr = b""
+        started = time.monotonic()
+        record["started_monotonic_seconds"] = started
         try:
-            return subprocess.run(self.adb_command + arguments, input=payload,
-                                  capture_output=True, timeout=timeout)
+            result = subprocess.run(command, input=payload, capture_output=True, timeout=timeout)
+            ended = time.monotonic()
+            record.update({"outcome": "returned", "returncode": result.returncode})
+            stdout, stderr = result.stdout, result.stderr
+            return result
         except subprocess.TimeoutExpired as error:
+            ended = time.monotonic()
+            record.update({"outcome": "timeout", "returncode": None})
+            stdout, stderr = error.stdout or b"", error.stderr or b""
             raise RuntimeError("UiAutomation session adb command timed out") from error
+        except OSError as error:
+            ended = time.monotonic()
+            record.update({"outcome": "os-error", "returncode": None,
+                           "error": f"{type(error).__name__}: {error}"})
+            raise
+        finally:
+            if "outcome" not in record:
+                ended = time.monotonic()
+                record.update({"outcome": "interrupted", "returncode": None})
+            # No diagnostic I/O precedes the actual command. These writes still
+            # consume the caller's existing deadline; no timeout is restarted.
+            record.update({"ended_monotonic_seconds": ended,
+                           "elapsed_seconds": ended - started,
+                           "ended_unix_seconds": time.time()})
+            try:
+                self._record_command(record, stdout, stderr)
+            except Exception as error:
+                self.diagnostic_errors.append(f"command evidence: {type(error).__name__}: {error}")
 
     def _write(self, basename: str, envelope: dict[str, object], *, timeout: float) -> None:
         path = f"{self.directory}/{basename}"

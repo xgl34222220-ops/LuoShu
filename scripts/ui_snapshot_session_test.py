@@ -294,6 +294,139 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.popen.assert_called_once()
         self.assertIsNotNone(self.session.fatal_error)
 
+    def test_command_journal_preserves_real_arguments_return_code_times_and_binary_output(self):
+        stdout, stderr = b'\x00\xfforiginal stdout\r\n', b'\x80original stderr\x00'
+        arguments = ['shell', 'run-as', HELPER, 'cat', f'{self.session.directory}/ready.json']
+        def returned(command, **kwargs):
+            self.assertFalse(list(self.output.glob('ui-snapshot-command-*')))
+            self.assertEqual(100, self.clock.now)  # No pre-command evidence I/O.
+            self.clock.now += .35
+            return subprocess.CompletedProcess(command, 7, stdout, stderr)
+        self.adb.side_effect = returned
+        result = self.session._run(arguments, timeout=1.75)
+        self.assertEqual((7, stdout, stderr), (result.returncode, result.stdout, result.stderr))
+        journal = json.loads((self.output / 'ui-snapshot-commands.json').read_text())
+        record = journal['commands'][0]
+        self.assertEqual(self.session.nonce, journal['nonce'])
+        self.assertEqual(self.session.adb_command + arguments, record['arguments'])
+        self.assertEqual((1.75, 7, 'returned'),
+                         (record['timeout_seconds'], record['returncode'], record['outcome']))
+        self.assertEqual(100, record['started_monotonic_seconds'])
+        self.assertAlmostEqual(100.35, record['ended_monotonic_seconds'])
+        self.assertAlmostEqual(.35, record['elapsed_seconds'])
+        self.assertGreater(record['started_unix_seconds'], 0)
+        self.assertGreaterEqual(record['ended_unix_seconds'], record['started_unix_seconds'])
+        self.assertEqual(stdout, (self.output / record['stdout']).read_bytes())
+        self.assertEqual(stderr, (self.output / record['stderr']).read_bytes())
+
+    def test_timeout_journal_keeps_partial_original_bytes_and_original_fatal_error(self):
+        stdout, stderr = b'\xffpartial ready\x00', b'\x00\x80transport stderr'
+        def timed_out(command, **kwargs):
+            self.clock.now += kwargs['timeout']
+            raise subprocess.TimeoutExpired(command, kwargs['timeout'], output=stdout, stderr=stderr)
+        self.adb.side_effect = timed_out
+        with self.assertRaisesRegex(RuntimeError, 'adb command timed out') as caught:
+            self.session.capture('hierarchy-0001.xml', deadline=110)
+        self.assertIsInstance(caught.exception.__cause__, subprocess.TimeoutExpired)
+        record = self.session.commands[0]
+        self.assertEqual(('timeout', None, 10),
+                         (record['outcome'], record['returncode'], record['elapsed_seconds']))
+        self.assertTrue(record['arguments'][-1].endswith('/ready.json'))
+        self.assertEqual(stdout, (self.output / record['stdout']).read_bytes())
+        self.assertEqual(stderr, (self.output / record['stderr']).read_bytes())
+        self.assertEqual([], self.protocol.requests)
+        with self.assertRaises(RuntimeError):
+            self.session.capture('hierarchy-0002.xml', deadline=120)
+        self.popen.assert_called_once()
+        self.assertEqual(1, self.adb.call_count)
+
+    def test_os_error_is_preserved_with_command_diagnostics(self):
+        failure = OSError('actual missing adb executable')
+        self.adb.side_effect = failure
+        with self.assertRaises(OSError) as caught:
+            self.session._run(['shell', 'run-as', HELPER, 'cat', 'ready.json'], timeout=2)
+        self.assertIs(failure, caught.exception)
+        self.assertEqual('os-error', self.session.commands[0]['outcome'])
+        self.assertIn('actual missing adb executable', self.session.commands[0]['error'])
+
+    def fail_diagnostic_writes(self):
+        write = Path.write_bytes
+        def only_diagnostics(path, content):
+            if path.name.startswith('ui-snapshot-command') or path.name == 'ui-snapshot-session.json':
+                raise OSError('diagnostic storage failure')
+            return write(path, content)
+        return patch.object(Path, 'write_bytes', only_diagnostics)
+
+    def test_diagnostic_storage_failure_cannot_mask_the_original_timeout(self):
+        self.adb.side_effect = subprocess.TimeoutExpired(['adb'], 10, output=b'raw partial')
+        with self.fail_diagnostic_writes():
+            with self.assertRaisesRegex(RuntimeError, 'adb command timed out') as caught:
+                self.session.capture('hierarchy-0001.xml', deadline=110)
+        self.assertIsInstance(caught.exception.__cause__, subprocess.TimeoutExpired)
+        self.assertEqual('timeout', self.session.commands[0]['outcome'])
+        self.assertTrue(self.session.diagnostic_errors)
+        self.assertEqual('UiAutomation session adb command timed out', self.session.fatal_error)
+
+    def test_diagnostic_storage_failure_cannot_become_a_new_success_condition(self):
+        with self.fail_diagnostic_writes():
+            metadata, xml = self.session.capture('hierarchy-0001.xml')
+            self.session.close()
+        self.assertEqual('ok', metadata['snapshot'])
+        self.assertEqual(self.protocol.xml.decode(), xml)
+        self.assertTrue(self.session.diagnostic_errors)
+        self.popen.assert_called_once()
+        self.process.communicate.assert_called_once_with(timeout=10)
+
+    def test_native_ready_fields_and_final_instrumentation_remain_optional_evidence(self):
+        ready = json.loads(self.protocol.files['ready.json'])
+        ready['helper_diagnostics'] = {'helper_session_nonce': self.session.nonce, 'helper_pid': '2409',
+                                     'helper_ready_write_started_uptime_ms': '65100'}
+        self.protocol.files['ready.json'] = json.dumps(ready).encode()
+        transcript = (f'INSTRUMENTATION_RESULT: helper_session_nonce={self.session.nonce}\n'
+                      'INSTRUMENTATION_RESULT: helper_pid=2409\n'
+                      'INSTRUMENTATION_RESULT: helper_ready_published_uptime_ms=65105\n'
+                      'INSTRUMENTATION_CODE: -1\n').encode()
+        self.process.communicate.return_value = (transcript, b'')
+        metadata, xml = self.session.capture('hierarchy-0001.xml')
+        self.assertEqual('ok', metadata['snapshot'])
+        self.assertEqual(self.protocol.xml.decode(), xml)
+        self.assertEqual(self.protocol.files['ready.json'], (self.output / 'ui-snapshot-session-ready.json').read_bytes())
+        self.session.close()
+        self.assertEqual(transcript, (self.output / 'ui-snapshot-session-instrumentation.txt').read_bytes())
+        self.assertEqual(7, len(self.protocol.calls))  # Original ready/write/response/XML/stop/closed/rm only.
+
+    def test_late_ready_native_diagnostics_cannot_publish_a_request_or_restart(self):
+        ready = json.loads(self.protocol.files['ready.json'])
+        ready['helper_diagnostics'] = {'helper_pid': '2409', 'helper_ready_write_started_uptime_ms': '65100'}
+        self.protocol.files['ready.json'] = json.dumps(ready).encode()
+        original_run = self.protocol.run
+        def late_ready(command, **kwargs):
+            result = original_run(command, **kwargs)
+            self.clock.now = 110.01
+            return result
+        self.adb.side_effect = late_ready
+        with self.assertRaisesRegex(RuntimeError, 'timed out while reading ready.json'):
+            self.session.capture('hierarchy-0001.xml', deadline=110)
+        self.assertEqual(self.protocol.files['ready.json'], (self.output / 'ui-snapshot-session-ready.json').read_bytes())
+        self.assertEqual([], self.protocol.requests)
+        self.assertFalse(any(event['event'] == 'ready' for event in self.session.events))
+        with self.assertRaises(RuntimeError):
+            self.session.capture('hierarchy-0002.xml', deadline=120)
+        self.popen.assert_called_once()
+
+    def test_post_command_diagnostic_io_still_consumes_the_original_caller_deadline(self):
+        record = self.session._record_command
+        def slow_evidence(*args):
+            record(*args)
+            self.clock.now += 3
+        with patch.object(self.session, '_record_command', side_effect=slow_evidence):
+            with self.assertRaisesRegex(RuntimeError, 'timed out while reading ready.json'):
+                self.session.capture('hierarchy-0001.xml', deadline=102)
+        self.assertAlmostEqual(.1, self.session.commands[0]['elapsed_seconds'])
+        self.assertEqual(2, self.session.commands[0]['timeout_seconds'])
+        self.assertEqual([], self.protocol.requests)
+        self.popen.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()

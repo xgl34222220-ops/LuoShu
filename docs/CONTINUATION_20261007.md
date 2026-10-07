@@ -156,3 +156,19 @@ API 34 前没有公开的 UiAutomation.clearCache。旧 API 的读取器现在�
 同 SHA 视觉作业在 ffmpeg 安装准备时于 180 秒退出 124，原 artifact 11515902600 为 300 bytes、SHA-256 `00d88ac5fd07cf0296856a7d34bf7e5efad392e7ca159d8aa1f026ab3515bb21`，仅两个空 apt 日志；模拟器、HOME 基线、gzip 传输和四段原录像均未执行。因此不评价新传输速度或首帧效果，更不交付安装包。后续仅去掉 install 的静默输出，保留原 180 秒/两次重试/网络单请求 30 秒预算及签名验证，并在失败时保存只读包状态和不含参数的进程表，保留安装与日志写入的真实退出码；不停止包管理器、不清缓存。原失败证据不覆盖，新 helper 的完整 SDK 编译、API 28/36 与原录像仍需下一准确 SHA 的完整 CI。
 
 修正后的适用 host 回归实际为 UI 工具 73、会话 18、逐帧分类器 20、启动源约束 11，共 122 项通过。新增一项 host 测试真实编译并执行生产 Java 方法与原 SDK 分支的 24 个配置/空值/预算/现代 clearCache 行为案例；这是 host 控制流测试，不是 Android 窗口验证。完整 SDK helper 编译本地未运行。实际 Bash 管道另验证 upstream 0/124 与日志写入 0/7 的退出码均保存，工作流 YAML 和真实准备脚本 bash -n 通过；未扩大任何验收预算。
+
+## 942255ab 真实零矩形失败与连接阶段诊断
+
+`942255abbcb92f712dc85a4ae49b9ac43a63dcb5` 的 [candidate 37698733037](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37698733037) 已成功终态；两轮原源码检查各 41 suites / 721 tests / 41 OK，补充 4 suites / 54 tests / 4 OK，包验证 9 suites / 204 tests / 9 OK。重复轮次不能记成 1700 项独立测试。原 artifact 11517940045 为 12,340,200 bytes、SHA-256 `c34ebdabe5ee1750a28368b872685465f57dec45bddf1ae1083b7e7a9f0cb4a9`，仅保留内部校验，未交付安装。
+
+同 SHA [UI 37698733087](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37698733087) 已失败终态。build 实际 34 suites / 217 tests、0 failure/error/skip，lint、更新 helper 的完整 Android SDK 编译与 73+18 host 回归通过。API 36 原 artifact 11517277252（50,757,338 bytes、SHA-256 `6915cf79419839d835581268d61293683d09898257e3fd60910eebfb02fa2add`）完成 31 次捕获 / 30 张独立 PNG / 20 项检查，309.48 秒，真实选中语义、正文、滚动/Quick Return、后台/旋转、Google 入口通过。原 Google persistent PID 1390 的 ANR 保留，与洛书冷启 PID 2380、再次冷启 PID 7768 分开；未记录洛书 App ANR，不称全系统无 ANR。
+
+API 28 原 artifact 11517257816（13,549,454 bytes、SHA-256 `b903d7630358856e5c453d235f303c01a352b06c58edb9a6f0a857b594d3279e`）完成 18 屏 / 14 项检查后于 453.28 秒失败。40 份实际 snapshot 均有真实根节点，公开 legacy 刷新的原配置前后相同；这不能代替后续完整 API 28 验收。失败已由两次独立禁用所有 adb 的原 XML 重放定位：字体库检查将 viewport 改为 1080×1920/420，设置页存在 15 个 `[0,0][0,0]` 屏外后代；`ensure_dock` 候选矩形列表在过滤前就对零面积节点调用严格 `bounds`，在任何手势之前抛 ValueError，Quick Return 原失败耗时 0.007 秒。不是旧首次空根节点失败，也没有证明 App ANR。
+
+修正仅安全筛掉非目标的不可见矩形，保留全部真实点击目标的正面积/可操作/完整四项导航约束；全部 App 矩形均无效仍失败且不发输入。原 30 秒 Quick Return、单次两秒手势、原视口与后续滚动/返回断言均不变。提交夹具逐字节来自原 hierarchy-0040.xml，SHA-256 `3217891af93db5db5a10affab3dcade2e7fad58f61413a7ff169e7713684428b`，来源记录绑定原 SHA/job/artifact；两项新增 host 回归覆盖原零矩形和全部不可见拒绝，UI host 共 75 项通过。它们是 host 控制流验证，不是新 Android 运行结果。
+
+视觉准备与 KVM 成功后，原 artifact 11516653105（825,478 bytes、SHA-256 `fd5f035b5a25411b902a034a8a378ae8f98dba5e2636d97a93088f22372ec737`）仍有 23 个成员、0 MP4、0 基线 raw/gzip/PNG。亮冷在共享十秒中 HOME resolve 0.201654 秒、首次读取 ready.json 的 adb 命令约 9.799 秒超时，设备 snapshot 请求还未发布；暗冷继承同一 fatal session 于 28 微秒内拒绝，不能称为另一次独立超时。后来正常同 nonce closed/Instrumentation -1 不能证明十秒内已就绪。原失败 PNG 仍为壁纸和中央 Launcher 图形；helper PID 2409 启动、UiAutomation 注册的 1342 ms 锁等待、Google SIM_STATE_CHANGED ANR 全保留。未保留每次命令输出/时序或原生 ready 时间，不能据同期锁日志断言 PM/GMS 根因，也不能评价 App 启动画面或 gzip 速度。
+
+后续只补命令的真正起止、原 argv/timeout/退出码/超时原 stdout-stderr，以及同 nonce/helper PID/连接和 ready 原生 uptime 阶段诊断。诊断不能改变原成功条件、掩盖原错误、增加 RPC/重连/权限、预算外预热或延长原十秒/八秒/二十秒及清理预算；较晚 ready 仅保留诊断。App 默认启动退场、首帧提交与玻璃、OEM/Google 字体和合成/切换实现均保留。最终完整 SDK、API 28/36 和四段原录像必须由下一准确 SHA 的真实 CI 重新核验，旧 97 秒及两台真机整次切换/ColorOS 整机 reboot 仍未解决或实测。
+
+本次合并后的适用 host 回归实际为 UI 工具 75、会话 26、逐帧分类器 20、启动源约束 11，共 132 项通过；原 Java 24 案例也在 UI host 用例中实际编译执行。新增八项会话行为回归验证原始二进制输出、超时部分输出、原始 OS 错误、诊断存储失败、原生时间仅为证据、迟到 ready 拒绝及诊断 I/O 消耗原截止时间。正常结束仍为原七次 RPC，没有新增连接或清理调用。完整 Android SDK 编译和新的模拟器运行未在这些 host 结果中发生。统一原日志 SHA-256 为 `11272ba0e4cf78f34bc5b59dcfec607244582391d257a2138ec0540f50bac4d7`；942 原失败保持，下一提交未验收前不交付安装包。

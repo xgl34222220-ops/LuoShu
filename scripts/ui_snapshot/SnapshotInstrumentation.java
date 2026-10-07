@@ -55,32 +55,41 @@ public final class SnapshotInstrumentation extends Instrumentation {
     @Override
     public void onStart() {
         Bundle result;
+        Bundle diagnostics = new Bundle();
         try {
             String nonce = arguments.getString("session_nonce");
             if (nonce == null) {
-                result = snapshot(connectAutomation(), arguments.getString("filename", "hierarchy-0000.xml"),
+                result = snapshot(connectAutomation(null), arguments.getString("filename", "hierarchy-0000.xml"),
                         getContext().getFilesDir());
             } else {
-                result = runSession(nonce);
+                result = runSession(nonce, diagnostics);
             }
         } catch (Exception failure) {
             result = new Bundle();
             result.putString("snapshot", "failed");
             result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
         }
+        result.putAll(diagnostics);
         // Instrumentation.finish tears down this one public test connection.
         finish("failed".equals(result.getString("snapshot")) ? Activity.RESULT_CANCELED : Activity.RESULT_OK, result);
     }
 
-    private UiAutomation connectAutomation() {
+    private UiAutomation connectAutomation(Bundle diagnostics) {
+        diagnosticTime(diagnostics, "helper_automation_connect_started_uptime_ms");
         UiAutomation automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         if (automation == null) throw new IllegalStateException("UiAutomation test connection failed");
+        diagnosticTime(diagnostics, "helper_automation_connected_uptime_ms");
         AccessibilityServiceInfo service = automation.getServiceInfo();
         service.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
                 | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
                 | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
         automation.setServiceInfo(service);
+        diagnosticTime(diagnostics, "helper_automation_configured_uptime_ms");
         return automation;
+    }
+
+    private static void diagnosticTime(Bundle diagnostics, String key) {
+        if (diagnostics != null) diagnostics.putString(key, Long.toString(SystemClock.uptimeMillis()));
     }
 
     private static JSONObject serviceInfoEvidence(AccessibilityServiceInfo info) throws Exception {
@@ -149,13 +158,29 @@ public final class SnapshotInstrumentation extends Instrumentation {
         }
     }
 
-    private Bundle runSession(String nonce) throws Exception {
+    private Bundle runSession(String nonce, Bundle diagnostics) throws Exception {
         if (!nonce.matches("[0-9a-f]{32}")) throw new IllegalArgumentException("Invalid session nonce");
+        diagnostics.putString("helper_session_nonce", nonce);
+        diagnostics.putString("helper_pid", Integer.toString(android.os.Process.myPid()));
+        diagnosticTime(diagnostics, "helper_run_session_started_uptime_ms");
         File directory = new File(getContext().getFilesDir(), "ui-snapshot-session-" + nonce);
         // A fresh private directory makes old ready/response/XML files unusable.
         if (!directory.mkdir()) throw new IllegalStateException("Cannot create fresh session directory");
-        UiAutomation automation = connectAutomation();
-        writeJson(directory, "ready.json", envelope(nonce).put("state", "ready").put("root_wait_ms", ROOT_WAIT_MS));
+        UiAutomation automation = connectAutomation(diagnostics);
+        diagnosticTime(diagnostics, "helper_ready_write_started_uptime_ms");
+        JSONObject ready = envelope(nonce).put("state", "ready").put("root_wait_ms", ROOT_WAIT_MS);
+        try {
+            JSONObject timing = new JSONObject();
+            for (String key : diagnostics.keySet()) timing.put(key, diagnostics.getString(key));
+            ready.put("helper_diagnostics", timing);
+        } catch (Exception diagnosticFailure) {
+            diagnostics.putString("helper_diagnostics_error", diagnosticFailure.toString());
+        }
+        writeJson(directory, "ready.json", ready);
+        // This can occur after the host's original deadline. The final existing
+        // instrumentation result preserves it only as a diagnostic, never as a
+        // substitute for a matching timely ready/request/response/XML exchange.
+        diagnosticTime(diagnostics, "helper_ready_published_uptime_ms");
         Set<String> requests = new HashSet<>();
         Set<String> filenames = new HashSet<>();
         while (true) {
