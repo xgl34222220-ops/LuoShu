@@ -3,14 +3,12 @@ package io.github.xgl34222220.luoshu.ui.launch
 import android.app.Activity
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
-import androidx.annotation.RequiresApi
 import io.github.xgl34222220.luoshu.ui.launch.LuoShuLaunchExitPolicy.Action
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlassPalette
 
-/** The real Window backdrop and immediate system-splash cleanup; no second launch page. */
+/** The real Window backdrop; Android owns the native splash and its default exit. */
 internal class LuoShuLaunchController(private val activity: Activity) {
     private val exitPolicy = LuoShuLaunchExitPolicy()
     val isComplete: Boolean get() = exitPolicy.isComplete
@@ -28,9 +26,9 @@ internal class LuoShuLaunchController(private val activity: Activity) {
         val dark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES
         applyAppearance(dark, pureBlack = false)
-        // Register for every launch, including recreation, task entry and reduced motion.
-        // There is no custom animation in any of those paths.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) installPlatformExit()
+        // Keep the default platform exit. Registering a custom exit listener asks
+        // Android to copy its splash into this Activity's decor. A delayed transfer
+        // can then cover an already visible home frame, even if removal is immediate.
     }
 
     fun onContentDrawn() {
@@ -38,19 +36,6 @@ internal class LuoShuLaunchController(private val activity: Activity) {
         contentDrawReported = true
         event("content_draw_delivered")
         complete("content_drawn", exitPolicy.onContentDrawn())
-    }
-
-    @RequiresApi(Build.VERSION_CODES.S)
-    private fun installPlatformExit() {
-        activity.splashScreen.setOnExitAnimationListener { splash ->
-            event("native_exit_received")
-            // Never retain, animate or repost this view. Even a late callback after
-            // stop/task entry must remove its system layer in this same callback.
-            if (exitPolicy.onNativeExit() == Action.REMOVE_NATIVE) {
-                splash.remove()
-                event("native_removed")
-            }
-        }
     }
 
     fun stop() = complete("stop")
@@ -75,12 +60,6 @@ internal class LuoShuLaunchController(private val activity: Activity) {
         disposed = true
         onComplete = null
         complete("destroy")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) clearPlatformExit()
-    }
-
-    @RequiresApi(Build.VERSION_CODES.S)
-    private fun clearPlatformExit() {
-        activity.splashScreen.clearOnExitAnimationListener()
     }
 
     private fun complete(reason: String, action: Action = exitPolicy.finish()) {

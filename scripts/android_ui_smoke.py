@@ -413,7 +413,11 @@ def instrumentation_results(output: str) -> dict[str, str]:
 
 
 def assert_single_stage_startup(log: str, pid: str, api_level: int) -> list[str]:
-    """Inspect this launch's real process events without accepting evidence from an old PID."""
+    """Require current-process content delivery; visual handoff needs decoded frames.
+
+    Default platform removal has no App exit callback. Absence of art/native event
+    names cannot establish what was actually composited over the home screen.
+    """
     events = re.findall(
         rf"^\S+\s+\S+\s+{re.escape(pid)}\s+\d+\s+I\s+LuoShuStartup\s*:\s+event=(\w+)",
         log, re.MULTILINE,
@@ -423,13 +427,6 @@ def assert_single_stage_startup(log: str, pid: str, api_level: int) -> list[str]
     for event in ("first_decor_draw", "content_draw_delivered", "launch_complete"):
         if event not in events:
             raise RuntimeError(f"Current launch is missing startup evidence: {event}")
-    if api_level >= 31:
-        received = [index for index, event in enumerate(events) if event == "native_exit_received"]
-        removed = [index for index, event in enumerate(events) if event == "native_removed"]
-        if not received or len(received) != len(removed):
-            raise RuntimeError("The system splash did not report matching removal")
-        if any(index + 1 >= len(events) or events[index + 1] != "native_removed" for index in received):
-            raise RuntimeError("The system splash exit was deferred instead of removed in its callback")
     return events
 
 
@@ -719,34 +716,46 @@ class SmokeRun:
         return root
 
     def scroll(self, root: ET.Element, direction: str = "up") -> None:
-        rectangles = []
-        for node in root.iter("node"):
-            if node.get("package") == self.package:
-                try:
-                    rectangles.append(bounds(node))
-                except ValueError:
-                    pass
-        if not rectangles:
-            raise RuntimeError("Cannot read actual App bounds for scrolling")
-        width, height = max(rect[2] for rect in rectangles), max(rect[3] for rect in rectangles)
-        start, end = (int(height * .72), int(height * .30))
+        window = app_window_bounds(root, self.package)
+        logical_input_size(self.text("shell", "wm", "size"), window)
+        _, rect = scroll_content(root, self.package)
+        x = (rect[0] + rect[2]) // 2
+        height = rect[3] - rect[1]
+        start, end = rect[1] + int(height * .76), rect[1] + int(height * .25)
         if direction == "down":
             start, end = end, start
         elif direction != "up":
             raise ValueError(f"Unknown scroll direction: {direction}")
-        self.adb("shell", "input", "swipe", str(width // 2), str(start), str(width // 2), str(end), "400")
+        self.adb("shell", "input", "swipe", str(x), str(start), str(x), str(end), "400")
 
     def record(self, name: str, **evidence: object) -> None:
         self.checks.append({"check": name, "passed": True, **evidence})
         print(f"Verified {name}", flush=True)
 
     def launch(self, name: str) -> ET.Element:
-        recording = self.begin_launch_recording(name) if name in ("cold-start", "repeat-cold-start") and self.record_launch else None
+        if self.record_launch:
+            baseline = self.adb("exec-out", "screencap", "-p").stdout
+            (self.output / f"{name}-before.png").write_bytes(baseline)
+        recording = self.begin_launch_recording(name) if self.record_launch else None
+        root = None
         try:
-            return self.launch_and_capture(name)
+            root = self.launch_and_capture(name)
         finally:
             if recording is not None:
                 self.finish_launch_recording(recording, name)
+        if self.visual_launch_only:
+            evidence = next((item for item in reversed(self.recordings) if item.get("recording") == name), {})
+            if not evidence.get("available"):
+                raise RuntimeError(f"Required startup visual recording is unavailable: {name}")
+            from android_startup_visual import inspect_recording
+            result = inspect_recording(self.output / f"{name}.mp4", self.output / f"{name}-home.png",
+                self.output / f"{name}-home.xml", "dark" if name.startswith("dark-") or name == "repeat-cold-start" else "light",
+                self.output / f"{name}-visual-verdict.json", baseline=self.output / f"{name}-before.png", warm="warm" in name)
+            if not result["passed"]:
+                raise RuntimeError(f"Startup visual handoff failed for {name}: " + "; ".join(result["errors"][:8]))
+            self.record(f"{name}-visual-handoff", frames_decoded=result["frames_decoded"],
+                        verdict=f"{name}-visual-verdict.json", scope=result["scope"])
+        return root
 
     def begin_launch_recording(self, name: str = "cold-start"):
         """Record a bounded real launch concurrently; evidence failure is not App failure."""
@@ -798,9 +807,12 @@ class SmokeRun:
         # main log buffer; normal crash checks continue to read every buffer.
         startup_log = self.logcat(f"{name}-startup-logcat.txt")
         pid = self.text("shell", "pidof", self.package).strip().split()[0]
-        events = assert_single_stage_startup(startup_log, pid, self.api_level or 28)
-        self.record(f"{name}-single-stage-startup", events=events,
-                    scope="Current App PID logs plus source gates; raw recording supplies visual evidence")
+        events = [] if "warm" in name else assert_single_stage_startup(startup_log, pid, self.api_level or 28)
+        window = self.text("shell", "dumpsys", "window")
+        (self.output / f"{name}-startup-window.txt").write_text(window, encoding="utf-8")
+        self.record(f"{name}-startup-content-delivery", events=events, pid=pid,
+                    system_displayed=bool(re.search(rf"Displayed\s+{re.escape(self.package)}/", startup_log)),
+                    scope="Current App PID content events and real window/system logs; visual acceptance is separate")
         self.record(name, ui_ready_seconds=round(time.monotonic() - start, 3),
                     am_total_time_ms=re.search(r"TotalTime:\s*(\d+)", launch).group(1) if re.search(r"TotalTime:\s*(\d+)", launch) else None)
         return root
@@ -887,15 +899,14 @@ class SmokeRun:
         self.capture("library-favorite-filter", root)
         self.tap_label("导入与管理", scroll_attempts=5)
         root = self.wait_ui(lambda root: "收起管理" in app_labels(root, self.package), "Expanded production font management tools")
-        initial = content_anchors(root, self.package)
-        for _ in range(3):
-            self.scroll(root)
-            time.sleep(.7)
-            root = self.hierarchy()
-            scrolled = content_anchors(root, self.package)
-            if scrolled and not anchors_preserved(initial, scrolled):
-                break
-        else:
+        initial = visible_scroll_anchors(root, self.package)
+        self.capture("library-management-expanded-before-scroll", root)
+        # Reach the production empty-library action below the real management
+        # rows. A gesture count or a disappearing dock is never scroll proof.
+        root = self.reach_content(lambda current: visible_action(current, "清除筛选", self.package),
+            "Font library real scroll below expanded management rows", root=root,
+            budget=ScrollBudget(timeout=90, max_gestures=5))
+        if not scroll_progress(initial, visible_scroll_anchors(root, self.package), "up"):
             raise RuntimeError("Font library did not produce an observable real scroll in the smaller viewport")
         root = self.ensure_dock()
         scrolled = content_anchors(root, self.package)
@@ -1019,15 +1030,36 @@ class SmokeRun:
         self.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         self.adb("shell", "wm", "dismiss-keyguard")
         self.adb("shell", "cmd", "uimode", "night", "no")
-        self.launch("cold-start")
         if self.visual_launch_only:
-            # This separate evidence run never encodes during the main UI
-            # regression run. Both launches still use real readiness/crash checks.
-            self.adb("shell", "cmd", "uimode", "night", "yes")
-            self.adb("shell", "am", "force-stop", self.package)
-            self.launch("repeat-cold-start")
+            errors = []
+            for theme, mode in (("light", "no"), ("dark", "yes")):
+                self.adb("shell", "cmd", "uimode", "night", mode)
+                self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
+                self.adb("shell", "am", "force-stop", self.package)
+                time.sleep(.7)
+                for kind in ("cold", "warm"):
+                    name = f"{theme}-{kind}-start"
+                    previous_pid = None
+                    if kind == "warm":
+                        previous_pid = self.text("shell", "pidof", self.package).strip()
+                        self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
+                        time.sleep(.7)
+                    self.adb("logcat", "-c")
+                    try:
+                        self.launch(name)
+                    except RuntimeError as error:
+                        errors.append(f"{name}: {error}")
+                    if previous_pid:
+                        current_pid = self.text("shell", "pidof", self.package).strip()
+                        if current_pid != previous_pid:
+                            errors.append(f"{name}: warm resume changed App PID {previous_pid} to {current_pid}")
+                        else:
+                            self.record(f"{name}-same-process", before_pid=previous_pid, after_pid=current_pid)
             self.assert_running()
+            if errors:
+                raise RuntimeError("; ".join(errors))
             return
+        self.launch("cold-start")
         for theme in ("light", "dark"):
             if theme == "dark":
                 self.adb("shell", "cmd", "uimode", "night", "yes")
@@ -1122,7 +1154,7 @@ def main() -> int:
     parser.add_argument("--record-launch", action="store_true",
                         help="Optional raw cold-start video evidence; disabled by default to keep encoding load out of UI validation")
     parser.add_argument("--visual-launch-only", action="store_true",
-                        help="Separate light/dark cold-start evidence run; does not replace the functional UI regression suite")
+                        help="Require every-frame light/dark cold and same-process warm launch evidence, separately from functional UI regression")
     args = parser.parse_args()
     if args.visual_launch_only and not args.record_launch:
         parser.error("--visual-launch-only requires --record-launch")

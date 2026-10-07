@@ -7,9 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LuoShuLaunchExitPolicyTest {
-    @Test fun nativeCallbackAlwaysRequestsImmediateRemoval() {
+    @Test fun launchDoesNotCompleteBeforeContentOrAnInterruption() {
         val policy = LuoShuLaunchExitPolicy()
-        assertEquals(Action.REMOVE_NATIVE, policy.onNativeExit())
         assertFalse(policy.isComplete)
     }
 
@@ -19,38 +18,21 @@ class LuoShuLaunchExitPolicyTest {
         assertTrue(policy.isComplete)
     }
 
-    @Test fun nativeCallbackBeforeContentCannotManufactureAContentFrame() {
-        val policy = LuoShuLaunchExitPolicy()
-        assertEquals(Action.REMOVE_NATIVE, policy.onNativeExit())
-        assertFalse(policy.isComplete)
-        assertEquals(Action.FINISH, policy.onContentDrawn())
-        assertTrue(policy.isComplete)
-    }
-
-    @Test fun callbackAfterContentStillRemovesItsSystemView() {
+    @Test fun interruptionAfterContentCannotRepeatCompletion() {
         val policy = LuoShuLaunchExitPolicy()
         assertEquals(Action.FINISH, policy.onContentDrawn())
-        assertEquals(Action.REMOVE_NATIVE, policy.onNativeExit())
+        assertEquals(Action.NONE, policy.finish())
         assertEquals(Action.NONE, policy.onContentDrawn())
     }
 
-    @Test fun interruptionBeforeContentCompletesOnlyOnceAndStillCleansLateNativeViews() {
+    @Test fun interruptionBeforeContentCompletesOnlyOnce() {
         val policy = LuoShuLaunchExitPolicy()
         assertEquals(Action.FINISH, policy.finish())
         repeat(20) {
             assertEquals(Action.NONE, policy.finish())
             assertEquals(Action.NONE, policy.onContentDrawn())
-            assertEquals(Action.REMOVE_NATIVE, policy.onNativeExit())
         }
         assertTrue(policy.isComplete)
-    }
-
-    @Test fun repeatedNativeCallbacksNeverScheduleOrRestartABrandPage() {
-        val policy = LuoShuLaunchExitPolicy()
-        repeat(20) { assertEquals(Action.REMOVE_NATIVE, policy.onNativeExit()) }
-        assertEquals(Action.FINISH, policy.onContentDrawn())
-        repeat(20) { assertEquals(Action.REMOVE_NATIVE, policy.onNativeExit()) }
-        assertEquals(Action.NONE, policy.finish())
     }
 
     @Test fun legacyLaunchNeedsOnlyTheActualContentFrame() {
@@ -60,25 +42,20 @@ class LuoShuLaunchExitPolicyTest {
         assertEquals(Action.NONE, policy.finish())
     }
 
-    @Test fun allEventOrderingsKeepOneShotCompletionAndUnconditionalNativeCleanup() {
-        // Covers callbacks arriving before/after a draw, stop, task entry, or destroy.
-        // Reduced motion follows these same events: there is no animation-dependent path.
-        repeat(81) { encoded ->
+    @Test fun allContentAndInterruptionOrderingsCompleteOnlyOnce() {
+        // A draw, stop, task entry and destroy can arrive in either order. Native
+        // exit is a platform concern and is deliberately absent from this policy.
+        repeat(16) { encoded ->
             val policy = LuoShuLaunchExitPolicy()
             var digits = encoded
             var completionSeen = false
             repeat(4) {
-                val event = digits % 3
-                digits /= 3
-                val action = when (event) {
-                    0 -> policy.onNativeExit()
-                    1 -> policy.onContentDrawn()
-                    else -> policy.finish()
-                }
-                val expected = if (event == 0) Action.REMOVE_NATIVE else
-                    if (completionSeen) Action.NONE else Action.FINISH
+                val event = digits % 2
+                digits /= 2
+                val action = if (event == 0) policy.onContentDrawn() else policy.finish()
+                val expected = if (completionSeen) Action.NONE else Action.FINISH
                 assertEquals("sequence=$encoded event=$event", expected, action)
-                if (event != 0) completionSeen = true
+                completionSeen = true
                 assertEquals(completionSeen, policy.isComplete)
             }
         }

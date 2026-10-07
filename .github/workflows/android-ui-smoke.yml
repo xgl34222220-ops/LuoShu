@@ -7,6 +7,8 @@ on:
       - android-app/**
       - module.prop
       - scripts/android_ui_smoke*.py
+      - scripts/android_startup_visual*.py
+      - scripts/startup_visual_fixtures/**
       - scripts/google_font_compat_smoke.py
       - scripts/ui_snapshot/**
       - scripts/build_ui_snapshot_helper.sh
@@ -17,6 +19,8 @@ on:
       - android-app/**
       - module.prop
       - scripts/android_ui_smoke*.py
+      - scripts/android_startup_visual*.py
+      - scripts/startup_visual_fixtures/**
       - scripts/google_font_compat_smoke.py
       - scripts/ui_snapshot/**
       - scripts/build_ui_snapshot_helper.sh
@@ -177,7 +181,7 @@ jobs:
           retention-days: 14
 
   launch-visual:
-    name: Startup visual evidence API 36
+    name: Startup visual acceptance API 36
     needs: build
     if: ${{ !cancelled() && needs.build.outputs.apk_built == 'true' }}
     runs-on: ubuntu-24.04
@@ -196,6 +200,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Prepare every-frame visual acceptance and regression tests
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
+          "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0
+          echo "$RUNNER_TEMP/luoshu-startup-visual/bin" >> "$GITHUB_PATH"
+          command -v ffmpeg
+          command -v ffprobe
+          "$RUNNER_TEMP/luoshu-startup-visual/bin/python" scripts/android_startup_visual_test.py
       - name: Enable KVM
         shell: bash
         run: |
@@ -212,7 +225,7 @@ jobs:
           done
           ls -l /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
-      - name: Record real light and dark native artwork handoffs
+      - name: Verify every real light and dark cold and warm launch frame
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -225,8 +238,8 @@ jobs:
           disable-animations: false
           disable-linux-hw-accel: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          # Encoding is bounded to 30 seconds per launch. App timing is unchanged;
-          # raw frames and logs establish what actually appeared, not a mock splash.
+          # Four bounded recordings retain every original frame/timestamp.
+          # Re-covering home, black blanks and unknown frames fail acceptance.
           script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only
       - name: Upload separate startup recordings and logs
         if: always()

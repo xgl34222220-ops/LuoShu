@@ -1,0 +1,32 @@
+{
+  "workflow_run": 37658629186,
+  "commit": "17888663a0fb64a7a63ed96c56f423d94a36a76d",
+  "artifact": "LuoShu-Startup-Visual-API-36",
+  "notes": "Unmodified crops from real recorded native splash frames. These are recognition references, never inserted into emulator recordings. Negative baseline contains a logo returning after visible home in both themes.",
+  "references": [
+    {
+      "file": "native-logo-light.png",
+      "source": "cold-start.mp4",
+      "source_sha256": "c9df890b08f57f714b910cb0d912a6f0f2a3730e5a176b73244536538f97c7cc",
+      "time_seconds": 2.0,
+      "crop_pixels": [
+        192,
+        612,
+        528,
+        948
+      ]
+    },
+    {
+      "file": "native-logo-dark.png",
+      "source": "repeat-cold-start.mp4",
+      "source_sha256": "bea4cc58137fa4e2a84e368a6c1c0f59df109198802709c430e471761c80833f",
+      "time_seconds": 2.0,
+      "crop_pixels": [
+        192,
+        612,
+        528,
+        948
+      ]
+    }
+  ]
+}

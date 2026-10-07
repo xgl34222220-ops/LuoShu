@@ -78,6 +78,19 @@ class ColorOSMetricsTest(unittest.TestCase):
         self.assertEqual(result['romKind'], 'coloros')
         return result['slots']
 
+    def stock_file(self, name, partition='system', symlink=False):
+        root = self.root / 'stock' / partition
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / name
+        if symlink:
+            donor = root / 'framework-managed.ttf'
+            font_file(donor)
+            path.symlink_to(donor)
+        else:
+            font_file(path)
+        os.environ[f'LUOSHU_{partition.upper()}_FONTS_ROOT'] = str(root)
+        return path
+
     def test_restores_each_existing_alias_and_preserves_real_weight_source(self):
         regular = self.target()
         bold = self.target('SysSans-Hans-Bold.ttf')
@@ -179,6 +192,81 @@ class ColorOSMetricsTest(unittest.TestCase):
         target = self.target('VendorText.otf'); font_file(target, cff=True)
         self.inventory({'/system/fonts/VendorText.otf': {**stock(), 'families': ['sans-serif']}})
         self.assertEqual(batch.build(self.module, self.stage)['mapped'], 1)
+
+    def test_completes_existing_inventory_slots_in_real_partitions_and_uses_weight_donors(self):
+        regular = self.target(); font_file(regular, top=730)
+        store = regular.parent / '.luoshu-font-store'
+        font_file(store / 'regular.font', top=730)
+        font_file(store / 'semibold.font', top=950)
+        slots = {'/system/fonts/SysSans-Hans-Regular.ttf': stock()}
+        for partition, name, weight, ascent in (
+                ('product', 'VendorText.otf', 600, 810),
+                ('oplus_product', 'GoogleSansText-VF.ttf', 400, 910)):
+            self.stock_file(name, partition)
+            slots[f'/{partition}/fonts/{name}'] = {
+                **stock(ascent=ascent), 'families': ['sans-serif'], 'source': 'xml', 'weight': weight}
+        self.inventory(slots)
+        result = batch.build(self.module, self.stage)
+        self.assertEqual(result, {'mapped': 3, 'generated': 3, 'preservedSlots': 0})
+        for partition, name, top, ascent in (
+                ('product', 'VendorText.otf', 950, 810),
+                ('oplus_product', 'GoogleSansText-VF.ttf', 730, 910)):
+            with TTFont(self.target(name, partition)) as font:
+                self.assertEqual(font['glyf']['A'].yMax, top)
+                self.assertEqual(font['hhea'].ascent, ascent)
+        self.assertEqual(sum(row.get('slotSource') == 'stock-inventory' for row in self.report()), 2)
+
+    def test_completes_scanner_verified_unusual_text_without_a_rom_filename_list(self):
+        font_file(self.target())
+        font_file(self.target().parent / '.luoshu-font-store/regular.font')
+        self.stock_file('NovelUI.ttf')
+        coverage = {'hasHan': False, 'hasLatin': True, 'hanCount': 0,
+                    'latinCount': 52, 'unicodeCount': 96, 'cjkPunctuation': []}
+        slot = stock(); slot['metrics']['coverage'] = coverage
+        self.inventory({'/system/fonts/NovelUI.ttf': {**slot, 'source': 'verified-scan'}})
+        self.assertEqual(batch.build(self.module, self.stage)['mapped'], 1)
+        self.assertTrue(self.target('NovelUI.ttf').exists())
+
+    def test_completion_does_not_promote_symbols_scripts_collections_or_dynamic_symlinks(self):
+        font_file(self.target())
+        font_file(self.target().parent / '.luoshu-font-store/regular.font')
+        slots = {}
+        names = ('StatusIcons.ttf', 'NotoSansArabic.ttf', 'RobotoMono.ttf', 'Roboto-Italic.ttf',
+                 'VendorCollection.ttc', 'NovelUI.ttf', 'ExternalUI.ttf', 'GoogleSansManaged.ttf')
+        for name in names:
+            self.stock_file(name, symlink=name == 'GoogleSansManaged.ttf')
+            slots[f'/system/fonts/{name}'] = {**stock(), 'families': ['sans-serif']}
+        slots['/system/fonts/NovelUI.ttf']['source'] = 'verified-scan'  # no measured coverage
+        slots['/system/fonts/NovelUI.ttf']['families'] = []
+        slots['/system/fonts/ExternalUI.ttf']['faceIndex'] = 1
+        self.inventory(slots)
+        self.assertEqual(batch.build(self.module, self.stage)['mapped'], 0)
+        for name in names:
+            self.assertFalse(self.target(name).exists(), name)
+
+    def test_dynamic_partition_completion_requires_safe_manifest_and_canonical_slot_path(self):
+        font_file(self.target())
+        font_file(self.target().parent / '.luoshu-font-store/regular.font')
+        for part in ('vendor_custom', 'unrecorded', 'data'):
+            self.stock_file('VendorUI.ttf', part)
+        (self.module / 'config/device_font_partitions.conf').write_text('vendor_custom\ndata\n../escape\n')
+        self.inventory({f'/{part}/fonts/VendorUI.ttf': {**stock(), 'families': ['sans-serif']}
+                        for part in ('vendor_custom', 'unrecorded', 'data')})
+        self.assertEqual(batch.build(self.module, self.stage)['mapped'], 1)
+        self.assertTrue(self.target('VendorUI.ttf', 'vendor_custom').exists())
+        self.assertFalse(self.target('VendorUI.ttf', 'unrecorded').exists())
+        self.assertFalse(self.target('VendorUI.ttf', 'data').exists())
+
+    def test_completion_rejects_stage_font_directory_escape(self):
+        font_file(self.target())
+        font_file(self.target().parent / '.luoshu-font-store/regular.font')
+        self.stock_file('VendorUI.ttf', 'product')
+        outside = self.root / 'outside'; outside.mkdir()
+        (self.stage / 'product').symlink_to(outside, target_is_directory=True)
+        self.inventory({'/product/fonts/VendorUI.ttf': {**stock(), 'families': ['sans-serif']}})
+        with self.assertRaisesRegex(ValueError, '隔离目录之外'):
+            batch.build(self.module, self.stage)
+        self.assertEqual(list(outside.iterdir()), [])
 
     def test_collection_is_preserved_instead_of_discarding_other_faces(self):
         first = self.root / 'first.ttf'; second = self.root / 'second.ttf'

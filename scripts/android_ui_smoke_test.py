@@ -442,15 +442,13 @@ class UiSmokeHarnessTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "content_draw_delivered"):
             assert_single_stage_startup(self.startup_log(["first_decor_draw", "launch_complete"]), "123", 28)
 
-    def test_single_stage_startup_rejects_a_second_brand_layer_and_deferred_native_exit(self):
+    def test_startup_content_evidence_rejects_explicit_second_brand_but_needs_no_exit_callback(self):
         events = ["first_decor_draw", "content_draw_delivered", "launch_complete"]
         with self.assertRaisesRegex(RuntimeError, "second branded"):
             assert_single_stage_startup(self.startup_log(events + ["art_fade_start"]), "123", 36)
-        with self.assertRaisesRegex(RuntimeError, "matching removal"):
-            assert_single_stage_startup(self.startup_log(events + ["native_exit_received"]), "123", 36)
-        with self.assertRaisesRegex(RuntimeError, "deferred"):
-            assert_single_stage_startup(self.startup_log(["first_decor_draw", "native_exit_received",
-                "content_draw_delivered", "native_removed", "launch_complete"]), "123", 36)
+        # A platform-owned exit need not call App code. These events establish
+        # content delivery only; every-frame checks reject actual re-covering.
+        self.assertEqual(events, assert_single_stage_startup(self.startup_log(events), "123", 36))
 
     def test_single_stage_startup_legacy_and_late_native_callback_both_work(self):
         events = ["first_decor_draw", "content_draw_delivered", "launch_complete"]
@@ -466,6 +464,7 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
             root = self.hierarchy()
             run.launch_and_capture = Mock(return_value=root)
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, b"baseline PNG", b""))
             run.begin_launch_recording = Mock(return_value=Mock())
             run.finish_launch_recording = Mock()
             self.assertIs(root, run.launch("cold-start"))
@@ -508,11 +507,28 @@ class UiSmokeHarnessTest(unittest.TestCase):
             run.verify_rapid_navigation = Mock(side_effect=AssertionError("Functional regression is a separate run"))
             run.run()
             self.assertEqual([call.args[0] for call in run.launch.call_args_list],
-                             ["cold-start", "repeat-cold-start"])
+                             ["light-cold-start", "light-warm-start", "dark-cold-start", "dark-warm-start"])
             self.assertTrue(any(call.args == ("shell", "cmd", "uimode", "night", "yes")
                                 for call in run.adb.call_args_list))
             run.verify_rapid_navigation.assert_not_called()
             run.assert_running.assert_called_once()
+
+    def test_scroll_uses_live_content_and_override_dimensions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+              <node package="{PACKAGE}" scrollable="true" bounds="[0,63][1080,1700]">
+                <node package="{PACKAGE}" text="管理字体库" bounds="[150,1300][400,1390]" />
+              </node>
+              <node package="{PACKAGE}" resource-id="android:id/navigationBarBackground" bounds="[0,1794][1080,1920]" />
+            </node></hierarchy>''')
+            run.text = Mock(return_value="Physical size: 1440x3120\nOverride size: 1080x1920\n")
+            run.adb = Mock()
+            run.scroll(root)
+            run.adb.assert_called_once_with("shell", "input", "swipe", "540", "1307", "540", "472", "400")
+            run.text = Mock(return_value="Physical size: 800x1280\n")
+            with self.assertRaisesRegex(RuntimeError, "exceeds logical input"):
+                run.scroll(root)
 
     def test_successful_platform_dump_stays_on_normal_backend_and_keeps_cli_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:

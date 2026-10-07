@@ -1,0 +1,105 @@
+{
+  "baselineRef": "17888663a0fb64a7a63ed96c56f423d94a36a76d",
+  "scope": "host-sh; synthetic physical-map and warm-cache stages; no device mounts",
+  "sourceSha256": {
+    "baseline": {
+      "font_switch_safe.sh": "ac696981b8eb5ed5ab818f12e32fa68fa6fae8c408fd8d42a8b9aa12aa188132",
+      "rom_adapters.sh": "3a3425fd29d8b8f09d24d3a2f95476ed4f0f87a4b05bd589140cf367fc01ac54"
+    },
+    "current": {
+      "font_switch_safe.sh": "296f38902eb27973e3ce40c4c7c9edde6ad760e4caffb64fc84939b4cffe6b01",
+      "rom_adapters.sh": "88cff0402be2a9612a176084edc73ca2529701931217adc10d3d2518f90c351f"
+    }
+  },
+  "environment": {
+    "python": "3.12.14",
+    "shell": "/usr/bin/dash",
+    "system": "Linux",
+    "machine": "x86_64",
+    "cksum": "/usr/bin/cksum",
+    "wc": "/usr/bin/wc",
+    "stat": "/usr/bin/stat",
+    "versions": {
+      "cksum": "cksum (GNU coreutils) 9.4",
+      "wc": "wc (GNU coreutils) 9.4",
+      "stat": "stat (GNU coreutils) 9.4"
+    },
+    "fixtureDonorCount": 2
+  },
+  "fontMiB": 32,
+  "trials": 11,
+  "stages": {
+    "physicalMapping": {
+      "baseline": {
+        "medianMs": 237.104,
+        "samplesMs": [
+          245.161,
+          296.776,
+          247.58,
+          231.327,
+          232.967,
+          262.361,
+          235.479,
+          227.766,
+          233.408,
+          237.104,
+          238.061
+        ]
+      },
+      "current": {
+        "medianMs": 232.714,
+        "samplesMs": [
+          258.41,
+          260.61,
+          223.815,
+          229.058,
+          232.407,
+          239.317,
+          232.714,
+          230.345,
+          244.816,
+          232.043,
+          260.576
+        ]
+      },
+      "changePercent": -1.85
+    },
+    "warmValidationLookupRestore": {
+      "baseline": {
+        "medianMs": 68.442,
+        "samplesMs": [
+          70.706,
+          66.763,
+          65.061,
+          75.982,
+          63.033,
+          69.708,
+          68.442,
+          65.205,
+          73.001,
+          72.448,
+          68.094
+        ]
+      },
+      "current": {
+        "medianMs": 37.428,
+        "samplesMs": [
+          38.311,
+          39.75,
+          37.428,
+          38.618,
+          35.836,
+          35.904,
+          35.411,
+          34.539,
+          43.703,
+          39.834,
+          36.709
+        ]
+      },
+      "changePercent": -45.31
+    }
+  },
+  "fixtureSha256": "ed8b7976722689687a3b9d38091c5589902cf53f7952ef045bfaeacff937e05e",
+  "aliasesPerMappedTree": 39
+}

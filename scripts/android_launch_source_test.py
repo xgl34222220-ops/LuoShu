@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard single-stage launch wiring/resources; runtime exit ordering lives in Kotlin tests."""
+"""Guard platform-owned launch wiring/resources; raw frames verify visible ordering."""
 
 from pathlib import Path
 import re
@@ -52,14 +52,15 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         appearance = method(self.controller, "fun applyAppearance(")
         self.assertIn("window.setBackgroundDrawable(LuoShuGlassBackdropDrawable(dark, pureBlack))", appearance)
 
-    def test_native_view_is_removed_synchronously_for_every_entry_path(self):
-        install = method(self.controller, "fun install(")
-        self.assertIn("installPlatformExit()", install)
-        self.assertNotRegex(install, r"savedInstanceState|openTaskCenter|areAnimatorsEnabled")
-        callback = method(self.controller, "setOnExitAnimationListener")
-        self.assertEqual(callback.count("splash.remove()"), 1)
-        self.assertNotRegex(callback, r"return@|post\(|postDelayed|animate\(|setDuration|isComplete|disposed")
-        self.assertIn('event("native_removed")', callback)
+    def test_native_splash_keeps_default_platform_exit_without_client_transfer(self):
+        # A synchronously removed exit callback still transfers a copied logo to
+        # the decor before that callback, which can cover an already drawn home.
+        # Guard every production Kotlin entry point, not just this controller.
+        for file in JAVA.rglob("*.kt"):
+            source = file.read_text()
+            self.assertNotRegex(source, r"setOnExitAnimationListener\s*[(\{]", str(file))
+            self.assertNotRegex(source, r"clearOnExitAnimationListener\s*\(", str(file))
+        self.assertNotIn("activity.splashScreen", self.controller)
 
     def test_lifecycle_and_task_entry_cannot_replay_or_retain_the_launch(self):
         self.assertIn('fun stop() = complete("stop")', self.controller)
@@ -68,7 +69,6 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         self.assertIn("launchController.finishForTaskEntry()", method(self.activity, "override fun onNewIntent("))
         destroy = method(self.controller, "fun dispose(")
         self.assertIn("onComplete = null", destroy)
-        self.assertIn("clearPlatformExit()", destroy)
         activity_destroy = method(self.activity, "override fun onDestroy(")
         self.assertIn("removeCallbacks", activity_destroy)
         self.assertIn("removeFirstDrawListener()", activity_destroy)
