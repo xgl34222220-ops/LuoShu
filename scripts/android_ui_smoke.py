@@ -541,6 +541,9 @@ class SmokeRun:
             raise RuntimeError(f"MainActivity launch failed: {launch}")
         root = self.wait_page("首页", "当前字体")
         self.capture(f"{name}-home", root)
+        # Keep this launch's events before later system traffic replaces the
+        # main log buffer; normal crash checks continue to read every buffer.
+        self.logcat(f"{name}-startup-logcat.txt")
         self.record(name, ui_ready_seconds=round(time.monotonic() - start, 3),
                     am_total_time_ms=re.search(r"TotalTime:\s*(\d+)", launch).group(1) if re.search(r"TotalTime:\s*(\d+)", launch) else None)
         return root
@@ -697,6 +700,7 @@ class SmokeRun:
             )
             root = self.find_choice("收藏")
             self.capture("library-landscape", root)
+            self.logcat("landscape-startup-logcat.txt")
             self.adb("shell", "settings", "put", "system", "user_rotation", "0")
             root = self.wait_ui(
                 lambda root: orientation_matches(root, self.package, landscape=False),
@@ -709,6 +713,7 @@ class SmokeRun:
                 root = self.hierarchy()
             root = self.find_choice("收藏")
             self.capture("library-portrait-return", root)
+            self.logcat("portrait-return-startup-logcat.txt")
             self.record("library-rotation-return", selected_label="收藏", rotations=["landscape", "portrait"])
         finally:
             for key, value in rotation_preferences.items():
@@ -736,6 +741,7 @@ class SmokeRun:
             self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
             root = self.wait_page("设置", "你的洛书")
             self.capture("animations-disabled-settings-return", root)
+            self.logcat("animations-disabled-startup-logcat.txt")
             self.record("system-animations-disabled", scales={key: 0 for key in keys})
         finally:
             for key, value in previous.items():
@@ -799,6 +805,8 @@ class SmokeRun:
                 # Keep the production animations enabled; capture once navigation settles.
                 time.sleep(0.7)
                 self.capture(f"{theme}-{name}", root)
+                if theme == "light" and name == "home":
+                    self.logcat("cold-start-settled-startup-logcat.txt")
         # Exercise STOPPED -> STARTED without stopping the process or masking crashes.
         self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
         time.sleep(1)
