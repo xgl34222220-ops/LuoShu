@@ -78,7 +78,9 @@ class LuoShuGlassBackdropDrawable(
     }
 
     @Deprecated("Deprecated in Android")
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    override fun getOpacity(): Int =
+        if (drawableAlpha == 255 && drawableFilter == null) PixelFormat.OPAQUE
+        else PixelFormat.TRANSLUCENT
 
     private fun paint(shader: Shader) = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG).apply {
         this.shader = shader

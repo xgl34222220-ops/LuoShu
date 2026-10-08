@@ -62,6 +62,38 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
             self.assertNotRegex(source, r"clearOnExitAnimationListener\s*\(", str(file))
         self.assertNotIn("activity.splashScreen", self.controller)
 
+    def test_first_system_glass_frame_uses_window_backdrop_without_hiding_content(self):
+        shell = (JAVA / "LuoShuAppShell.kt").read_text()
+        self.assertIn("val windowOwnsFirstBackdrop = !firstFrameCommitted && appearance.glassEnabled &&", shell)
+        self.assertIn("appearance.themeMode == ThemeMode.SYSTEM && !appearance.amoledBlack", shell)
+        self.assertIn("if (!windowOwnsFirstBackdrop) AppBackdrop(appearance, dark)", shell)
+        # The condition gates only the duplicated backdrop. It must never gate
+        # page semantics, the dock or a replacement startup/loading surface.
+        gated = shell.index("if (!windowOwnsFirstBackdrop) AppBackdrop(appearance, dark)")
+        page = shell.index("pageStateHolder.SaveableStateProvider(page.name)", gated)
+        self.assertNotIn("{", shell[gated:page])
+        self.assertIn("HomeRoute(", shell[page:])
+        self.assertIn("MiuixAppDock(", shell[page:])
+        self.assertIn("val blurActive = firstFrameCommitted &&", shell)
+        # Saved explicit/AMOLED/solid choices retain their own first-frame draw.
+        for committed in (False, True):
+            for glass in (False, True):
+                for theme in ("SYSTEM", "LIGHT", "DARK"):
+                    for amoled in (False, True):
+                        window_owned = not committed and glass and theme == "SYSTEM" and not amoled
+                        self.assertEqual(window_owned, (committed, glass, theme, amoled) ==
+                                         (False, True, "SYSTEM", False))
+
+    def test_window_backdrop_reports_opaque_only_without_alpha_or_filter(self):
+        drawable = (JAVA / "ui/launch/LuoShuGlassBackdropDrawable.kt").read_text()
+        self.assertRegex(drawable, r"override fun getOpacity\(\): Int =\s*"
+                         r"if \(drawableAlpha == 255 && drawableFilter == null\) PixelFormat.OPAQUE\s*"
+                         r"else PixelFormat.TRANSLUCENT")
+        self.assertIn("return (255 shl 24)", drawable)
+        self.assertIn("color = 0xFF000000.toInt()", drawable)
+        self.assertIn("drawableAlpha = alpha.coerceIn(0, 255)", drawable)
+        self.assertIn("drawableFilter = colorFilter", drawable)
+
     def test_lifecycle_and_task_entry_cannot_replay_or_retain_the_launch(self):
         self.assertIn('fun stop() = complete("stop")', self.controller)
         self.assertIn('fun finishForTaskEntry() = complete("task_entry")', self.controller)

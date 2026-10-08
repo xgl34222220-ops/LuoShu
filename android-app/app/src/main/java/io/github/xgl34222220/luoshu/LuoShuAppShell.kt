@@ -96,6 +96,7 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
+import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.dialogs.FontActionDialogRoute
 import io.github.xgl34222220.luoshu.ui.dialogs.FontActionKind
 import io.github.xgl34222220.luoshu.ui.dialogs.FontPickerDialogRoute
@@ -319,6 +320,11 @@ internal fun LuoShuAppShell(
     val liquidBackdrop = rememberLayerBackdrop()
     val liquidGlassSupported = blurActive &&
         isRuntimeShaderSupported()
+    // The Window already paints the system-theme glass backdrop. Avoid a second
+    // six-layer fullscreen shader pass before the first buffer is submitted.
+    // Explicit theme/AMOLED/solid choices keep their Compose-owned first backdrop.
+    val windowOwnsFirstBackdrop = !firstFrameCommitted && appearance.glassEnabled &&
+        appearance.themeMode == ThemeMode.SYSTEM && !appearance.amoledBlack
     val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val edgeToEdgeGlass = appearance.glassEnabled && appearance.floatingDock && showDock
     // A floating glass dock overlays a full-height viewport. Lists own the trailing
@@ -347,7 +353,7 @@ internal fun LuoShuAppShell(
 
     Box(Modifier.fillMaxSize()) {
         Box(modifier = contentModifier) {
-            AppBackdrop(appearance, dark)
+            if (!windowOwnsFirstBackdrop) AppBackdrop(appearance, dark)
             // Only the destination page participates in the transition. AnimatedContent kept
             // the outgoing page alive for 210–360 ms; the backdrop shader then refracted that
             // stale layer through the dock, producing the one-frame/old-page flash in recordings.
