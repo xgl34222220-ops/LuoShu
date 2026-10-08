@@ -204,3 +204,13 @@ API 28 原 artifact 11518477392（17,539,419 bytes、SHA-256 `96701f4954174cbae3
 新增有限 native child-query 次数/耗时，以及导出序列化、flush、close 的阶段时间，下一真实运行可区分 Binder 节点读取与文件导出；这不预先声称根节点迟到已修复。新增 host JVM 回归执行实际生产 Java 方法、真实文件写入及独立 JVM 读取，验证完整跨进程可见性、失败发布拒绝、原八秒截止和有限诊断；两条工作流均运行该回归。完整 SDK、同一新 SHA 的 candidate、API 28/36、亮暗冷/热四段录像与逐帧独立复核仍以新 CI 终态为准。
 
 双系统覆盖、ColorOS/Google 回退、连续实时 A→B→A、重启保持、生成复用与阶段计时的既有实现保留，全局字重入口已移除；仍缺两台真机完整覆盖、整次切换、超时清理及重启后的证据。旧 600/630 属于合成/应用生成，host 热缓存改善不折算整次手机提速；ColorOS 整机重启两分多钟、App 冷启/加载与旧 97 秒首次 zygote 前异常继续分项记录。
+
+## 741ef24 原始 ANR 与单变量视觉环境试验
+
+`741ef24c8343df348c081493c6ba0587ffa66d3e` 的 [candidate 37714359939](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37714359939) 成功，包字节、签名、frozen22、实际定义的 7 个 helper 与 9 个 Google 文件经独立核验；App 与字体运行文件没有新增变化。完整 API 36 功能原件成功，API 28 的最终结论以该准确 SHA 原作业终态为准，不停止它。
+
+同 SHA [UI 37714359927](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37714359927) 的视觉作业仍失败：原 artifact 11523551324，775001 bytes，SHA-256 `5f3e84cdbc6fc7f2a4a8556a91a68ef7e51dc5bc2fc72e3743ec106b73c0db2a`，81 成员、0 MP4、0 XML；原失败截图没有实际 Launcher 工作区或洛书首页。Host ready 8.043415 s；native root wait 11744 ms，最后单次查询 5003 ms，原八秒 deadline 后返回，0 child queries、没有导出，失败 response 发布 1 ms。短发布时间不能抵销根节点阻塞或四段缺失。
+
+新原件保留 Launcher PID 1324 的 ANR：NotificationListener 服务执行等待 20019 ms；主线程等待 `RenderProxy::destroyContext`，调用链含 `HardwareRenderer.createHardwareBitmap` 与 Launcher bitmap/shadow 构造。RenderThread 在 ART/JNI frame-metrics 回调等待；不能把该栈直接断言为 Vulkan 驱动死锁。GMS startup/broadcast ANR 与 Launcher 资源路径重建也记录在原件，`last-anr.txt` 的空结果不能否定实际 traces 和窗口。未标注时钟的 ANR marker 不与 helper uptime 相减；97 秒旧异常与手机整机 reboot 不由此代替。
+
+原 emulator 37.2.12 的 `-gpu software` 实际选择 GLES swangle/SwiftShader 和 Vulkan Lavapipe，guest HWUI 为 skiagl。下一轮仅将独立视觉 job 指定为 Android 官方支持的 `-gpu swiftshader`，作为单变量兼容性试验；[官方模式说明](https://developer.android.com/studio/run/emulator-acceleration) 区分 software 自动选择、swiftshader 与 swangle。功能 API 28/36 保持原后端；API、系统镜像、KVM、RAM、视口、动画、boot 600 s、HOME 10 s、root 8 s、host 20 s、录制 30 s、原生帧/PTS、同 PID、ANR 和视觉阈值均保持。没有禁用 Vulkan、额外等待/预热、隐藏 API 或全局任务清理。必须核新日志的真实后端并重录四段原片到终态，试验尚不证明启动问题已修复。

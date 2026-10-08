@@ -270,7 +270,12 @@ jobs:
           emulator-boot-timeout: 600
           disable-animations: false
           disable-linux-hw-accel: false
-          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # Exact741's Launcher ANR blocked hardware-bitmap creation under the
+          # auto software choice (GLES swangle/SwiftShader, Vulkan lavapipe).
+          # Pin one supported backend for a controlled compatibility trial;
+          # retain animations, viewport, deadlines and every-frame rejection.
+          # This is not proof of Vulkan causality or a passed startup handoff.
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
           # Four bounded recordings retain every original frame/timestamp.
           # Re-covering home, black blanks and unknown frames fail acceptance.
           script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only
