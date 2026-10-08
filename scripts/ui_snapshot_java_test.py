@@ -24,12 +24,16 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
 
         methods = '\n'.join(method(signature) for signature in (
             '    public void onStart()',
+            '    private static void diagnosticTime(',
             '    private static void lastDiagnostic(',
             '    private static void lastDiagnosticTime(',
+            '    private static void acceptRequestDiagnostics(',
             '    private static void rootQueryStarted(',
             '    private static void rootQueryReturned(',
             '    private static void snapshotDiagnostics(',
+            '    private static JSONObject envelope(',
             '    private static void writeJson(',
+            '    private void publishJson(',
             '    private Bundle snapshot(',
             '    private int observeRoot(',
             '    private AccessibilityNodeInfo readChild(',
@@ -48,7 +52,9 @@ public class NativeSnapshotPublicationHarness {
     private Bundle arguments = new Bundle();
     private int nodeCount, childQueryCount;
     private long childQueryMillis;
+    private static final int PROTOCOL = 1;
     private static final int ROOT_WAIT_MS = 8000;
+    private static final String NONCE = "0123456789abcdef0123456789abcdef";
     static class Bundle {
         final Map<String,String> values = new HashMap<>();
         void putString(String key,String value) { values.put(key,value); }
@@ -92,10 +98,11 @@ public class NativeSnapshotPublicationHarness {
         final boolean visible;
         final List<AccessibilityNodeInfo> children = new ArrayList<>();
         boolean recycled, throwChild;
+        int refreshDelay=1000;
         AccessibilityNodeInfo(String value,boolean visible) { this.value=value; this.visible=visible; }
         AccessibilityNodeInfo copy() {
             AccessibilityNodeInfo n=new AccessibilityNodeInfo(value,visible);
-            n.children.addAll(children); n.throwChild=throwChild; return n;
+            n.children.addAll(children); n.throwChild=throwChild; n.refreshDelay=refreshDelay; return n;
         }
         void usable() { require(!recycled,"recycled node reused"); }
         int getChildCount() { usable(); return children.size(); }
@@ -105,7 +112,7 @@ public class NativeSnapshotPublicationHarness {
             AccessibilityNodeInfo child=children.get(index); return child==null ? null : child.copy();
         }
         boolean isVisibleToUser() { usable(); return visible; }
-        boolean refresh() { usable(); SystemClock.now+=1000; return true; }
+        boolean refresh() { usable(); SystemClock.now+=refreshDelay; return true; }
         void recycle() { require(!recycled,"node recycled twice"); recycled=true; }
         int getWindowId() { usable(); return 2; }
         CharSequence getPackageName() { usable(); return "fixture.package"; }
@@ -121,19 +128,25 @@ public class NativeSnapshotPublicationHarness {
         boolean isPassword() { return false; } boolean isSelected() { return true; }
     }
     static class AccessibilityWindowInfo {
-        boolean isActive() { return false; } boolean isFocused() { return false; }
-        AccessibilityNodeInfo getRoot() { return null; } int getId() { return 2; }
+        AccessibilityNodeInfo root;
+        int rootDelay;
+        boolean isActive() { return true; } boolean isFocused() { return false; }
+        AccessibilityNodeInfo getRoot() {
+            SystemClock.now+=rootDelay; return root==null ? null : root.copy();
+        }
+        int getId() { return 2; }
         void recycle() {}
     }
     static class UiAutomation {
         AccessibilityNodeInfo root;
+        final List<AccessibilityWindowInfo> windows = new ArrayList<>();
         int rootDelay=3, windowDelay;
         boolean clearCache() { return true; }
         AccessibilityNodeInfo getRootInActiveWindow() {
             SystemClock.now+=rootDelay; return root==null ? null : root.copy();
         }
         List<AccessibilityWindowInfo> getWindows() {
-            SystemClock.now+=windowDelay; return Collections.emptyList();
+            SystemClock.now+=windowDelay; return windows;
         }
     }
     static class JSONObject {
@@ -209,9 +222,40 @@ public class NativeSnapshotPublicationHarness {
     Bundle finished;
     int finishCode=123;
     boolean failSession;
+    int noticeCalls;
+    boolean failNotice;
+    String expectedNoticeBasename, expectedNoticeContent, expectedNoticeTimeKey;
+    Bundle expectedNoticeDiagnostics;
+    final List<Bundle> notices=new ArrayList<>();
     Context getContext() { return context; }
     UiAutomation connectAutomation(Bundle diagnostics) { return automation; }
     void finish(int code,Bundle result) { finishCode=code; finished=result; }
+    void expectNotice(String basename,String content,Bundle diagnostics,String timeKey) {
+        expectedNoticeBasename=basename; expectedNoticeContent=content;
+        expectedNoticeDiagnostics=diagnostics; expectedNoticeTimeKey=timeKey;
+    }
+    void sendStatus(int code,Bundle notice) {
+        noticeCalls++;
+        require(code==1 && notice.keySet().size()==1,"notification status schema changed");
+        require(("{\"protocol\":1,\"nonce\":\""+NONCE+"\",\"basename\":\""+expectedNoticeBasename+"\"}")
+                .equals(notice.getString("luoshu_snapshot_published")),"notification envelope changed");
+        require(expectedNoticeDiagnostics.getString(expectedNoticeTimeKey)!=null,
+                "notification preceded publication timestamp");
+        String timingPrefix=expectedNoticeBasename.equals("ready.json") ? "helper_ready_notice" : "helper_last_response_notice";
+        String started=expectedNoticeDiagnostics.getString(timingPrefix+"_started_uptime_ms");
+        require(started!=null && Long.parseLong(started)>=Long.parseLong(expectedNoticeDiagnostics.getString(expectedNoticeTimeKey)),
+                "notice-start timestamp preceded private publication");
+        require(expectedNoticeDiagnostics.getString(timingPrefix+"_finished_uptime_ms")==null,
+                "notice-finish timestamp preceded callback return");
+        require(!new File(context.directory,expectedNoticeBasename+".tmp").exists(),
+                "notification preceded private rename");
+        try {
+            childRead("json",new File(context.directory,expectedNoticeBasename).getPath(),expectedNoticeContent);
+        } catch(IOException error) { throw new UncheckedIOException(error); }
+        SystemClock.now+=5;
+        if(failNotice) throw new IllegalStateException("notification failed");
+        notices.add(notice);
+    }
     static void refreshLegacyAccessibilityCache(UiAutomation a,Bundle r,long deadline) { throw new AssertionError("unexpected legacy branch"); }
     Bundle runSession(String nonce,Bundle diagnostics) {
         if(failSession) throw new IllegalStateException("session failure");
@@ -254,30 +298,50 @@ public class NativeSnapshotPublicationHarness {
         root.children.add(new AccessibilityNodeInfo("hidden",false)); return root;
     }
     static void clearFaults() { File.failRename=false; FileOutputStream.failure=null; FileOutputStream.failSuffix=null; }
-    static void expectJsonFailure(File dir,String filename,String failure) throws Exception {
+    static void checkNoticeTimes(Bundle diagnostics,String prefix,String publishedKey) {
+        long published=Long.parseLong(diagnostics.getString(publishedKey));
+        long started=Long.parseLong(diagnostics.getString(prefix+"_started_uptime_ms"));
+        long finished=Long.parseLong(diagnostics.getString(prefix+"_finished_uptime_ms"));
+        require(published<=started && finished==started+5,"notice timing lost order or watcher duration");
+    }
+    static void expectJsonFailure(NativeSnapshotPublicationHarness h,File dir,String filename,String failure) throws Exception {
+        int before=h.noticeCalls;
         FileOutputStream.failure=failure; FileOutputStream.failSuffix=".json.tmp";
-        try { writeJson(dir,filename,new JSONObject().put("state","ready")); throw new AssertionError("JSON failure accepted"); }
+        try { h.publishJson(dir,filename,new JSONObject().put("state","ready"),NONCE,new Bundle(),"published"); throw new AssertionError("JSON failure accepted"); }
         catch(IOException expected) { require(!new File(dir,filename).exists(),"failed JSON was advertised"); }
+        require(h.noticeCalls==before,"failed private publication sent a notification");
         clearFaults();
     }
     public static void main(String[] args) throws Exception {
         if(!args[0].equals("exercise")) { reader(args[0],args[1],args[2]); return; }
         File dir=new File(args[1]); require(dir.mkdir(),"cannot create fresh test directory");
-        JSONObject ready=new JSONObject().put("protocol",1).put("nonce","0123456789abcdef0123456789abcdef").put("state","ready").put("text","雪😀");
-        writeJson(dir,"ready.json",ready);
+        NativeSnapshotPublicationHarness h=new NativeSnapshotPublicationHarness();
+        h.context.directory=dir;
+        JSONObject ready=new JSONObject().put("protocol",1).put("nonce",NONCE).put("state","ready").put("text","雪😀");
+        Bundle readyDiagnostics=new Bundle();
+        h.expectNotice("ready.json",ready.toString(),readyDiagnostics,"helper_ready_published_uptime_ms");
+        h.publishJson(dir,"ready.json",ready,NONCE,readyDiagnostics,"helper_ready_published_uptime_ms");
+        require(h.notices.size()==1,"ready publication sent no matching notification");
+        checkNoticeTimes(readyDiagnostics,"helper_ready_notice","helper_ready_published_uptime_ms");
+        readyDiagnostics.putString("helper_last_response_notice_started_uptime_ms","1");
+        readyDiagnostics.putString("helper_last_response_notice_finished_uptime_ms","2");
+        acceptRequestDiagnostics(readyDiagnostics,"11111111111111111111111111111111","hierarchy-0001.xml");
+        require(!readyDiagnostics.containsKey("helper_last_response_notice_started_uptime_ms") &&
+                !readyDiagnostics.containsKey("helper_last_response_notice_finished_uptime_ms"),"previous request's notice timings survived acceptance");
+        checkNoticeTimes(readyDiagnostics,"helper_ready_notice","helper_ready_published_uptime_ms");
         childRead("json",new File(dir,"ready.json").getPath(),ready.toString());
         require(!new File(dir,"ready.json.tmp").exists(),"temporary file remained after publication");
-        try { writeJson(dir,"ready.json",ready); throw new AssertionError("reused published file accepted"); }
+        try { h.publishJson(dir,"ready.json",ready,NONCE,new Bundle(),"published"); throw new AssertionError("reused published file accepted"); }
         catch(IllegalStateException expected) {}
         Files.writeString(new File(dir,"old.json.tmp").toPath(),"partial");
-        try { writeJson(dir,"old.json",ready); throw new AssertionError("reused temporary file accepted"); }
+        try { h.publishJson(dir,"old.json",ready,NONCE,new Bundle(),"published"); throw new AssertionError("reused temporary file accepted"); }
         catch(IllegalStateException expected) { require(!new File(dir,"old.json").exists(),"partial file published"); }
-        expectJsonFailure(dir,"write-failed.json","write"); expectJsonFailure(dir,"close-failed.json","close");
+        expectJsonFailure(h,dir,"write-failed.json","write"); expectJsonFailure(h,dir,"close-failed.json","close");
         File.failRename=true;
-        try { writeJson(dir,"rename-failed.json",ready); throw new AssertionError("failed rename accepted"); }
+        try { h.publishJson(dir,"rename-failed.json",ready,NONCE,new Bundle(),"published"); throw new AssertionError("failed rename accepted"); }
         catch(IllegalStateException expected) { require(!new File(dir,"rename-failed.json").exists(),"failed rename published"); }
+        require(h.noticeCalls==1,"failed/reused private publication sent a notification");
         clearFaults();
-        NativeSnapshotPublicationHarness h=new NativeSnapshotPublicationHarness();
         h.context.directory=dir; h.automation.root=tree();
         Bundle diagnostics=new Bundle();
         Bundle result=h.snapshot(h.automation,"hierarchy-0001.xml",dir,diagnostics);
@@ -292,8 +356,24 @@ public class NativeSnapshotPublicationHarness {
             require(at>=previous,"export diagnostic clocks/order changed"); previous=at;
         }
         require(diagnostics.keySet().size()<25,"unbounded per-node diagnostic records");
-        JSONObject response=new JSONObject().put("protocol",1).put("request_id","request").put("filename","hierarchy-0001.xml").put("code",-1);
-        writeJson(dir,"response.json",response); childRead("json",new File(dir,"response.json").getPath(),response.toString());
+        String responseName="response-11111111111111111111111111111111.json";
+        JSONObject response=new JSONObject().put("protocol",1).put("nonce",NONCE).put("request_id","11111111111111111111111111111111")
+                .put("filename","hierarchy-0001.xml").put("root_wait_ms",8000).put("code",-1);
+        h.expectNotice(responseName,response.toString(),diagnostics,"helper_last_response_published_uptime_ms");
+        h.publishJson(dir,responseName,response,NONCE,diagnostics,"helper_last_response_published_uptime_ms");
+        require(h.notices.size()==2,"response publication sent no matching notification");
+        checkNoticeTimes(diagnostics,"helper_last_response_notice","helper_last_response_published_uptime_ms");
+        String noticeFailureName="response-22222222222222222222222222222222.json";
+        Bundle noticeFailureDiagnostics=new Bundle();
+        h.expectNotice(noticeFailureName,response.toString(),noticeFailureDiagnostics,"published");
+        h.failNotice=true;
+        try { h.publishJson(dir,noticeFailureName,response,NONCE,noticeFailureDiagnostics,"published"); throw new AssertionError("notification exception hidden"); }
+        catch(IllegalStateException expected) { require("notification failed".equals(expected.getMessage()),"notification failure changed"); }
+        require(new File(dir,noticeFailureName).exists() && noticeFailureDiagnostics.getString("published")!=null,
+                "notification exception disguised successful private publication");
+        require(h.noticeCalls==3 && h.notices.size()==2,"notification failure was accepted as delivery");
+        checkNoticeTimes(noticeFailureDiagnostics,"helper_last_response_notice","published");
+        h.failNotice=false;
         for(String fault:new String[]{"write","flush","close"}) {
             FileOutputStream.failure=fault; FileOutputStream.failSuffix=".xml";
             Bundle failed=h.snapshot(h.automation,"hierarchy-000"+(fault.equals("write")?2:fault.equals("flush")?3:4)+".xml",dir,new Bundle());
@@ -309,6 +389,20 @@ public class NativeSnapshotPublicationHarness {
         h.automation.root=tree(); h.automation.rootDelay=8000;
         Bundle late=h.snapshot(h.automation,"hierarchy-0007.xml",dir,new Bundle());
         require("failed".equals(late.getString("snapshot")) && !new File(dir,"hierarchy-0007.xml").exists(),"late root expanded original deadline");
+        require("0".equals(late.getString("child_query_count")),"late active root queried descendants");
+        h.automation.root=null; h.automation.rootDelay=3; h.automation.windowDelay=0;
+        AccessibilityWindowInfo window=new AccessibilityWindowInfo(); window.root=tree(); window.rootDelay=8000;
+        h.automation.windows.add(window);
+        Bundle lateWindow=h.snapshot(h.automation,"hierarchy-0010.xml",dir,new Bundle());
+        require("failed".equals(lateWindow.getString("snapshot")) && "0".equals(lateWindow.getString("child_query_count"))
+                && !new File(dir,"hierarchy-0010.xml").exists(),"late window root queried descendants or became evidence");
+        h.automation.windows.clear();
+        h.automation.root=new AccessibilityNodeInfo("incomplete",true); h.automation.root.refreshDelay=8000;
+        h.automation.root.children.add(new AccessibilityNodeInfo("invisible",false));
+        Bundle lateRefresh=h.snapshot(h.automation,"hierarchy-0011.xml",dir,new Bundle());
+        require("failed".equals(lateRefresh.getString("snapshot")) && "1".equals(lateRefresh.getString("child_query_count"))
+                && "1".equals(lateRefresh.getString("root_refresh_attempts")) && !new File(dir,"hierarchy-0011.xml").exists(),
+                "late retained-root refresh queried descendants or became evidence");
         h.automation.root=tree(); h.automation.root.throwChild=true; h.automation.rootDelay=3;
         Bundle queryFailure=h.snapshot(h.automation,"hierarchy-0008.xml",dir,new Bundle());
         require("failed".equals(queryFailure.getString("snapshot")) && "1".equals(queryFailure.getString("child_query_count")) && "7".equals(queryFailure.getString("child_query_ms")),"throwing query attribution/error lost");

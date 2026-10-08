@@ -223,11 +223,10 @@ public final class SnapshotInstrumentation extends Instrumentation {
         } catch (Exception diagnosticFailure) {
             diagnostics.putString("helper_diagnostics_error", diagnosticFailure.toString());
         }
-        writeJson(directory, "ready.json", ready);
         // This can occur after the host's original deadline. The final existing
         // instrumentation result preserves it only as a diagnostic, never as a
         // substitute for a matching timely ready/request/response/XML exchange.
-        diagnosticTime(diagnostics, "helper_ready_published_uptime_ms");
+        publishJson(directory, "ready.json", ready, nonce, diagnostics, "helper_ready_published_uptime_ms");
         lastDiagnostic(diagnostics, "request_status", "none-accepted");
         Set<String> requests = new HashSet<>();
         Set<String> filenames = new HashSet<>();
@@ -284,14 +283,16 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 lastDiagnostic(diagnostics, "request_status", "response-write-started");
                 lastDiagnosticTime(diagnostics, "response_write_started");
                 try {
-                    writeJson(directory, "response-" + requestId + ".json", envelope(nonce)
+                    publishJson(directory, "response-" + requestId + ".json", envelope(nonce)
                             .put("request_id", requestId).put("filename", filename).put("root_wait_ms", ROOT_WAIT_MS)
-                            .put("code", code).put("result", values));
+                            .put("code", code).put("result", values), nonce, diagnostics,
+                            "helper_last_response_published_uptime_ms");
                 } catch (Exception failure) {
-                    lastDiagnostic(diagnostics, "request_status", "response-write-failed");
+                    lastDiagnostic(diagnostics, "request_status",
+                            diagnostics.containsKey("helper_last_response_published_uptime_ms")
+                                    ? "response-notice-failed" : "response-write-failed");
                     throw failure;
                 }
-                lastDiagnosticTime(diagnostics, "response_published");
                 lastDiagnostic(diagnostics, "request_status", "response-published");
             }
             Thread.sleep(50);
@@ -335,6 +336,25 @@ public final class SnapshotInstrumentation extends Instrumentation {
         // discarded when this session closes. Close then rename publishes all
         // bytes atomically; crash durability is neither required nor reused.
         if (!temporary.renameTo(target)) throw new IllegalStateException("Cannot publish atomic session response");
+    }
+
+    private void publishJson(File directory, String filename, JSONObject value, String nonce,
+            Bundle diagnostics, String publishedTimeKey) throws Exception {
+        writeJson(directory, filename, value);
+        diagnosticTime(diagnostics, publishedTimeKey);
+        // The existing owned instrumentation pipe carries only a publication
+        // notice. The host still reads and validates this exact private file;
+        // missing/late notices cannot replace its original deadline or evidence.
+        Bundle notice = new Bundle();
+        notice.putString("luoshu_snapshot_published", envelope(nonce).put("basename", filename).toString());
+        String noticeTimePrefix = "ready.json".equals(filename)
+                ? "helper_ready_notice" : "helper_last_response_notice";
+        diagnosticTime(diagnostics, noticeTimePrefix + "_started_uptime_ms");
+        try {
+            sendStatus(1, notice);
+        } finally {
+            diagnosticTime(diagnostics, noticeTimePrefix + "_finished_uptime_ms");
+        }
     }
 
     private Bundle snapshot(UiAutomation automation, String filename, File outputDirectory, Bundle diagnostics) {
@@ -397,6 +417,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                     result.putString("root_refresh_successes", Integer.toString(refreshSuccesses));
                     result.putString("root_refresh_failures", Integer.toString(refreshFailures));
                     result.putString("last_root_refresh_result", Boolean.toString(refreshed));
+                    if (SystemClock.uptimeMillis() >= deadline) break;
                     lastDiagnostic(diagnostics, "request_status", "observe-descendants");
                     int visibleChildren = observeRoot(result, rootObservations, incompleteRoot,
                             "retained-root:refresh", waitStarted);
@@ -418,6 +439,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 rootQueryReturned(diagnostics);
                 if (root != null) {
                     rootSource = "getRootInActiveWindow";
+                    if (SystemClock.uptimeMillis() >= deadline) break;
                     lastDiagnostic(diagnostics, "request_status", "observe-descendants");
                     if (observeRoot(result, rootObservations, root, rootSource, waitStarted) > 0) break;
                     incompleteRoots++;
@@ -448,6 +470,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                             rootQueryReturned(diagnostics);
                             if (root != null) {
                                 rootSource = (priority == 0 ? "active-window:" : "focused-window:") + window.getId();
+                                if (SystemClock.uptimeMillis() >= deadline) break;
                                 lastDiagnostic(diagnostics, "request_status", "observe-descendants");
                                 if (observeRoot(result, rootObservations, root, rootSource, waitStarted) > 0) break;
                                 incompleteRoots++;

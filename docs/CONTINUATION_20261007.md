@@ -214,3 +214,19 @@ API 28 原 artifact 11518477392（17,539,419 bytes、SHA-256 `96701f4954174cbae3
 新原件保留 Launcher PID 1324 的 ANR：NotificationListener 服务执行等待 20019 ms；主线程等待 `RenderProxy::destroyContext`，调用链含 `HardwareRenderer.createHardwareBitmap` 与 Launcher bitmap/shadow 构造。RenderThread 在 ART/JNI frame-metrics 回调等待；不能把该栈直接断言为 Vulkan 驱动死锁。GMS startup/broadcast ANR 与 Launcher 资源路径重建也记录在原件，`last-anr.txt` 的空结果不能否定实际 traces 和窗口。未标注时钟的 ANR marker 不与 helper uptime 相减；97 秒旧异常与手机整机 reboot 不由此代替。
 
 原 emulator 37.2.12 的 `-gpu software` 实际选择 GLES swangle/SwiftShader 和 Vulkan Lavapipe，guest HWUI 为 skiagl。下一轮仅将独立视觉 job 指定为 Android 官方支持的 `-gpu swiftshader`，作为单变量兼容性试验；[官方模式说明](https://developer.android.com/studio/run/emulator-acceleration) 区分 software 自动选择、swiftshader 与 swangle。功能 API 28/36 保持原后端；API、系统镜像、KVM、RAM、视口、动画、boot 600 s、HOME 10 s、root 8 s、host 20 s、录制 30 s、原生帧/PTS、同 PID、ANR 和视觉阈值均保持。没有禁用 Vulkan、额外等待/预热、隐藏 API 或全局任务清理。必须核新日志的真实后端并重录四段原片到终态，试验尚不证明启动问题已修复。
+
+## 0e3895f 真实失败与发布通知传输
+
+`0e3895fd35ac0deceed361467ab963102d0a88ce` 的 [candidate 37716314618](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37716314618) 已成功终态；原候选 ZIP 12,340,170 bytes，SHA-256 `fbae84ff29fcda1374deeda6a6ef53232f7c8951b03211eeb4970351a68b7951`，仅内部核验。同期 [UI 37716314638](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37716314638) 构建实际 217 JVM tests、0 failure/error/skip，lint 40 Warning / 1 Hint；API 36 完整功能验收为 31 捕获记录、20 检查、308.88 秒成功。GMS Safety Center broadcast ANR 仍保留，未观察到洛书 ANR/fatal；不宣称系统无 ANR。API 28 也已成功终态：35 捕获记录 / 24 检查 / 1043.03 秒，86 份请求/响应/XML 原字节匹配；原件 27,259,903 bytes，SHA-256 `942389c226992ee809a9f148f547c93ea8fc18bfc17305bf10ea7f648a7dfcaf`。旧 741 的 API 28 现已核完整成功终态，35 捕获记录 / 24 检查 / 1020.21 秒，不覆盖新 SHA。
+
+单变量视觉后端实际由 Vulkan lavapipe/llvmpipe 换为 SwiftShader/Subzero，仍失败：原 artifact 11523724134，809,290 bytes，SHA-256 `284a5dc829762d6653b5ddef0dc302ef4acbff88e9f20cd0b2a3e51280a0166d`，93 成员均核验，0 MP4 / 0 XML。新失败截图实际为壁纸与中央浅色椭圆，没有 Launcher 网格或洛书首页；原 ANR 文件/对应日志未发现此次 ANR，但 Launcher assets-path 配置重建、未显示的 base 窗口仍在。不能把后端切换或缺少 ANR 当作根因已定或视觉已通过。
+
+此轮 native ready 发布 1 ms；host ready 4.253333 s。实际 root wait 8536 ms / 41 次尝试，末次查询耗 1441 ms、返回时已超过原八秒截止点 142 ms，随后可见子节点读取 394 ms；末次树被原截止断言拒绝，没有导出，失败 response 发布 188 ms。成功功能 API 36 首次 helper readiness 反而更慢，不能单凭 host 连接耗时解释 Launcher 根节点失败。不同运行并未成对，不把 ready 改善外推到 App、手机切换或整机启动。
+
+原始命令记录显示等 ready/response 共启动 30 次 adb/run-as/cat，其中 29 次读不到最终文件；这些命令的 wall elapsed 合计 5.848964 秒，与 native 工作并发，不能相加到设备阶段或宣称 CPU 占用。本轮修正通过已有、任务拥有的 `am instrument` stdout 使用公开 `Instrumentation.sendStatus`，在 JSON close/rename 与发布时间记录之后，仅发送 protocol/nonce/basename 发布通知。主机收到严格匹配的完整通知后只读取一次同一私有 JSON，随后仍核 request ID、filename、root wait、结果/返回码和匹配 XML。没有额外远端 waiter、旧文件回退、预热或重新连接。
+
+stdout/stderr 持续读取并保留原字节；错误身份、重复/中断通知、EOF、进程退出和迟到 JSON/XML 继续失败，协议出错后仍保留后续原始输出。退出仍限当前隔离 CI 的测试 helper，不能停止 App/GMS/系统进程。原 HOME 10 s、native root 8 s、host 首次连接与捕获共享 20 s、recording 30 s、三次稳定 Launcher 捕获、亮暗冷暖原片、同 PID、黑帧/徽标回盖/未分类帧拒绝条件全部保留。额外在 root/refresh 查询返回后立刻检查原截止点，避免对已迟到的根节点继续读后代；这只收紧失败路径，不让迟到树通过。
+
+本轮未改 App、字体生产功能、玻璃、nohook 或 frozen22。字体双系统覆盖/Google 回退/连续实时与重启/生成复用/全局字重移除沿用既有实现；仍缺两台真机整次切换及阶段计时、ColorOS 整次手机 reboot 与 App 冷启、旧 97 秒 prezygote 复现。新传输与后续四段原片须在同一新 SHA 的全量 CI 实际到终态后独立复核，不能由 host 管道或 JVM 边界回归提前宣布修复。
+
+提交前实际适用 host 回归为 UI 84、会话 39（原有 29 项与新增 10 项真实子进程管道）、生产 Java JVM 边界回归 1、逐帧分类器 20、启动源约束 11、玻璃 6，共 161 项通过，frozen22 门禁也通过；完整原 stdout/stderr 与源码哈希已保留。管道/文件测试不是真机字体或真实 App 原录像。新通知单独记录 native notice started/finished，和 JSON 发布时间分开，包括异常完成；这些计时不增加 RPC 或预算。独立协议审查没有剩余阻塞。

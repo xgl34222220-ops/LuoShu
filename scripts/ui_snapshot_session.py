@@ -10,14 +10,18 @@ import json
 import re
 import shlex
 import subprocess
+import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 
 HELPER = "io.github.xgl34222220.luoshu.uisnapshot"
 PROTOCOL = 1
 ROOT_WAIT_MS = 8000
+PUBLICATION_KEY = b"luoshu_snapshot_published"
+PUBLICATION_LIMIT = 512
 
 
 class UiSnapshotSession:
@@ -34,6 +38,161 @@ class UiSnapshotSession:
         self.events: list[dict[str, object]] = []
         self.commands: list[dict[str, object]] = []
         self.diagnostic_errors: list[str] = []
+        self._pipe_condition = threading.Condition()
+        self._pipe_bytes = {"stdout": bytearray(), "stderr": bytearray()}
+        self._pipe_eof: set[str] = set()
+        self._pipe_error: str | None = None
+        self._pipe_threads: list[threading.Thread] = []
+        self._publications: deque[str] = deque()
+        self._published_names: set[str] = set()
+
+    def _publication_frame(self, values: list[tuple[bytes, bytes]], code: bytes) -> None:
+        notices = [value for key, value in values if key == PUBLICATION_KEY]
+        if not notices:
+            return
+        if code != b"1" or len(values) != 1 or len(notices) != 1:
+            raise RuntimeError("UiAutomation session publication frame is malformed")
+        raw = notices[0]
+        if len(raw) > PUBLICATION_LIMIT:
+            raise RuntimeError("UiAutomation session publication notice is too large")
+
+        def unique_pairs(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate publication key")
+                result[key] = value
+            return result
+
+        try:
+            notice = json.loads(raw, object_pairs_hook=unique_pairs)
+        except (ValueError, UnicodeDecodeError) as error:
+            raise RuntimeError("UiAutomation session publication notice is malformed") from error
+        if not isinstance(notice, dict) or set(notice) != {"protocol", "nonce", "basename"}:
+            raise RuntimeError("UiAutomation session publication notice fields mismatch")
+        self._validate(notice)
+        basename = notice["basename"]
+        if type(basename) is not str or not re.fullmatch(r"ready\.json|response-[0-9a-f]{32}\.json", basename):
+            raise RuntimeError("UiAutomation session publication basename mismatch")
+        if basename in self._published_names:
+            raise RuntimeError("UiAutomation session duplicate publication notice")
+        if len(self._publications) >= 2:
+            raise RuntimeError("UiAutomation session unexpected publication backlog")
+        self._published_names.add(basename)
+        self._publications.append(basename)
+
+    def _read_pipe(self, stream: str) -> None:
+        pending = bytearray()
+        values: list[tuple[bytes, bytes]] = []
+        discard_line = False
+        parser_failed = False
+        pipe = None
+        try:
+            pipe = getattr(self.process, stream)
+            while True:
+                chunk = pipe.read1(4096)
+                with self._pipe_condition:
+                    if not chunk:
+                        if stream == "stdout" and not parser_failed and (values or pending.startswith(
+                                (b"INSTRUMENTATION_STATUS:", b"INSTRUMENTATION_STATUS_CODE:"))):
+                            self._pipe_error = self._pipe_error or "UiAutomation session publication stream ended mid-record"
+                        self._pipe_eof.add(stream)
+                        self._pipe_condition.notify_all()
+                        return
+                    self._pipe_bytes[stream].extend(chunk)
+                    if stream == "stdout" and not parser_failed:
+                        try:
+                            if discard_line:
+                                _, separator, chunk = chunk.partition(b"\n")
+                                if not separator:
+                                    continue
+                                discard_line = False
+                            pending.extend(chunk)
+                            while b"\n" in pending:
+                                line, _, rest = pending.partition(b"\n")
+                                pending = bytearray(rest)
+                                if line.startswith((b"INSTRUMENTATION_STATUS:", b"INSTRUMENTATION_STATUS_CODE:")) and len(line) > 4096:
+                                    raise RuntimeError("UiAutomation session status line is too large")
+                                if line.startswith(b"INSTRUMENTATION_STATUS: "):
+                                    key, separator, value = line[len(b"INSTRUMENTATION_STATUS: "):].partition(b"=")
+                                    if not separator or len(values) >= 16:
+                                        raise RuntimeError("UiAutomation session status frame is malformed")
+                                    values.append((key, value))
+                                elif line.startswith(b"INSTRUMENTATION_STATUS_CODE: "):
+                                    self._publication_frame(values, line[len(b"INSTRUMENTATION_STATUS_CODE: "):])
+                                    values = []
+                                elif any(key == PUBLICATION_KEY for key, _ in values):
+                                    raise RuntimeError("UiAutomation session publication frame was interrupted")
+                            if len(pending) > 4096:
+                                if any(key == PUBLICATION_KEY for key, _ in values):
+                                    raise RuntimeError("UiAutomation session publication frame was interrupted")
+                                if pending.startswith((b"INSTRUMENTATION_STATUS:", b"INSTRUMENTATION_STATUS_CODE:")):
+                                    raise RuntimeError("UiAutomation session status line is too large")
+                                pending.clear()
+                                discard_line = True
+                        except Exception as error:
+                            # Protocol failure remains fatal, but raw stdout
+                            # must keep draining through the final result/EOF.
+                            self._pipe_error = self._pipe_error or str(error)
+                            parser_failed = True
+                            pending.clear()
+                            values.clear()
+                    self._pipe_condition.notify_all()
+        except Exception as error:
+            with self._pipe_condition:
+                self._pipe_error = self._pipe_error or str(error)
+                self._pipe_eof.add(stream)
+                self._pipe_condition.notify_all()
+        finally:
+            if pipe is not None:
+                pipe.close()
+
+    def _start_readers(self) -> None:
+        for stream in ("stdout", "stderr"):
+            thread = threading.Thread(target=self._read_pipe, args=(stream,), daemon=True)
+            self._pipe_threads.append(thread)
+            thread.start()
+
+    def _wait_publication(self, basename: str, deadline: float) -> None:
+        with self._pipe_condition:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(f"UiAutomation session timed out waiting for {basename}")
+                if self._pipe_error:
+                    raise RuntimeError(self._pipe_error)
+                if self.process.poll() is not None or "stdout" in self._pipe_eof:
+                    raise RuntimeError("UiAutomation session exited before its matching response")
+                if self._publications:
+                    if self._publications.popleft() != basename:
+                        raise RuntimeError("UiAutomation session publication basename mismatch")
+                    return
+                self._pipe_condition.wait(min(.1, remaining))
+
+    def _finish_readers(self, deadline: float) -> tuple[bytes, bytes]:
+        self.process.wait(timeout=max(0, deadline - time.monotonic()))
+        with self._pipe_condition:
+            while len(self._pipe_eof) != 2:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(self.process.args, 0)
+                self._pipe_condition.wait(min(.1, remaining))
+            stdout, stderr = bytes(self._pipe_bytes["stdout"]), bytes(self._pipe_bytes["stderr"])
+        for thread in self._pipe_threads:
+            thread.join(timeout=max(0, deadline - time.monotonic()))
+            if thread.is_alive():
+                raise subprocess.TimeoutExpired(self.process.args, 0)
+        return stdout, stderr
+
+    def _instrumentation_evidence(self, stdout: bytes, stderr: bytes) -> None:
+        self._diagnostic_write(self.output / "ui-snapshot-session-instrumentation-stdout.bin", stdout)
+        self._diagnostic_write(self.output / "ui-snapshot-session-instrumentation-stderr.bin", stderr)
+        (self.output / "ui-snapshot-session-instrumentation.txt").write_bytes(stdout + stderr)
+
+    def _check_pipe_error(self) -> None:
+        with self._pipe_condition:
+            if self._pipe_error:
+                raise RuntimeError(self._pipe_error)
 
     def _diagnostic_write(self, path: Path, content: bytes) -> None:
         try:
@@ -111,26 +270,26 @@ class UiSnapshotSession:
                                (result.stdout + result.stderr).decode("utf-8", "replace"))
 
     def _wait_json(self, basename: str, evidence: Path, deadline: float) -> dict[str, object]:
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise RuntimeError(f"UiAutomation session timed out waiting for {basename}")
-            if self.process.poll() is not None:
-                raise RuntimeError("UiAutomation session exited before its matching response")
-            result = self._run(["shell", "run-as", HELPER, "cat", f"{self.directory}/{basename}"],
-                               timeout=remaining)
-            if not result.returncode:
-                evidence.write_bytes(result.stdout)
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(f"UiAutomation session timed out while reading {basename}")
-                try:
-                    value = json.loads(result.stdout)
-                except (ValueError, UnicodeDecodeError) as error:
-                    raise RuntimeError("UiAutomation session returned malformed JSON") from error
-                if not isinstance(value, dict):
-                    raise RuntimeError("UiAutomation session response is not an object")
-                return value
-            time.sleep(min(.1, max(0, deadline - time.monotonic())))
+        self._wait_publication(basename, deadline)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError(f"UiAutomation session timed out waiting for {basename}")
+        result = self._run(["shell", "run-as", HELPER, "cat", f"{self.directory}/{basename}"], timeout=remaining)
+        if result.returncode:
+            raise RuntimeError("UiAutomation session published JSON is unavailable")
+        evidence.write_bytes(result.stdout)
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"UiAutomation session timed out while reading {basename}")
+        if self.process.poll() is not None:
+            raise RuntimeError("UiAutomation session exited before its matching response")
+        self._check_pipe_error()
+        try:
+            value = json.loads(result.stdout)
+        except (ValueError, UnicodeDecodeError) as error:
+            raise RuntimeError("UiAutomation session returned malformed JSON") from error
+        if not isinstance(value, dict):
+            raise RuntimeError("UiAutomation session response is not an object")
+        return value
 
     def _validate(self, envelope: dict[str, object], **expected: object) -> None:
         if not isinstance(envelope, dict):
@@ -150,6 +309,7 @@ class UiSnapshotSession:
             self.process = subprocess.Popen(self.adb_command + ["shell", "am", "instrument", "-w", "-r",
                 "-e", "session_nonce", self.nonce, f"{HELPER}/.SnapshotInstrumentation"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self._start_readers()
             self._event("started")
             ready = self._wait_json("ready.json", self.output / "ui-snapshot-session-ready.json", deadline)
             self._validate(ready, state="ready", root_wait_ms=ROOT_WAIT_MS)
@@ -211,6 +371,7 @@ class UiSnapshotSession:
                 raise RuntimeError("UiAutomation session did not return its matching XML")
             if time.monotonic() >= deadline:
                 raise RuntimeError("UiAutomation session timed out while reading matching XML")
+            self._check_pipe_error()
             return result, xml.stdout.decode("utf-8")
         except (OSError, RuntimeError, ValueError) as error:
             self.fatal_error = str(error)
@@ -228,8 +389,11 @@ class UiSnapshotSession:
             return
         try:
             self._write("stop.json", {"protocol": PROTOCOL, "nonce": self.nonce}, timeout=5)
-            stdout, stderr = self.process.communicate(timeout=10)
-            (self.output / "ui-snapshot-session-instrumentation.txt").write_bytes(stdout + stderr)
+            stdout, stderr = self._finish_readers(time.monotonic() + 10)
+            self._instrumentation_evidence(stdout, stderr)
+            self._check_pipe_error()
+            if self._publications:
+                raise RuntimeError("UiAutomation session unconsumed publication notice at close")
             transcript = (stdout + stderr).decode("utf-8", "replace")
             if self.process.returncode or not re.search(r"INSTRUMENTATION_CODE:\s*-1\b", transcript):
                 raise RuntimeError("UiAutomation session did not finish normally")
@@ -252,9 +416,9 @@ class UiSnapshotSession:
                 if self.process.poll() is None:
                     self.process.terminate()
                 try:
-                    stdout, stderr = self.process.communicate(timeout=5)
+                    stdout, stderr = self._finish_readers(time.monotonic() + 5)
                 except subprocess.TimeoutExpired:
                     self.process.kill()
-                    stdout, stderr = self.process.communicate(timeout=5)
-                (self.output / "ui-snapshot-session-instrumentation.txt").write_bytes(stdout + stderr)
+                    stdout, stderr = self._finish_readers(time.monotonic() + 5)
+                self._instrumentation_evidence(stdout, stderr)
             raise RuntimeError(f"UiAutomation session cleanup failed: {error}") from error

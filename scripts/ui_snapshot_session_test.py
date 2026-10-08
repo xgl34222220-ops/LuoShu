@@ -5,12 +5,15 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
+import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from ui_snapshot_session import HELPER, ROOT_WAIT_MS, UiSnapshotSession
 
+REAL_POPEN = subprocess.Popen
 
 class Clock:
     def __init__(self):
@@ -27,6 +30,7 @@ class PrivateProtocol:
     """Simulate only private-file adb I/O. XML bytes have no UI semantics."""
     def __init__(self, session, clock):
         self.session = session
+        session._protocol_fixture = self
         self.clock = clock
         self.files = {
             'ready.json': json.dumps({'protocol': 1, 'nonce': session.nonce,
@@ -39,6 +43,18 @@ class PrivateProtocol:
         self.xml_reads = []
         self.calls = []
         self.xml = b'unchanged bytes read from the matching private XML file'
+
+    def wait_publication(self, basename, deadline):
+        # These existing private-file tests model publication scheduling only.
+        # The real-pipe class below exercises the production reader and waiter.
+        while True:
+            if self.clock.now >= deadline:
+                raise RuntimeError(f'UiAutomation session timed out waiting for {basename}')
+            if self.session.process.poll() is not None:
+                raise RuntimeError('UiAutomation session exited before its matching response')
+            if basename in self.files and (basename != 'ready.json' or self.clock.now >= 100 + self.ready_delay):
+                return
+            self.clock.sleep(min(.1, deadline - self.clock.now))
 
     def run(self, command, *, input, capture_output, timeout):
         self.calls.append((command, timeout))
@@ -88,10 +104,21 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.process.poll.return_value = None
         self.process.returncode = 0
         self.process.communicate.return_value = (b'INSTRUMENTATION_CODE: -1\n', b'')
+        self.process.wait.return_value = 0
+        self.enterContext(patch.object(UiSnapshotSession, '_start_readers'))
+        self.enterContext(patch.object(UiSnapshotSession, '_wait_publication', autospec=True,
+                                      side_effect=lambda current, basename, deadline:
+                                      current._protocol_fixture.wait_publication(basename, deadline)))
+        self.enterContext(patch.object(UiSnapshotSession, '_finish_readers',
+                                      side_effect=lambda deadline: self.finish_reader_fixture(deadline)))
         self.popen = self.enterContext(patch('ui_snapshot_session.subprocess.Popen', return_value=self.process))
         self.adb = self.enterContext(patch('ui_snapshot_session.subprocess.run', side_effect=self.protocol.run))
         self.enterContext(patch('ui_snapshot_session.time.monotonic', side_effect=self.clock.monotonic))
         self.enterContext(patch('ui_snapshot_session.time.sleep', side_effect=self.clock.sleep))
+
+    def finish_reader_fixture(self, deadline):
+        self.process.wait(timeout=deadline - self.clock.now)
+        return self.process.communicate.return_value
 
     def test_one_connection_unique_requests_matching_xml_and_normal_finish(self):
         for index in (1, 2):
@@ -105,7 +132,7 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.assertEqual([f'{self.session.directory}/hierarchy-{index:04d}.xml' for index in (1, 2)],
                          self.protocol.xml_reads)
         self.session.close()
-        self.process.communicate.assert_called_once_with(timeout=10)
+        self.process.wait.assert_called_once_with(timeout=10)
         self.assertNotIn(['adb', '-s', 'emulator-5554', 'shell', 'am', 'force-stop', HELPER],
                          [command for command, _ in self.protocol.calls])
         journal = json.loads((self.output / 'ui-snapshot-session.json').read_text())
@@ -376,7 +403,7 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.assertEqual(self.protocol.xml.decode(), xml)
         self.assertTrue(self.session.diagnostic_errors)
         self.popen.assert_called_once()
-        self.process.communicate.assert_called_once_with(timeout=10)
+        self.process.wait.assert_called_once_with(timeout=10)
 
     def test_native_ready_fields_and_final_instrumentation_remain_optional_evidence(self):
         ready = json.loads(self.protocol.files['ready.json'])
@@ -477,6 +504,237 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.assertEqual(2, self.session.commands[0]['timeout_seconds'])
         self.assertEqual([], self.protocol.requests)
         self.popen.assert_called_once()
+
+
+class PublicationPipeTest(unittest.TestCase):
+    """Real child-process pipes test the production framing/drain/deadline code."""
+
+    producer = r'''
+import json, os, sys, time
+from pathlib import Path
+directory=Path(sys.argv[1]); nonce=sys.argv[2]
+config=json.loads((directory/'producer.json').read_text()); mode=config['mode']
+stop=directory/'stop'; request=directory/'request.json'
+def emit(stream,raw,fragment=False):
+    with (directory/('producer-'+stream+'.bin')).open('ab') as trace:
+        while raw:
+            piece=raw[:17] if fragment else raw
+            count=os.write(1 if stream=='stdout' else 2,piece)
+            trace.write(piece[:count]); trace.flush(); raw=raw[count:]
+            if fragment: time.sleep(.001)
+def frame(basename):
+    raw=json.dumps({'protocol':1,'nonce':nonce,'basename':basename},separators=(',',':')).encode()
+    return b'INSTRUMENTATION_STATUS: luoshu_snapshot_published='+raw+b'\nINSTRUMENTATION_STATUS_CODE: 1\n'
+emit('stderr',b'\x00\xff'+(b'pipe-pressure-stderr\n'*8192 if mode=='high-stderr' else b'initial-stderr\n'))
+emit('stdout',b'\xffraw-start\n'+(b'x'*12000+b'\n' if mode=='high-stderr' else b''))
+ready=frame('ready.json')
+if mode=='bad': ready=bytes.fromhex(config['frame_hex'])
+if mode=='duplicate': ready+=ready
+if mode=='interleaved': ready=ready.replace(b'INSTRUMENTATION_STATUS_CODE:',b'INSTRUMENTATION_RESULT: other=value\nINSTRUMENTATION_STATUS_CODE:')
+if mode=='interleaved-long': ready=ready.replace(b'INSTRUMENTATION_STATUS_CODE:',b'x'*12000+b'\nINSTRUMENTATION_STATUS_CODE:')
+if mode=='missing': ready=b'luoshu_snapshot_published={"protocol":1}\n'
+if mode=='partial-line-eof': ready=ready[:90]
+if mode=='fields-eof': ready=ready.split(b'INSTRUMENTATION_STATUS_CODE:')[0]
+if mode=='late': time.sleep(.2)
+emit('stdout',ready,mode=='high-stderr')
+if mode in ('eof','partial-line-eof','fields-eof'): sys.exit(0)
+until=time.monotonic()+5
+while not request.exists() and not stop.exists() and time.monotonic()<until: time.sleep(.005)
+if request.exists():
+    value=json.loads(request.read_text()); response=frame('response-'+value['request_id']+'.json')
+    if mode=='response-duplicate': response+=response
+    emit('stdout',response,mode=='high-stderr')
+    if mode=='after-xml':
+        while not (directory/'xml-read').exists() and not stop.exists() and time.monotonic()<until: time.sleep(.005)
+        emit('stdout',frame('ready.json'))
+while not stop.exists() and time.monotonic()<until: time.sleep(.005)
+if mode=='close-extra': emit('stdout',frame('response-'+'0'*32+'.json'))
+emit('stdout',b'INSTRUMENTATION_RESULT: session=finished\nINSTRUMENTATION_CODE: -1\n')
+emit('stderr',b'\x80raw-final-stderr\n')
+'''
+
+    def make_session(self, mode, *, frame=None):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        session = UiSnapshotSession(['adb', '-s', 'emulator-5554'], directory)
+        protocol = PrivateProtocol(session, Clock())
+        config = {'mode': mode}
+        if frame is not None:
+            config['frame_hex'] = frame(session.nonce).hex()
+        (directory / 'producer.json').write_text(json.dumps(config))
+        real_popen = REAL_POPEN
+        processes = []
+
+        def launch(command, **kwargs):
+            self.assertIn('instrument', command)
+            process = real_popen([sys.executable, '-c', self.producer, str(directory), session.nonce], **kwargs)
+            processes.append(process)
+            return process
+
+        def transport(command, **kwargs):
+            result = protocol.run(command, **kwargs)
+            if protocol.requests:
+                (directory / 'request.json').write_text(json.dumps(protocol.requests[-1]))
+            if command[-1].endswith('.xml') and mode == 'after-xml':
+                (directory / 'xml-read').touch()
+                until = time.monotonic() + 1
+                while session._pipe_error is None and time.monotonic() < until:
+                    time.sleep(.005)
+            if command[-1].endswith("stop.json'"):
+                (directory / 'stop').touch()
+            return result
+
+        self.enterContext(patch('ui_snapshot_session.subprocess.Popen', side_effect=launch))
+        self.enterContext(patch('ui_snapshot_session.subprocess.run', side_effect=transport))
+
+        def cleanup():
+            (directory / 'stop').touch()
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=3)
+            for thread in session._pipe_threads:
+                thread.join(timeout=3)
+        self.addCleanup(cleanup)
+        return session, protocol, directory, processes
+
+    @staticmethod
+    def frame(nonce, *, notice=None, code=b'1'):
+        notice = notice if notice is not None else {'protocol': 1, 'nonce': nonce, 'basename': 'ready.json'}
+        raw = notice if isinstance(notice, bytes) else json.dumps(notice).encode()
+        return b'INSTRUMENTATION_STATUS: luoshu_snapshot_published=' + raw + b'\nINSTRUMENTATION_STATUS_CODE: ' + code + b'\n'
+
+    def assert_raw_preserved(self, directory):
+        stdout = (directory / 'producer-stdout.bin').read_bytes()
+        stderr = (directory / 'producer-stderr.bin').read_bytes()
+        self.assertEqual(stdout, (directory / 'ui-snapshot-session-instrumentation-stdout.bin').read_bytes())
+        self.assertEqual(stderr, (directory / 'ui-snapshot-session-instrumentation-stderr.bin').read_bytes())
+        self.assertEqual(stdout + stderr, (directory / 'ui-snapshot-session-instrumentation.txt').read_bytes())
+
+    def test_fragmented_notices_high_stderr_and_long_unrelated_stdout_keep_one_read_per_file(self):
+        session, protocol, directory, processes = self.make_session('high-stderr')
+        metadata, xml = session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 3)
+        self.assertEqual('ok', metadata['snapshot'])
+        self.assertEqual(protocol.xml.decode(), xml)
+        session.close()
+        json_reads = [command[-1] for command, _ in protocol.calls
+                      if command[-1].endswith('.json') and 'response-' in command[-1] or command[-1].endswith('/ready.json')]
+        self.assertEqual(2, len(json_reads))
+        self.assertEqual(1, len(processes))
+        self.assertEqual('closed', session.events[-1]['event'])
+        self.assertTrue(processes[0].stdout.closed and processes[0].stderr.closed)
+        self.assert_raw_preserved(directory)
+        self.assertGreater((directory / 'producer-stderr.bin').stat().st_size, 128 * 1024)
+        self.assertFalse(any('force-stop' in command for command, _ in protocol.calls))
+
+    def test_missing_notice_never_reads_existing_ready_json_or_reconnects(self):
+        session, protocol, directory, processes = self.make_session('missing')
+        started = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            session.capture('hierarchy-0001.xml', deadline=started + .15)
+        self.assertLess(time.monotonic() - started, .35)
+        self.assertEqual([], protocol.calls)
+        self.assertEqual([], protocol.requests)
+        session.close()
+        self.assert_raw_preserved(directory)
+        with self.assertRaises(RuntimeError):
+            session.capture('hierarchy-0002.xml')
+        self.assertEqual(1, len(processes))
+
+    def test_notice_after_caller_deadline_cannot_salvage_timeout_or_normal_close(self):
+        session, protocol, directory, processes = self.make_session('late')
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + .06)
+        original = session.fatal_error
+        self.assertEqual([], protocol.calls)
+        with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+            session.close()
+        self.assertEqual(original, session.fatal_error)
+        self.assert_raw_preserved(directory)
+        self.assertEqual(1, len(processes))
+
+    def test_eof_before_matching_response_is_fatal_and_cannot_read_xml(self):
+        session, protocol, directory, _ = self.make_session('eof')
+        with self.assertRaisesRegex(RuntimeError, 'exited'):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+        self.assertEqual([], protocol.xml_reads)
+        with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+            session.close()
+        self.assert_raw_preserved(directory)
+
+    def test_bad_notices_retain_later_final_code_and_raw_stderr_without_json_fallback(self):
+        cases = {
+            'wrong-nonce': lambda nonce: self.frame(nonce, notice={'protocol': 1, 'nonce': '0' * 32, 'basename': 'ready.json'}),
+            'boolean-protocol': lambda nonce: self.frame(nonce, notice={'protocol': True, 'nonce': nonce, 'basename': 'ready.json'}),
+            'bad-basename': lambda nonce: self.frame(nonce, notice={'protocol': 1, 'nonce': nonce, 'basename': '../old.json'}),
+            'extra-field': lambda nonce: self.frame(nonce, notice={'protocol': 1, 'nonce': nonce, 'basename': 'ready.json', 'extra': 1}),
+            'malformed-json': lambda nonce: self.frame(nonce, notice=b'{broken'),
+            'duplicate-json-key': lambda nonce: self.frame(nonce, notice=(f'{{"protocol":1,"protocol":1,"nonce":"{nonce}","basename":"ready.json"}}').encode()),
+            'oversized-notice': lambda nonce: self.frame(nonce, notice=b' ' * 513),
+            'wrong-status-code': lambda nonce: self.frame(nonce, code=b'0'),
+            'partial-record': lambda nonce: self.frame(nonce).split(b'\n')[0] + b'\n',
+        }
+        for name, frame in cases.items():
+            with self.subTest(name=name):
+                session, protocol, directory, _ = self.make_session('bad', frame=frame)
+                with self.assertRaises(RuntimeError):
+                    session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+                self.assertEqual([], protocol.calls)
+                self.assertEqual([], protocol.xml_reads)
+                with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+                    session.close()
+                self.assert_raw_preserved(directory)
+                self.assertIn(b'INSTRUMENTATION_CODE: -1\n', (directory / 'producer-stdout.bin').read_bytes())
+
+    def test_physical_eof_with_partial_notice_preserves_original_partial_bytes(self):
+        for mode in ('partial-line-eof', 'fields-eof'):
+            with self.subTest(mode=mode):
+                session, protocol, directory, _ = self.make_session(mode)
+                with self.assertRaises(RuntimeError):
+                    session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+                self.assertEqual([], protocol.calls)
+                self.assertEqual([], protocol.xml_reads)
+                with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+                    session.close()
+                self.assertIn('mid-record', session._pipe_error)
+                self.assert_raw_preserved(directory)
+
+    def test_duplicate_and_interleaved_frames_cannot_publish_a_ready_token(self):
+        for mode in ('duplicate', 'interleaved', 'interleaved-long'):
+            with self.subTest(mode=mode):
+                session, protocol, directory, _ = self.make_session(mode)
+                with self.assertRaisesRegex(RuntimeError, 'duplicate|interrupted'):
+                    session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+                self.assertEqual([], protocol.calls)
+                with self.assertRaises(RuntimeError):
+                    session.close()
+                self.assert_raw_preserved(directory)
+
+    def test_duplicate_response_notice_is_fatal_before_xml_and_retains_final_transcript(self):
+        session, protocol, directory, _ = self.make_session('response-duplicate')
+        with self.assertRaisesRegex(RuntimeError, 'duplicate'):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+        self.assertEqual([], protocol.xml_reads)
+        with self.assertRaises(RuntimeError):
+            session.close()
+        self.assert_raw_preserved(directory)
+
+    def test_bad_notice_arriving_during_xml_read_cannot_complete_capture(self):
+        session, protocol, directory, _ = self.make_session('after-xml')
+        with self.assertRaisesRegex(RuntimeError, 'duplicate'):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+        self.assertEqual(1, len(protocol.xml_reads))
+        with self.assertRaises(RuntimeError):
+            session.close()
+        self.assert_raw_preserved(directory)
+
+    def test_extra_notice_at_normal_close_fails_and_preserves_all_original_bytes(self):
+        session, protocol, directory, _ = self.make_session('close-extra')
+        session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 1)
+        with self.assertRaisesRegex(RuntimeError, 'unconsumed'):
+            session.close()
+        self.assert_raw_preserved(directory)
 
 
 class NativeLastRequestDiagnosticsTest(unittest.TestCase):
