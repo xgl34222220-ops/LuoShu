@@ -517,6 +517,32 @@ def visible_action(root: ET.Element, label: str, package: str) -> ET.Element:
     return target
 
 
+def visible_control(root: ET.Element, label: str, package: str) -> ET.Element:
+    """Require a whole semantic control and label above the dock; disabled is valid."""
+    content, rect = scroll_content(root, package)
+    parents = {child: parent for parent in root.iter() for child in parent}
+    for node in content.iter("node"):
+        if node.get("package") != package or label not in labels(node):
+            continue
+        target = node
+        while target is not None and target is not content and target.get("package") == package:
+            if target.get("clickable") == "true" or target.get("checkable") == "true" or (
+                    target.get("selected") == "true" and target.get("focusable") == "true"):
+                try:
+                    control = bounds(target)
+                    text = bounds(node)
+                except ValueError:
+                    break
+                if (rect[0] <= control[0] < control[2] <= rect[2]
+                        and rect[1] <= control[1] < control[3] <= rect[3]
+                        and control[0] <= text[0] < text[2] <= control[2]
+                        and control[1] <= text[1] < text[3] <= control[3]):
+                    return target
+                break
+            target = parents.get(target)
+    raise ValueError(f"Whole control for {label!r} is outside visible scroll content or absent")
+
+
 def visible_text(root: ET.Element, marker: str, package: str) -> bool:
     _, rect = scroll_content(root, package)
     for node in root.iter("node"):
@@ -1490,6 +1516,70 @@ class SmokeRun:
             self.scroll(root)
         raise RuntimeError("Unsupported legacy Monet option was not disabled with its Android 12 requirement")
 
+    def verify_library_empty_management_reveal(self) -> None:
+        # Use the production empty state at the same real smaller viewport as
+        # preservation. Only the pre-tap search may scroll to the empty entry.
+        self.adb("shell", "wm", "size", "1080x1920")
+        self.adb("shell", "wm", "density", "420")
+        self.select_tab("字体库", "搜索你的字体")
+        root = self.wait_ui(
+            lambda current: page_ready(current, "字体库", "搜索你的字体", self.package)
+                and choice_selected(current, "全部", self.package)
+                and visible_control(current, "搜索你的字体", self.package) is not None
+                and visible_action(current, "全部", self.package) is not None
+                and "导入与管理" in app_labels(current, self.package),
+            "Unfiltered empty library before its management entry",
+        )
+        root = self.reach_content(
+            lambda current: visible_action(current, "打开导入与管理", self.package) is not None
+                and visible_control(current, "打开导入与管理", self.package) is not None,
+            "Whole production empty-library management entry", root=root,
+            budget=ScrollBudget(timeout=90, max_gestures=5),
+        )
+        target = visible_action(root, "打开导入与管理", self.package)
+        self.capture("library-empty-management-before-tap", root)
+        x, y = center(target)
+        self.adb("shell", "input", "tap", str(x), str(y))
+        last_root = root
+
+        def revealed(current: ET.Element) -> bool:
+            nonlocal last_root
+            last_root = current
+            return (page_ready(current, "字体库", "收起管理", self.package)
+                    and visible_action(current, "收起管理", self.package) is not None
+                    and visible_control(current, "收起管理", self.package) is not None
+                    and visible_control(current, "导入字体", self.package) is not None)
+
+        try:
+            # Never help the UI with a post-tap gesture: this is the reveal test.
+            root = self.wait_ui(revealed, "Empty-library entry reveals whole import tools without a test scroll")
+        except Exception as error:
+            try:
+                self.capture("library-empty-management-after-tap", last_root)
+            except Exception as capture_error:
+                raise RuntimeError(f"{error}; reveal failure capture also failed: {capture_error}") from error
+            raise
+        self.capture("library-empty-management-after-tap", root)
+        self.record("library-empty-management-reveal", entry="打开导入与管理", revealed="导入字体",
+                    import_enabled=visible_control(root, "导入字体", self.package).get("enabled"),
+                    selected_tab="字体库", post_tap_test_scrolls=0, viewport="1080x1920@420dpi")
+        x, y = center(visible_action(root, "收起管理", self.package))
+        self.adb("shell", "input", "tap", str(x), str(y))
+        root = self.wait_ui(
+            lambda current: "导入与管理" in app_labels(current, self.package)
+                and "收起管理" not in app_labels(current, self.package),
+            "Management tools closed after the empty-entry reveal",
+        )
+        root = self.reach_content(
+            lambda current: page_ready(current, "字体库", "搜索你的字体", self.package)
+                and choice_selected(current, "全部", self.package)
+                and visible_control(current, "搜索你的字体", self.package) is not None
+                and visible_action(current, "全部", self.package) is not None,
+            "Unfiltered library search restored before preservation", direction="down", root=root,
+            budget=ScrollBudget(timeout=90, max_gestures=8),
+        )
+        self.capture("library-empty-management-restored-top", root)
+
     def verify_library_preservation(self) -> None:
         # A real smaller emulator viewport makes an empty library scrollable.
         # It still uses production data and controls; no mock fonts are inserted.
@@ -1724,6 +1814,7 @@ class SmokeRun:
         self.record("settings-background-return", restored_tab="设置")
         self.verify_rapid_navigation()
         self.verify_settings_details()
+        self.verify_library_empty_management_reveal()
         self.verify_library_preservation()
         self.verify_disabled_animations()
         self.select_tab("首页", "当前字体")

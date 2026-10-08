@@ -49,6 +49,19 @@ public final class SnapshotInstrumentation extends Instrumentation {
     private long childQueryMillis;
     private long childQueryMaxMillis;
     private long childRootDeadline;
+    private int rootQueryCount;
+    private long rootQueryMillis;
+    private long rootQueryMaxMillis;
+    private int rootQueryNullCount;
+    private int rootQueryNonnullCount;
+    private int rootQueryTrueCount;
+    private int rootQueryFalseCount;
+    private int rootQueryThrownCount;
+    private int rootQueryDiagnosticFailures;
+    private long rootQueryStartedUptime;
+    private String rootQueryKind;
+    private boolean rootQueryPending;
+    private final ArrayDeque<JSONObject> rootQueryRecords = new ArrayDeque<>();
     private int childQueryNullCount;
     private int childQueryNonnullCount;
     private int childQueryThrownCount;
@@ -59,6 +72,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
     private int observedChildReuseCount;
     private static final int PROTOCOL = 1;
     private static final int ROOT_WAIT_MS = 8000;
+    private static final int ROOT_QUERY_RECORD_LIMIT = 32;
     private static final int CHILD_QUERY_RECORD_LIMIT = 32;
     private static final int OBSERVED_CHILD_LIMIT = 32;
 
@@ -141,17 +155,50 @@ public final class SnapshotInstrumentation extends Instrumentation {
         lastDiagnosticTime(diagnostics, "request_accepted");
     }
 
-    private static void rootQueryStarted(Bundle diagnostics, String kind) {
+    private void rootQueryStarted(Bundle diagnostics, String kind) {
         if (diagnostics != null) diagnostics.remove("helper_last_root_query_returned_uptime_ms");
         lastDiagnostic(diagnostics, "request_status", "root-query");
         lastDiagnostic(diagnostics, "root_query_kind", kind);
         lastDiagnostic(diagnostics, "root_query_status", "started");
-        lastDiagnosticTime(diagnostics, "root_query_started");
+        rootQueryStartedUptime = SystemClock.uptimeMillis();
+        rootQueryKind = kind;
+        rootQueryPending = true;
+        rootQueryCount++;
+        lastDiagnostic(diagnostics, "root_query_started_uptime_ms", Long.toString(rootQueryStartedUptime));
     }
 
-    private static void rootQueryReturned(Bundle diagnostics) {
-        lastDiagnosticTime(diagnostics, "root_query_returned");
+    private void rootQueryReturned(Bundle diagnostics, String outcome) {
+        long finished = SystemClock.uptimeMillis();
+        lastDiagnostic(diagnostics, "root_query_returned_uptime_ms", Long.toString(finished));
         lastDiagnostic(diagnostics, "root_query_status", "returned");
+        recordRootQuery(finished, outcome, null);
+    }
+
+    private void recordRootQuery(long finished, String outcome, Throwable failure) {
+        if (!rootQueryPending) return;
+        rootQueryPending = false;
+        long duration = finished - rootQueryStartedUptime;
+        rootQueryMillis += duration;
+        rootQueryMaxMillis = Math.max(rootQueryMaxMillis, duration);
+        if ("null".equals(outcome)) rootQueryNullCount++;
+        else if ("nonnull".equals(outcome)) rootQueryNonnullCount++;
+        else if ("true".equals(outcome)) rootQueryTrueCount++;
+        else if ("false".equals(outcome)) rootQueryFalseCount++;
+        else if ("threw".equals(outcome)) rootQueryThrownCount++;
+        try {
+            // Record only existing query times and returns; no node metadata,
+            // accessibility queries, refreshes or actions are added here.
+            JSONObject record = new JSONObject().put("sequence", rootQueryCount).put("kind", rootQueryKind)
+                    .put("started_uptime_ms", rootQueryStartedUptime).put("finished_uptime_ms", finished)
+                    .put("duration_ms", duration).put("root_deadline_uptime_ms", childRootDeadline)
+                    .put("finished_at_or_after_root_deadline", childRootDeadline != 0 && finished >= childRootDeadline)
+                    .put("outcome", outcome);
+            if (failure != null) record.put("exception", childDiagnosticText(failure.getClass().getName()));
+            if (rootQueryRecords.size() == ROOT_QUERY_RECORD_LIMIT) rootQueryRecords.removeFirst();
+            rootQueryRecords.addLast(record);
+        } catch (Throwable diagnosticFailure) {
+            rootQueryDiagnosticFailures++;
+        }
     }
 
     private static void snapshotDiagnostics(Bundle diagnostics, Bundle result) {
@@ -161,15 +208,20 @@ public final class SnapshotInstrumentation extends Instrumentation {
         String[] fields = {"error", "wait_ms", "attempts", "incomplete_roots", "root_source", "nodes",
                 "last_root_package", "last_root_window_id", "last_root_child_count", "last_root_visible_child_count",
                 "last_root_examined_child_count", "last_root_observation_partial", "last_root_observation_deadline_reached",
+                "root_query_count", "root_query_ms", "root_query_max_ms", "root_query_null_count", "root_query_nonnull_count",
+                "root_query_true_count", "root_query_false_count", "root_query_thrown_count", "root_query_records_omitted",
+                "root_query_records_policy", "root_query_diagnostic_failures", "child_query_strategy",
                 "child_query_count", "child_query_ms", "export_child_query_count", "export_child_query_ms",
                 "child_query_max_ms", "child_query_null_count", "child_query_nonnull_count", "child_query_thrown_count",
                 "child_query_records_omitted", "child_query_records_policy", "child_query_diagnostic_failures", "observed_child_reuse_count"};
         for (String key : fields) lastDiagnostic(diagnostics, "snapshot_" + key, result.getString(key));
         // Keep the bounded JSON complete; generic 1024-character truncation
         // would turn the retained call records into invalid JSON.
-        String records = result.getString("child_query_records");
-        if (diagnostics != null && records != null && records.length() <= 70000) {
-            diagnostics.putString("helper_last_snapshot_child_query_records", records);
+        for (String field : new String[] {"child_query_records", "root_query_records"}) {
+            String records = result.getString(field);
+            if (diagnostics != null && records != null && records.length() <= 70000) {
+                diagnostics.putString("helper_last_snapshot_" + field, records);
+            }
         }
     }
 
@@ -397,6 +449,17 @@ public final class SnapshotInstrumentation extends Instrumentation {
         childQueryMillis = 0;
         childQueryMaxMillis = 0;
         childRootDeadline = 0;
+        rootQueryCount = 0;
+        rootQueryMillis = 0;
+        rootQueryMaxMillis = 0;
+        rootQueryNullCount = 0;
+        rootQueryNonnullCount = 0;
+        rootQueryTrueCount = 0;
+        rootQueryFalseCount = 0;
+        rootQueryThrownCount = 0;
+        rootQueryDiagnosticFailures = 0;
+        rootQueryPending = false;
+        rootQueryRecords.clear();
         childQueryNullCount = 0;
         childQueryNonnullCount = 0;
         childQueryThrownCount = 0;
@@ -455,7 +518,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                     refreshAttempts++;
                     rootQueryStarted(diagnostics, "retained-root.refresh");
                     boolean refreshed = incompleteRoot.refresh();
-                    rootQueryReturned(diagnostics);
+                    rootQueryReturned(diagnostics, Boolean.toString(refreshed));
                     if (refreshed) refreshSuccesses++; else refreshFailures++;
                     result.putString("root_refresh_attempts", Integer.toString(refreshAttempts));
                     result.putString("root_refresh_successes", Integer.toString(refreshSuccesses));
@@ -481,7 +544,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 if (SystemClock.uptimeMillis() >= deadline) break;
                 rootQueryStarted(diagnostics, "getRootInActiveWindow");
                 root = automation.getRootInActiveWindow();
-                rootQueryReturned(diagnostics);
+                rootQueryReturned(diagnostics, root == null ? "null" : "nonnull");
                 if (root != null) {
                     rootSource = "getRootInActiveWindow";
                     if (SystemClock.uptimeMillis() >= deadline) break;
@@ -494,7 +557,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 if (SystemClock.uptimeMillis() >= deadline) break;
                 rootQueryStarted(diagnostics, "getWindows");
                 List<AccessibilityWindowInfo> windows = automation.getWindows();
-                rootQueryReturned(diagnostics);
+                rootQueryReturned(diagnostics, windows == null ? "null" : "nonnull");
                 try {
                     int active = 0;
                     int focused = 0;
@@ -512,7 +575,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                             if (!(priority == 0 ? window.isActive() : window.isFocused())) continue;
                             rootQueryStarted(diagnostics, "window.getRoot");
                             root = window.getRoot();
-                            rootQueryReturned(diagnostics);
+                            rootQueryReturned(diagnostics, root == null ? "null" : "nonnull");
                             if (root != null) {
                                 rootSource = (priority == 0 ? "active-window:" : "focused-window:") + window.getId();
                                 if (SystemClock.uptimeMillis() >= deadline) break;
@@ -584,6 +647,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("nodes", Integer.toString(nodeCount));
             result.putString("root_package", text(root.getPackageName()));
         } catch (Exception failure) {
+            if (rootQueryPending) recordRootQuery(SystemClock.uptimeMillis(), "threw", failure);
             if (diagnostics != null && waitStarted != 0 &&
                     !diagnostics.containsKey("helper_last_root_wait_finished_uptime_ms")) {
                 lastDiagnosticTime(diagnostics, "root_wait_finished");
@@ -599,6 +663,21 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("snapshot", "failed");
             result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
         } finally {
+            result.putString("root_query_count", Integer.toString(rootQueryCount));
+            result.putString("root_query_ms", Long.toString(rootQueryMillis));
+            result.putString("root_query_max_ms", Long.toString(rootQueryMaxMillis));
+            result.putString("root_query_null_count", Integer.toString(rootQueryNullCount));
+            result.putString("root_query_nonnull_count", Integer.toString(rootQueryNonnullCount));
+            result.putString("root_query_true_count", Integer.toString(rootQueryTrueCount));
+            result.putString("root_query_false_count", Integer.toString(rootQueryFalseCount));
+            result.putString("root_query_thrown_count", Integer.toString(rootQueryThrownCount));
+            result.putString("root_query_records_omitted", Integer.toString(rootQueryCount - rootQueryRecords.size()));
+            result.putString("root_query_records_policy", "last-32-calls; includes-root-refresh-and-getWindows");
+            result.putString("root_query_diagnostic_failures", Integer.toString(rootQueryDiagnosticFailures));
+            JSONArray rootRecords = new JSONArray();
+            for (JSONObject record : rootQueryRecords) rootRecords.put(record);
+            result.putString("root_query_records", rootRecords.toString());
+            result.putString("child_query_strategy", Build.VERSION.SDK_INT >= 33 ? "api33-zero-prefetch" : "legacy-platform-default");
             result.putString("child_query_count", Integer.toString(childQueryCount));
             result.putString("child_query_ms", Long.toString(childQueryMillis));
             result.putString("child_query_max_ms", Long.toString(childQueryMaxMillis));
@@ -734,7 +813,10 @@ public final class SnapshotInstrumentation extends Instrumentation {
         AccessibilityNodeInfo child = null;
         Throwable failure = null;
         try {
-            child = node.getChild(index);
+            // API33 exposes a public strategy overload. Request this child
+            // without descendant prefetch; older devices retain their getter.
+            // Real Android measurements, not JVM fixtures, decide its cost.
+            child = Build.VERSION.SDK_INT >= 33 ? node.getChild(index, 0) : node.getChild(index);
             if (child == null) childQueryNullCount++; else childQueryNonnullCount++;
             return child;
         } catch (RuntimeException | Error queryFailure) {

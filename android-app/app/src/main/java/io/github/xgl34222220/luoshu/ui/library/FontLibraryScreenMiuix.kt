@@ -66,8 +66,10 @@ import io.github.xgl34222220.luoshu.ui.theme.luoShuPressScale
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
@@ -90,6 +92,8 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun FontLibraryScreenMiuix(
@@ -109,6 +113,8 @@ internal fun FontLibraryScreenMiuix(
     val filtered = state.query.isNotBlank() || state.filter != FontLibraryFilter.ALL
 
     val listState = rememberLazyListState()
+    val toolsRevealScope = rememberCoroutineScope()
+    var toolsRevealJob by remember { mutableStateOf<Job?>(null) }
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -195,7 +201,10 @@ internal fun FontLibraryScreenMiuix(
                         }
                     }
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { showTools = !showTools }) {
+                    TextButton(onClick = {
+                        toolsRevealJob?.cancel()
+                        showTools = !showTools
+                    }) {
                         Text(if (showTools) "收起管理" else "导入与管理", fontSize = 12.sp)
                         Spacer(Modifier.width(4.dp))
                         Icon(
@@ -283,7 +292,17 @@ internal fun FontLibraryScreenMiuix(
                         )
                         FilledTonalButton(onClick = {
                             if (filtered) { actions.setQuery(""); actions.setFilter(FontLibraryFilter.ALL) }
-                            else showTools = true
+                            else {
+                                showTools = true
+                                toolsRevealJob?.cancel()
+                                toolsRevealJob = toolsRevealScope.launch {
+                                    // collection_heading is the fourth fixed item, before any status rows.
+                                    // Reveal it and the tools below in the next frame; newer taps, user
+                                    // scrolls and page disposal can cancel this one navigation request.
+                                    withFrameNanos { }
+                                    listState.animateScrollToItem(index = 3)
+                                }
+                            }
                         }) { Text(if (filtered) "清除筛选" else "打开导入与管理") }
                     }
                 }

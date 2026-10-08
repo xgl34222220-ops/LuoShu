@@ -19,8 +19,13 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
         if java is None:
             self.skipTest('Production Java regression requires the host JDK')
         source = (Path(__file__).parent / 'ui_snapshot' / 'SnapshotInstrumentation.java').read_text()
-        for constant in ('ROOT_WAIT_MS = 8000', 'CHILD_QUERY_RECORD_LIMIT = 32', 'OBSERVED_CHILD_LIMIT = 32'):
+        for constant in ('ROOT_WAIT_MS = 8000', 'ROOT_QUERY_RECORD_LIMIT = 32',
+                         'CHILD_QUERY_RECORD_LIMIT = 32', 'OBSERVED_CHILD_LIMIT = 32'):
             self.assertIn(f'private static final int {constant};', source)
+        child_strategy = 'Build.VERSION.SDK_INT >= 33 ? node.getChild(index, 0) : node.getChild(index)'
+        self.assertEqual(1, source.count(child_strategy))
+        self.assertIn('root = automation.getRootInActiveWindow();', source)
+        self.assertIn('root = window.getRoot();', source)
 
         def method(signature):
             start = source.index(signature)
@@ -34,9 +39,12 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
             '    private static void lastDiagnostic(',
             '    private static void lastDiagnosticTime(',
             '    private static void acceptRequestDiagnostics(',
-            '    private static void rootQueryStarted(',
-            '    private static void rootQueryReturned(',
+            '    private void rootQueryStarted(',
+            '    private void rootQueryReturned(',
+            '    private void recordRootQuery(',
             '    private static void snapshotDiagnostics(',
+            '    private static JSONObject serviceInfoEvidence(',
+            '    private static void refreshLegacyAccessibilityCache(',
             '    private static JSONObject envelope(',
             '    private static void writeJson(',
             '    private void publishJson(',
@@ -51,6 +59,12 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
             '    private void dumpNode(',
             '    private static String text(',
         ))
+        # In-memory comparison only: the source file retains its fixed API gate.
+        # Both boundaries use the exact same fixture tree and synthetic cost.
+        # This compares overload selection and XML/recycle behavior, not Android speed.
+        methods = methods.replace(child_strategy,
+                                  'Build.VERSION.SDK_INT >= 33 && !COMPARE_PLATFORM_DEFAULT '
+                                  '? node.getChild(index, 0) : node.getChild(index)')
         harness = r'''
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -67,6 +81,12 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
     private final Bundle lifecycleDiagnostics = new Bundle();
     private int nodeCount, childQueryCount;
     private long childQueryMillis, childQueryMaxMillis, childRootDeadline;
+    private int rootQueryCount, rootQueryNullCount, rootQueryNonnullCount, rootQueryTrueCount,
+            rootQueryFalseCount, rootQueryThrownCount, rootQueryDiagnosticFailures;
+    private long rootQueryMillis, rootQueryMaxMillis, rootQueryStartedUptime;
+    private String rootQueryKind;
+    private boolean rootQueryPending;
+    private final ArrayDeque<JSONObject> rootQueryRecords = new ArrayDeque<>();
     private int childQueryNullCount, childQueryNonnullCount, childQueryThrownCount, childQueryDiagnosticFailures;
     private final ArrayDeque<JSONObject> childQueryRecords = new ArrayDeque<>();
     private AccessibilityNodeInfo observedRoot;
@@ -74,11 +94,13 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
     private int observedChildReuseCount;
     private static final int PROTOCOL = 1;
     private static final int ROOT_WAIT_MS = 8000;
+    private static final int ROOT_QUERY_RECORD_LIMIT = 32;
     private static final int CHILD_QUERY_RECORD_LIMIT = 32;
     // Test-only boundary override exercises the production overflow/fallback
     // path at zero: it reproduces observe/requery behavior without pretending
     // to execute all literal 6eb source, or changing the real getter boundary.
     private static int OBSERVED_CHILD_LIMIT = 32;
+    private static boolean COMPARE_PLATFORM_DEFAULT;
     private static final String NONCE = "0123456789abcdef0123456789abcdef";
     static class Bundle {
         final Map<String,String> values = new HashMap<>();
@@ -119,12 +141,12 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         int getRotation() { return 1; }
     }
     static class AccessibilityNodeInfo {
-        static int getterCalls, createdCopies, recycledCopies;
+        static int getterCalls, defaultGetterCalls, zeroGetterCalls, createdCopies, recycledCopies;
         static final List<AccessibilityNodeInfo> copies=new ArrayList<>();
         final String value;
         final boolean visible;
         final List<AccessibilityNodeInfo> children = new ArrayList<>();
-        boolean recycled, throwChild, throwMetadata, errorMetadata;
+        boolean recycled, throwChild, throwMetadata, errorMetadata, refreshResult=true;
         int throwChildIndex=-1;
         String className="fixture.Node", resourceId="fixture:id/content";
         int refreshDelay=1000, childDelay=7;
@@ -135,17 +157,26 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
             n.childDelay=childDelay; n.throwMetadata=throwMetadata;
             n.throwChildIndex=throwChildIndex; n.className=className; n.resourceId=resourceId;
             n.errorMetadata=errorMetadata;
+            n.refreshResult=refreshResult;
             createdCopies++; copies.add(n); return n;
         }
         void usable() { require(!recycled,"recycled node reused"); }
         int getChildCount() { usable(); return children.size(); }
         AccessibilityNodeInfo getChild(int index) {
+            defaultGetterCalls++; return getChildBoundary(index);
+        }
+        AccessibilityNodeInfo getChild(int index,int strategy) {
+            require(Build.VERSION.SDK_INT>=33,"API33 child overload reached on legacy device");
+            require(strategy==0,"child prefetch strategy changed from zero");
+            zeroGetterCalls++; return getChildBoundary(index);
+        }
+        AccessibilityNodeInfo getChildBoundary(int index) {
             usable(); getterCalls++; SystemClock.now+=childDelay;
             if(throwChild || index==throwChildIndex) throw new IllegalStateException("child query failed");
             AccessibilityNodeInfo child=children.get(index); return child==null ? null : child.copy();
         }
         boolean isVisibleToUser() { usable(); return visible; }
-        boolean refresh() { usable(); SystemClock.now+=refreshDelay; return true; }
+        boolean refresh() { usable(); SystemClock.now+=refreshDelay; return refreshResult; }
         void recycle() { require(!recycled,"node recycled twice"); recycled=true; recycledCopies++; }
         int getWindowId() { usable(); return 2; }
         CharSequence getPackageName() { usable(); return "fixture.package"; }
@@ -175,7 +206,12 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
     }
     static class AccessibilityServiceInfo {
         static final int FLAG_INCLUDE_NOT_IMPORTANT_VIEWS=2, FLAG_REPORT_VIEW_IDS=4, FLAG_RETRIEVE_INTERACTIVE_WINDOWS=8;
-        int flags=1;
+        int flags=1, eventTypes=3, feedbackType=5;
+        long notificationTimeout=9;
+        String[] packageNames={"fixture.package"};
+        int getCapabilities() { return 7; }
+        int getInteractiveUiTimeoutMillis() { return 11; }
+        int getNonInteractiveUiTimeoutMillis() { return 13; }
     }
     static class UiAutomation {
         static final int FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES=1;
@@ -185,19 +221,29 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         void setServiceInfo(AccessibilityServiceInfo info) { require(info==service,"different service set"); setServiceCalls++; SystemClock.now+=30; }
         AccessibilityNodeInfo root;
         final List<AccessibilityWindowInfo> windows = new ArrayList<>();
-        int rootDelay=3, windowDelay;
-        boolean clearCache() { return true; }
+        int rootDelay=3, windowDelay, rootCalls, windowCalls, clearCacheCalls, rootNullCallsRemaining;
+        boolean throwRoot, throwWindows;
+        boolean clearCache() { clearCacheCalls++; return true; }
         AccessibilityNodeInfo getRootInActiveWindow() {
-            SystemClock.now+=rootDelay; return root==null ? null : root.copy();
+            rootCalls++; SystemClock.now+=rootDelay;
+            if(throwRoot) throw new IllegalStateException("root query failed");
+            if(rootNullCallsRemaining>0) { rootNullCallsRemaining--; return null; }
+            return root==null ? null : root.copy();
         }
         List<AccessibilityWindowInfo> getWindows() {
-            SystemClock.now+=windowDelay; return windows;
+            windowCalls++; SystemClock.now+=windowDelay;
+            if(throwWindows) throw new IllegalStateException("window query failed");
+            return windows;
         }
     }
     static class JSONObject {
         static final Object NULL=new Object();
+        static boolean failRootRecord;
         final Map<String,Object> values=new LinkedHashMap<>();
-        JSONObject put(String key,Object value) { values.put(key,value); return this; }
+        JSONObject put(String key,Object value) {
+            if(failRootRecord && key.equals("kind")) throw new AssertionError("root diagnostic boundary failed");
+            values.put(key,value); return this;
+        }
         static String encode(Object value) {
             if(value==null || value==NULL) return "null";
             if(value instanceof Number || value instanceof Boolean) return value.toString();
@@ -311,7 +357,6 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         if(failNotice) throw new IllegalStateException("notification failed");
         notices.add(notice);
     }
-    static void refreshLegacyAccessibilityCache(UiAutomation a,Bundle r,long deadline) { throw new AssertionError("unexpected legacy branch"); }
     Bundle runSession(String nonce,Bundle diagnostics) {
         if(failSession) throw new IllegalStateException("session failure");
         snapshotDiagnostics(diagnostics,snapshot(automation,"hierarchy-0099.xml",context.directory,diagnostics));
@@ -486,7 +531,8 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         h.automation.root.children.add(new AccessibilityNodeInfo("invisible",false));
         Bundle lateRefresh=h.snapshot(h.automation,"hierarchy-0011.xml",dir,new Bundle());
         require("failed".equals(lateRefresh.getString("snapshot")) && "1".equals(lateRefresh.getString("child_query_count"))
-                && "1".equals(lateRefresh.getString("root_refresh_attempts")) && !new File(dir,"hierarchy-0011.xml").exists(),
+                && "1".equals(lateRefresh.getString("root_refresh_attempts")) && "1".equals(lateRefresh.getString("root_query_true_count"))
+                && !new File(dir,"hierarchy-0011.xml").exists(),
                 "late retained-root refresh queried descendants or became evidence");
         h.automation.root=tree(); h.automation.root.throwChild=true; h.automation.rootDelay=3;
         Bundle queryFailure=h.snapshot(h.automation,"hierarchy-0008.xml",dir,new Bundle());
@@ -607,11 +653,136 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         require(h.finished.getString("helper_on_start_started_uptime_ms")!=null &&
                 "50".equals(h.finished.getString("helper_process_started_uptime_ms")),"lifecycle was not carried into final result");
         for(Map.Entry<String,String> entry:h.finished.values.entrySet()) require(entry.getValue().length()<=
-                (entry.getKey().equals("helper_last_snapshot_child_query_records")?70000:1024),"unbounded final diagnostic string");
+                (entry.getKey().equals("helper_last_snapshot_child_query_records") ||
+                 entry.getKey().equals("helper_last_snapshot_root_query_records")?70000:1024),"unbounded final diagnostic string");
         JSONObject closed=new JSONObject().put("state","closed");
         writeJson(dir,"closed.json",closed); childRead("json",new File(dir,"closed.json").getPath(),closed.toString());
         h.failSession=true; h.onStart(); require(h.finishCode==0 && "failed".equals(h.finished.getString("snapshot")),"real session failure changed close code");
         require(FileOutputStream.syncCalls==0,"ephemeral publication forced durability");
+        NativeSnapshotPublicationHarness comparison=new NativeSnapshotPublicationHarness();
+        comparison.context.directory=dir; comparison.automation.root=tree();
+        int fileNumber=40;
+        for(int api:new int[]{28,32,33,36}) {
+            Build.VERSION.SDK_INT=api;
+            COMPARE_PLATFORM_DEFAULT=true; SystemClock.now=100;
+            String defaultName=String.format("hierarchy-%04d.xml",fileNumber++);
+            int defaultsBefore=AccessibilityNodeInfo.defaultGetterCalls, zerosBefore=AccessibilityNodeInfo.zeroGetterCalls;
+            int rootsBefore=comparison.automation.rootCalls, windowsBefore=comparison.automation.windowCalls;
+            int clearBefore=comparison.automation.clearCacheCalls, getInfoBefore=comparison.automation.getServiceCalls;
+            int setInfoBefore=comparison.automation.setServiceCalls;
+            Bundle defaultResult=comparison.snapshot(comparison.automation,defaultName,dir,new Bundle());
+            require("ok".equals(defaultResult.getString("snapshot")) && AccessibilityNodeInfo.defaultGetterCalls-defaultsBefore==6 &&
+                    AccessibilityNodeInfo.zeroGetterCalls==zerosBefore,"default comparison changed getter calls");
+            int defaultRootCalls=comparison.automation.rootCalls-rootsBefore, defaultWindowCalls=comparison.automation.windowCalls-windowsBefore;
+            int defaultCacheCalls=comparison.automation.clearCacheCalls-clearBefore;
+            int defaultGetInfoCalls=comparison.automation.getServiceCalls-getInfoBefore;
+            int defaultSetInfoCalls=comparison.automation.setServiceCalls-setInfoBefore;
+            COMPARE_PLATFORM_DEFAULT=false; SystemClock.now=100;
+            String candidateName=String.format("hierarchy-%04d.xml",fileNumber++);
+            defaultsBefore=AccessibilityNodeInfo.defaultGetterCalls; zerosBefore=AccessibilityNodeInfo.zeroGetterCalls;
+            rootsBefore=comparison.automation.rootCalls; windowsBefore=comparison.automation.windowCalls;
+            clearBefore=comparison.automation.clearCacheCalls; getInfoBefore=comparison.automation.getServiceCalls;
+            setInfoBefore=comparison.automation.setServiceCalls;
+            Bundle candidateResult=comparison.snapshot(comparison.automation,candidateName,dir,new Bundle());
+            require("ok".equals(candidateResult.getString("snapshot")),"API strategy candidate failed");
+            require(AccessibilityNodeInfo.defaultGetterCalls-defaultsBefore==(api<33?6:0) &&
+                    AccessibilityNodeInfo.zeroGetterCalls-zerosBefore==(api>=33?6:0),"API gate selected wrong public child overload");
+            require(Arrays.equals(Files.readAllBytes(new File(dir,defaultName).toPath()),Files.readAllBytes(new File(dir,candidateName).toPath())),
+                    "prefetch strategy changed XML bytes");
+            for(String metric:new String[]{"child_query_count","child_query_ms","export_child_query_count","export_child_query_ms",
+                    "child_query_null_count","child_query_nonnull_count","child_query_thrown_count","observed_child_reuse_count",
+                    "root_query_count","root_query_ms","root_query_records","child_query_records"}) {
+                require(defaultResult.getString(metric).equals(candidateResult.getString(metric)),"fixed fixture differs beyond overload: "+metric);
+            }
+            require(defaultRootCalls==1 && comparison.automation.rootCalls-rootsBefore==defaultRootCalls &&
+                    comparison.automation.windowCalls-windowsBefore==defaultWindowCalls &&
+                    comparison.automation.clearCacheCalls-clearBefore==defaultCacheCalls &&
+                    comparison.automation.getServiceCalls-getInfoBefore==defaultGetInfoCalls &&
+                    comparison.automation.setServiceCalls-setInfoBefore==defaultSetInfoCalls,"strategy comparison changed root/cache/service calls");
+            require(defaultCacheCalls==(api>=34?1:0) && defaultSetInfoCalls==(api<34?1:0) &&
+                    (api>=34 || "true".equals(candidateResult.getString("accessibility_service_info_unchanged"))),
+                    "legacy public cache branch or unchanged service configuration lost");
+            allCopiesRecycled();
+            System.out.println("CHILD_STRATEGY_FIXTURE API="+api+" XML bytes same; default/candidate each 6 queries/42 synthetic ms; "
+                    +"candidate overload="+(api>=33?"getChild(index,0)":"getChild(index)")+"; not Android performance evidence");
+        }
+        Build.VERSION.SDK_INT=36;
+        // Fault/late fixtures have equal boundary costs in both overload modes.
+        for(boolean platformDefault:new boolean[]{true,false}) {
+            COMPARE_PLATFORM_DEFAULT=platformDefault;
+            for(String fault:new String[]{"late-visible","late-null","late-throw"}) {
+                comparison.automation.root=new AccessibilityNodeInfo(fault,true);
+                comparison.automation.root.children.add(fault.equals("late-visible")?new AccessibilityNodeInfo("returned",true):null);
+                comparison.automation.root.children.add(new AccessibilityNodeInfo("must-not-query",true));
+                comparison.automation.root.childDelay=8000; comparison.automation.root.throwChild=fault.equals("late-throw");
+                int gettersBefore=AccessibilityNodeInfo.getterCalls;
+                String name=String.format("hierarchy-%04d.xml",fileNumber++);
+                Bundle failure=comparison.snapshot(comparison.automation,name,dir,new Bundle());
+                require("failed".equals(failure.getString("snapshot")) && !new File(dir,name).exists() &&
+                        AccessibilityNodeInfo.getterCalls-gettersBefore==1 &&
+                        Boolean.TRUE.equals(lastQuery(comparison).values.get("finished_at_or_after_root_deadline")),
+                        "strategy comparison accepted late child or started another getter");
+                require((fault.equals("late-throw")?"threw":fault.equals("late-null")?"null":"nonnull")
+                        .equals(lastQuery(comparison).values.get("outcome")),"strategy fault return/exception changed");
+                allCopiesRecycled();
+            }
+        }
+        COMPARE_PLATFORM_DEFAULT=false;
+        comparison.automation.root=tree(); comparison.automation.rootDelay=7; comparison.automation.windowDelay=11;
+        comparison.automation.rootNullCallsRemaining=20; SystemClock.now=100;
+        int rootCallsBefore=comparison.automation.rootCalls, windowCallsBefore=comparison.automation.windowCalls;
+        Bundle manyRoots=comparison.snapshot(comparison.automation,"hierarchy-0070.xml",dir,new Bundle());
+        require("ok".equals(manyRoots.getString("snapshot")) && "21".equals(manyRoots.getString("attempts")) &&
+                "41".equals(manyRoots.getString("root_query_count")) && "367".equals(manyRoots.getString("root_query_ms")) &&
+                "11".equals(manyRoots.getString("root_query_max_ms")) && "20".equals(manyRoots.getString("root_query_null_count")) &&
+                "21".equals(manyRoots.getString("root_query_nonnull_count")) && "9".equals(manyRoots.getString("root_query_records_omitted")),
+                "root aggregate/omitted counts lost actual root/window returns");
+        require(comparison.automation.rootCalls-rootCallsBefore==21 && comparison.automation.windowCalls-windowCallsBefore==20 &&
+                comparison.rootQueryRecords.size()==32 && Integer.valueOf(10).equals(comparison.rootQueryRecords.getFirst().values.get("sequence")) &&
+                Integer.valueOf(41).equals(comparison.rootQueryRecords.getLast().values.get("sequence")),"root diagnostics added queries or lost tail32");
+        Bundle rootFinal=new Bundle(); snapshotDiagnostics(rootFinal,manyRoots);
+        require(manyRoots.getString("root_query_records").equals(rootFinal.getString("helper_last_snapshot_root_query_records")) &&
+                manyRoots.getString("root_query_records").length()>1024,"root tail JSON truncated in final result");
+        System.out.println("ROOT_DIAGNOSTIC_JSON="+manyRoots.getString("root_query_records"));
+        acceptRequestDiagnostics(rootFinal,"next","hierarchy-0071.xml");
+        require(!rootFinal.containsKey("helper_last_snapshot_root_query_records"),"root records survived new request");
+        comparison.automation.rootDelay=8000;
+        Bundle rootLate=comparison.snapshot(comparison.automation,"hierarchy-0071.xml",dir,new Bundle());
+        require("failed".equals(rootLate.getString("snapshot")) && "1".equals(rootLate.getString("root_query_count")) &&
+                "0".equals(rootLate.getString("root_query_records_omitted")) && "8000".equals(rootLate.getString("root_query_ms")) &&
+                Boolean.TRUE.equals(comparison.rootQueryRecords.getLast().values.get("finished_at_or_after_root_deadline")) &&
+                "0".equals(rootLate.getString("child_query_count")),"late root changed original deadline or retained old records");
+        comparison.automation.rootDelay=23; comparison.automation.throwRoot=true;
+        Bundle rootThrew=comparison.snapshot(comparison.automation,"hierarchy-0072.xml",dir,new Bundle());
+        require("failed".equals(rootThrew.getString("snapshot")) && "1".equals(rootThrew.getString("root_query_thrown_count")) &&
+                "23".equals(rootThrew.getString("root_query_ms")) && "threw".equals(comparison.rootQueryRecords.getLast().values.get("outcome")) &&
+                "java.lang.IllegalStateException".equals(comparison.rootQueryRecords.getLast().values.get("exception")),"throwing root lost actual return time/exception");
+        comparison.automation.throwRoot=false; comparison.automation.root=null; comparison.automation.throwWindows=true;
+        Bundle windowsThrew=comparison.snapshot(comparison.automation,"hierarchy-0073.xml",dir,new Bundle());
+        require("failed".equals(windowsThrew.getString("snapshot")) && "2".equals(windowsThrew.getString("root_query_count")) &&
+                "1".equals(windowsThrew.getString("root_query_null_count")) && "1".equals(windowsThrew.getString("root_query_thrown_count")) &&
+                "getWindows".equals(comparison.rootQueryRecords.getLast().values.get("kind")),"throwing windows mixed root outcomes");
+        comparison.automation.throwWindows=false;
+        comparison.automation.root=new AccessibilityNodeInfo("incomplete",true); comparison.automation.root.refreshResult=false;
+        comparison.automation.root.children.add(new AccessibilityNodeInfo("invisible",false));
+        comparison.automation.rootDelay=1000; comparison.automation.windowDelay=1000;
+        Bundle refreshFalse=comparison.snapshot(comparison.automation,"hierarchy-0074.xml",dir,new Bundle());
+        require("failed".equals(refreshFalse.getString("snapshot")) && Integer.parseInt(refreshFalse.getString("root_query_false_count"))>0 &&
+                "0".equals(refreshFalse.getString("root_query_true_count")),"false refresh reported as node/null or lost");
+        comparison.automation.root=tree(); comparison.automation.rootDelay=3; comparison.automation.windowDelay=0;
+        JSONObject.failRootRecord=true; rootCallsBefore=comparison.automation.rootCalls;
+        Bundle rootMetadataFailed=comparison.snapshot(comparison.automation,"hierarchy-0075.xml",dir,new Bundle());
+        require("ok".equals(rootMetadataFailed.getString("snapshot")) && "1".equals(rootMetadataFailed.getString("root_query_diagnostic_failures")) &&
+                "1".equals(rootMetadataFailed.getString("root_query_records_omitted")) && comparison.automation.rootCalls-rootCallsBefore==1,
+                "root diagnostic failure replaced getter return or added a query");
+        comparison.automation.throwRoot=true;
+        Bundle rootMetadataThrew=comparison.snapshot(comparison.automation,"hierarchy-0076.xml",dir,new Bundle());
+        require("failed".equals(rootMetadataThrew.getString("snapshot")) && "1".equals(rootMetadataThrew.getString("root_query_thrown_count")) &&
+                "1".equals(rootMetadataThrew.getString("root_query_diagnostic_failures")) &&
+                "IllegalStateException: root query failed".equals(rootMetadataThrew.getString("error")),"root diagnostic failure replaced actual getter exception");
+        JSONObject.failRootRecord=false; comparison.automation.throwRoot=false;
+        allCopiesRecycled();
+        Build.VERSION.SDK_INT=34;
         System.out.println("Passed production Java cross-process publication, export failures, deadlines and diagnostics");
         System.out.println("Compared complete XML: same-production bound-zero requery 7 getters/49 ms; retained child 6 getters/42 ms; overflow 48 getters, 32 reused, last32 records/16 omitted");
     }
@@ -634,7 +805,9 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                         (evidence / 'ProcessBoundary.java').write_bytes(process_boundary.read_bytes())
                     else:
                         for filename, label in [('hierarchy-0001.xml', 'retained-fixture.xml'),
-                                                ('hierarchy-0012.xml', 'bound-zero-fixture.xml')]:
+                                                ('hierarchy-0012.xml', 'bound-zero-fixture.xml'),
+                                                ('hierarchy-0046.xml', 'prefetch-default-api36-fixture.xml'),
+                                                ('hierarchy-0047.xml', 'prefetch-zero-api36-fixture.xml')]:
                             (evidence / label).write_bytes((directory / 'session' / filename).read_bytes())
             compiled = subprocess.run([java, '--module', 'jdk.compiler/com.sun.tools.javac.Main',
                                        '-d', str(directory), str(file), str(process_boundary)], capture_output=True, timeout=30)
@@ -656,6 +829,11 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                     self.assertEqual('null', record['outcome'])
                     self.assertTrue(record['parent']['fields_truncated'])
                     self.assertLess(len(line.partition('=')[2]), 2048)
+                elif line.startswith('ROOT_DIAGNOSTIC_JSON='):
+                    records = json.loads(line.partition('=')[2])
+                    self.assertEqual(32, len(records))
+                    self.assertEqual(list(range(10, 42)), [record['sequence'] for record in records])
+                    self.assertLess(len(line.partition('=')[2]), 70000)
                 else:
                     print(line)
             self.assertIn('Passed production Java cross-process publication, export failures, deadlines and diagnostics',

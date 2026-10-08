@@ -22,7 +22,7 @@ from android_ui_smoke import (
     SmokeRun, instrumentation_results, library_state_preserved, assert_single_stage_startup,
     legacy_manual_colors_ready, legacy_monet_unavailable,
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
-    scroll_progress, visible_action, visible_text, ScrollBudget,
+    scroll_progress, visible_action, visible_control, visible_text, ScrollBudget,
     focused_component, home_window_state, decode_raw_screencap, decompress_screencap_gzip, home_launcher_content, main,
 )
 
@@ -1744,6 +1744,276 @@ class SnapshotCleanupHarnessTest(unittest.TestCase):
             with patch("android_ui_smoke.sys.argv", arguments), patch("android_ui_smoke.SmokeRun", return_value=run):
                 self.assertEqual(1, main())
             self.assertFalse(json.loads((output / "summary.json").read_text())["passed"])
+
+
+class LibraryEmptyManagementHarnessTest(unittest.TestCase):
+    """Controlled host windows test gestures and reveal failures, not device pixels."""
+    def library(self, phase, *, import_state="disabled", entry_state="whole", selected="字体库"):
+        root = ET.fromstring(f'''<hierarchy rotation="0">
+          <node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+            <node package="{PACKAGE}" scrollable="true" bounds="[0,63][1080,1920]" />
+            <node resource-id="android:id/navigationBarBackground" bounds="[0,1840][1080,1920]" />
+          </node>
+        </hierarchy>''')
+        content = root[0][0]
+
+        def text(label, rectangle):
+            return ET.SubElement(content, "node", {"package": PACKAGE, "text": label, "bounds": rectangle})
+
+        def button(label, rectangle, *, enabled=True, selected=False, label_bounds=None):
+            target = ET.SubElement(content, "node", {"package": PACKAGE, "enabled": str(enabled).lower(),
+                "selected": str(selected).lower(), "focusable": str(enabled).lower(),
+                "clickable": str(not selected).lower(), "bounds": rectangle})
+            left, top, right, bottom = bounds(target)
+            ET.SubElement(target, "node", {"package": PACKAGE, "text": label, "enabled": "true",
+                "bounds": label_bounds or f"[{left + 20},{top + 20}][{right - 20},{bottom - 20}]"})
+            return target
+
+        if phase == "top":
+            button("搜索你的字体", "[40,260][1040,410]", label_bounds="[160,300][420,360]")
+            button("全部", "[40,420][200,550]", selected=True)
+            button("导入与管理", "[780,740][1040,870]")
+            text("从第一款字体开始", "[320,1100][760,1170]")
+            button("打开导入与管理", "[260,2200][820,2330]")
+        elif phase == "entry":
+            text("从第一款字体开始", "[320,1100][760,1170]")
+            if entry_state != "missing":
+                rectangle = "[260,1400][820,1530]" if entry_state in ("whole", "partial-label") else "[260,1640][820,1790]"
+                label_bounds = "[300,1450][780,1550]" if entry_state == "partial-label" else None
+                button("打开导入与管理", rectangle, label_bounds=label_bounds)
+        elif phase == "revealed":
+            button("收起管理", "[780,150][1040,280]")
+            if import_state != "missing":
+                rectangle = "[220,350][1020,490]"
+                if import_state in ("dock", "partial-control"):
+                    rectangle = "[220,1710][1020,1850]" if import_state == "dock" else "[220,1640][1020,1780]"
+                label_bounds = "[400,1650][800,1680]" if import_state == "partial-control" else \
+                    "[400,400][800,520]" if import_state == "partial-label" else None
+                button("导入字体", rectangle, enabled=import_state == "enabled", label_bounds=label_bounds)
+        elif phase == "closed":
+            button("导入与管理", "[780,150][1040,280]")
+        else:
+            raise AssertionError(phase)
+        dock = ET.SubElement(root[0], "node", {"package": PACKAGE, "bounds": "[60,1700][1020,1840]"})
+        for index, label in enumerate(("首页", "字体库", "组合", "设置")):
+            left = 60 + index * 240
+            target = ET.SubElement(dock, "node", {"package": PACKAGE, "enabled": "true", "focusable": "true",
+                "selected": str(label == selected).lower(), "clickable": str(label != selected).lower(),
+                "bounds": f"[{left},1700][{left + 240},1840]"})
+            ET.SubElement(target, "node", {"package": PACKAGE, "text": label,
+                "bounds": f"[{left + 40},1760][{left + 200},1810]"})
+        return root
+
+    def prepare(self, output, *, import_state="disabled", entry_state="whole", selected="字体库",
+                restore=True, transient=False):
+        from PIL import Image
+        png = io.BytesIO()
+        Image.new("RGB", (540, 960), "gray").save(png, format="PNG")
+        run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+        clock = [0.0]
+        state = {"phase": "top", "taps": 0, "post_tap_swipes": 0, "closed": False, "reads": 0}
+        top = self.library("top")
+        entry = self.library("entry", entry_state=entry_state)
+        revealed = self.library("revealed", import_state=import_state, selected=selected)
+        closed = self.library("closed")
+        current = [top]
+
+        def adb(*args, **kwargs):
+            if args[:3] == ("shell", "input", "swipe"):
+                if state["taps"] and not state["closed"]:
+                    state["post_tap_swipes"] += 1
+                    raise AssertionError("A test swipe must never reveal the tools after the entry tap")
+                current[0] = top if state["closed"] and restore else closed if state["closed"] else entry
+                clock[0] += 2
+            elif args[:3] == ("shell", "input", "tap"):
+                state["taps"] += 1
+                if state["taps"] == 1:
+                    self.assertEqual(center(visible_action(entry, "打开导入与管理", PACKAGE)),
+                                     (int(args[3]), int(args[4])))
+                    state["phase"] = "revealed"
+                    current[0] = revealed
+                else:
+                    self.assertEqual(center(visible_action(revealed, "收起管理", PACKAGE)),
+                                     (int(args[3]), int(args[4])))
+                    state["closed"] = True
+                    current[0] = closed
+            return subprocess.CompletedProcess([], 0, png.getvalue() if args[:2] == ("exec-out", "screencap") else b"", b"")
+
+        def hierarchy():
+            if transient and state["phase"] == "revealed" and not state["closed"]:
+                state["reads"] += 1
+                if state["reads"] == 1:
+                    return entry  # Expansion can precede the App's next-frame scroll.
+            return current[0]
+
+        run.adb = Mock(side_effect=adb)
+        run.hierarchy = Mock(side_effect=hierarchy)
+        run.text = Mock(return_value="Physical size: 1440x3120\nOverride size: 1080x1920\n")
+        run.assert_running = Mock()
+        run.select_tab = Mock(return_value=top)
+        run.scroll = Mock(side_effect=AssertionError("Use bounded measured searches, never blind scroll"))
+        run.ensure_dock = Mock(side_effect=AssertionError("A post-tap dock gesture would mask the reveal failure"))
+        return run, clock, state
+
+    def exercise(self, run, clock):
+        with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                patch("android_ui_smoke.time.sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)):
+            run.verify_library_empty_management_reveal()
+
+    def test_disabled_import_passes_with_real_search_taps_captures_and_downward_reset(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run, clock, state = self.prepare(output)
+            self.exercise(run, clock)
+            self.assertEqual((2, 0, True), (state["taps"], state["post_tap_swipes"], state["closed"]))
+            self.assertEqual(1, len(run.checks))
+            self.assertEqual("library-empty-management-reveal", run.checks[0]["check"])
+            self.assertEqual("false", run.checks[0]["import_enabled"])
+            self.assertEqual(0, run.checks[0]["post_tap_test_scrolls"])
+            run.select_tab.assert_called_once_with("字体库", "搜索你的字体")
+            for name in ("before-tap", "after-tap", "restored-top"):
+                prefix = output / f"library-empty-management-{name}"
+                self.assertTrue(prefix.with_suffix(".png").read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
+                self.assertTrue(prefix.with_suffix(".xml").is_file())
+            after = ET.parse(output / "library-empty-management-after-tap.xml").getroot()
+            self.assertTrue(action_disabled(after, "导入字体", PACKAGE))
+            self.assertEqual((220, 350, 1020, 490), bounds(visible_control(after, "导入字体", PACKAGE)))
+            searches = [json.loads((output / f"scroll-search-{number:04d}.json").read_text()) for number in (1, 2)]
+            self.assertEqual([("up", 5, 1), ("down", 8, 1)],
+                             [(item["direction"], item["max_gestures"], item["gestures_used"]) for item in searches])
+            self.assertTrue(all(item["passed"] for item in searches))
+            swipes = [call.args for call in run.adb.call_args_list if call.args[:3] == ("shell", "input", "swipe")]
+            self.assertGreater(int(swipes[0][4]), int(swipes[0][6]))
+            self.assertLess(int(swipes[1][4]), int(swipes[1][6]))
+            restored = ET.parse(output / "library-empty-management-restored-top.xml").getroot()
+            self.assertTrue(page_ready(restored, "字体库", "搜索你的字体", PACKAGE))
+            self.assertTrue(choice_selected(restored, "全部", PACKAGE))
+            self.assertNotIn("收起管理", app_labels(restored, PACKAGE))
+            run.scroll.assert_not_called()
+            run.ensure_dock.assert_not_called()
+
+    def test_enabled_import_and_delayed_app_reveal_pass_without_a_post_tap_swipe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run, clock, state = self.prepare(Path(temporary), import_state="enabled", transient=True)
+            self.exercise(run, clock)
+            self.assertGreaterEqual(state["reads"], 2)
+            self.assertEqual(0, state["post_tap_swipes"])
+            self.assertEqual("true", run.checks[0]["import_enabled"])
+
+    def test_missing_dock_occluded_and_partial_import_fail_and_keep_the_last_xml_and_png(self):
+        for import_state in ("missing", "dock", "partial-control", "partial-label"):
+            with self.subTest(import_state=import_state), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary)
+                run, clock, state = self.prepare(output, import_state=import_state)
+                with self.assertRaisesRegex(RuntimeError, "without a test scroll did not become ready"):
+                    self.exercise(run, clock)
+                self.assertEqual((1, 0, False), (state["taps"], state["post_tap_swipes"], state["closed"]))
+                self.assertEqual([], run.checks)
+                self.assertTrue((output / "library-empty-management-after-tap.png").is_file())
+                actual = ET.parse(output / "library-empty-management-after-tap.xml").getroot()
+                self.assertEqual(ET.tostring(self.library("revealed", import_state=import_state)), ET.tostring(actual))
+                self.assertEqual(1, len(list(output.glob("scroll-search-*.json"))))
+                run.ensure_dock.assert_not_called()
+                run.scroll.assert_not_called()
+
+    def test_selected_page_and_whole_collapse_control_are_required(self):
+        for invalid in ("wrong-page", "missing-collapse", "occluded-collapse"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                run, clock, state = self.prepare(Path(temporary), selected="设置" if invalid == "wrong-page" else "字体库")
+                original = run.hierarchy.side_effect
+                def hierarchy():
+                    root = original()
+                    if state["phase"] == "revealed" and invalid != "wrong-page":
+                        content = scroll_content(root, PACKAGE)[0]
+                        toggle = next((node for node in content if "收起管理" in app_labels(node, PACKAGE)), None)
+                        if toggle is None:
+                            return root
+                        if invalid == "missing-collapse":
+                            content.remove(toggle)
+                        else:
+                            toggle.set("bounds", "[780,1640][1040,1780]")
+                    return root
+                run.hierarchy = Mock(side_effect=hierarchy)
+                with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+                    self.exercise(run, clock)
+                self.assertEqual([], run.checks)
+                self.assertEqual(0, state["post_tap_swipes"])
+
+    def test_missing_or_partial_empty_entry_is_never_tapped(self):
+        for entry_state in ("missing", "dock", "partial-label"):
+            with self.subTest(entry_state=entry_state), tempfile.TemporaryDirectory() as temporary:
+                run, clock, state = self.prepare(Path(temporary), entry_state=entry_state)
+                with self.assertRaisesRegex(RuntimeError, "stalled or reached a boundary"):
+                    self.exercise(run, clock)
+                self.assertEqual(0, state["taps"])
+                self.assertEqual([], run.checks)
+                self.assertEqual([], run.results)
+                evidence = json.loads((Path(temporary) / "scroll-search-0001.json").read_text())
+                self.assertFalse(evidence["passed"])
+                self.assertLessEqual(evidence["gestures_used"], 5)
+
+    def test_restore_failure_does_not_skip_the_downward_search_or_capture_a_restored_top(self):
+        for restore in ("missing-search", "partial-search"):
+            with self.subTest(restore=restore), tempfile.TemporaryDirectory() as temporary:
+                run, clock, state = self.prepare(Path(temporary), restore=restore == "partial-search")
+                if restore == "partial-search":
+                    original = run.hierarchy.side_effect
+                    def hierarchy():
+                        root = original()
+                        if state["closed"] and "搜索你的字体" in app_labels(root, PACKAGE):
+                            field = label_target(root, "搜索你的字体", PACKAGE)
+                            field.set("bounds", "[40,0][1040,410]")
+                            self.assertTrue(visible_text(root, "搜索你的字体", PACKAGE))
+                        return root
+                    run.hierarchy = Mock(side_effect=hierarchy)
+                with self.assertRaisesRegex(RuntimeError, "stalled or reached a boundary"):
+                    self.exercise(run, clock)
+                self.assertTrue(state["closed"])
+                self.assertEqual(1, len(run.checks))
+                self.assertFalse((Path(temporary) / "library-empty-management-restored-top.xml").exists())
+                evidence = json.loads((Path(temporary) / "scroll-search-0002.json").read_text())
+                self.assertEqual("down", evidence["direction"])
+                self.assertFalse(evidence["passed"])
+
+    def test_ordinary_smoke_calls_empty_reveal_before_the_unchanged_preservation_phase(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+            root = UiSmokeHarnessTest().hierarchy()
+            mode = ["no"]
+            order = []
+            def adb(*args, **kwargs):
+                if args[:4] == ("shell", "cmd", "uimode", "night"):
+                    mode[0] = args[4]
+            run.adb = Mock(side_effect=adb)
+            run.text = Mock(side_effect=lambda *args, **kwargs: "36" if args[-1] == "ro.build.version.sdk"
+                            else f"Night mode: {mode[0]}")
+            run.hierarchy = Mock(return_value=root)
+            run.wait_page = Mock(return_value=root)
+            run.wait_ui = Mock(return_value=root)
+            run.launch = Mock()
+            run.capture = Mock()
+            run.logcat = Mock()
+            run.record = Mock()
+            run.select_tab = Mock()
+            run.assert_running = Mock()
+            for method in ("verify_rapid_navigation", "verify_settings_details", "verify_library_empty_management_reveal",
+                           "verify_library_preservation", "verify_disabled_animations"):
+                setattr(run, method, Mock(side_effect=lambda name=method: order.append(name)))
+            with patch("android_ui_smoke.time.sleep"):
+                run.run()
+            self.assertEqual(["verify_rapid_navigation", "verify_settings_details", "verify_library_empty_management_reveal",
+                              "verify_library_preservation", "verify_disabled_animations"], order)
+
+    def test_visual_only_run_never_enters_the_new_functional_reveal(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None, record_launch=True, visual_launch_only=True)
+            run.adb = Mock()
+            run.text = Mock(return_value="36")
+            run.launch = Mock()
+            run.assert_running = Mock()
+            run.verify_library_empty_management_reveal = Mock(side_effect=AssertionError("Functional reveal is a separate run"))
+            run.run()
+            run.verify_library_empty_management_reveal.assert_not_called()
 
 
 class LibraryRestorationHarnessTest(unittest.TestCase):

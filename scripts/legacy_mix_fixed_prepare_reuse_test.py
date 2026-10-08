@@ -74,6 +74,7 @@ class LegacyMixPrepareReuse(unittest.TestCase):
         (self.module / "common/background_task.sh").write_text(
             "luoshu_clear_task_pid() { return 0; }\n")
         self.calls = self.root / "instance-calls.jsonl"
+        self.composite_calls = self.root / "composite-calls.txt"
         self.child_errors = self.root / "instance-errors.jsonl"
         wrapper = self.module / "common/python/bin/luoshu-python"
         wrapper.write_text('#!/bin/sh\nunset PYTHONHOME LD_LIBRARY_PATH\n'
@@ -108,7 +109,11 @@ sys.exit(result.returncode)
 ''')
         wrapper.chmod(0o755)
         (self.module / "common/luoshu_composite.sh").write_text(
-            '#!/bin/sh\nexec "$HOST_PYTHON" "$MODDIR/common/composite_font.py" "$@"\n')
+            '#!/bin/sh\nprintf "run\\n" >> "$REUSE_COMPOSITE_CALLS"\n'
+            '"$HOST_PYTHON" "$MODDIR/common/composite_font.py" "$@" || exit $?\n'
+            '[ -z "${REUSE_COMPOSITE_CHANGE:-}" ] || printf "\\n# changed during generation\\n" >> "$REUSE_COMPOSITE_CHANGE"\n'
+            'if [ "${REUSE_HOLD_COMPOSITE:-0}" = 1 ]; then\n'
+            '    printf "%s\\n" "$$" > "$REUSE_HOLD_READY"\n    exec sleep 30\nfi\n')
         (self.module / "common/font_manager.sh").write_text('''#!/bin/sh
 mkdir -p "$REUSE_CAPTURED"
 cp "$LUOSHU_PUBLIC_DIR"/fonts/* "$REUSE_CAPTURED"/ || exit 1
@@ -120,6 +125,7 @@ printf '%s\\n' '{"status":"ok"}'
                     "LUOSHU_TASK_SCOPE_PIDFILE": str(self.module / ".luoshu-state/tasks/auto_multiweight_worker.pid"),
                     "REUSE_CALLS": str(self.calls), "REUSE_CAPTURED": str(self.captured),
                     "REUSE_ERRORS": str(self.child_errors), "REUSE_HOST_FONTTOOLS_SITE": HOST_FONTTOOLS_SITE,
+                    "REUSE_COMPOSITE_CALLS": str(self.composite_calls),
                     "HOST_PYTHON": sys.executable}
         definitions = self.script.read_text().split('case "${1:-config}" in', 1)[0]
         self.definitions = self.module / "common/definitions.sh"
@@ -148,6 +154,204 @@ printf '%s\\n' '{"status":"ok"}'
     def assert_prepared(self, requests, *, root=None):
         result = self.prepare(requests, root=root)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def prepare_composite_inputs(self):
+        self.assert_prepared('''prepare_source cjk CJK wght=400 fixed 400 "$REUSE_ROOT/in/cjk.ttf" || exit $?
+prepare_source latin Latin wght=400 fixed 400 "$REUSE_ROOT/in/latin.ttf" || exit $?
+prepare_source digit Digit wght=400 fixed 400 "$REUSE_ROOT/in/digit.ttf" || exit $?
+''')
+
+    def composite(self, name="result", *, extra_env=None, prefix=""):
+        return self.prepare(prefix + f'''build_composite_cached "$REUSE_ROOT/in/cjk.ttf" "$REUSE_ROOT/in/latin.ttf" "$REUSE_ROOT/in/digit.ttf" "$REUSE_ROOT/{name}.ttf" "$REUSE_ROOT/{name}.progress.json"
+''', extra_env=extra_env)
+
+    def composite_count(self):
+        return len(self.composite_calls.read_text().splitlines()) if self.composite_calls.exists() else 0
+
+    def composite_cache(self):
+        return self.module / "cache/auto-multiweight-mix/composites-v3"
+
+    def test_persistent_cache_tracks_real_engine_layout_and_runner_identity(self):
+        self.prepare_composite_inputs()
+        result = self.composite()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        original = (self.taskroot / "result.ttf").read_bytes()
+        for index, name in enumerate(("composite_font.py", "composite_layout.py", "luoshu_composite.sh"), 2):
+            with self.subTest(dependency=name):
+                with (self.module / "common" / name).open("a") as stream:
+                    stream.write("\n# identity changed without changing glyphs\n")
+                result = self.composite(name="changed-" + str(index))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.composite_count(), index)
+                self.assertEqual((self.taskroot / f"changed-{index}.ttf").read_bytes(), original)
+
+    def test_persistent_cache_layout_change_uses_new_real_glyphs(self):
+        self.prepare_composite_inputs()
+        result = self.composite()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with TTFont(self.taskroot / "result.ttf") as font:
+            original_bottom = font["glyf"][font.getBestCmap()[ord("A")]].yMin
+        layout = self.module / "common/composite_layout.py"
+        old = "return scale, max(-limit, min(limit, shift))"
+        self.assertIn(old, layout.read_text())
+        layout.write_text(layout.read_text().replace(old, old + " + 37.0"))
+        shutil.rmtree(self.module / "common/__pycache__", ignore_errors=True)
+        result = self.composite(name="new-layout")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.composite_count(), 2)
+        with TTFont(self.taskroot / "new-layout.ttf") as font:
+            self.assertEqual(font["glyf"][font.getBestCmap()[ord("A")]].yMin, original_bottom + 37)
+            self.assertTrue(set(map(ord, "Aa09中文")) <= set(font.getBestCmap()))
+
+    def test_corrupt_persistent_composite_is_rebuilt_with_same_font_bytes(self):
+        self.prepare_composite_inputs()
+        self.assertEqual(self.composite().returncode, 0)
+        original = (self.taskroot / "result.ttf").read_bytes()
+        cached, = self.composite_cache().glob("*.font")
+        cached.write_bytes(b"damaged nonempty composite cache")
+        result = self.composite(name="recovered")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.composite_count(), 2)
+        self.assertEqual((self.taskroot / "recovered.ttf").read_bytes(), original)
+        with TTFont(self.taskroot / "recovered.ttf") as font:
+            self.assertTrue(set(map(ord, "Aa09中文")) <= set(font.getBestCmap()))
+
+    def test_valid_but_changed_persistent_payload_is_rebuilt(self):
+        self.prepare_composite_inputs()
+        self.assertEqual(self.composite().returncode, 0)
+        original = (self.taskroot / "result.ttf").read_bytes()
+        cached, = self.composite_cache().glob("*.font")
+        with TTFont(cached, recalcTimestamp=False) as font:
+            font["head"].fontRevision += 1
+            font.save(cached)
+        result = self.composite(name="recovered")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.composite_count(), 2)
+        self.assertEqual((self.taskroot / "recovered.ttf").read_bytes(), original)
+
+    def test_atomic_receipt_avoids_revalidation_but_missing_or_invalid_proof_does_not(self):
+        self.prepare_composite_inputs()
+        # Count real shell font validation only for the composite stage. Keep its
+        # complete implementation and original font/coverage assertions.
+        validation_calls = self.root / "validation-calls.txt"
+        check = self.module / "common/font_check.sh"
+        check.write_text(check.read_text().replace("font_validate() {", "real_font_validate() {") +
+                         '\nfont_validate() { printf "validate\\n" >> "$REUSE_VALIDATE_CALLS"; real_font_validate "$@"; }\n')
+        env = {"REUSE_VALIDATE_CALLS": str(validation_calls)}
+        self.assertEqual(self.composite(extra_env=env).returncode, 0)
+        original = (self.taskroot / "result.ttf").read_bytes()
+        cached, = self.composite_cache().glob("*.font")
+        receipt = Path(str(cached) + ".receipt")
+        self.assertTrue(receipt.is_file())
+        self.assertEqual(len(validation_calls.read_text().splitlines()), 1)
+        self.assertEqual(self.composite(name="warm", extra_env=env).returncode, 0)
+        self.assertEqual(len(validation_calls.read_text().splitlines()), 1)
+        self.assertEqual(self.composite_count(), 1)
+        self.assertEqual((self.taskroot / "warm.ttf").read_bytes(), original)
+        receipt.unlink()
+        self.assertEqual(self.composite(name="no-proof", extra_env=env).returncode, 0)
+        self.assertEqual(len(validation_calls.read_text().splitlines()), 2)
+        self.assertEqual(self.composite_count(), 1)
+        receipt.write_text("schema=invalid\npayloadDigest=unproven\n")
+        self.assertEqual(self.composite(name="bad-proof", extra_env=env).returncode, 0)
+        self.assertEqual(self.composite_count(), 2)
+        self.assertEqual((self.taskroot / "bad-proof.ttf").read_bytes(), original)
+
+    def test_composite_dependency_changing_during_generation_is_never_published(self):
+        self.prepare_composite_inputs()
+        for name in ("composite_font.py", "composite_layout.py", "luoshu_composite.sh"):
+            with self.subTest(dependency=name):
+                result = self.composite(extra_env={"REUSE_COMPOSITE_CHANGE": str(self.module / "common" / name)})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.taskroot / "result.ttf").exists())
+                self.assertFalse(list(self.composite_cache().glob("*.font")))
+                self.assertFalse(list(self.composite_cache().glob("*.receipt")))
+
+    def test_missing_composite_dependency_cannot_reuse_verified_cache(self):
+        self.prepare_composite_inputs()
+        self.assertEqual(self.composite().returncode, 0)
+        (self.module / "common/composite_layout.py").unlink()
+        result = self.composite(name="missing-dependency")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.taskroot / "missing-dependency.ttf").exists())
+
+    def test_composite_identity_change_during_atomic_publication_is_rejected(self):
+        self.prepare_composite_inputs()
+        real_mv = shutil.which("mv")
+        directory = self.root / "publication-bin"
+        directory.mkdir()
+        move = directory / "mv"
+        move.write_text(f'''#!/bin/sh
+"{real_mv}" "$@" || exit $?
+case "$*" in *composites-v3/*.font*) printf '\\n# replaced during payload publication\\n' >> "$MODDIR/common/composite_font.py" ;; esac
+''')
+        move.chmod(0o755)
+        result = self.composite(extra_env={"PATH": str(directory) + ":" + self.env["PATH"]})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.taskroot / "result.ttf").exists())
+        self.assertFalse(list(self.composite_cache().glob("*.font")))
+        self.assertFalse(list(self.composite_cache().glob("*.receipt")))
+
+    def test_composite_stage_timeout_and_cancel_retire_only_owned_artifacts(self):
+        for action in ("timeout", "cancel"):
+            with self.subTest(action=action):
+                for name in ("task_scope.sh", "task_scope.py"):
+                    shutil.copyfile(ROOT / "common" / name, self.module / "common" / name)
+                task_id = "composite-owned-" + action
+                task = self.module / "config/axes_task.conf"
+                task.write_text(f"task={task_id}\nstate=queued\ncjk=CJK\nlatin=Latin\ndigit=Digit\n"
+                                "cjkAxes=wght=400\nlatinAxes=wght=400\ndigitAxes=wght=400\n"
+                                "cjkMode=auto\nlatinMode=fixed\ndigitMode=fixed\n"
+                                f"root={self.taskroot}\nstarted=1\nfinished=\npercent=1\n")
+                marker = self.root / (task_id + ".ready")
+                cache = self.composite_cache()
+                cache.mkdir(parents=True, exist_ok=True)
+                sentinel_file = cache / "unrelated.keep"
+                sentinel_file.write_bytes(b"unrelated reusable fixture cache")
+                # A task record does not authorize recursive deletion of an
+                # external root; the worker must place all scratch in its scope.
+                external_file = self.taskroot / "external.keep"
+                external_file.write_bytes(b"outside owned scope")
+                sentinel = subprocess.Popen(["sleep", "30"])
+                environment = {**self.env, "LUOSHU_TASK_SCOPE_PYTHON": sys.executable,
+                               "REUSE_HOLD_COMPOSITE": "1", "REUSE_HOLD_READY": str(marker)}
+                pidfile = self.module / ".luoshu-state/tasks/auto_multiweight_worker.pid"
+                process = subprocess.Popen(["sh", str(self.module / "common/task_scope.sh"), "run",
+                                            "--pid-file", str(pidfile), "--task", task_id,
+                                            "--timeout", "5" if action == "timeout" else "30", "--",
+                                            "sh", str(self.script), "worker", task_id], env=environment,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                try:
+                    deadline = time.monotonic() + 4
+                    while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(.02)
+                    self.assertTrue(marker.exists(), "real composite never completed: " + self.child_diagnostics())
+                    temporary, = (pidfile.parent / "tmp").glob("task-" + task_id + "-*")
+                    self.assertTrue(list(temporary.rglob("*.font")))
+                    if action == "cancel":
+                        cancelled = subprocess.run(["sh", str(self.module / "common/task_scope.sh"),
+                                                    "cancel", str(pidfile), task_id], env=environment,
+                                                   capture_output=True, text=True, timeout=8)
+                        self.assertEqual(cancelled.returncode, 0, cancelled.stderr + cancelled.stdout)
+                        self.assertTrue(json.loads(cancelled.stdout)["data"]["cleaned"])
+                    _, stderr = process.communicate(timeout=10)
+                    self.assertEqual(process.returncode, 124 if action == "timeout" else 143, stderr)
+                    proof = json.loads(Path(str(pidfile) + ".cleanup.json").read_text())
+                    self.assertTrue(proof["cleaned"], proof)
+                    self.assertEqual(proof["leftoverPids"], [])
+                    self.assertFalse(temporary.exists())
+                    self.assertFalse(Path("/proc", marker.read_text().strip()).exists())
+                    self.assertIsNone(sentinel.poll())
+                    self.assertEqual(sentinel_file.read_bytes(), b"unrelated reusable fixture cache")
+                    self.assertEqual(external_file.read_bytes(), b"outside owned scope")
+                    self.assertEqual(list(cache.iterdir()), [sentinel_file])
+                    self.assertFalse((self.taskroot / "prepared").exists())
+                finally:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.communicate(timeout=10)
+                    sentinel.terminate()
+                    sentinel.wait(timeout=3)
 
     def test_fixed_slot_reuses_exact_instance_and_bytes(self):
         started = time.monotonic()

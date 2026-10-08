@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise transport identities/deadlines, not an invented accessibility tree."""
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -836,16 +837,21 @@ class NativeLastRequestDiagnosticsTest(unittest.TestCase):
             '    private static void lastDiagnostic(',
             '    private static void lastDiagnosticTime(',
             '    private static void acceptRequestDiagnostics(',
-            '    private static void rootQueryStarted(',
-            '    private static void rootQueryReturned(',
+            '    private void rootQueryStarted(',
+            '    private void rootQueryReturned(',
+            '    private void recordRootQuery(',
+            '    private static String childDiagnosticText(',
             '    private static void snapshotDiagnostics(',
             '    public void onStart()',
         ))
         harness = r'''
 import java.io.File;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Set;
+import java.util.StringJoiner;
 public class NativeLastRequestDiagnosticsHarness {
     static class Bundle {
         final HashMap<String,String> values = new HashMap<>();
@@ -861,10 +867,50 @@ public class NativeLastRequestDiagnosticsHarness {
         static long now;
         static long uptimeMillis() { return now; }
     }
+    static class JSONObject {
+        static boolean failRootRecord;
+        final LinkedHashMap<String,Object> values=new LinkedHashMap<>();
+        JSONObject put(String key,Object value) {
+            if(failRootRecord && key.equals("kind")) throw new AssertionError("diagnostic boundary failed");
+            values.put(key,value); return this;
+        }
+        static String encode(Object value) {
+            if(value==null) return "null";
+            if(value instanceof Number || value instanceof Boolean || value instanceof JSONObject || value instanceof JSONArray) return value.toString();
+            StringBuilder encoded=new StringBuilder("\"");
+            for(char c:value.toString().toCharArray()) {
+                if(c=='"' || c=='\\') encoded.append('\\').append(c);
+                else if(c<32) encoded.append(String.format("\\u%04x",(int)c));
+                else encoded.append(c);
+            }
+            return encoded.append('"').toString();
+        }
+        public String toString() {
+            StringJoiner encoded=new StringJoiner(",","{","}");
+            for(java.util.Map.Entry<String,Object> entry:values.entrySet()) encoded.add(encode(entry.getKey())+":"+encode(entry.getValue()));
+            return encoded.toString();
+        }
+    }
+    static class JSONArray {
+        final java.util.ArrayList<Object> values=new java.util.ArrayList<>();
+        JSONArray put(Object value) { values.add(value); return this; }
+        public String toString() {
+            StringJoiner encoded=new StringJoiner(",","[","]");
+            for(Object value:values) encoded.add(JSONObject.encode(value));
+            return encoded.toString();
+        }
+    }
     static class Activity { static final int RESULT_OK=-1, RESULT_CANCELED=0; }
     static class Context { File getFilesDir() { return new File("unused"); } }
     Bundle arguments = new Bundle();
     private final Bundle lifecycleDiagnostics = new Bundle();
+    private int rootQueryCount, rootQueryNullCount, rootQueryNonnullCount, rootQueryTrueCount,
+            rootQueryFalseCount, rootQueryThrownCount, rootQueryDiagnosticFailures;
+    private long rootQueryMillis, rootQueryMaxMillis, rootQueryStartedUptime, childRootDeadline;
+    private String rootQueryKind;
+    private boolean rootQueryPending;
+    private final ArrayDeque<JSONObject> rootQueryRecords=new ArrayDeque<>();
+    private static final int ROOT_QUERY_RECORD_LIMIT=32;
     Bundle finished;
     int finishCode=123;
     boolean failSession;
@@ -893,6 +939,7 @@ public class NativeLastRequestDiagnosticsHarness {
     }
     static void require(boolean ok,String message) { if(!ok) throw new AssertionError(message); }
     public static void main(String[] args) {
+        NativeLastRequestDiagnosticsHarness h=new NativeLastRequestDiagnosticsHarness();
         Bundle diagnostics=new Bundle();
         diagnostics.putString("helper_ready_published_uptime_ms","100");
         diagnostics.putString("helper_last_request_id","old-request");
@@ -908,13 +955,15 @@ public class NativeLastRequestDiagnosticsHarness {
                 !diagnostics.containsKey("helper_last_snapshot_status"),"stale last-request result or time retained");
         require("100".equals(diagnostics.getString("helper_ready_published_uptime_ms")),"connection evidence removed");
         diagnostics.putString("helper_last_root_query_returned_uptime_ms","300");
-        SystemClock.now=710; rootQueryStarted(diagnostics,"getRootInActiveWindow");
+        SystemClock.now=710; h.rootQueryStarted(diagnostics,"getRootInActiveWindow");
         require(!diagnostics.containsKey("helper_last_root_query_returned_uptime_ms"),"old query return mixed with new query");
         require("started".equals(diagnostics.getString("helper_last_root_query_status")),"query entered status missing");
-        SystemClock.now=713; rootQueryReturned(diagnostics);
+        SystemClock.now=713; h.rootQueryReturned(diagnostics,"nonnull");
         require("710".equals(diagnostics.getString("helper_last_root_query_started_uptime_ms")) &&
                 "713".equals(diagnostics.getString("helper_last_root_query_returned_uptime_ms")),"query times not native uptime");
         require("returned".equals(diagnostics.getString("helper_last_root_query_status")),"query return status missing");
+        require(h.rootQueryCount==1 && h.rootQueryMillis==3 && h.rootQueryNonnullCount==1 &&
+                "nonnull".equals(h.rootQueryRecords.getLast().values.get("outcome")),"instance root records did not execute production returns");
         snapshotDiagnostics(diagnostics,failedSnapshot());
         require("failed".equals(diagnostics.getString("helper_last_snapshot_status")),"failed status lost");
         require(diagnostics.getString("helper_last_snapshot_error").length()==1024,"unbounded error summary");
@@ -924,7 +973,46 @@ public class NativeLastRequestDiagnosticsHarness {
                 !diagnostics.containsKey("helper_last_snapshot_window_counts") &&
                 !diagnostics.containsKey("helper_last_snapshot_filename"),"full or unprefixed snapshot result leaked");
         lastDiagnostic(null,"request_status","ignored"); lastDiagnosticTime(null,"snapshot_started");
-        rootQueryStarted(null,"ignored"); rootQueryReturned(null);
+        h.rootQueryStarted(null,"ignored"); h.rootQueryReturned(null,"null");
+        require(h.rootQueryNullCount==1,"null diagnostics changed root return accounting");
+        NativeLastRequestDiagnosticsHarness bounded=new NativeLastRequestDiagnosticsHarness();
+        bounded.childRootDeadline=1190;
+        for(int index=0;index<40;index++) {
+            SystemClock.now=1000+index*5; bounded.rootQueryStarted(diagnostics,"fixture-root");
+            SystemClock.now+=2; bounded.rootQueryReturned(diagnostics,new String[]{"null","nonnull","true","false"}[index%4]);
+        }
+        require(bounded.rootQueryCount==40 && bounded.rootQueryMillis==80 && bounded.rootQueryMaxMillis==2 &&
+                bounded.rootQueryNullCount==10 && bounded.rootQueryNonnullCount==10 && bounded.rootQueryTrueCount==10 && bounded.rootQueryFalseCount==10,
+                "root aggregate outcomes/times lost");
+        require(bounded.rootQueryRecords.size()==32 && Integer.valueOf(9).equals(bounded.rootQueryRecords.getFirst().values.get("sequence")) &&
+                Integer.valueOf(40).equals(bounded.rootQueryRecords.getLast().values.get("sequence")) &&
+                Boolean.TRUE.equals(bounded.rootQueryRecords.getLast().values.get("finished_at_or_after_root_deadline")),"root tail32 or native deadline flag lost");
+        JSONArray rootRecords=new JSONArray();
+        for(JSONObject record:bounded.rootQueryRecords) rootRecords.put(record);
+        Bundle rootSummary=failedSnapshot();
+        rootSummary.putString("root_query_count",Integer.toString(bounded.rootQueryCount));
+        rootSummary.putString("root_query_records_omitted",Integer.toString(bounded.rootQueryCount-bounded.rootQueryRecords.size()));
+        rootSummary.putString("root_query_records",rootRecords.toString());
+        snapshotDiagnostics(diagnostics,rootSummary);
+        require(rootRecords.toString().length()>1024 && rootRecords.toString().equals(diagnostics.getString("helper_last_snapshot_root_query_records")) &&
+                "40".equals(diagnostics.getString("helper_last_snapshot_root_query_count")) &&
+                "8".equals(diagnostics.getString("helper_last_snapshot_root_query_records_omitted")),"root records/scalars lost in final snapshot diagnostics");
+        System.out.println("ROOT_NATIVE_DIAGNOSTIC_JSON="+rootRecords);
+        acceptRequestDiagnostics(diagnostics,"next-request","hierarchy-0003.xml");
+        require(!diagnostics.containsKey("helper_last_snapshot_root_query_records"),"new request mixed prior root records");
+        SystemClock.now=1200; bounded.rootQueryStarted(diagnostics,"getRootInActiveWindow");
+        SystemClock.now=1207; bounded.recordRootQuery(SystemClock.now,"threw",new IllegalStateException("original root failure"));
+        require(bounded.rootQueryThrownCount==1 && "threw".equals(bounded.rootQueryRecords.getLast().values.get("outcome")) &&
+                "java.lang.IllegalStateException".equals(bounded.rootQueryRecords.getLast().values.get("exception")),"real root exception evidence lost");
+        long recorded=bounded.rootQueryMillis;
+        bounded.recordRootQuery(SystemClock.now,"nonnull",null);
+        require(bounded.rootQueryMillis==recorded,"root return recorded twice");
+        JSONObject.failRootRecord=true;
+        SystemClock.now=1210; bounded.rootQueryStarted(diagnostics,"getWindows");
+        SystemClock.now=1211; bounded.rootQueryReturned(diagnostics,"nonnull");
+        JSONObject.failRootRecord=false;
+        require(bounded.rootQueryDiagnosticFailures==1 && !bounded.rootQueryPending &&
+                "returned".equals(diagnostics.getString("helper_last_root_query_status")),"root diagnostic failure replaced actual return status");
         NativeLastRequestDiagnosticsHarness normal=new NativeLastRequestDiagnosticsHarness();
         normal.arguments.putString("session_nonce","test-nonce"); normal.onStart();
         require(normal.finishCode==-1 && "finished".equals(normal.finished.getString("session")),"last failed snapshot changed normal finish code");
@@ -940,12 +1028,28 @@ public class NativeLastRequestDiagnosticsHarness {
             directory = Path(temporary)
             file = directory / 'NativeLastRequestDiagnosticsHarness.java'
             file.write_text(harness)
+            def capture(name, result):
+                if destination := os.environ.get('LUOSHU_NATIVE_TEST_EVIDENCE_DIR'):
+                    evidence = Path(destination)
+                    evidence.mkdir(parents=True, exist_ok=True)
+                    (evidence / f'native-last-request-{name}-stdout.bin').write_bytes(result.stdout)
+                    (evidence / f'native-last-request-{name}-stderr.bin').write_bytes(result.stderr)
+                    if name == 'javac':
+                        (evidence / file.name).write_bytes(file.read_bytes())
             compiled = subprocess.run([java, '--module', 'jdk.compiler/com.sun.tools.javac.Main',
                                        '-d', str(directory), str(file)], capture_output=True, timeout=30)
+            capture('javac', compiled)
             self.assertEqual(0, compiled.returncode, compiled.stderr.decode())
             exercised = subprocess.run([java, '-cp', str(directory), 'NativeLastRequestDiagnosticsHarness'],
                                        capture_output=True, timeout=10)
+            capture('java', exercised)
             self.assertEqual(0, exercised.returncode, exercised.stderr.decode())
+            for line in exercised.stdout.decode().splitlines():
+                if line.startswith('ROOT_NATIVE_DIAGNOSTIC_JSON='):
+                    records = json.loads(line.partition('=')[2])
+                    self.assertEqual(list(range(9, 41)), [record['sequence'] for record in records])
+                    self.assertEqual(32, len(records))
+                    self.assertLess(len(line.partition('=')[2]), 70000)
             self.assertIn('Passed production Java last-request diagnostics and finish-code regression', exercised.stdout.decode())
 
 

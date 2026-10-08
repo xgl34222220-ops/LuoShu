@@ -264,3 +264,24 @@ App/font/runtime、玻璃/Dock、全局字重移除、nohook 和 frozen22 不变
 b7f 成品内部校验通过：外包 SHA256 3ff629d438fe1d2f44e11a178cca45f6b0920e3379e78dcf404b6df80bf4831f；模块 4c6963e8f58a2e08412a1c0441dfd3feeb10ac93c066a68b4d3360de214d6d97；APK f1b0a937bbe07031e8d4ce6114c95ecb36fc1c1021007206b1e06f565b5f1680。frozen22/defined7/Google9、CRC/hash/安全路径和 v1/v2/v3 内容签名通过，包仍内部留存。原 log 实际96次套件/1701次执行/96OK，namespace 实际跳过两处、readiness三类警告及四项真机待测均保留；没有发布、安装或修改用户设备。
 
 两台 OEM 的具体 glyph/Google 运行时回退、连续实时 A→B→A、重启持续覆盖、整个生成和切换阶段、实际内核 namespace/owned cleanup 仍缺本轮真机证据。ColorOS 整台手机重启超过两分钟、App 冷启/加载及旧 97 秒首次 zygote 前异常分别待查；600/630 秒旧失败仍属于合成/应用生成。现有字体功能、UI/玻璃/Dock、nohook 与 frozen 1.1.1 约束全部保留。原 v32、6eb/b7f 失败及收到的完整/超时/迟到字节继续保存，原录像缺失不以截图替代。
+
+
+## 0b3fe3b 原件恢复与新的小批
+
+原工作目录丢失后，执行连接恢复；在原路径恢复准确远端 `0b3fe3b8630414477d5ca2c31db56a3387869968` / tree `a2b267238eab494eaedbebd09e5bf50ec57031df`，没有声称找回原未提交 diff。没有旧活跃开发任务或 adb/emulator 进程；只沿测试分支工作。原候选 [37728042005](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37728042005) 成功，原 UI [37728041998](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37728041998) 的 build/API28/API36 成功，visual 失败，均已终态。
+
+原启动证据 107 个成员、0 MP4、0 XML、1 PNG，PNG 是 Launcher 的加载状态，不是 App 画面。HOME 原十秒的 host 截止 422.537420，实际成功 response notice 在 425.206178，迟到 2.668758 秒；host 没有读取 response JSON/XML。native 请求到提交 5628 ms，其中 root 等待 3952 ms/20 次，四次 child 查询 142/591/570/349 ms。原 first19 root 查询分布缺失，不能补造，也不能把 native uptime 与 host monotonic 对齐。Popen 仅约 0.95 ms，首字节等待 5.638744 秒不是 Popen 阻塞。即使四次 child 查询降至零，其它固定成本仍约迟到 1.017 秒，不能预告 HOME 已解决。
+
+独立核验原模块的 22 frozen / 7 实际定义 helpers / 9 Google 字节及 APK v2/v3 签名、217 JVM 测试与 2416 份命令 raw stream。原 API36 有四次系统 ANR；API28 lastanr-traces 返回 Unknown command，不能以退出码零声称 trace 完整。原 UI 测试安装 debug App，同 Git SHA 不代表 release candidate 本体的 UI 已测试。
+
+本小批的活跃 v143 持久组合缓存原本只绑定输入字节，忽略 composite_font/layout/runner，非空损坏缓存也可能错误返回成功。新 key 绑定生成内容身份，receipt 绑定 payload 摘要、生成身份和当前真实 validator；无 receipt 要实际验证，不符重建，热命中仍校验完整摘要。生成与发布边界再次核身份，拒绝变化。worker/prepared/progress 与 composite 临时 font/report/error/receipt 放在已有 owned task scope 内，取消/超时沿原监督器清理；不删除没有拥有证明的历史残留或外部 task root，不碰全局进程/GMS。原11加新9项真实字体回归通过，含旧源损坏/身份变化失败复现、实际发布 race、超时/取消和独立 sentinel；frozen22 不变。
+
+固定同一真实九档 production helper driver 三轮交错 before/after，所有冷/热输出共80244字节，摘要一致，11 instances/冷9 generators/热0。主机阶段中位 prepare 2.886946→3.056406秒、cold composite 1.351971→1.669540秒、warm composite 0.085867→0.215149秒。新增安全证明有约0.129秒热成本，这是安全修复而非提速；不代表手机整次切换。旧 prepared 27→11 优化保留，未重复实现。
+
+采集仅做 API33+ 公开 getChild(index,0) 的单变量兼容性试验；API28/32 保留默认 getter，根查询、服务配置、缓存/回收、预算与所有视觉断言不变，不使用隐藏 root overload。新增现有 root/window/refresh 调用的总量、完整尾32和遗漏数，不增加 RPC。固定 JVM tree 下各 API/策略 XML 字节一致，真实 Android 速度仍以新准确 SHA 原件判定；取消预取也可能减少缓存命中，不能将原1.652秒整体归因预取。
+
+字体库未筛选空态的“打开导入与管理”现在下一 Compose 帧展开并定向滚动到固定管理区，重复点击取消旧滚动，顶部按钮保持原地展开，页面退出释放 scope。玻璃、Dock、首帧和原样式条件保留。新增真实 smoke 要求点击后不借助手势找到完整可见“导入字体”，随后收起、恢复顶部再执行原全部滚动/跨页/旋转检查；未 Root 导入禁用是合理状态，不能当作点击失败。
+
+本地检查使用原候选忽略的 FontTools4.63.0 payload、host FreeType2.13.2和私有官方 Temurin17；没有 Android SDK/adb/emulator/mksh，不把本地 JVM/sh 结果当作 SDK编译、mksh 或设备结果。完整 source gate、新准确 SHA candidate/API28/API36 与亮暗冷暖四段原录像必须自然终态，再独立看原画面；没有原录像就继续失败，不交付未验收安装包。两台 OEM 覆盖/Google/连续实时与重启、全程速度、ColorOS 整机启动、App冷启/加载、97秒 prezygote 各项仍分别待真机证据。
+
+本批独立本地全量 source 自然 exit0，报告41套件/718次执行；原 namespace class 按真实环境条件跳过。适用 UI109（原101保留）、session41（原失败夹具已修，原41保留）、native JVM1、逐帧分类器20、launch11、字体20均通过。session原失败日志另存，未用跳过方法修门禁；新Android结果尚待准确提交CI。

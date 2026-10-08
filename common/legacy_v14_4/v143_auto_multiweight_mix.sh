@@ -320,9 +320,11 @@ prepare_source() (
 
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" 2>/dev/null | awk '{print $1}'
+        _hf_result=$(sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_hf_result%% *}"
     elif command -v toybox >/dev/null 2>&1; then
-        toybox sha256sum "$1" 2>/dev/null | awk '{print $1}'
+        _hf_result=$(toybox sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_hf_result%% *}"
     else
         cksum "$1" 2>/dev/null | awk '{print $1 "-" $2}'
     fi
@@ -330,9 +332,9 @@ hash_file() {
 
 hash_text() {
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum | awk '{print $1}'
+        sha256sum | { IFS=' ' read -r _ht_digest _ht_rest && printf '%s\n' "$_ht_digest"; }
     elif command -v toybox >/dev/null 2>&1; then
-        toybox sha256sum | awk '{print $1}'
+        toybox sha256sum | { IFS=' ' read -r _ht_digest _ht_rest && printf '%s\n' "$_ht_digest"; }
     else
         cksum | awk '{print $1 "-" $2}'
     fi
@@ -348,9 +350,51 @@ prune_composite_cache() {
     for _old in $(ls -1t "$COMPOSITE_CACHE"/*.font 2>/dev/null); do
         _count=$((_count + 1))
         [ "$_count" -le 24 ] && continue
-        rm -f "$_old" "${_old}.json" 2>/dev/null || true
+        rm -f "$_old" "${_old}.json" "${_old}.receipt" 2>/dev/null || true
     done
 }
+
+composite_cache_identity() (
+    if command -v sha256sum >/dev/null 2>&1; then
+        _cci_records=$(sha256sum "$MODDIR/common/composite_font.py" "$MODDIR/common/composite_layout.py" "$COMPOSITE_RUNNER" 2>/dev/null) || return 1
+    elif command -v toybox >/dev/null 2>&1; then
+        _cci_records=$(toybox sha256sum "$MODDIR/common/composite_font.py" "$MODDIR/common/composite_layout.py" "$COMPOSITE_RUNNER" 2>/dev/null) || return 1
+    else
+        _cci_engine=$(hash_file "$MODDIR/common/composite_font.py")
+        _cci_layout=$(hash_file "$MODDIR/common/composite_layout.py")
+        _cci_runner=$(hash_file "$COMPOSITE_RUNNER")
+        [ -n "$_cci_engine" ] && [ -n "$_cci_layout" ] && [ -n "$_cci_runner" ] || return 1
+        printf '%s\000%s\000%s' "$_cci_engine" "$_cci_layout" "$_cci_runner" | hash_text
+        return $?
+    fi
+    # Hash the three contents in order; do not make their path names identity.
+    printf '%s\n' "$_cci_records" | while IFS= read -r _cci_line; do
+        printf '%s\000' "${_cci_line%% *}"
+    done | hash_text
+)
+
+composite_receipt_matches() (
+    # Parse only our fixed, complete record with Shell builtins. A receipt is
+    # evidence for exact payload bytes, never permission to trust a filename.
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    {
+        IFS= read -r _crm_schema && IFS= read -r _crm_payload &&
+        IFS= read -r _crm_engine && IFS= read -r _crm_validator &&
+        ! IFS= read -r _crm_extra
+    } <"$1" || return 1
+    [ "$_crm_schema" = schema=auto-composite-receipt-v1 ] &&
+    [ "$_crm_payload" = "payloadDigest=$2" ] &&
+    [ "$_crm_engine" = "engineIdentity=$3" ] &&
+    [ "$_crm_validator" = "validatorIdentity=$4" ]
+)
+
+write_composite_receipt() (
+    _wcr_target="$1"; _wcr_tmp="$2"
+    {
+        printf 'schema=auto-composite-receipt-v1\npayloadDigest=%s\n' "$3"
+        printf 'engineIdentity=%s\nvalidatorIdentity=%s\n' "$4" "$5"
+    } >"$_wcr_tmp" && chmod 0644 "$_wcr_tmp" && mv -f "$_wcr_tmp" "$_wcr_target"
+)
 
 build_composite_cached() (
     # The worker retains family names in _cjk/_latin/_digit for the next weight
@@ -361,19 +405,62 @@ build_composite_cached() (
     _output="$4"
     _progress="$5"
     mkdir -p "$COMPOSITE_CACHE" "${_output%/*}" 2>/dev/null || return 1
-    _key=$(printf '%s|%s|%s|auto-multiweight-v3-metrics' \
-        "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
+    _engine_identity=$(composite_cache_identity) || return 1
+    _validator_identity=$(hash_file "$MODDIR/common/font_check.sh")
+    _cjk_digest=$(hash_file "$_cjk")
+    _latin_digest=$(hash_file "$_latin")
+    _digit_digest=$(hash_file "$_digit")
+    [ -n "$_engine_identity" ] && [ -n "$_validator_identity" ] &&
+        [ -n "$_cjk_digest" ] && [ -n "$_latin_digest" ] && [ -n "$_digit_digest" ] || return 1
+    _key=$(printf '%s\000%s\000%s\000%s\000auto-multiweight-v4-content-identity' \
+        "$_cjk_digest" "$_latin_digest" "$_digit_digest" "$_engine_identity" | hash_text)
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"
-    if [ -s "$_cached" ]; then
-        link_or_copy "$_cached" "$_output" || return 1
-        chmod 0644 "$_output" 2>/dev/null || true
-        return 0
+    _receipt="${_cached}.receipt"
+    # The supervisor retires this entire task-private tree after descendants
+    # exit, including KILL/timeout. Never generate partial files in the shared
+    # persistent cache, where cancellation cannot prove which files it owns.
+    _build_tmp=''
+    trap '[ -z "$_build_tmp" ] || rm -rf "$_build_tmp" 2>/dev/null || true' EXIT
+    _composite_tmp_init() {
+        _temporary_root="${LUOSHU_TASK_SCOPE_TMPDIR:-${_root:-}}"
+        [ -n "$_temporary_root" ] && [ -d "$_temporary_root" ] || return 1
+        _build_tmp=$(mktemp -d "$_temporary_root/composite.XXXXXX") || return 1
+        _tmp="$_build_tmp/composite.font"
+        _tmp_report="$_build_tmp/composite.json"
+        _tmp_error="$_build_tmp/composite.err"
+        _tmp_receipt="$_build_tmp/receipt"
+    }
+    if [ -s "$_cached" ] && [ ! -L "$_cached" ]; then
+        _payload_digest=$(hash_file "$_cached")
+        _cache_valid=false
+        if [ -n "$_payload_digest" ] && composite_receipt_matches "$_receipt" \
+            "$_payload_digest" "$_engine_identity" "$_validator_identity"; then
+            _cache_valid=true
+        elif [ ! -e "$_receipt" ] && [ ! -L "$_receipt" ] && font_validate "$_cached" text; then
+            # Interrupted publication/old entries without evidence must run the
+            # actual validator once. An existing mismatched receipt instead
+            # requires rebuilding, even if altered bytes still look like SFNT.
+            [ -n "$_payload_digest" ] && [ "$(hash_file "$_cached")" = "$_payload_digest" ] || return 1
+            [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+                [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || return 1
+            _composite_tmp_init || return 1
+            write_composite_receipt "$_receipt" "$_tmp_receipt" "$_payload_digest" \
+                "$_engine_identity" "$_validator_identity" || return 1
+            _cache_valid=true
+        fi
+        if [ "$_cache_valid" = true ]; then
+            [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+                [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || return 1
+            link_or_copy "$_cached" "$_output" || return 1
+            chmod 0644 "$_output" 2>/dev/null || true
+            return 0
+        fi
+        rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || return 1
+    elif [ -L "$_cached" ]; then
+        rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || return 1
     fi
-    _tmp="$COMPOSITE_CACHE/.${_key}.$$.tmp.font"
-    _tmp_report="${_tmp}.json"
-    _tmp_error="${_tmp}.err"
-    rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
+    [ -n "$_build_tmp" ] || _composite_tmp_init || return 1
     MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_cjk" --latin "$_latin" --digit "$_digit" \
         --output "$_tmp" --progress "$_progress" >"$_tmp_report" 2>"$_tmp_error"
     _code=$?
@@ -386,8 +473,21 @@ build_composite_cached() (
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
         return 1
     }
+    _payload_digest=$(hash_file "$_tmp")
+    [ -n "$_payload_digest" ] && [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+        [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] &&
+        [ "$(hash_file "$_cjk")" = "$_cjk_digest" ] && [ "$(hash_file "$_latin")" = "$_latin_digest" ] &&
+        [ "$(hash_file "$_digit")" = "$_digit_digest" ] || return 1
     chmod 0644 "$_tmp" "$_tmp_report" 2>/dev/null || true
     mv -f "$_tmp" "$_cached" 2>/dev/null || return 1
+    # The publication itself can race an engine replacement. Do not leave a
+    # proven entry or hand its bytes to the worker if that identity changed.
+    write_composite_receipt "$_receipt" "$_tmp_receipt" "$_payload_digest" \
+        "$_engine_identity" "$_validator_identity" || return 1
+    [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+        [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || {
+        rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || true; return 1;
+    }
     mv -f "$_tmp_report" "${_cached}.json" 2>/dev/null || true
     rm -f "$_tmp_error" 2>/dev/null || true
     link_or_copy "$_cached" "$_output" || return 1
@@ -427,6 +527,17 @@ worker() {
     _latin_mode=$(normalize_mode "$(read_value "$TASK_FILE" latinMode)")
     _digit_mode=$(normalize_mode "$(read_value "$TASK_FILE" digitMode)")
     _root=$(read_value "$TASK_FILE" root)
+    if [ -n "${LUOSHU_TASK_SCOPE_TMPDIR:-}" ]; then
+        [ "${LUOSHU_TASK_SCOPE_TASK:-}" = "$_wanted" ] && [ -d "$LUOSHU_TASK_SCOPE_TMPDIR" ] || exit 126
+        _queued_root="$_root"
+        _root="$LUOSHU_TASK_SCOPE_TMPDIR/auto-multiweight"
+        # Retire only our known empty queue placeholder. The shared task record
+        # must never authorize deleting an arbitrary old/external root.
+        [ "$_queued_root" != "$CACHE_ROOT/$_wanted" ] || rmdir "$_queued_root" 2>/dev/null || true
+        write_task "$_wanted" running '正在准备自动多字重任务' "$_cjk" "$_latin" "$_digit" \
+            "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode" \
+            "$_root" '' "$(read_value "$TASK_FILE" started)" '' 1 || exit 1
+    fi
     _family=LuoShuAutoMix
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
         update_task "$_wanted" failed '无法创建自动多字重缓存' 100 "$(date +%s)"
