@@ -7,6 +7,8 @@ import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +63,7 @@ import org.json.JSONObject
 private const val FONT_WATCH_SCHEMA = 1
 private const val FONT_WATCH_MAX_DOCUMENTS = 2_048
 private const val FONT_WATCH_MAX_DEPTH = 6
+private const val FONT_WATCH_IMPORT_BATCH_SIZE = 32
 private val FONT_WATCH_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
 
 @Immutable
@@ -171,6 +174,18 @@ internal fun diffFontDirectorySnapshots(
     )
 }
 
+internal fun fontDirectoryImportBatchCount(documents: List<WatchedFontDocument>): Int =
+    (documents.size + FONT_WATCH_IMPORT_BATCH_SIZE - 1) / FONT_WATCH_IMPORT_BATCH_SIZE
+
+internal fun fontDirectoryImportBatch(
+    documents: List<WatchedFontDocument>,
+    batchIndex: Int,
+): List<WatchedFontDocument> {
+    val lastBatchIndex = (fontDirectoryImportBatchCount(documents) - 1).coerceAtLeast(0)
+    return documents.drop(batchIndex.coerceIn(0, lastBatchIndex) * FONT_WATCH_IMPORT_BATCH_SIZE)
+        .take(FONT_WATCH_IMPORT_BATCH_SIZE)
+}
+
 internal fun hasPersistedFontDirectoryPermission(context: Context, config: FontDirectoryWatchConfig): Boolean {
     if (!config.configured) return false
     return context.contentResolver.persistedUriPermissions.any { permission ->
@@ -192,12 +207,14 @@ internal fun FontDirectoryMonitorTool(
     var scan by remember { mutableStateOf<FontDirectoryScan?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var importRequestMessage by remember { mutableStateOf("") }
     var showDialog by remember { mutableStateOf(false) }
 
     suspend fun scanNow(target: FontDirectoryWatchConfig) {
         if (!target.configured || scanning) return
         scanning = true
         errorMessage = ""
+        importRequestMessage = ""
         val result = runCatching {
             withContext(Dispatchers.IO) {
                 val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
@@ -248,6 +265,7 @@ internal fun FontDirectoryMonitorTool(
             store.save(next)
             config = next
             scan = null
+            importRequestMessage = ""
             showDialog = true
         }
     }
@@ -271,23 +289,30 @@ internal fun FontDirectoryMonitorTool(
             scan = scan,
             scanning = scanning,
             errorMessage = errorMessage,
+            importRequestMessage = importRequestMessage,
+            importEnabled = enabled,
             importViewModel = importViewModel,
             onChooseDirectory = { treeLauncher.launch(Uri.parse(config.treeUri).takeIf { config.configured }) },
             onScan = { requestScan() },
             onImport = { documents ->
-                importViewModel.startImport(documents.take(32).map { Uri.parse(it.uri) })
-                val current = scan?.documents.orEmpty().associateBy { it.key }
-                val next = config.copy(snapshot = current)
-                store.save(next)
-                config = next
-                scan = scan?.copy(diff = FontDirectoryDiff())
+                val importState = importViewModel.state
+                if (enabled && !scanning && !importState.busy && !importState.paused) {
+                    val selected = documents.take(FONT_WATCH_IMPORT_BATCH_SIZE)
+                    if (selected.isNotEmpty()) {
+                        importViewModel.startImport(selected.map { Uri.parse(it.uri) })
+                        importRequestMessage = "已请求导入 ${selected.size} 项，结果请在任务中心查看。目录变更仍保留，确认处理完后可选择“仅记录基线”。"
+                    }
+                }
             },
             onUseBaseline = {
-                val current = scan?.documents.orEmpty().associateBy { it.key }
-                val next = config.copy(snapshot = current)
-                store.save(next)
-                config = next
-                scan = scan?.copy(diff = FontDirectoryDiff())
+                if (!scanning && scan != null) {
+                    val current = scan?.documents.orEmpty().associateBy { it.key }
+                    val next = config.copy(snapshot = current)
+                    store.save(next)
+                    config = next
+                    scan = scan?.copy(diff = FontDirectoryDiff())
+                    importRequestMessage = ""
+                }
             },
             onDisconnect = {
                 runCatching {
@@ -300,6 +325,7 @@ internal fun FontDirectoryMonitorTool(
                 config = FontDirectoryWatchConfig()
                 scan = null
                 errorMessage = ""
+                importRequestMessage = ""
             },
             onDismiss = { showDialog = false },
         )
@@ -364,6 +390,8 @@ private fun FontDirectoryMonitorDialog(
     scan: FontDirectoryScan?,
     scanning: Boolean,
     errorMessage: String,
+    importRequestMessage: String,
+    importEnabled: Boolean,
     importViewModel: NativeImportViewModel,
     onChooseDirectory: () -> Unit,
     onScan: () -> Unit,
@@ -373,6 +401,11 @@ private fun FontDirectoryMonitorDialog(
     onDismiss: () -> Unit,
 ) {
     val diff = scan?.diff ?: FontDirectoryDiff()
+    val documents = diff.actionable
+    var batchIndex by remember(documents) { mutableStateOf(0) }
+    val batchCount = fontDirectoryImportBatchCount(documents)
+    val importBatch = fontDirectoryImportBatch(documents, batchIndex)
+    val canImport = importEnabled && !scanning && !importViewModel.state.busy && !importViewModel.state.paused
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(34.dp)),
@@ -381,7 +414,7 @@ private fun FontDirectoryMonitorDialog(
             shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
             border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
@@ -471,21 +504,46 @@ private fun FontDirectoryMonitorDialog(
 
                 if (diff.hasChanges) {
                     Text(
-                        "新增与变更会进入现有安全导入队列；目录删除只作提示，洛书不会自动删除字体库文件。",
+                        "新增与变更可分批请求导入，结果请查看任务中心。目录变更仅在选择“仅记录基线”后清除；目录删除只作提示。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp,
                         lineHeight = 14.sp,
                     )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onUseBaseline, modifier = Modifier.weight(1f)) { Text("仅记录基线") }
-                        OutlinedButton(
-                            onClick = { onImport(diff.actionable) },
-                            enabled = diff.actionable.isNotEmpty() && !importViewModel.state.busy && !importViewModel.state.paused,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(if (diff.actionable.size > 32) "导入前 32 项" else "导入 ${diff.actionable.size} 项")
+                    if (batchCount > 1) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { batchIndex = (batchIndex - 1).coerceAtLeast(0) }, enabled = canImport && batchIndex > 0) {
+                                Text("上一批")
+                            }
+                            Text(
+                                "第 ${batchIndex + 1}/$batchCount 批",
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.sp,
+                            )
+                            TextButton(onClick = { batchIndex = (batchIndex + 1).coerceAtMost(batchCount - 1) }, enabled = canImport && batchIndex + 1 < batchCount) {
+                                Text("下一批")
+                            }
                         }
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onUseBaseline, enabled = !scanning, modifier = Modifier.weight(1f)) { Text("仅记录基线") }
+                        OutlinedButton(
+                            onClick = { onImport(importBatch) },
+                            enabled = importBatch.isNotEmpty() && canImport,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(when {
+                                importViewModel.state.busy -> "正在导入"
+                                importViewModel.state.paused -> "导入已暂停"
+                                batchCount > 1 -> "导入本批 ${importBatch.size} 项"
+                                else -> "导入 ${importBatch.size} 项"
+                            })
+                        }
+                    }
+                }
+
+                if (importRequestMessage.isNotBlank()) {
+                    Text(importRequestMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 14.sp)
                 }
 
                 if (config.configured) {

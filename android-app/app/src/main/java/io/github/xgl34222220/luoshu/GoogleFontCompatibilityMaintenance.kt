@@ -71,8 +71,10 @@ internal class GoogleFontCompatibilityMaintenance(
 
     fun update(snapshot: ModuleSnapshot, resumed: Boolean) {
         if (closed) return
-        val trusted = !snapshot.loading && !snapshot.statusCached &&
-            snapshot.rootGranted && snapshot.installed
+        val trusted = googleFontMaintenanceEligible(
+            snapshot.loading, snapshot.statusCached, snapshot.rootGranted,
+            snapshot.installed, snapshot.enabled,
+        )
         trustedSnapshot = trusted
         if (!trusted) request?.cancel()
         if (gate.update(trusted, resumed)) startRequest()

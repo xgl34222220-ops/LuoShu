@@ -418,7 +418,7 @@ _mix_build_composite_cached() {
             _cache_valid=true
         elif [ ! -e "$_receipt" ] && [ ! -L "$_receipt" ] && {
             luoshu_mix_phase_end 0 miss
-            luoshu_mix_phase_run composite validate "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit font_validate "$_cached" text
+            luoshu_mix_phase_run composite validate "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit composite_validate_cached_output "$_cached"
         }; then
             # Interrupted publication/old entries without evidence must run the
             # actual validator once. An existing mismatched receipt instead

@@ -151,6 +151,141 @@ class IntegrationTest(unittest.TestCase):
         self.assertLess(uninstall.index('restore-owned --json'), uninstall.index('. "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"'))
 
 
+class LateModuleGuardTest(unittest.TestCase):
+    setUp = IntegrationTest.setUp
+
+    def clear_flags(self):
+        for name in ('disable', 'remove'):
+            flag = self.module / name
+            if flag.is_symlink() or flag.is_file():
+                flag.unlink()
+            elif flag.is_dir():
+                flag.rmdir()
+
+    def place_flag(self, marker, shape):
+        flag = self.module / marker
+        if shape == 'file':
+            flag.touch()
+        elif shape == 'directory':
+            flag.mkdir()
+        else:
+            flag.symlink_to(self.module / 'missing-marker-target')
+
+    def backend_with_late_flag(self, marker, shape, original=0):
+        self.clear_flags()
+        self.journal.clear()
+        test = self
+
+        class LateAndroid(RecoveryAndroid):
+            trigger = None
+            reads_after_armed = 0
+
+            def snapshot(self, user):
+                current = super().snapshot(user)
+                if self.trigger is not None:
+                    self.reads_after_armed += 1
+                    if self.reads_after_armed == self.trigger:
+                        test.place_flag(marker, shape)
+                return current
+
+        self.backend = LateAndroid()
+        self.backend.states[0] = original
+
+    def cli(self, action):
+        output = io.StringIO()
+        with patch.object(m, 'os', SimpleNamespace(geteuid=lambda: 0)), \
+                patch.object(m, 'Android', return_value=self.backend), \
+                patch.object(m, 'STORE', self.store), \
+                patch.object(m, 'LEGACY_STORE', self.root / 'legacy'), \
+                patch.object(m, 'MODULE', self.module), \
+                patch('sys.argv', ['google_font_fallback.py', action, '--user', '0', '--json']), \
+                contextlib.redirect_stdout(output):
+            code = m.main()
+        return code, json.loads(output.getvalue())
+
+    def test_module_ready_rejects_all_manager_marker_shapes_and_invalid_identity(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                with self.subTest(marker=marker, shape=shape):
+                    self.clear_flags()
+                    self.place_flag(marker, shape)
+                    self.assertFalse(m.module_ready(self.module))
+        self.clear_flags()
+        (self.module / 'module.prop').write_text('id=OtherModule\n')
+        self.assertFalse(m.module_ready(self.module))
+
+    def test_enable_rechecks_late_marker_before_actual_disable(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for original in (0, 1):
+                    with self.subTest(marker=marker, shape=shape, original=original):
+                        self.backend_with_late_flag(marker, shape, original)
+                        self.backend.trigger = 2
+                        code, result = self.cli('enable')
+                        self.assertEqual(code, 1, result)
+                        self.assertEqual(result['status'], 'error')
+                        self.assertEqual(self.backend.calls, [])
+                        self.assertEqual(self.backend.states[0], original)
+                        # The original core verifies the unchanged original state
+                        # before clearing this new write-ahead record.
+                        self.assertIsNone(self.journal.read())
+
+    def test_owned_upgrade_reset_rechecks_late_marker_and_retains_original_undo(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                with self.subTest(marker=marker, shape=shape):
+                    self.backend_with_late_flag(marker, shape)
+                    m.enable(self.backend, self.journal)
+                    original = self.journal.path.read_bytes()
+                    self.backend.calls.clear()
+                    self.backend.version += 1
+                    self.backend.states[0] = 0
+                    self.backend.trigger = 2
+                    code, result = self.cli('reconcile-owned')
+                    self.assertEqual(code, 1, result)
+                    self.assertEqual(result['status'], 'error')
+                    self.assertEqual(self.backend.calls, [])
+                    self.assertEqual(self.backend.states[0], 0)
+                    self.assertEqual(self.journal.path.read_bytes(), original)
+
+    def test_late_disable_after_explicit_restore_never_reasserts_disable_or_claims_success(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for original in (0, 1):
+                    with self.subTest(marker=marker, shape=shape, original=original):
+                        self.backend_with_late_flag(marker, shape, original)
+                        m.enable(self.backend, self.journal)
+                        saved = self.journal.path.read_bytes()
+                        self.backend.calls.clear()
+                        self.backend.trigger = 3
+                        code, result = self.cli('reapply-owned')
+                        self.assertEqual(code, 1, result)
+                        self.assertIn('回滚待确认', result['message'])
+                        self.assertEqual(self.backend.calls, [(0, original)])
+                        self.assertEqual(self.backend.states[0], original)
+                        self.assertEqual(self.journal.path.read_bytes(), saved)
+                        code, result = self.cli('restore')
+                        self.assertEqual(code, 0, result)
+                        self.assertEqual(self.backend.calls, [(0, original)])
+                        self.assertIsNone(self.journal.read())
+
+    def test_disabled_or_removing_restore_keeps_original_state_writes_available(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for original in (0, 1):
+                    for action in ('restore', 'restore-owned'):
+                        with self.subTest(marker=marker, shape=shape, original=original, action=action):
+                            self.backend_with_late_flag(marker, shape, original)
+                            m.enable(self.backend, self.journal)
+                            self.backend.calls.clear()
+                            self.place_flag(marker, shape)
+                            code, result = self.cli(action)
+                            self.assertEqual(code, 0, result)
+                            self.assertEqual(self.backend.calls, [(0, original)])
+                            self.assertEqual(self.backend.states[0], original)
+                            self.assertIsNone(self.journal.read())
+
+
 class OwnedRecoveryTest(unittest.TestCase):
     setUp = IntegrationTest.setUp
     status = IntegrationTest.status

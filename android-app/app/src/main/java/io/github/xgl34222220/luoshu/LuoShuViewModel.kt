@@ -28,6 +28,7 @@ internal data class ModuleSnapshot(
     val statusCached: Boolean = false,
     val rootGranted: Boolean = false,
     val installed: Boolean = false,
+    val enabled: Boolean = false,
     val version: String = "检测中…",
     val versionCode: Int = 0,
     val activeFont: String = "default",
@@ -72,16 +73,16 @@ internal data class ModuleSnapshot(
 
     val effectFailureMessage: String
         get() = when {
-            mountFailure.isNotBlank() -> "自挂载失败（${mountFailure}），已安全回滚到系统字体"
+            mountFailure.isNotBlank() -> "自挂载失败（${mountFailure}），系统字体回退状态仍需核实"
             else -> when (verificationReason) {
-                "self-mount-not-visible" -> "开机挂载未完整生效，系统已安全使用默认字体"
-                "self-mount-failed" -> "本次启动的原子挂载事务失败，已完整回滚到系统字体"
+                "self-mount-not-visible" -> "开机挂载未完整生效，默认字体与挂载回退状态仍需核实"
+                "self-mount-failed" -> "本次启动的挂载事务失败，系统字体回退状态仍需核实"
                 "self-mount-invalid-backend" -> "检测到不受支持的挂载后端，洛书没有提交字体负载"
-                "self-mount-manifest-missing" -> "本次启动的字体与配置挂载清单缺失，已回滚到系统字体"
-                "aligned-manifest-missing" -> "字体负载清单缺失，系统已安全使用默认字体"
-                "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，已安全回到系统字体"
-                "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，已完整回滚到系统字体"
-                else -> "开机字体验证失败，系统已安全使用默认字体"
+                "self-mount-manifest-missing" -> "本次启动的字体与配置挂载清单缺失，系统字体状态仍需核实"
+                "aligned-manifest-missing" -> "字体负载清单缺失，系统字体状态仍需核实"
+                "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，系统字体状态仍需核实"
+                "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，系统字体回退状态仍需核实"
+                else -> "开机字体验证失败，默认字体与挂载回退状态仍需核实"
             }
         }
 }
@@ -1134,6 +1135,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 loading = false,
                 rootGranted = data.optBoolean("root", true),
                 installed = data.optBoolean("installed", false),
+                enabled = data.optBoolean("enabled", false),
                 version = data.optString("version", "未知版本"),
                 versionCode = data.optInt("versionCode", 0),
                 activeFont = data.optString("active", "default"),

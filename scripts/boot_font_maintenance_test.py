@@ -381,6 +381,84 @@ exec "$FIXTURE_REAL_MV" "$@"
         self.assertEqual(self.scan_records()[0]['output'], str(self.inventory))
         self.cleanup_proofs()
 
+    def public_storage_fixture(self):
+        for name in ('util_functions.sh', 'util_functions_core.sh'):
+            shutil.copyfile(ROOT / 'common' / name, self.common / name)
+        for name in ('post-fs-data.sh', '.luoshu-runtime/core/post-fs-data.sh',
+                     '.luoshu-runtime/compat/v227/post-fs-data.sh'):
+            target = self.module / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, target)
+        (self.common / 'private_payload.sh').write_text('''
+luoshu_private_mount_module_view() { :; }
+luoshu_private_unmount_module_view() { printf 'hidden\\n' >> "$FIXTURE_BOOT_STAGES"; }
+''')
+        (self.common / 'rom_adapters.sh').write_text('''
+check_android_version() { :; }
+check_magisk_version() { :; }
+check_coloros() { :; }
+check_hyperos() { :; }
+''')
+        (self.common / 'mount_compat.sh').write_text('''
+font_config_boot_guard() { printf 'guard:%s\\n' "$1" >> "$FIXTURE_BOOT_STAGES"; }
+luoshu_detect_root_manager() { printf '%s\\n' "$FIXTURE_MANAGER"; }
+luoshu_private_self_mount_ensure() { printf 'mounted\\n' >> "$FIXTURE_BOOT_STAGES"; }
+set_perm_recursive() { :; }
+''')
+        shutil.copyfile(ROOT / 'common/mount_self_backend.sh', self.common / 'mount_self_backend.sh')
+        (self.module / 'config/active_font.conf').write_text('default\n')
+        legacy = self.base / 'legacy-public-fonts'
+        legacy.mkdir()
+        (legacy / 'Large-Regular.ttf').write_bytes(b'legacy-font' * 512)
+        (legacy / 'Upper.TTC').write_bytes(b'legacy-uppercase')
+        public = self.base / 'public'
+        calls = self.base / 'public-copy-calls'
+        stages = self.base / 'boot-stages'
+        cp = self.bin / 'cp'
+        cp.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE_COPY_CALLS"\nexec "$FIXTURE_REAL_CP" "$@"\n')
+        cp.chmod(0o755)
+        env = {**self.env, 'LUOSHU_PUBLIC_DIR': str(public), 'LEGACY_FONTS_DIR': str(legacy),
+               'FIXTURE_COPY_CALLS': str(calls), 'FIXTURE_REAL_CP': shutil.which('cp'),
+               'FIXTURE_BOOT_STAGES': str(stages)}
+        return public, legacy, calls, stages, env
+
+    def test_normal_frozen_post_fs_defers_all_public_storage_work(self):
+        public, legacy, calls, stages, env = self.public_storage_fixture()
+        original = {path.name: path.read_bytes() for path in legacy.iterdir()}
+        for manager, expected in (('Magisk', 'mounted'), ('APatch', 'hidden')):
+            with self.subTest(manager=manager):
+                stages.unlink(missing_ok=True)
+                result = subprocess.run(['sh', str(self.module / 'post-fs-data.sh')],
+                                        env={**env, 'FIXTURE_MANAGER': manager},
+                                        capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(stages.read_text().splitlines(), ['guard:default', expected])
+                self.assertFalse(public.exists(), 'early hook initialized shared storage')
+                self.assertFalse(calls.exists(), 'early hook copied legacy public fonts')
+                self.assertEqual({path.name: path.read_bytes() for path in legacy.iterdir()}, original)
+
+    def test_public_storage_remains_available_to_later_initializers(self):
+        public, legacy, calls, _stages, env = self.public_storage_fixture()
+        body = '. "$1"; ensure_public_storage'
+        early = subprocess.run(['sh', '-c', body, 'post-mount.sh', str(self.common / 'util_functions.sh')],
+                               env=env, capture_output=True, text=True, timeout=3)
+        self.assertEqual(early.returncode, 0, early.stdout + early.stderr)
+        self.assertFalse(public.exists(), 'post-mount initialized shared storage')
+        self.assertFalse(calls.exists())
+        for entry in ('font_manager_v4.sh', 'customize.sh', 'boot-completed.sh', 'service.sh'):
+            with self.subTest(entry=entry):
+                shutil.rmtree(public, ignore_errors=True)
+                (public / 'fonts').mkdir(parents=True)
+                existing = public / 'fonts/Large-Regular.ttf'
+                existing.write_bytes(b'existing-user-font')
+                result = subprocess.run(['sh', '-c', body, entry, str(self.common / 'util_functions.sh')],
+                                        env=env, capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(existing.read_bytes(), b'existing-user-font')
+                self.assertEqual((public / 'fonts/Upper.TTC').read_bytes(), (legacy / 'Upper.TTC').read_bytes())
+                self.assertTrue((public / 'import').is_dir())
+                self.assertTrue((public / 'reports').is_dir())
+
     def release_probe(self, *, service=False, state='missing'):
         (self.common / 'device_font_template.sh').write_text('# fixture\n')
         target = self.base / 'dynamic.xml'

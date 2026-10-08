@@ -5,6 +5,28 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from google_font_fallback_core import *
+from google_font_fallback_core import module_ready as _core_module_ready
+
+
+def module_ready(module: Path) -> bool:
+    # A broken manager marker is still a disable/remove request.
+    return _core_module_ready(module) and not any(
+        (module / flag).is_symlink() for flag in ('disable', 'remove'))
+
+
+class _ModuleWriteGuard:
+    """Recheck compatibility disables at the actual Android write boundary."""
+    def __init__(self, backend: Android, module: Path):
+        self.backend, self.module = backend, module
+
+    def snapshot(self, user: int) -> dict:
+        return self.backend.snapshot(user)
+
+    def change(self, user: int, state_value: int) -> None:
+        # Original-state restoration remains available even after a late disable.
+        if state_value == 2 and not module_ready(self.module):
+            raise FallbackError('模块已禁用、待移除或未就绪；未重新停用 Google 字体组件。')
+        self.backend.change(user, state_value)
 
 def _verified_version(saved: dict) -> int | None:
     value = saved.get('lastVerifiedVersionCode', saved.get('versionCode'))
@@ -131,7 +153,7 @@ def reconcile_owned(backend: Android, journal: Journal, module: Path) -> dict:
     reason = _owned_reset_reason(saved, current)
     if reason is None:
         return {**unchanged, 'message': '没有确认 GMS 升级后的默认状态回退；请检测后明确选择重新应用。'}
-    result = _reapply_transaction(backend, journal, saved, current, restart=False)
+    result = _reapply_transaction(_ModuleWriteGuard(backend, module), journal, saved, current, restart=False)
     result['recoveredAfterUpgrade'] = True
     result['recoveryReason'] = reason
     return result
@@ -145,7 +167,7 @@ def reapply_owned(backend: Android, journal: Journal, module: Path) -> dict:
     current = backend.snapshot(journal.user)
     if not _can_reapply(saved, current, module):
         raise FallbackError('模块、组件或安装身份无法核验；保留记录，未重新应用。')
-    return _reapply_transaction(backend, journal, saved, current, restart=True)
+    return _reapply_transaction(_ModuleWriteGuard(backend, module), journal, saved, current, restart=True)
 
 
 def describe(backend: Android, journal: Journal, module: Path) -> dict:
@@ -240,7 +262,7 @@ def main() -> int:
             elif args.action == 'reapply-owned':
                 result = reapply_owned(backend, journal, MODULE)
             else:
-                result = enable(backend, journal) if args.action == 'enable' else restore(backend, journal)
+                result = enable(_ModuleWriteGuard(backend, MODULE), journal) if args.action == 'enable' else restore(backend, journal)
             if args.json and args.action != 'status':
                 try:
                     result['current'] = describe(backend, journal, MODULE)

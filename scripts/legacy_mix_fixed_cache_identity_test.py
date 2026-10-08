@@ -19,7 +19,8 @@ import time
 import unittest
 
 import fontTools
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont, TTCollection
+from fontTools.pens.ttGlyphPen import TTGlyphPen
 
 from legacy_mix_fixed_prepare_reuse_test import variable_font
 
@@ -61,10 +62,15 @@ class FixedCompositeCacheIdentity(unittest.TestCase):
         (common / 'python/bin/luoshu-python').chmod(0o755)
         self.calls = self.root / 'generator-calls'
         self.validations = self.root / 'validator-calls'
+        self.ink_checks = self.root / 'ink-check-calls'
         self.ready = self.root / 'hold-ready'
         self.runner = common / 'luoshu_composite.sh'
         self.runner.write_text('''#!/bin/sh
 if [ "${1:-}" = --self-test ]; then exec "$MODDIR/common/python/bin/luoshu-python" -c 'import fontTools; print("ok")'; fi
+if [ "${1:-}" = --validate-output ]; then
+    printf 'validate-ink\\n' >> "$FIXED_INK_CHECKS"
+    exec "$MODDIR/common/python/bin/luoshu-python" "$MODDIR/common/composite_font.py" "$@"
+fi
 printf 'run\\n' >> "$FIXED_GENERATOR_CALLS"
 "$MODDIR/common/python/bin/luoshu-python" "$MODDIR/common/composite_font.py" "$@" || exit $?
 if [ -n "${FIXED_MUTATE_AFTER_GEN:-}" ]; then printf '\\n# changed after real generation\\n' >> "$FIXED_MUTATE_AFTER_GEN"; fi
@@ -100,6 +106,7 @@ if [ "${FIXED_HOLD:-0}" = 1 ]; then printf '%s\\n' "$$" > "$FIXED_HOLD_READY"; e
                     'LUOSHU_TASK_SCOPE_PYTHON': sys.executable, 'LUOSHU_RUNTIME_PATHS_PYTHON': sys.executable,
                     'FIXED_HOST_PYTHON': sys.executable, 'FIXED_HOST_SITE': HOST_SITE,
                     'FIXED_GENERATOR_CALLS': str(self.calls), 'FIXED_VALIDATOR_CALLS': str(self.validations),
+                    'FIXED_INK_CHECKS': str(self.ink_checks),
                     'FIXED_HOLD_READY': str(self.ready), 'PYTHONDONTWRITEBYTECODE': '1',
                     'LUOSHU_MIX_TASK_TIMEOUT': '15', 'LUOSHU_MIX_MONITOR_TIMEOUT': '20'}
         self.cache = self.module / '.luoshu-state/cache/full-composite-v7'
@@ -238,11 +245,71 @@ printf 'output=%s\\nreport=%s\\ncacheHit=%s\\nsha256=%s\\n' "$COMPOSITE_RESULT" 
         first, font = self.good(sources=sources)
         self.assertEqual(self.count(self.calls), 0)
         self.assertEqual(self.count(self.validations), 1)
+        self.assertEqual(self.count(self.ink_checks), 1)
         self.assertEqual(font.read_bytes(), self.sources[0].read_bytes())
         warm, font = self.good(sources=sources)
         self.assertEqual(warm.data['cacheHit'], 'true')
         self.assertEqual(self.count(self.validations), 1)
+        self.assertEqual(self.count(self.ink_checks), 1)
         self.assertEqual(json.loads(Path(first.data['report']).read_text())['fastPath'], 'same-source')
+
+    def test_blank_same_source_never_publishes_a_receipt(self):
+        with TTFont(self.sources[0], recalcTimestamp=False) as font:
+            font['glyf'][font.getBestCmap()[ord('B')]] = TTGlyphPen(None).glyph()
+            font.save(self.sources[0])
+        result = self.build(sources=[self.sources[0]] * 3)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.count(self.calls), 0)
+        self.assertEqual(self.count(self.ink_checks), 1)
+        self.assertFalse(list(self.cache.glob('*.otf')))
+        self.assertFalse(list(self.cache.glob('*.receipt')))
+        self.assertFalse(list(self.scope_tmp.iterdir()))
+        self.assertEqual(self.sentinel_file.read_text(), 'preserved')
+
+    def test_changed_contract_cannot_reuse_a_warm_receipt_for_blank_glyphs(self):
+        layout = self.module / 'common/composite_layout.py'
+        checked = layout.read_text()
+        # Model the previous exact three-probe acceptance in the fixture only.
+        old = '''
+def validate_required_ink(font, latin, digits, cjk_probes):
+    cmap = font.getBestCmap(); glyphs = font.getGlyphSet(); bounds = {}
+    for char in '中A1':
+        pen = BoundsPen(glyphs); glyphs[cmap[ord(char)]].draw(pen)
+        if pen.bounds is None: raise ValueError('previous three-probe failed')
+        bounds[char] = list(pen.bounds)
+    return {"bounds": bounds}
+'''
+        layout.write_text(checked + old)
+        with TTFont(self.sources[1], recalcTimestamp=False) as font:
+            font['glyf'][font.getBestCmap()[ord('B')]] = TTGlyphPen(None).glyph()
+            font.save(self.sources[1])
+        first, cached = self.good()
+        source_hashes = [digest(path) for path in self.sources]
+        warm, _ = self.good()
+        self.assertEqual(warm.data['cacheHit'], 'true')
+        self.assertEqual(self.count(self.calls), 1)
+        old_bytes = cached.read_bytes()
+        layout.write_text(checked)
+        result = self.build()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.count(self.calls), 2)
+        self.assertEqual([digest(path) for path in self.sources], source_hashes)
+        self.assertEqual(cached.read_bytes(), old_bytes)
+        self.assertNotIn('output=', result.stdout)
+        self.assertFalse(list(self.scope_tmp.iterdir()))
+
+    def test_same_source_collection_uses_role_aware_generator(self):
+        collection = TTCollection()
+        collection.fonts = [TTFont(self.sources[0]), TTFont(self.sources[1])]
+        path = self.root / 'complete-collection.ttc'
+        collection.save(path); collection.close()
+        first, output = self.good(sources=[path] * 3)
+        self.assertEqual(self.count(self.calls), 1)
+        self.assertEqual(self.count(self.ink_checks), 0)
+        self.assertNotEqual(output.read_bytes()[:4], b'ttcf')
+        warm, _ = self.good(sources=[path] * 3)
+        self.assertEqual(warm.data['cacheHit'], 'true')
+        self.assertEqual(self.count(self.calls), 1)
 
     def test_missing_dependencies_cannot_reuse_a_verified_cache(self):
         self.good()

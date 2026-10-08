@@ -66,6 +66,7 @@ def build(module: Path, stage: Path) -> dict:
     jobs = []
     reports = []
     seen = set()
+    preserved_stock_aliases = []
     roots = font_roots(module)
     for partition, logical_root in roots.items():
         root = stage / partition / 'fonts'
@@ -84,8 +85,9 @@ def build(module: Path, stage: Path) -> dict:
             if not eligible_slot(slot, logical):
                 report['reason'] = 'missing-or-ineligible-stock-slot'
                 continue
+            stock_collection = slot.get('format') in {'TTC', 'OTC'} or slot.get('faceIndex', 0) != 0
             contract = contract_for_slot(inventory, logical)
-            if contract[-1] != 'stock':
+            if contract[-1] != 'stock' and not stock_collection:
                 report['reason'] = 'invalid-stock-metrics'
                 continue
             with source.open('rb') as stream:
@@ -94,6 +96,15 @@ def build(module: Path, stage: Path) -> dict:
                 # A collection may be addressed at a nonzero face index by ROM
                 # XML. The single-face writer must not silently discard faces.
                 report['reason'] = 'collection-metrics-preserved'
+                continue
+            if stock_collection:
+                # The alias already contains the single-face replacement, so
+                # its header cannot prove the stock XML's collection/index
+                # contract. Remove only this staged alias after all generation
+                # succeeds; its absence exposes the untouched stock collection.
+                # `seen` also prevents completion from recreating the alias.
+                report['reason'] = 'stock-collection-slot-preserved'
+                preserved_stock_aliases.append(source)
                 continue
             jobs.append((source, source, contract, report))
 
@@ -147,6 +158,8 @@ def build(module: Path, stage: Path) -> dict:
                            **cached_reports[key]})
         for output, destination in prepared:
             link_copy(output, destination)
+        for alias in preserved_stock_aliases:
+            alias.unlink(missing_ok=True)
         write_report(stage, reports)
     finally:
         shutil.rmtree(outputs, ignore_errors=True)

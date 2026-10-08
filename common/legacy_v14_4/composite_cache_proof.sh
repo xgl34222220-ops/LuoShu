@@ -2,6 +2,17 @@
 # Shared composite byte/implementation proof. Callers provide hash_file/hash_text
 # and COMPOSITE_RUNNER; policy, generation, ownership and validation stay local.
 
+composite_validate_output() (
+    # Used only when no real guarded generator ran: same-source copies and
+    # legacy entries without a receipt. Proven warm entries need no glyph read.
+    [ -s "$1" ] && [ ! -L "$1" ] || return 1
+    MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --validate-output "$1"
+)
+
+composite_validate_cached_output() {
+    font_validate "$1" text && composite_validate_output "$1" >/dev/null
+}
+
 composite_cache_identity() (
     if command -v sha256sum >/dev/null 2>&1; then
         _cci_records=$(sha256sum "$MODDIR/common/composite_font.py" "$MODDIR/common/composite_layout.py" "$COMPOSITE_RUNNER" 2>/dev/null) || return 1

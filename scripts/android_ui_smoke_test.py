@@ -26,6 +26,7 @@ from android_ui_smoke import (
     scroll_progress, visible_action, visible_control, visible_text, ScrollBudget,
     focused_component, home_window_state, decode_raw_screencap, decompress_screencap_gzip, home_launcher_content, main,
     HOME_BATCH_TIMING_HELPER, HOME_BATCH_TIMING_CLOCK, home_batch_capture_command, home_batch_timing,
+    diagnostic_video_after_baseline_failure,
 )
 
 
@@ -3118,6 +3119,333 @@ class ChildPrefetchExperimentHarnessTest(unittest.TestCase):
         self.assertNotIn('--snapshot-child-prefetch', functional)
         self.assertEqual(1, visual.count('--snapshot-child-prefetch default'))
         self.assertIn('--record-launch --visual-launch-only --snapshot-child-prefetch default', visual)
+
+
+class DiagnosticVideoHarnessTest(unittest.TestCase):
+    """Low-level protocol fixtures, not Android video/codec or pixel evidence."""
+
+    def prepare(self, directory):
+        apk = directory / "app.apk"; apk.write_bytes(b"fixture APK path")
+        run = SmokeRun(apk, directory, PACKAGE, None, record_launch=True, visual_launch_only=True)
+        run.home_baseline_failures = [{"name": "light-cold-start", "error": "real baseline root timed out"}]
+        run.checks = [{"check": "primary-owned-close", "passed": False}]
+        run.adb_command_count = 7
+        run.adb_diagnostic_errors = ["primary unconsumed late notice"]
+        run.adb = Mock(side_effect=AssertionError("diagnostics must not use accepted ADB ledger"))
+        run.snapshot_hierarchy = Mock(side_effect=AssertionError("no diagnostic hierarchy reconnect"))
+        run.begin_launch_recording = Mock(side_effect=AssertionError("no accepted recorder"))
+        run.finish_launch_recording = Mock(side_effect=AssertionError("no accepted recorder finish"))
+        summary = {"passed": False, "error": "HOME failure; unconsumed late notice", "seconds": 10,
+                   "mode": "visual-launch-only", "recordings": [], "checks": run.checks,
+                   "screens": [], "adb_command_count": 7, "adb_diagnostic_errors": run.adb_diagnostic_errors}
+        (directory / "summary.json").write_text(json.dumps(summary) + "\n")
+        for name in ("failure.png", "logcat.txt", "last-anr.txt", "anr-traces.txt", "window.txt",
+                     "adb-commands.jsonl", "snapshot-notices.jsonl", "light-cold-start-baseline-readiness.json"):
+            (directory / name).write_bytes(("frozen original " + name).encode())
+        return run, summary
+
+    def primary_state(self, run):
+        return {"checks": json.loads(json.dumps(run.checks)), "recordings": json.loads(json.dumps(run.recordings)),
+                "screens": json.loads(json.dumps(run.results)), "adb_command_count": run.adb_command_count,
+                "adb_diagnostic_errors": list(run.adb_diagnostic_errors),
+                "files": {p.name: p.read_bytes() for p in run.output.iterdir() if p.is_file()}}
+
+    def execute(self, run, summary, failure=None, on_command=None):
+        process = Mock(returncode=7 if failure == "recorder-failure" else 0)
+        process.poll.return_value = 0
+        process.communicate.return_value = (b"recorder raw stdout", b"recorder raw stderr")
+        if failure == "recorder-timeout":
+            process.communicate.side_effect = [subprocess.TimeoutExpired("owned reader", 35,
+                output=b"partial recorder stdout", stderr=b"partial recorder stderr"),
+                (b"cleanup recorder stdout", b"cleanup recorder stderr")]
+            process.poll.side_effect = [None, 0]
+        if failure == "recorder-exception":
+            process.communicate.side_effect = OSError("owned recorder stream unavailable")
+        if failure == "am-evidence-write-failure":
+            process.poll.return_value = None
+        pid_calls = [0]
+        calls = []
+        def low_level(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            if on_command is not None:
+                on_command(arguments)
+            stdout, stderr, rc = b"observation raw stdout", b"observation raw stderr", 0
+            if "pidof" in arguments:
+                pid_calls[0] += 1
+                stdout, stderr, rc = (b"", b"", 1) if pid_calls[0] == 1 else (b"9001\n", b"", 0)
+                if failure == "existing-pid" and pid_calls[0] == 1:
+                    stdout, rc = b"8000\n", 0
+                if failure == "pid-connection-failure" and pid_calls[0] == 1:
+                    stderr, rc = b"adb device offline", 255
+                if failure == "pid-exit0-empty" and pid_calls[0] == 1:
+                    rc = 0
+                if failure == "pid-timeout" and pid_calls[0] == 1:
+                    raise subprocess.TimeoutExpired(arguments, kwargs["timeout"], output=b"partial pid", stderr=b"partial offline")
+                if failure == "after-pid-absent" and pid_calls[0] == 2 or failure == "end-pid-absent" and pid_calls[0] == 3:
+                    stdout, rc = b"", 1
+            elif "uimode" in arguments:
+                stdout, stderr = b"Night mode: yes\n", b""
+            elif "start" in arguments:
+                stdout, stderr = b"Status: ok\nTotalTime: 20\n", b"am raw stderr"
+                if failure == "am-failure":
+                    stdout, rc = b"Error: actual launch failed", 7
+                if failure == "am-timeout":
+                    raise subprocess.TimeoutExpired(arguments, kwargs["timeout"], output=b"partial am", stderr=b"partial am stderr")
+            elif "logcat" in arguments and failure == "app-anr":
+                stdout = f"ActivityManager: ANR in {PACKAGE}\n".encode()
+            elif "window" in arguments and failure == "observation-timeout":
+                raise subprocess.TimeoutExpired(arguments, kwargs["timeout"], output=b"partial window", stderr=b"partial window stderr")
+            elif "pull" in arguments:
+                Path(arguments[-1]).write_bytes(b"\x00\x00\x00\x18ftypmp42fixture original stream bytes")
+                stdout, stderr = b"pull raw stdout", b"pull raw stderr"
+                if failure == "pull-failure":
+                    rc = 1
+                if failure == "pull-timeout":
+                    raise subprocess.TimeoutExpired(arguments, kwargs["timeout"], output=b"partial pull", stderr=b"partial pull stderr")
+            elif "rm" in arguments:
+                stdout, stderr = b"remove owned raw stdout", b"remove owned raw stderr"
+                if failure == "cleanup-failure":
+                    rc = 1
+            elif arguments[0] in ("ffprobe", "ffmpeg") and "-version" in arguments:
+                stdout, stderr = b"fixture decoder version; not real codec coverage", b""
+            elif arguments[0] == "ffprobe":
+                frames = [{"pts": 0, "pts_time": "0.000", "best_effort_timestamp_time": "0.000"},
+                          {"pts": 1, "pts_time": "0.100", "best_effort_timestamp_time": "0.100"}]
+                if failure == "missing-original-pts":
+                    frames[0].pop("pts"); frames[0].pop("pts_time")
+                if failure == "reverse-pts":
+                    frames[1]["pts_time"] = "-0.1"
+                stdout = json.dumps({"streams": [{"width": 2, "height": 2, "time_base": "1/10", "codec_name": "fixture"}],
+                                     "frames": frames}).encode()
+                stderr = b""
+                if failure == "probe-timeout":
+                    raise subprocess.TimeoutExpired(arguments, kwargs["timeout"], output=b'{"frames": [', stderr=b"partial probe stderr")
+            elif arguments[0] == "ffmpeg":
+                stdout, stderr = (b"#tb 0: 1/10\n0,0,0,1,12," + b"a" * 32 + b"\n0,1,1,1,12," + b"b" * 32 + b"\n"), b""
+                if failure == "decode-timeout":
+                    raise subprocess.TimeoutExpired(arguments, kwargs["timeout"], output=b"partial frame hashes", stderr=b"partial decoder stderr")
+                if failure == "decoded-count-mismatch":
+                    stdout = stdout.splitlines(keepends=True)[0] + stdout.splitlines(keepends=True)[1]
+                if failure == "decoded-pts-mismatch":
+                    stdout = stdout.replace(b"0,1,1,1,12", b"0,1,2,1,12")
+                if failure == "decoded-timebase-missing":
+                    stdout = b"\n".join(stdout.splitlines()[1:])
+            return subprocess.CompletedProcess(arguments, rc, stdout, stderr)
+        popen_effect = OSError("owned recorder Popen failed") if failure == "popen-failure" else None
+        real_write = Path.write_bytes
+        def evidence_write(path, content):
+            if failure == "am-evidence-write-failure" and path.name == "am-start-stdout.bin":
+                raise OSError("diagnostic am stream disk failure")
+            return real_write(path, content)
+        with patch("android_ui_smoke.subprocess.run", side_effect=low_level), \
+                patch("android_ui_smoke.subprocess.Popen", return_value=process, side_effect=popen_effect) as popen, \
+                patch("android_ui_smoke.time.sleep"), patch.object(Path, "write_bytes", evidence_write):
+            diagnostic_video_after_baseline_failure(run, json.loads(json.dumps(summary)))
+        metadata = json.loads((run.output / "diagnostic-only/diagnostic-video.json").read_text())
+        return metadata, process, popen, calls
+
+    def test_post_failure_video_success_freezes_original_summary_arrays_and_owned_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run, summary = self.prepare(Path(temporary))
+            frozen = self.primary_state(run)
+            metadata, process, popen, calls = self.execute(run, summary)
+            self.assertEqual(frozen, self.primary_state(run))
+            self.assertTrue(metadata["diagnostic_only"])
+            self.assertTrue(metadata["attempted"])
+            self.assertTrue(metadata["available"])
+            self.assertEqual(1, metadata["primary_exit_code"])
+            self.assertEqual(hashlib.sha256(frozen["files"]["summary.json"]).hexdigest(), metadata["primary_summary_sha256"])
+            self.assertEqual("unknown", metadata["codec_ready"])
+            self.assertEqual("unknown", metadata["start_frame_precedes_am_launch"])
+            self.assertEqual(2, metadata["original_frame_count"])
+            self.assertEqual(2, metadata["decoded_frame_count"])
+            self.assertEqual("known", metadata["original_pts_state"])
+            process.communicate.assert_called_once_with(timeout=35)
+            process.kill.assert_not_called()
+            self.assertEqual(1, popen.call_count)
+            self.assertIn(["--time-limit", "30", "--bit-rate", "2000000", "--size", "720x1560"],
+                          [popen.call_args.args[0][3:9]])
+            self.assertEqual(1, sum("start" in arguments for arguments, _ in calls))
+            self.assertEqual(3, sum("pidof" in arguments for arguments, _ in calls))
+            removed = next(arguments for arguments, _ in calls if "rm" in arguments)
+            self.assertEqual(["adb", "shell", "rm", "-f", metadata["remote_file"]], removed)
+            self.assertRegex(metadata["remote_file"], r"^/sdcard/luoshu-diagnostic-[0-9a-f]{32}\.mp4$")
+            self.assertFalse(any(any(word in arguments for word in ("force-stop", "kill", "clear", "uiautomator", "instrument"))
+                                 for arguments, _ in calls))
+            run.adb.assert_not_called(); run.snapshot_hierarchy.assert_not_called()
+            run.begin_launch_recording.assert_not_called(); run.finish_launch_recording.assert_not_called()
+            for record in metadata["commands"]:
+                for stream in ("stdout", "stderr"):
+                    original = (run.output / "diagnostic-only" / record[stream]).read_bytes()
+                    self.assertEqual(len(original), record[f"{stream}_bytes"])
+                    self.assertEqual(hashlib.sha256(original).hexdigest(), record[f"{stream}_sha256"])
+
+    def test_post_failure_video_keeps_all_failure_streams_and_never_mutates_primary(self):
+        failures = ("popen-failure", "am-failure", "am-timeout", "after-pid-absent", "end-pid-absent", "app-anr",
+                    "recorder-failure", "recorder-timeout", "recorder-exception", "pull-failure", "pull-timeout",
+                    "probe-timeout", "missing-original-pts", "reverse-pts", "decode-timeout", "decoded-count-mismatch",
+                    "decoded-pts-mismatch", "decoded-timebase-missing",
+                    "observation-timeout", "cleanup-failure")
+        for failure in failures:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                run, summary = self.prepare(Path(temporary)); frozen = self.primary_state(run)
+                metadata, process, popen, calls = self.execute(run, summary, failure)
+                self.assertEqual(frozen, self.primary_state(run))
+                self.assertFalse(metadata["available"])
+                self.assertTrue(metadata["errors"])
+                self.assertEqual(1, metadata["primary_exit_code"])
+                self.assertEqual("unknown", metadata["start_frame_precedes_am_launch"])
+                self.assertEqual(1, popen.call_count)
+                self.assertEqual(1, sum("rm" in arguments for arguments, _ in calls))
+                self.assertLessEqual(sum("start" in arguments for arguments, _ in calls), 1)
+                for record in metadata["commands"]:
+                    for stream in ("stdout", "stderr"):
+                        content = (run.output / "diagnostic-only" / record[stream]).read_bytes()
+                        self.assertEqual(hashlib.sha256(content).hexdigest(), record[f"{stream}_sha256"])
+                if failure.endswith("timeout") and failure != "recorder-timeout":
+                    timed_out = [record for record in metadata["commands"] if record["outcome"] == "timed-out"]
+                    self.assertEqual(1, len(timed_out))
+                    self.assertIsNone(timed_out[0]["returncode"])
+                    self.assertTrue(timed_out[0]["partial_streams"])
+                    self.assertTrue((run.output / "diagnostic-only" / timed_out[0]["stdout"]).read_bytes())
+                    self.assertTrue((run.output / "diagnostic-only" / timed_out[0]["stderr"]).read_bytes())
+                if failure == "recorder-timeout":
+                    process.kill.assert_called_once()
+                    self.assertEqual(b"partial recorder stdout", (run.output / "diagnostic-only" / metadata["recorder"]["stdout"]).read_bytes())
+                    self.assertEqual(b"partial recorder stderr", (run.output / "diagnostic-only" / metadata["recorder"]["stderr"]).read_bytes())
+                    self.assertEqual([35, 3], [call.kwargs["timeout"] for call in process.communicate.call_args_list])
+                else:
+                    process.kill.assert_not_called()
+                if failure in ("pull-failure", "pull-timeout", "decode-timeout", "missing-original-pts"):
+                    self.assertTrue((run.output / "diagnostic-only/diagnostic.mp4").is_file())
+                    self.assertIn("video", metadata)
+                if failure == "missing-original-pts":
+                    self.assertEqual("unknown", metadata["original_pts_state"])
+                    self.assertIn("best_effort_timestamp_time", metadata["original_pts"][0])
+                    self.assertNotIn("pts", metadata["original_pts"][0])
+                    self.assertFalse(any(record["stage"] == "frame-decode" for record in metadata["commands"]))
+
+    def test_post_failure_video_eligibility_skips_success_functional_existing_evidence(self):
+        for reason in ("primary-passed", "functional", "no-record", "no-home-marker", "existing-recording", "pid", "before_pid", "after_pid"):
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temporary:
+                run, summary = self.prepare(Path(temporary))
+                if reason == "primary-passed": summary["passed"] = True
+                if reason == "functional": run.visual_launch_only = False
+                if reason == "no-record": run.record_launch = False
+                if reason == "no-home-marker": run.home_baseline_failures = []
+                if reason == "existing-recording": summary["recordings"] = [{"available": True, "file": "original.mp4"}]
+                if reason in ("pid", "before_pid", "after_pid"): summary["checks"] = [{reason: "9010"}]
+                frozen = self.primary_state(run)
+                metadata, process, popen, calls = self.execute(run, summary)
+                self.assertEqual(frozen, self.primary_state(run))
+                self.assertFalse(metadata["attempted"])
+                self.assertFalse(metadata["available"])
+                self.assertTrue(metadata["not_attempted_reason"])
+                self.assertEqual([], calls)
+                popen.assert_not_called(); process.kill.assert_not_called()
+
+    def test_post_failure_video_requires_verified_pid_absence_and_keeps_probe_streams(self):
+        for failure in ("existing-pid", "pid-connection-failure", "pid-exit0-empty", "pid-timeout"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                run, summary = self.prepare(Path(temporary)); frozen = self.primary_state(run)
+                metadata, process, popen, calls = self.execute(run, summary, failure)
+                self.assertEqual(frozen, self.primary_state(run))
+                self.assertFalse(metadata["attempted"])
+                self.assertFalse(metadata["available"])
+                self.assertEqual(2, len(metadata["commands"]))
+                self.assertEqual([], [arguments for arguments, _ in calls if "start" in arguments or "rm" in arguments])
+                self.assertTrue(metadata["not_attempted_reason"])
+                popen.assert_not_called(); process.kill.assert_not_called()
+
+    def test_interrupted_launch_evidence_still_observes_pid_and_cleans_only_owned_reader(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run, summary = self.prepare(Path(temporary)); frozen = self.primary_state(run)
+            metadata, process, popen, calls = self.execute(run, summary, "am-evidence-write-failure")
+            self.assertEqual(frozen, self.primary_state(run))
+            self.assertFalse(metadata["available"])
+            self.assertEqual("issued", metadata["launch_request_state"])
+            self.assertEqual("returned", metadata["post_launch_pid_observation"])
+            self.assertEqual("returned", metadata["end_pid_observation"])
+            self.assertTrue(any("stream disk failure" in error for error in metadata["errors"]))
+            self.assertEqual(1, sum("start" in arguments for arguments, _ in calls))
+            self.assertEqual(3, sum("pidof" in arguments for arguments, _ in calls))
+            self.assertEqual(1, sum("rm" in arguments for arguments, _ in calls))
+            process.kill.assert_called_once()
+            process.communicate.assert_called_once_with(timeout=3)
+            self.assertNotIn("original_frame_count", metadata)
+
+    def test_main_freezes_failure_close_late_notices_and_exit_before_diagnostic_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run, _ = self.prepare(Path(temporary))
+            run.run = Mock(side_effect=RuntimeError("real HOME baseline failure"))
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, b"\x89PNG\r\n\x1a\nprimary pixels", b""))
+            run.diagnostics = Mock()
+            run.close_snapshot_session = Mock(side_effect=RuntimeError("primary unconsumed late notice"))
+            seen = {}
+            def after_freeze(current, frozen):
+                run.close_snapshot_session.assert_called_once()
+                seen["before"] = self.primary_state(run)
+                seen["summary"] = (run.output / "summary.json").read_bytes()
+                seen["result"] = self.execute(current, frozen)[0]
+                self.assertEqual(seen["before"], self.primary_state(run))
+            arguments = ["android_ui_smoke.py", "--apk", str(run.apk), "--output", str(run.output),
+                         "--record-launch", "--visual-launch-only", "--diagnostic-video-after-baseline-failure"]
+            with patch("android_ui_smoke.sys.argv", arguments), patch("android_ui_smoke.SmokeRun", return_value=run), \
+                    patch("android_ui_smoke.diagnostic_video_after_baseline_failure", side_effect=after_freeze):
+                self.assertEqual(1, main())
+            self.assertTrue(seen["result"]["available"])
+            self.assertEqual(seen["summary"], (run.output / "summary.json").read_bytes())
+            summary = json.loads(seen["summary"])
+            self.assertFalse(summary["passed"])
+            self.assertIn("unconsumed late notice", summary["error"])
+            self.assertEqual([], summary["recordings"])
+            self.assertEqual(7, summary["adb_command_count"])
+            self.assertEqual(run.checks, summary["checks"])
+            self.assertEqual(1, run.adb.call_count)  # Only the original failure screenshot.
+
+    def test_main_diagnostic_exception_does_not_change_frozen_failure_or_exit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run, _ = self.prepare(Path(temporary)); run.run = Mock(side_effect=RuntimeError("HOME primary failure"))
+            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, b"", b""));run.diagnostics = Mock();run.close_snapshot_session = Mock()
+            args = ["android_ui_smoke.py", "--apk", str(run.apk), "--output", str(run.output),
+                    "--record-launch", "--visual-launch-only", "--diagnostic-video-after-baseline-failure"]
+            def failed(current, frozen):
+                self.assertFalse(frozen["passed"])
+                frozen["checks"].append({"diagnostic mutation": True})  # JSON copy cannot mutate primary arrays.
+                raise OSError("separate diagnostic directory unavailable")
+            with patch("android_ui_smoke.sys.argv", args), patch("android_ui_smoke.SmokeRun", return_value=run), \
+                    patch("android_ui_smoke.diagnostic_video_after_baseline_failure", side_effect=failed):
+                self.assertEqual(1, main())
+            summary = json.loads((run.output / "summary.json").read_text())
+            self.assertFalse(summary["passed"])
+            self.assertEqual(run.checks, summary["checks"])
+            self.assertNotIn("separate diagnostic", summary["error"])
+            self.assertEqual([], run.recordings)
+
+    def test_diagnostic_cli_requires_explicit_visual_and_record_and_default_is_off(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary);apk=directory/"app.apk";apk.write_bytes(b"path fixture")
+            base=["android_ui_smoke.py", "--apk", str(apk), "--output", str(directory)]
+            for options in ([], ["--record-launch"]):
+                with self.subTest(options=options), patch("android_ui_smoke.sys.argv",base+options+["--diagnostic-video-after-baseline-failure"]), \
+                        patch("android_ui_smoke.SmokeRun") as factory, patch("android_ui_smoke.sys.stderr", new=io.StringIO()):
+                    with self.assertRaises(SystemExit) as error: main()
+                    self.assertEqual(2,error.exception.code);factory.assert_not_called()
+            run=SmokeRun(apk,directory,PACKAGE,None);run.run=Mock();run.diagnostics=Mock();run.close_snapshot_session=Mock()
+            with patch("android_ui_smoke.sys.argv",base),patch("android_ui_smoke.SmokeRun",return_value=run), \
+                    patch("android_ui_smoke.diagnostic_video_after_baseline_failure") as diagnostic:
+                self.assertEqual(0,main());diagnostic.assert_not_called()
+            self.assertFalse((directory/"diagnostic-only").exists())
+
+    def test_home_failure_marker_comes_from_actual_baseline_failure_not_error_text(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run=SmokeRun(Path("app.apk"),Path(temporary),PACKAGE,None,record_launch=True,visual_launch_only=True)
+            run.adb=Mock(side_effect=RuntimeError("resolve failed"))
+            with self.assertRaisesRegex(RuntimeError,"HOME baseline failed"):
+                run.wait_home_baseline("actual-home")
+            self.assertEqual([{"name":"actual-home","error":"resolve failed"}],run.home_baseline_failures)
+            metadata=json.loads((Path(temporary)/"actual-home-baseline-readiness.json").read_text())
+            self.assertFalse(metadata["passed"]);self.assertEqual(10,metadata["timeout_seconds"])
 
 
 if __name__ == "__main__":

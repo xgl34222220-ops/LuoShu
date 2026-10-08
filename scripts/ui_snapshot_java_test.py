@@ -535,6 +535,10 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         Bundle lateWindow=h.snapshot(h.automation,"hierarchy-0010.xml",dir,new Bundle());
         require("failed".equals(lateWindow.getString("snapshot")) && "0".equals(lateWindow.getString("child_query_count"))
                 && !new File(dir,"hierarchy-0010.xml").exists(),"late window root queried descendants or became evidence");
+        Bundle lateWindowDiagnostics=new Bundle(); snapshotDiagnostics(lateWindowDiagnostics,lateWindow);
+        require(lateWindow.getString("window_counts").equals(lateWindowDiagnostics.getString("helper_last_snapshot_window_counts")) &&
+                "failed".equals(lateWindowDiagnostics.getString("helper_last_snapshot_status")),"failed snapshot lost existing window counts");
+        System.out.println("FAILED_WINDOW_COUNTS_JSON="+lateWindow.getString("window_counts"));
         h.automation.windows.clear();
         h.automation.root=new AccessibilityNodeInfo("incomplete",true); h.automation.root.refreshDelay=8000;
         h.automation.root.children.add(new AccessibilityNodeInfo("invisible",false));
@@ -663,7 +667,8 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                 "50".equals(h.finished.getString("helper_process_started_uptime_ms")),"lifecycle was not carried into final result");
         for(Map.Entry<String,String> entry:h.finished.values.entrySet()) require(entry.getValue().length()<=
                 (entry.getKey().equals("helper_last_snapshot_child_query_records") ||
-                 entry.getKey().equals("helper_last_snapshot_root_query_records")?70000:1024),"unbounded final diagnostic string");
+                 entry.getKey().equals("helper_last_snapshot_root_query_records") ||
+                 entry.getKey().equals("helper_last_snapshot_window_counts")?70000:1024),"unbounded final diagnostic string");
         JSONObject closed=new JSONObject().put("state","closed");
         writeJson(dir,"closed.json",closed); childRead("json",new File(dir,"closed.json").getPath(),closed.toString());
         h.failSession=true; h.onStart(); require(h.finishCode==0 && "failed".equals(h.finished.getString("snapshot")),"real session failure changed close code");
@@ -764,6 +769,17 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         Bundle rootFinal=new Bundle(); snapshotDiagnostics(rootFinal,manyRoots);
         require(manyRoots.getString("root_query_records").equals(rootFinal.getString("helper_last_snapshot_root_query_records")) &&
                 manyRoots.getString("root_query_records").length()>1024,"root tail JSON truncated in final result");
+        require(manyRoots.getString("window_counts").equals(rootFinal.getString("helper_last_snapshot_window_counts")) &&
+                manyRoots.getString("window_counts").length()>1024,"existing window counts truncated in final result");
+        System.out.println("WINDOW_COUNTS_JSON="+manyRoots.getString("window_counts"));
+        Bundle windowBoundary=new Bundle(), windowBoundaryDiagnostics=new Bundle();
+        String maximumWindowCounts="["+" ".repeat(69998)+"]";
+        windowBoundary.putString("window_counts",maximumWindowCounts); snapshotDiagnostics(windowBoundaryDiagnostics,windowBoundary);
+        require(maximumWindowCounts.equals(windowBoundaryDiagnostics.getString("helper_last_snapshot_window_counts")),"70000-character window JSON was truncated or omitted");
+        acceptRequestDiagnostics(windowBoundaryDiagnostics,"next","hierarchy-0071.xml");
+        require(!windowBoundaryDiagnostics.containsKey("helper_last_snapshot_window_counts"),"window counts survived new request");
+        windowBoundary.putString("window_counts",maximumWindowCounts+" "); snapshotDiagnostics(windowBoundaryDiagnostics,windowBoundary);
+        require(!windowBoundaryDiagnostics.containsKey("helper_last_snapshot_window_counts"),"oversize window counts must stay unavailable, not truncated");
         System.out.println("ROOT_DIAGNOSTIC_JSON="+manyRoots.getString("root_query_records"));
         acceptRequestDiagnostics(rootFinal,"next","hierarchy-0071.xml");
         require(!rootFinal.containsKey("helper_last_snapshot_root_query_records"),"root records survived new request");
@@ -855,6 +871,16 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                     self.assertEqual(32, len(records))
                     self.assertEqual(list(range(10, 42)), [record['sequence'] for record in records])
                     self.assertLess(len(line.partition('=')[2]), 70000)
+                elif line.startswith('WINDOW_COUNTS_JSON='):
+                    records = json.loads(line.partition('=')[2])
+                    self.assertEqual(20, len(records))
+                    self.assertTrue(all(record['windows'] == record['active'] == record['focused'] == 0 for record in records))
+                    self.assertGreater(len(line.partition('=')[2]), 1024)
+                    self.assertLessEqual(len(line.partition('=')[2]), 70000)
+                elif line.startswith('FAILED_WINDOW_COUNTS_JSON='):
+                    records = json.loads(line.partition('=')[2])
+                    self.assertEqual(1, len(records))
+                    self.assertEqual((1, 1, 0), (records[0]['windows'], records[0]['active'], records[0]['focused']))
                 else:
                     print(line)
             self.assertIn('Passed production Java cross-process publication, export failures, deadlines and diagnostics',

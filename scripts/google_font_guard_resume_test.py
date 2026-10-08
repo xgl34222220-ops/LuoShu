@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """A finished reconciliation has no watcher; a later explicit call still repairs."""
 import unittest
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
 import google_font_provider_lifecycle_test as fixtures
 
 
@@ -28,6 +33,57 @@ class ExplicitReconcileTest(unittest.TestCase):
         self.assertEqual(self.run_service('reconcile').returncode, 0)
         self.assertEqual(self.rows('applied'), ['applied', 'applied'])
         self.assertEqual(self.rows('fingerprints'), [])
+
+
+class DisabledModuleFallbackRequestTest(unittest.TestCase):
+    def test_disabled_or_removing_module_rejects_writes_before_initialization(self):
+        source = Path(__file__).resolve().parents[1] / 'common/google_font_fallback.sh'
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for action in ('enable', 'reapply-owned', 'reconcile-owned'):
+                    with self.subTest(marker=marker, shape=shape, action=action), tempfile.TemporaryDirectory() as tmp:
+                        module = Path(tmp)
+                        common = module / 'common'
+                        common.mkdir()
+                        bridge = common / source.name
+                        bridge.write_bytes(source.read_bytes())
+                        (common / 'runtime_paths.sh').write_text(
+                            'luoshu_runtime_paths_init() { touch "$MODDIR/initialized"; }\n')
+                        launcher = common / 'python/bin/luoshu-python'
+                        launcher.parent.mkdir(parents=True)
+                        launcher.write_text('#!/bin/sh\ntouch "$MODDIR/executed"\nprintf \'{"status":"ok"}\\n\'\n')
+                        launcher.chmod(0o700)
+                        flag = module / marker
+                        if shape == 'file': flag.touch()
+                        elif shape == 'directory': flag.mkdir()
+                        else: flag.symlink_to(module / 'missing-marker-target')
+                        env = dict(os.environ, MODDIR=str(module), LUOSHU_TASK_SCOPE_PID=str(os.getpid()))
+                        result = subprocess.run(['sh', str(bridge), action], env=env, text=True,
+                                                capture_output=True, timeout=5)
+                        self.assertNotEqual(result.returncode, 0, result)
+                        self.assertEqual(json.loads(result.stdout)['status'], 'error')
+                        self.assertFalse((module / 'initialized').exists(), result)
+                        self.assertFalse((module / 'executed').exists(), result)
+
+    def test_disabled_module_keeps_explicit_restore_available(self):
+        source = Path(__file__).resolve().parents[1] / 'common/google_font_fallback.sh'
+        for action in ('restore', 'restore-owned'):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmp:
+                module = Path(tmp)
+                common = module / 'common'
+                common.mkdir()
+                bridge = common / source.name
+                bridge.write_bytes(source.read_bytes())
+                (module / 'disable').touch()
+                launcher = common / 'python/bin/luoshu-python'
+                launcher.parent.mkdir(parents=True)
+                launcher.write_text('#!/bin/sh\nprintf \'{"status":"ok","action":"%s"}\\n\' "$2"\n')
+                launcher.chmod(0o700)
+                result = subprocess.run(['sh', str(bridge), action],
+                    env=dict(os.environ, MODDIR=str(module), LUOSHU_TASK_SCOPE_PID=str(os.getpid())),
+                    text=True, capture_output=True, timeout=5)
+                self.assertEqual(result.returncode, 0, result)
+                self.assertEqual(json.loads(result.stdout)['action'], action)
 
 
 if __name__ == '__main__':

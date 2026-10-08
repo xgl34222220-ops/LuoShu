@@ -18,6 +18,7 @@ import struct
 import subprocess
 import sys
 import time
+import uuid
 import xml.etree.ElementTree as ET
 import zlib
 from pathlib import Path
@@ -767,6 +768,7 @@ class SmokeRun:
         self.results: list[dict[str, object]] = []
         self.checks: list[dict[str, object]] = []
         self.recordings: list[dict[str, object]] = []
+        self.home_baseline_failures: list[dict[str, str]] = []
         self.record_launch = record_launch
         self.visual_launch_only = visual_launch_only
         self.api_level: int | None = None
@@ -1490,6 +1492,7 @@ class SmokeRun:
                     return png
                 time.sleep(min(.4, remaining()))
         except Exception as error:
+            self.home_baseline_failures.append({"name": name, "error": str(error)})
             metadata.update(passed=False, error=str(error))
             if pending_sample is not None:
                 metadata["failed_sample"] = pending_sample
@@ -1990,6 +1993,264 @@ class SmokeRun:
                 print(f"Could not collect {filename}: {error}", file=sys.stderr)
 
 
+def diagnostic_video_after_baseline_failure(run: SmokeRun, frozen_summary: dict[str, object]) -> None:
+    """Collect separate forensic evidence after acceptance and its exit are frozen."""
+    started = time.monotonic()
+    directory = run.output / "diagnostic-only"
+    directory.mkdir(exist_ok=False)  # Never overwrite an earlier diagnostic attempt.
+    primary = run.output / "summary.json"
+    data: dict[str, object] = {
+        "diagnostic_only": True, "attempted": False, "available": False,
+        "primary_summary_sha256": hashlib.sha256(primary.read_bytes()).hexdigest(),
+        "primary_exit_code": 1 if not frozen_summary["passed"] else 0,
+        "home_baseline_failures": json.loads(json.dumps(run.home_baseline_failures)),
+        "commands": [], "errors": [], "time_limit_seconds": 30,
+        "recorder_communicate_timeout_seconds": 35, "pull_timeout_seconds": 30,
+        "observation_timeout_seconds": 20, "am_start_timeout_seconds": 45,
+        "probe_timeout_seconds": 20, "decode_timeout_seconds": 30,
+        "started_monotonic_seconds": started,
+        "clock_scope": "host monotonic; media PTS is separate and is not synchronized with host/native clocks",
+        "start_frame_precedes_am_launch": "unknown", "codec_ready": "unknown",
+        "original_pts_state": "unknown",
+        "decoded_pts_state": "unknown",
+        "launch_request_state": "not-issued", "post_launch_pid_observation": "not-observed",
+        "end_pid_observation": "not-observed",
+        "scope": "one post-failure raw App video; no accepted HOME baseline, visual verdict, cold/warm timing or complete pre-launch-frame guarantee",
+        "cost": "additional 30s recording and bounded observation/pull/decoding after the frozen primary run; encoder load changes this later environment",
+    }
+    process = None
+    remote = None
+
+    def save_streams(key: str, stdout: bytes | None, stderr: bytes | None) -> dict[str, object]:
+        record: dict[str, object] = {}
+        for stream, content in (("stdout", stdout or b""), ("stderr", stderr or b"")):
+            name = f"{key}-{stream}.bin"
+            (directory / name).write_bytes(content)
+            record[stream] = name
+            record[f"{stream}_bytes"] = len(content)
+            record[f"{stream}_sha256"] = hashlib.sha256(content).hexdigest()
+        return record
+
+    def command(key: str, arguments: list[str], timeout: float = 20):
+        record = {"stage": key, "arguments": arguments, "timeout_seconds": timeout,
+                  "started_monotonic_seconds": time.monotonic()}
+        stdout = stderr = b""
+        result = None
+        try:
+            result = subprocess.run(arguments, capture_output=True, timeout=timeout)
+            stdout, stderr = result.stdout, result.stderr
+            record.update(outcome="returned", returncode=result.returncode)
+        except subprocess.TimeoutExpired as error:
+            stdout, stderr = error.output or b"", error.stderr or b""
+            record.update(outcome="timed-out", returncode=None, partial_streams=True,
+                          error=f"{type(error).__name__}: {error}")
+            data["errors"].append(f"{key}: {record['error']}")
+        except Exception as error:
+            record.update(outcome="exception", returncode=None, error=f"{type(error).__name__}: {error}")
+            data["errors"].append(f"{key}: {record['error']}")
+        finally:
+            record["ended_monotonic_seconds"] = time.monotonic()
+            record.update(save_streams(key, stdout, stderr))
+            data["commands"].append(record)
+        return result
+
+    def adb(key: str, *arguments: str, timeout: float = 20):
+        # Deliberately bypass run.adb: its primary ledger/counters/errors are frozen.
+        return command(key, list(run.adb_command) + list(arguments), timeout)
+
+    try:
+        if not run.visual_launch_only or not run.record_launch:
+            data["not_attempted_reason"] = "requires visual-launch-only and record-launch"
+            return
+        if frozen_summary["passed"]:
+            data["not_attempted_reason"] = "primary run passed"
+            return
+        if not run.home_baseline_failures:
+            data["not_attempted_reason"] = "no actual HOME baseline failure recorded by this run"
+            return
+        if any(record.get("available") for record in frozen_summary["recordings"]):
+            data["not_attempted_reason"] = "primary run already has an available recording"
+            return
+        if any(check.get(key) for check in frozen_summary["checks"]
+               for key in ("pid", "before_pid", "after_pid")):
+            data["not_attempted_reason"] = "primary run already has App PID evidence"
+            return
+        mode = adb("before-uimode", "shell", "cmd", "uimode", "night")
+        if mode is None or mode.returncode:
+            data["errors"].append("current system mode observation unavailable")
+        before_pid = adb("before-pid", "shell", "pidof", run.package)
+        if before_pid is None or before_pid.returncode != 1 or before_pid.stdout.strip() or before_pid.stderr.strip():
+            data["not_attempted_reason"] = (
+                "existing App PID" if before_pid is not None and before_pid.stdout.strip()
+                else "App PID absence is unknown; expected pidof exit1 with empty streams")
+            return
+        data["attempted"] = True
+        remote = f"/sdcard/luoshu-diagnostic-{uuid.uuid4().hex}.mp4"
+        data["remote_file"] = remote
+        recorder_arguments = list(run.adb_command) + ["shell", "screenrecord", "--time-limit", "30",
+            "--bit-rate", "2000000", "--size", "720x1560", remote]
+        data["recorder"] = {"arguments": recorder_arguments, "popen_started_monotonic_seconds": time.monotonic()}
+        process = subprocess.Popen(recorder_arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        data["recorder"]["popen_returned_monotonic_seconds"] = time.monotonic()
+        time.sleep(.2)  # Existing physical allowance, not a codec-ready receipt.
+        data["launch_request_state"] = "issued"
+        launch = adb("am-start", "shell", "am", "start", "-W", "-n",
+                     f"{run.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
+        if launch is None or launch.returncode or b"Status: ok" not in launch.stdout or b"Error:" in launch.stdout + launch.stderr:
+            data["errors"].append("single diagnostic MainActivity launch failed or is unknown")
+        data["post_launch_pid_observation"] = "requested"
+        after_pid = adb("after-pid", "shell", "pidof", run.package)
+        data["post_launch_pid_observation"] = "returned" if after_pid is not None else "unknown"
+        if after_pid is None or after_pid.returncode or not after_pid.stdout.strip() or \
+                not all(value.isdigit() and int(value) > 0 for value in after_pid.stdout.split()):
+            data["errors"].append("diagnostic App PID absent or unknown after launch")
+        data["recorder"]["communicate_started_monotonic_seconds"] = time.monotonic()
+        try:
+            stdout, stderr = process.communicate(timeout=35)
+            data["recorder"].update(save_streams("recorder", stdout, stderr))
+            data["recorder"].update(outcome="returned", returncode=process.returncode)
+            if process.returncode:
+                data["errors"].append(f"owned recorder returned {process.returncode}")
+        except subprocess.TimeoutExpired as error:
+            data["recorder"].update(save_streams("recorder-timeout", error.output, error.stderr))
+            data["recorder"].update(outcome="timed-out", returncode=None, partial_streams=True)
+            data["errors"].append("owned recorder timed out; partial streams only")
+            if process.poll() is None:
+                process.kill()  # Only the Popen object owned by this attempt, never a device PID.
+                try:
+                    stdout, stderr = process.communicate(timeout=3)
+                    data["recorder"]["owned_reader_cleanup"] = save_streams("recorder-cleanup", stdout, stderr)
+                except subprocess.TimeoutExpired as cleanup_error:
+                    data["recorder"]["owned_reader_cleanup"] = save_streams(
+                        "recorder-cleanup-timeout", cleanup_error.output, cleanup_error.stderr)
+                    data["errors"].append("owned reader cleanup timed out")
+        except Exception as error:
+            data["recorder"].update(outcome="exception", returncode=None,
+                                    error=f"{type(error).__name__}: {error}")
+            data["errors"].append(f"owned recorder: {type(error).__name__}: {error}")
+        finally:
+            data["recorder"]["communicate_ended_monotonic_seconds"] = time.monotonic()
+        data["end_pid_observation"] = "requested"
+        end_pid = adb("end-pid", "shell", "pidof", run.package)
+        data["end_pid_observation"] = "returned" if end_pid is not None else "unknown"
+        if end_pid is None or end_pid.returncode or not end_pid.stdout.strip() or \
+                not all(value.isdigit() and int(value) > 0 for value in end_pid.stdout.split()):
+            data["errors"].append("diagnostic App PID absent or unknown at recording end")
+        for key, arguments in (
+            ("after-window", ("shell", "dumpsys", "window")),
+            ("after-logcat", ("logcat", "-b", "all", "-d", "-v", "threadtime")),
+            ("after-anr", ("shell", "dumpsys", "activity", "lastanr")),
+            ("after-anr-traces", ("shell", "dumpsys", "activity", "lastanr-traces")),
+        ):
+            observation = adb(key, *arguments)
+            if observation is None or observation.returncode:
+                data["errors"].append(f"{key} observation unavailable")
+            if key == "after-logcat" and observation is not None:
+                reason = crash_reason(observation.stdout.decode("utf-8", "replace"), run.package)
+                if reason:
+                    data["errors"].append(reason)
+        video = directory / "diagnostic.mp4"
+        pulled = adb("pull", "pull", remote, str(video), timeout=30)
+        if video.is_file():
+            data["video"] = {"file": video.name, "bytes": video.stat().st_size,
+                             "sha256": hashlib.sha256(video.read_bytes()).hexdigest()}
+        if pulled is None or pulled.returncode or not video.is_file() or b"ftyp" not in video.read_bytes()[:64]:
+            data["errors"].append("diagnostic MP4 pull/container incomplete or unavailable")
+            return
+        for tool in ("ffprobe", "ffmpeg"):
+            version = command(f"{tool}-version", [tool, "-version"])
+            if version is None or version.returncode:
+                data["errors"].append(f"{tool} version unavailable")
+        probe = command("frame-probe", ["ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_name,width,height,time_base,start_time,duration,nb_frames:frame=pts,pts_time,best_effort_timestamp,best_effort_timestamp_time,pkt_duration_time",
+            "-of", "json", str(video)], 20)
+        if probe is None or probe.returncode or probe.stderr.strip():
+            data["errors"].append("original frame/PTS probe failed")
+            return
+        info = json.loads(probe.stdout)
+        stream = info["streams"][0]
+        original_frames = info["frames"]
+        data["original_stream"] = stream
+        data["original_frame_count"] = len(original_frames)
+        data["original_pts"] = original_frames  # Preserve raw fields even when their PTS is missing/invalid.
+        time_base = re.fullmatch(r"([0-9]+)/([0-9]+)", str(stream.get("time_base", "")))
+        if time_base is None or not all(int(value) > 0 for value in time_base.groups()) or \
+                any("pts" not in frame or frame["pts"] is None for frame in original_frames):
+            raise RuntimeError("Original media PTS/time base missing; best-effort timestamps cannot replace it")
+        ticks = [int(str(frame["pts"])) for frame in original_frames]
+        stamps = [Decimal(str(frame["pts_time"])) for frame in original_frames]
+        if not stamps or any(not stamp.is_finite() for stamp in stamps) or \
+                any(right <= left for left, right in zip(stamps, stamps[1:])) or \
+                any(right <= left for left, right in zip(ticks, ticks[1:])):
+            raise RuntimeError("Original media PTS missing, invalid or not increasing")
+        numerator, denominator = map(Decimal, time_base.groups())
+        if any(abs(Decimal(tick) * numerator / denominator - stamp) > Decimal(10) ** stamp.as_tuple().exponent
+               for tick, stamp in zip(ticks, stamps)):
+            raise RuntimeError("Original integer PTS/time-base disagrees with printed PTS time")
+        data["original_pts_state"] = "known"
+        decoded = command("frame-decode", ["ffmpeg", "-v", "error", "-copyts", "-i", str(video),
+            "-map", "0:v:0", "-an", "-vsync", "0", "-pix_fmt", "rgb24", "-enc_time_base", "demux",
+            "-f", "framemd5", "pipe:1"], 30)
+        if decoded is None or decoded.returncode or decoded.stderr.strip():
+            data["errors"].append("every-frame diagnostic decoder failed")
+            return
+        hashes = [line.split(b",") for line in decoded.stdout.splitlines() if line.strip() and not line.startswith(b"#")]
+        expected_size = int(stream["width"]) * int(stream["height"]) * 3
+        if expected_size <= 0 or len(hashes) != len(original_frames) or any(
+                len(fields) != 6 or int(fields[4]) != expected_size or
+                not re.fullmatch(rb"[0-9a-f]{32}", fields[5].strip()) for fields in hashes):
+            raise RuntimeError("Decoded original frame count/size/hash records mismatch")
+        decoded_base = re.search(rb"(?m)^#tb 0: ([0-9]+)/([0-9]+)[ \t]*$", decoded.stdout)
+        if decoded_base is None or not all(int(value) > 0 for value in decoded_base.groups()):
+            raise RuntimeError("Decoded frame time base missing or invalid")
+        decoded_numerator, decoded_denominator = map(int, decoded_base.groups())
+        if any(int(fields[0]) != 0 or
+               int(fields[2]) * decoded_numerator * int(time_base.group(2)) !=
+               tick * int(time_base.group(1)) * decoded_denominator for fields, tick in zip(hashes, ticks)):
+            raise RuntimeError("Decoded frame PTS does not match each original integer PTS/time base")
+        data["decoded_frame_count"] = len(hashes)
+        data["decoded_pts_state"] = "known"
+        data["decoded_time_base"] = f"{decoded_numerator}/{decoded_denominator}"
+        data["decoded_frame_hash_scope"] = "every full original RGB24 frame, passthrough without fps sampling; hashes are not manual pixel or startup acceptance"
+        data["available"] = not data["errors"]
+    except Exception as error:
+        data["errors"].append(f"{type(error).__name__}: {error}")
+    finally:
+        if data["launch_request_state"] == "issued":
+            for state, key in (("post_launch_pid_observation", "after-pid-interrupted"),
+                               ("end_pid_observation", "end-pid-interrupted")):
+                if data[state] == "not-observed":
+                    data[state] = "requested"
+                    try:
+                        observation = adb(key, "shell", "pidof", run.package)
+                        data[state] = "returned" if observation is not None else "unknown"
+                    except Exception as error:
+                        data[state] = "unknown"
+                        data["errors"].append(f"{key} evidence unavailable: {type(error).__name__}: {error}")
+                if data[state] in ("requested", "unknown"):
+                    data["errors"].append(f"{state}: result unknown after interrupted diagnostic stage")
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.kill()
+                    try:
+                        stdout, stderr = process.communicate(timeout=3)
+                        data["owned_reader_final_cleanup"] = save_streams("recorder-final-cleanup", stdout, stderr)
+                    except subprocess.TimeoutExpired as error:
+                        data["owned_reader_final_cleanup"] = save_streams("recorder-final-cleanup-timeout", error.output, error.stderr)
+                        data["errors"].append("owned reader final cleanup timed out")
+            except Exception as error:
+                data["errors"].append(f"owned reader cleanup: {type(error).__name__}: {error}")
+        if remote is not None:
+            removed = adb("remove-owned-video", "shell", "rm", "-f", remote)
+            if removed is None or removed.returncode:
+                data["errors"].append("unique diagnostic remote video cleanup failed")
+        if data["errors"]:
+            data["available"] = False
+        data["diagnostic_elapsed_seconds"] = time.monotonic() - started
+        (directory / "diagnostic-video.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -2002,11 +2263,15 @@ def main() -> int:
                         help="Optional raw cold-start video evidence; disabled by default to keep encoding load out of UI validation")
     parser.add_argument("--visual-launch-only", action="store_true",
                         help="Require every-frame light/dark cold and same-process warm launch evidence, separately from functional UI regression")
+    parser.add_argument("--diagnostic-video-after-baseline-failure", action="store_true",
+                        help="After freezing a failed visual run, collect one separate diagnostic-only 30s video; never changes acceptance")
     parser.add_argument("--snapshot-child-prefetch", choices=("zero", "default"), default="zero",
                         help="Public child getter strategy; default is an explicit visual compatibility experiment")
     args = parser.parse_args()
     if args.visual_launch_only and not args.record_launch:
         parser.error("--visual-launch-only requires --record-launch")
+    if args.diagnostic_video_after_baseline_failure and (not args.visual_launch_only or not args.record_launch):
+        parser.error("--diagnostic-video-after-baseline-failure requires --visual-launch-only and --record-launch")
     if args.snapshot_child_prefetch == "default" and (not args.visual_launch_only or args.snapshot_apk is None):
         parser.error("--snapshot-child-prefetch default requires --visual-launch-only and --snapshot-apk")
     if not args.apk.is_file():
@@ -2064,7 +2329,13 @@ def main() -> int:
                    "launch_recording_enabled": run.record_launch,
                    "screens": run.results, "checks": run.checks, "recordings": run.recordings}
         (run.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return 0 if error is None else 1
+    primary_exit_code = 0 if error is None else 1
+    if args.diagnostic_video_after_baseline_failure:
+        try:
+            diagnostic_video_after_baseline_failure(run, json.loads((run.output / "summary.json").read_text()))
+        except Exception as failure:
+            print(f"diagnostic-only {type(failure).__name__}: {failure}", file=sys.stderr, flush=True)
+    return primary_exit_code
 
 
 if __name__ == "__main__":

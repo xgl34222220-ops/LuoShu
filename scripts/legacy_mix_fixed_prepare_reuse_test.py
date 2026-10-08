@@ -75,6 +75,7 @@ class LegacyMixPrepareReuse(unittest.TestCase):
             "luoshu_clear_task_pid() { return 0; }\n")
         self.calls = self.root / "instance-calls.jsonl"
         self.composite_calls = self.root / "composite-calls.txt"
+        self.ink_checks = self.root / "ink-check-calls.txt"
         self.child_errors = self.root / "instance-errors.jsonl"
         wrapper = self.module / "common/python/bin/luoshu-python"
         wrapper.write_text('#!/bin/sh\nunset PYTHONHOME LD_LIBRARY_PATH\n'
@@ -109,7 +110,10 @@ sys.exit(result.returncode)
 ''')
         wrapper.chmod(0o755)
         (self.module / "common/luoshu_composite.sh").write_text(
-            '#!/bin/sh\nprintf "run\\n" >> "$REUSE_COMPOSITE_CALLS"\n'
+            '#!/bin/sh\nif [ "${1:-}" = --validate-output ]; then\n'
+            '    printf "validate-ink\\n" >> "$REUSE_INK_CHECKS"\n'
+            '    exec "$HOST_PYTHON" "$MODDIR/common/composite_font.py" "$@"\nfi\n'
+            'printf "run\\n" >> "$REUSE_COMPOSITE_CALLS"\n'
             '"$HOST_PYTHON" "$MODDIR/common/composite_font.py" "$@" || exit $?\n'
             '[ -z "${REUSE_COMPOSITE_CHANGE:-}" ] || printf "\\n# changed during generation\\n" >> "$REUSE_COMPOSITE_CHANGE"\n'
             'if [ "${REUSE_HOLD_COMPOSITE:-0}" = 1 ]; then\n'
@@ -126,6 +130,7 @@ printf '%s\\n' '{"status":"ok"}'
                     "REUSE_CALLS": str(self.calls), "REUSE_CAPTURED": str(self.captured),
                     "REUSE_ERRORS": str(self.child_errors), "REUSE_HOST_FONTTOOLS_SITE": HOST_FONTTOOLS_SITE,
                     "REUSE_COMPOSITE_CALLS": str(self.composite_calls),
+                    "REUSE_INK_CHECKS": str(self.ink_checks),
                     "HOST_PYTHON": sys.executable}
         definitions = self.script.read_text().split('case "${1:-config}" in', 1)[0]
         self.definitions = self.module / "common/definitions.sh"
@@ -247,15 +252,34 @@ prepare_source digit Digit wght=400 fixed 400 "$REUSE_ROOT/in/digit.ttf" || exit
         self.assertEqual(self.composite(name="warm", extra_env=env).returncode, 0)
         self.assertEqual(len(validation_calls.read_text().splitlines()), 1)
         self.assertEqual(self.composite_count(), 1)
+        self.assertFalse(self.ink_checks.exists())
         self.assertEqual((self.taskroot / "warm.ttf").read_bytes(), original)
         receipt.unlink()
         self.assertEqual(self.composite(name="no-proof", extra_env=env).returncode, 0)
         self.assertEqual(len(validation_calls.read_text().splitlines()), 2)
         self.assertEqual(self.composite_count(), 1)
+        self.assertEqual(len(self.ink_checks.read_text().splitlines()), 1)
         receipt.write_text("schema=invalid\npayloadDigest=unproven\n")
         self.assertEqual(self.composite(name="bad-proof", extra_env=env).returncode, 0)
         self.assertEqual(self.composite_count(), 2)
         self.assertEqual((self.taskroot / "bad-proof.ttf").read_bytes(), original)
+
+    def test_missing_receipt_cannot_promote_empty_required_cached_glyph(self):
+        self.prepare_composite_inputs()
+        self.assertEqual(self.composite().returncode, 0)
+        original = (self.taskroot / 'result.ttf').read_bytes()
+        cached, = self.composite_cache().glob('*.font')
+        Path(str(cached) + '.receipt').unlink()
+        with TTFont(cached, recalcTimestamp=False) as font:
+            font['glyf'][font.getBestCmap()[ord('B')]] = TTGlyphPen(None).glyph()
+            font.save(cached)
+        result = self.composite(name='guarded-recovery')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.composite_count(), 2)
+        self.assertEqual(len(self.ink_checks.read_text().splitlines()), 1)
+        self.assertEqual((self.taskroot / 'guarded-recovery.ttf').read_bytes(), original)
+        with TTFont(self.taskroot / 'guarded-recovery.ttf') as font:
+            self.assertGreater(font['glyf'][font.getBestCmap()[ord('B')]].numberOfContours, 0)
 
     def test_composite_dependency_changing_during_generation_is_never_published(self):
         self.prepare_composite_inputs()

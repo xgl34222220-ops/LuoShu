@@ -1,5 +1,14 @@
 package io.github.xgl34222220.luoshu
 
+/** Installed files do not prove the root manager currently enables the module. */
+internal fun googleFontMaintenanceEligible(
+    loading: Boolean,
+    statusCached: Boolean,
+    rootGranted: Boolean,
+    installed: Boolean,
+    enabled: Boolean = false,
+): Boolean = !loading && !statusCached && rootGranted && installed && enabled
+
 /** Events may arrive together; one pass owns the request and one pending event. */
 internal class GoogleFontMaintenanceGate {
     private var trusted = false

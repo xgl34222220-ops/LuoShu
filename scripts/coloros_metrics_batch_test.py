@@ -297,15 +297,92 @@ class ColorOSMetricsTest(unittest.TestCase):
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(self.report()[0]['reason'], 'collection-metrics-preserved')
 
+    def test_single_face_alias_keeps_stock_collection_and_nonzero_faces_visible(self):
+        for name, fmt, face in (('SysFont-Regular.ttf', 'TTC', 1),
+                                ('SysSans-Hans-Regular.ttc', 'TTC', 0),
+                                ('SysSans-Hant-Regular.otf', 'OTC', 1)):
+            with self.subTest(name=name, face=face):
+                path = self.target(name)
+                font_file(path)
+                stock_path = self.stock_file(name)
+                second = self.root / 'second-stock.ttf'
+                font_file(second, top=900)
+                with TTFont(stock_path) as first, TTFont(second) as other:
+                    collection = TTCollection()
+                    collection.fonts = [first, other]
+                    collection.save(stock_path)
+                original = stock_path.read_bytes()
+                actual_format, metrics = _read_metrics(stock_path, face)
+                self.assertEqual(actual_format, 'TTC')
+                self.inventory({f'/system/fonts/{name}': {
+                    'format': fmt, 'faceIndex': face, 'metrics': metrics}})
+
+                result = batch.build(self.module, self.stage)
+
+                self.assertFalse(path.exists(), 'single-face alias must expose the original collection')
+                self.assertEqual(stock_path.read_bytes(), original)
+                with TTFont(stock_path, fontNumber=1) as retained:
+                    self.assertEqual(retained['glyf']['A'].yMax, 900)
+                self.assertEqual(result['mapped'], 0)
+                self.assertEqual(self.report()[0]['reason'], 'stock-collection-slot-preserved')
+
+    def test_nonzero_stock_index_alias_is_preserved_before_metrics_reads(self):
+        path = self.target('SysFont-Regular.ttf')
+        font_file(path)
+        slot = {**stock(), 'faceIndex': 1}
+        self.inventory({'/system/fonts/SysFont-Regular.ttf': slot})
+        with patch.object(batch, 'write_metrics', side_effect=AssertionError('unsafe single-face write')):
+            result = batch.build(self.module, self.stage)
+        self.assertFalse(path.exists())
+        self.assertEqual(result['mapped'], 0)
+        self.assertEqual(self.report()[0]['reason'], 'stock-collection-slot-preserved')
+
+    def test_stock_collection_alias_is_preserved_even_when_metrics_are_invalid(self):
+        path = self.target('SysFont-Regular.ttf')
+        font_file(path)
+        self.inventory({'/system/fonts/SysFont-Regular.ttf': {'format': 'TTC', 'metrics': {}}})
+        result = batch.build(self.module, self.stage)
+        self.assertFalse(path.exists())
+        self.assertEqual(result['mapped'], 0)
+        self.assertEqual(self.report()[0]['reason'], 'stock-collection-slot-preserved')
+
+    def test_single_face_stock_slot_still_aligns_metrics_without_extra_header_reads(self):
+        path = self.target('SysFont-Regular.ttf')
+        font_file(path, top=730)
+        self.inventory({'/system/fonts/SysFont-Regular.ttf': {
+            **stock(), 'format': 'TTF', 'faceIndex': 0}})
+        reads = []
+        original_open = Path.open
+
+        def counted_open(candidate, *args, **kwargs):
+            if candidate == path:
+                reads.append(args[0] if args else kwargs.get('mode', 'r'))
+            return original_open(candidate, *args, **kwargs)
+
+        with patch.object(Path, 'open', counted_open):
+            result = batch.build(self.module, self.stage)
+        self.assertEqual(result['mapped'], 1)
+        with TTFont(path) as retained:
+            self.assertEqual(retained['glyf']['A'].yMax, 730)
+            self.assertEqual(retained['hhea'].ascent, 920)
+        # Alias and collection-selection header probes plus the existing writer
+        # stream; the stock-slot guard adds no font-table or header read.
+        self.assertEqual(reads, ['rb', 'rb', 'rb'])
+
     def test_generation_failure_does_not_replace_any_existing_alias(self):
         first = self.target('SysSans-Hans-Regular.ttf'); font_file(first)
         second = self.target('SysSans-Z-Broken.ttf'); second.write_bytes(b'brokenfont')
+        guarded = self.target('SysFont-Regular.ttf'); font_file(guarded)
         self.inventory({'/system/fonts/SysSans-Hans-Regular.ttf': stock(),
-                        '/system/fonts/SysSans-Z-Broken.ttf': stock()})
+                        '/system/fonts/SysSans-Z-Broken.ttf': stock(),
+                        '/system/fonts/SysFont-Regular.ttf': {**stock(), 'format': 'TTC', 'faceIndex': 1}})
         original = first.read_bytes()
+        guarded_original = guarded.read_bytes()
         with self.assertRaises(Exception):
             batch.build(self.module, self.stage)
         self.assertEqual(first.read_bytes(), original)
+        self.assertEqual(guarded.read_bytes(), guarded_original,
+                         'stock-preserving alias removal waits for every generated result')
         self.assertFalse(list(self.stage.glob('.coloros-metrics-*')))
         self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
 

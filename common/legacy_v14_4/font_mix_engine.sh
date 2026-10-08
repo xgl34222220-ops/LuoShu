@@ -481,17 +481,27 @@ _mix_build_composite_file() {
     _fc_tmp_error="$_fc_build_tmp/composite.err"; _fc_tmp_receipt="$_fc_build_tmp/receipt"
     _fc_progress="$CONFIG_DIR/composite_progress.json"
     luoshu_mix_phase_begin composite cold_composite_runner fixed cold
-    if [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_LATIN_HASH" ] && [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_DIGIT_HASH" ]; then
+    if [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_LATIN_HASH" ] && [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_DIGIT_HASH" ] &&
+       [ "$(font_detect_format "$_fc_cjk_src")" != TTC ]; then
         # Selecting one complete font for all three roles needs no glyph rewrite.
-        # Reuse the validated source directly instead of serializing the entire CJK
-        # font through embedded Python.
+        # Reuse a validated single face instead of rewriting the CJK font. A TTC
+        # still needs the real generator's role-aware face selection; copying a
+        # collection cannot be proved by validating an arbitrary face zero.
         ln "$_fc_cjk_src" "$_fc_tmp" 2>/dev/null || cp -f "$_fc_cjk_src" "$_fc_tmp" 2>/dev/null || {
             composite_build_temp_cleanup
             set_mix_error '无法保存同源复合字体缓存'
             return 1
         }
+        if ! composite_validate_output "$_fc_tmp" >"$_fc_tmp_report" 2>"$_fc_tmp_error"; then
+            [ ! -s "$_fc_tmp_error" ] || cat "$_fc_tmp_error" >> "$LOG_FILE" 2>/dev/null || true
+            _detail=$(extract_composite_error "$_fc_tmp_error" 1)
+            luoshu_mix_phase_end 1 same-source
+            composite_build_temp_cleanup
+            set_mix_error "$_detail"
+            return 1
+        fi
         luoshu_mix_phase_end 0 same-source
-        printf '{"status":"ok","fastPath":"same-source"}\n' >"$_fc_tmp_report" 2>/dev/null || true
+        printf '{"status":"ok","fastPath":"same-source","validatedInk":true}\n' >"$_fc_tmp_report" 2>/dev/null || true
     else
         rm -f "$_fc_progress" 2>/dev/null || true
         if command -v timeout >/dev/null 2>&1; then

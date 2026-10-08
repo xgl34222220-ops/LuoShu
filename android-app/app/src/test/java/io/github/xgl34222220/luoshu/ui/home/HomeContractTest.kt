@@ -51,6 +51,9 @@ class HomeContractTest {
         assertEquals("系统默认字体（DemoFont未生效）", state.currentFont)
         assertEquals("字体未生效", state.taskTitle)
         assertTrue(state.taskMessage.contains("默认字体"))
+        assertTrue(state.taskMessage.contains("仍需核实"))
+        assertFalse(state.taskMessage.contains("已安全"))
+        assertFalse(state.taskMessage.contains("已完整回滚"))
         assertFalse(state.mountHealthy)
     }
 

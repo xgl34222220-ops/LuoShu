@@ -283,7 +283,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
           # Four bounded recordings retain every original frame/timestamp.
           # Re-covering home, black blanks and unknown frames fail acceptance.
-          script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default
+          script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --diagnostic-video-after-baseline-failure
       - name: Upload separate startup recordings and logs
         if: always()
         uses: actions/upload-artifact@v4

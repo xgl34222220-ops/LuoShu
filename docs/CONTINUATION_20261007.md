@@ -344,3 +344,32 @@ API28/36原件70张不同PNG均逐张独立看过，共72屏幕记录、46功能
 此批HOME10秒/root8秒/host20秒/录像30秒、三次fresh root与真实稳定raw帧、Launcher内容、迟到通知/close、同PID、ANR与所有视觉断言保持。两台OEM/Google/连续实时及reboot持续覆盖、整次字体切换与阶段速度、ColorOS整机reboot、App冷启/加载、97秒prezygote、600/630合成清理仍分别待真机证据，不以UI或采集诊断替代。
 
 发布前root完整source门禁374.311158秒自然exit0，43个unittest汇总/751次执行/43 OK；运行中六文件字节全部未变。原MissingNamespaceLifecycleTest因native一对一/proc PID映射条件setUpClass跳过一次，原原因和日志保留；JSON中字体slot skipped并非测试skip。另行完整namespace16的31fail/1error依然保存，不用source通过覆盖。root独立smoke122全部通过，真实mksh强制存在；所有108 shell原流与18组对照经独立审字节核同。此门禁后只有本文补实际结果，其余五代码/测试/工作流文件与已通过输入一致；SDK、实际动效及四启动原录像仍须准确新SHA实跑。
+
+## 3712887 原件终态与失败后独立诊断
+
+准确 `3712887fcb53d1b456df141e2ed9ee2790b9c38a` / tree `d32a568b75609b158a26303f62c1c2db0d4107eb` 的 [candidate37778170707](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37778170707) 自然 success，[UI37778170694](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37778170694) 的 SDK/API28/API36 success、visual failure。实际35套件236 JVM无fail/error/skip，lint40 warnings/1 hint。候选日志100个unittest汇总、1785次含重复执行；补充和解包验收中的完整namespace16各通过，宿主原31fail/1error及两处Google provider mount namespace权限条件跳过仍分别保存，不套旧计数。
+
+模块10672807字节/SHA256 `390ba2a8a350b232905e2158e6a0253eccf27cb1779a4b20d8fb633031eb3522`，release APK4088468字节/SHA256 `4abc8b4635fcbf27a9e119057cdcbebb4505747b3508e187780e7779192f3896`。v2/v3、内嵌APK逐byte、frozen22、实际HELPERS7、Google9及phase helper按371 Git对象核同；安装包仍内部留存。两API的命令原流绑定核同不替代手机像素；API36真实GMS persistent的SIM_STATE_CHANGED ANR与lastanr/data_app_anr缺项分别保留，不报全系统无ANR或给HOME因果结论。
+
+视觉原100成员只有0MP4/0XML/1PNG，独立原图是Launcher壁纸与中央加载图形，没有桌面内容或洛书画面。native process→ready2061ms、公开连接850ms、配置8ms均同钟；首请求40 attempts、79 root calls、40次root null，root wait8152ms，child查询0。getWindows非空list对象不证明有非空/active/focused窗口。host ready在HOME+5.712303秒，原notice迟到4.140848秒，未消费、close失败；暗路径承接fatal reader，原warm两次PID为空，四标准视频没有生成。截图分段command已配置但真实batch执行0次，不能把未执行诊断叫缺marker失败，不能解释此前约两秒的batch成本。
+
+下一最小批显式opt-in只在原HOME失败、标准视频及原App PID证据均为空且当前pidof可靠为空时，在原diagnostics、原close、原summary与exit1已经冻结以后采一段独立诊断原片。它使用独立diagnostic-only目录/命令账本，低层ADB一次MainActivity启动和自有30秒screenrecord，不调用原launch、hierarchy、session重连或视觉classifier，不回填原recordings/checks/PID，不覆盖原截图/logcat/ANR/summary，不消费旧迟到结果。录像、启动、拉取、解码失败也保留本阶段实际输出和错误；只清理自有host reader及本次唯一临时录像，不能kill App/GMS或清系统缓存。
+
+该独立原片不是合格HOME基线后的标准亮暗冷暖视频；现有Popen加0.2秒不能证明codec已记录启动前帧，必须标unknown。原MP4、真实PTS/timebase及逐原帧解码供人工审画面；只有解码hash不能证明像素视觉通过，后置诊断速度也不能外推原cold/warm或字体整次提速。原HOME10/root8/host20/录像30秒及fresh3、同PID、ANR、首帧、Dock/玻璃、迟到close门禁全保留。两台真机覆盖/Google/live A→B→A/reboot/整次切换与清理、ColorOS整机boot、App冷启动、97秒prezygote与600/630合成仍分别缺证据。
+
+同批还有一项已定位的输出遗漏：原native root循环已经读取并记录 `window_counts` 的elapsed/windows/active/focused，但最终instrumentation的JSON字段投影只保留root/child度量，HOME迟到时host不能再读取response，已有窗口内容统计便缺失。修正只让该既有JSON串走同一完整输出路径，不增加getter/Binder调用、不改root循环、预算或通知。该旧array没有last32 cap；沿用JSON长度不超过70000的守卫，超界时省略只能视为unknown，不能称零窗口或有界last32。不能放到scalar1024截断路径产生坏JSON，不能把此证据保留修正称启动根因或性能改善。
+
+
+## 2026-10-08 真实手机事故与本批隔离修正
+
+用户已报告禁用洛书后完整重启仍慢、严重发热、Play 不可用及换字体更慢；“开洛书”指打开 App 还是启用模块尚不明确。实际交付包为 be285fb0，ZIP SHA256 c0925c1cf21c10b22777faabef3f1c433f87ee52c071a2b95ad1343c616e3166；是否安装这个精确包、机型和模块管理器仍未确认。本批不操作用户手机、不要求热机重启/日志复现、不交付新未验包；模拟器或 CI 成功不能证明用户手机安全。
+
+两张原照片已实际读取：聊天多个气泡内文字不可见，部分英文可见；不猜空白原文或具体字体表根因。日志显示 ColorOS V17.0.0、同一 mix 的内层 apply32.593 秒和外层33.4 秒，清理均成功；这是任务清理耗时证据，不能相加、当成两次切换或推导完整点击到生效耗时，也不能当字体输出正确性证明。
+
+已复现并修正的非冻结安全缺口：早期 router 调用共享目录字体迁移；boot/service 禁止 Google restart 的环境标志未被 refresh 消费；Google 恢复失败仍继续卸载；App 仅用 installed 信任已禁用模块。新增门禁保留原 Google 恢复入口、持久 undo、完整身份检查与失败日志。挂载失败 UI 不再保证“已安全/完整回滚”，而明确回退状态待核实。冻结1.1.1 的22文件字节与 nohook 约束保持，不扩系统/GMS进程清理范围。
+
+UI 并行修复目录导入：请求不再提前推进基线或吞掉差异；超过32项可显式选批、同批重试；仅显式记录基线清差异，反馈为“已请求”且复用当前权限/扫描/忙状态。没有新增常驻刷新、计时器或耗电动画。保留玻璃、Dock 和既有布局条件；新对话框的完整 Android/小屏视觉仍需同SHA CI。
+
+字体正确性与性能同时验收：实际包脚本在隔离构造字体上曾对有 cmap 但无轮廓的 B/2/部分中文返回成功；这是可复现代码缺口，不能认定是真机照片根因。最终输出及同源/旧无receipt缓存路径必须执行新验证，真缓存继续以精确源/引擎/产品身份复用。ColorOS 的原厂集合字体/face index 契约也需与 existing-alias路径一致保护。性能优先减少可安全合并的重复读取，保留全SHA、独立代、锁、失败清理与回滚；I/O字节减少不等于 host/真机整次时间改善。App点击到观测terminal、后台阶段、清理、手机整次reboot是不同证据，仍不能拿部分热缓存百分比或普通启动通过宣称全部解决。
+
+原371候选/API28/API36成功和启动视觉失败原件保留；本批继承未提交的诊断录像补丁不提升原HOME预算，不忽略迟到notice/close，不将diagnostic-only或合成codec样本算四段原录像。最终准确提交SHA、全量CI终态与独立原画面验收须另记录。

@@ -111,10 +111,15 @@ status_json() {
     type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
         LUOSHU_BOOT_RECONCILE_CACHED_ONLY=1 luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
     _installed=false
+    _enabled=false
     _version='未安装'
     _version_code=0
     if [ -f "$MODDIR/module.prop" ]; then
         _installed=true
+        if [ ! -e "$MODDIR/disable" ] && [ ! -L "$MODDIR/disable" ] &&
+           [ ! -e "$MODDIR/remove" ] && [ ! -L "$MODDIR/remove" ]; then
+            _enabled=true
+        fi
         _version="$(read_prop "$MODDIR/module.prop" version)"
         _version_code="$(read_prop "$MODDIR/module.prop" versionCode)"
     fi
@@ -225,8 +230,8 @@ status_json() {
         case "$_font_effect_state" in system|verified) _activation=boot-verified ;; *) _activation=unverified ;; esac
     fi
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"liveApplied":%s,"activation":"%s","rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
-        "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"enabled":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"liveApplied":%s,"activation":"%s","rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+        "$_installed" "$_enabled" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
         "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
         "$(json_escape "$_verification_state")" "$(json_escape "$_verification_mode")" \
         "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" "$(json_escape "$_mount_failed")" \

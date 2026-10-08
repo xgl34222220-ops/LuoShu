@@ -218,7 +218,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         for (String key : fields) lastDiagnostic(diagnostics, "snapshot_" + key, result.getString(key));
         // Keep the bounded JSON complete; generic 1024-character truncation
         // would turn the retained call records into invalid JSON.
-        for (String field : new String[] {"child_query_records", "root_query_records"}) {
+        for (String field : new String[] {"child_query_records", "root_query_records", "window_counts"}) {
             String records = result.getString(field);
             if (diagnostics != null && records != null && records.length() <= 70000) {
                 diagnostics.putString("helper_last_snapshot_" + field, records);
