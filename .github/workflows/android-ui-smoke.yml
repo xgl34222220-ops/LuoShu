@@ -325,6 +325,12 @@ jobs:
           finally:
               print(f'::{boundary}::', flush=True)
           PY
+      - name: Preserve original startup media bytes in job log
+        if: always()
+        shell: bash
+        run: |
+          # Original bytes only; missing/diagnostic footage cannot pass primary acceptance.
+          python3 scripts/dump_ui_original_media.py
       - name: Upload separate startup recordings and logs
         if: always()
         uses: actions/upload-artifact@v4

@@ -361,6 +361,7 @@ sh "$ROOT/scripts/stock_scan_lock_test.sh"
 # Exercise the same helper chain as the UI workflow; source checks alone do not
 # cover the production Java last-request projection used by session shutdown.
 python3 "$ROOT/scripts/android_ui_smoke_test.py"
+python3 "$ROOT/scripts/dump_ui_original_media_test.py"
 python3 "$ROOT/scripts/ui_snapshot_session_test.py"
 python3 "$ROOT/scripts/ui_snapshot_java_test.py"
 
