@@ -1810,5 +1810,136 @@ class QuickReturnHarnessTest(unittest.TestCase):
             self.assertTrue(evidence["after_snapshot_received"])
 
 
+class AdbCommandEvidenceTest(unittest.TestCase):
+    """Real host pipe processes exercise collection; none is an Android device."""
+
+    def run_with_program(self, output, program):
+        run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+        run.adb_command = [sys.executable, "-u", "-c", program]
+        return run
+
+    def command_evidence(self, output, index=0):
+        records = [json.loads(line) for line in (output / "adb-commands.jsonl").read_text().splitlines()]
+        record = records[index]
+        streams = []
+        for stream in ("stdout", "stderr"):
+            data = (output / record[stream]).read_bytes()
+            self.assertEqual(len(data), record[stream + "_bytes"])
+            self.assertEqual(hashlib.sha256(data).hexdigest(), record[stream + "_sha256"])
+            streams.append(data)
+        self.assertGreaterEqual(record["ended_monotonic_seconds"], record["started_monotonic_seconds"])
+        self.assertAlmostEqual(record["elapsed_seconds"], record["ended_monotonic_seconds"] - record["started_monotonic_seconds"])
+        self.assertGreaterEqual(record["raw_streams_written_monotonic_seconds"], record["ended_monotonic_seconds"])
+        return records, record, streams
+
+    def test_full_large_stdout_and_stderr_keep_logcat_scope_and_default_budget(self):
+        stdout = b"stdout begin\n" + b"s" * (3 * 1024 * 1024) + b"\nstdout end\n"
+        stderr = b"stderr begin\n" + b"e" * (2 * 1024 * 1024) + b"\nstderr end\n"
+        program = "import sys;sys.stdout.buffer.write(b'stdout begin\\n'+b's'*(3*1024*1024)+b'\\nstdout end\\n');sys.stderr.buffer.write(b'stderr begin\\n'+b'e'*(2*1024*1024)+b'\\nstderr end\\n')"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary);run = self.run_with_program(output, program)
+            self.assertEqual(stdout.decode(), run.logcat())
+            records, record, streams = self.command_evidence(output)
+            self.assertEqual([stdout, stderr], streams)
+            self.assertEqual(stdout, (output / "logcat.txt").read_bytes())
+            self.assertEqual(["logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime"], record["arguments"][4:])
+            self.assertEqual(20, record["timeout_seconds"])
+            self.assertEqual(("returned", 0, True), (record["outcome"], record["returncode"], record["check"]))
+            self.assertEqual(1, len(records))
+            self.assertFalse(run.adb_diagnostic_errors)
+
+    def test_fragmented_binary_streams_are_preserved_without_decoding(self):
+        program = "import os,time\nfor out,err in [(b'\\x00\\xffA\\r',b'E\\x80'),(b'\\nB',b'\\x00\\n'),(b'C\\xfe',b'END')]:\n os.write(1,out);os.write(2,err);time.sleep(.01)"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary);run = self.run_with_program(output, program)
+            result = run.adb("host-pipe-fixture")
+            _, record, streams = self.command_evidence(output)
+            self.assertEqual([b"\x00\xffA\r\nBC\xfe", b"E\x80\x00\nEND"], streams)
+            self.assertEqual([result.stdout, result.stderr], streams)
+            self.assertEqual(0, record["returncode"])
+
+    def test_nonzero_full_error_streams_survive_checked_and_unchecked_calls(self):
+        prefix = f"ActivityManager: ANR in {PACKAGE}\n".encode()
+        program = f"import sys;sys.stdout.buffer.write({prefix!r}+b'o'*(1024*1024));sys.stderr.buffer.write(b'error begin\\x00\\xff'+b'e'*(1024*1024)+b'error end');sys.exit(7)"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary);run = self.run_with_program(output, program)
+            with self.assertRaisesRegex(RuntimeError, r"failed \(7\)"):
+                run.adb("logcat", "-d")
+            result = run.adb("logcat", "-d", check=False)
+            records, first, streams = self.command_evidence(output)
+            self.assertEqual([prefix + b"o" * (1024 * 1024), b"error begin\x00\xff" + b"e" * (1024 * 1024) + b"error end"], streams)
+            self.assertEqual("App ANR recorded by ActivityManager", crash_reason(streams[0].decode(), PACKAGE))
+            _, second, unchecked_streams = self.command_evidence(output, 1)
+            self.assertEqual(streams, unchecked_streams)
+            self.assertEqual(7, result.returncode)
+            self.assertEqual([1, 2], [record["index"] for record in records])
+            self.assertTrue(first["check"]);self.assertFalse(second["check"])
+            self.assertTrue(all(record["outcome"] == "returned" and record["returncode"] == 7 for record in records))
+
+    def test_timeout_partial_bytes_survive_and_check_false_still_fails(self):
+        marker = f"ActivityManager: ANR in {PACKAGE}\n".encode()
+        program = f"import os,sys,time;sys.stdout.buffer.write(b'begin\\x00\\xff'+b'o'*(1024*1024)+{marker!r});sys.stdout.buffer.flush();sys.stderr.buffer.write(b'error begin'+b'e'*(1024*1024)+b'\\x00\\xfeend');sys.stderr.buffer.flush();time.sleep(3)"
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary);run = self.run_with_program(output, program)
+            with self.assertRaisesRegex(RuntimeError, "adb timed out after 0.75s") as failure:
+                run.adb("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", timeout=.75, check=False)
+            _, record, streams = self.command_evidence(output)
+            self.assertIsInstance(failure.exception.__cause__, subprocess.TimeoutExpired)
+            self.assertEqual([failure.exception.__cause__.output, failure.exception.__cause__.stderr], streams)
+            self.assertEqual([b"begin\x00\xff" + b"o" * (1024 * 1024) + marker, b"error begin" + b"e" * (1024 * 1024) + b"\x00\xfeend"], streams)
+            self.assertEqual("App ANR recorded by ActivityManager", crash_reason(streams[0].decode(errors="replace"), PACKAGE))
+            self.assertEqual("timed-out", record["outcome"])
+            self.assertIsNone(record["returncode"])
+            self.assertTrue(record["partial_streams"])
+            self.assertEqual(.75, record["timeout_seconds"])
+            self.assertFalse(record["check"])
+            self.assertEqual(1, run.adb_command_count)
+
+    def test_full_large_logcat_anr_at_start_middle_and_end_always_fails(self):
+        marker = f"\nActivityManager: ANR in {PACKAGE}\n".encode()
+        for before, after in [(0, 3 * 1024 * 1024), (1536 * 1024, 1536 * 1024), (3 * 1024 * 1024, 0)]:
+            with self.subTest(before=before), tempfile.TemporaryDirectory() as temporary:
+                program = f"import sys;sys.stdout.buffer.write(b'p'*{before}+{marker!r}+b'q'*{after});sys.stderr.buffer.write(b'system stderr'+b'e'*(1024*1024))"
+                output = Path(temporary);run = self.run_with_program(output, program)
+                with self.assertRaisesRegex(RuntimeError, "App ANR recorded by ActivityManager"):
+                    run.assert_running()
+                records, _, streams = self.command_evidence(output)
+                self.assertEqual(b"p" * before + marker + b"q" * after, streams[0])
+                self.assertEqual(b"system stderr" + b"e" * (1024 * 1024), streams[1])
+                self.assertEqual(1, len(records))  # No later pidof can mask the crash gate.
+
+    def test_spawn_error_records_unavailable_returncode_and_preserves_exception(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary);run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            run.adb_command = [str(output / "missing-owned-host-fixture")]
+            with self.assertRaises(FileNotFoundError):
+                run.adb("logcat", "-d")
+            _, record, streams = self.command_evidence(output)
+            self.assertEqual([b"", b""], streams)
+            self.assertEqual("exception", record["outcome"])
+            self.assertIsNone(record["returncode"])
+            self.assertIn("FileNotFoundError", record["error"])
+
+    def test_evidence_failure_preserves_timeout_and_cannot_make_main_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary);run = self.run_with_program(output, "import time;print('partial',flush=True);time.sleep(3)")
+            with patch.object(run, "_record_adb", side_effect=OSError("evidence disk failure")):
+                with self.assertRaisesRegex(RuntimeError, "adb timed out after 0.1s"):
+                    run.adb("host-pipe-fixture", timeout=.1)
+            self.assertIn("evidence disk failure", run.adb_diagnostic_errors[0])
+            apk = output / "app.apk";apk.write_bytes(b"host path fixture")
+            run = self.run_with_program(output, "print('actual child completed')")
+            run.run = lambda: run.adb("host-pipe-fixture")
+            run.diagnostics = Mock();run.close_snapshot_session = Mock()
+            arguments = ["android_ui_smoke.py", "--apk", str(apk), "--output", str(output)]
+            with patch.object(run, "_record_adb", side_effect=OSError("evidence disk failure")), \
+                    patch("android_ui_smoke.sys.argv", arguments), patch("android_ui_smoke.SmokeRun", return_value=run):
+                self.assertEqual(1, main())
+            summary = json.loads((output / "summary.json").read_text())
+            self.assertFalse(summary["passed"])
+            self.assertIn("evidence disk failure", summary["error"])
+            self.assertEqual(1, summary["adb_command_count"])
+
+
 if __name__ == "__main__":
     unittest.main()

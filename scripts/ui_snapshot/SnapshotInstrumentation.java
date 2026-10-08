@@ -27,7 +27,9 @@ import java.io.FileOutputStream;
 import java.io.FilenameFilter;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -41,14 +43,34 @@ import java.util.Set;
  */
 public final class SnapshotInstrumentation extends Instrumentation {
     private Bundle arguments;
+    private final Bundle lifecycleDiagnostics = new Bundle();
     private int nodeCount;
     private int childQueryCount;
     private long childQueryMillis;
+    private long childQueryMaxMillis;
+    private long childRootDeadline;
+    private int childQueryNullCount;
+    private int childQueryNonnullCount;
+    private int childQueryThrownCount;
+    private int childQueryDiagnosticFailures;
+    private final ArrayDeque<JSONObject> childQueryRecords = new ArrayDeque<>();
+    private AccessibilityNodeInfo observedRoot;
+    private final HashMap<Integer, AccessibilityNodeInfo> observedChildren = new HashMap<>();
+    private int observedChildReuseCount;
     private static final int PROTOCOL = 1;
     private static final int ROOT_WAIT_MS = 8000;
+    private static final int CHILD_QUERY_RECORD_LIMIT = 32;
+    private static final int OBSERVED_CHILD_LIMIT = 32;
 
     @Override
     public void onCreate(Bundle arguments) {
+        diagnosticTime(lifecycleDiagnostics, "helper_on_create_started_uptime_ms");
+        if (Build.VERSION.SDK_INT >= 24) {
+            lifecycleDiagnostics.putString("helper_process_started_uptime_ms",
+                    Long.toString(android.os.Process.getStartUptimeMillis()));
+        } else {
+            lifecycleDiagnostics.putString("helper_process_start_time_status", "unavailable-before-api24");
+        }
         super.onCreate(arguments);
         this.arguments = arguments;
         start();
@@ -56,8 +78,11 @@ public final class SnapshotInstrumentation extends Instrumentation {
 
     @Override
     public void onStart() {
+        long started = SystemClock.uptimeMillis();
         Bundle result;
         Bundle diagnostics = new Bundle();
+        diagnostics.putAll(lifecycleDiagnostics);
+        diagnostics.putString("helper_on_start_started_uptime_ms", Long.toString(started));
         try {
             String nonce = arguments.getString("session_nonce");
             if (nonce == null) {
@@ -135,8 +160,17 @@ public final class SnapshotInstrumentation extends Instrumentation {
         lastDiagnostic(diagnostics, "snapshot_status", result.getString("snapshot"));
         String[] fields = {"error", "wait_ms", "attempts", "incomplete_roots", "root_source", "nodes",
                 "last_root_package", "last_root_window_id", "last_root_child_count", "last_root_visible_child_count",
-                "child_query_count", "child_query_ms", "export_child_query_count", "export_child_query_ms"};
+                "last_root_examined_child_count", "last_root_observation_partial", "last_root_observation_deadline_reached",
+                "child_query_count", "child_query_ms", "export_child_query_count", "export_child_query_ms",
+                "child_query_max_ms", "child_query_null_count", "child_query_nonnull_count", "child_query_thrown_count",
+                "child_query_records_omitted", "child_query_records_policy", "child_query_diagnostic_failures", "observed_child_reuse_count"};
         for (String key : fields) lastDiagnostic(diagnostics, "snapshot_" + key, result.getString(key));
+        // Keep the bounded JSON complete; generic 1024-character truncation
+        // would turn the retained call records into invalid JSON.
+        String records = result.getString("child_query_records");
+        if (diagnostics != null && records != null && records.length() <= 70000) {
+            diagnostics.putString("helper_last_snapshot_child_query_records", records);
+        }
     }
 
     private static JSONObject serviceInfoEvidence(AccessibilityServiceInfo info) throws Exception {
@@ -361,6 +395,15 @@ public final class SnapshotInstrumentation extends Instrumentation {
         nodeCount = 0;
         childQueryCount = 0;
         childQueryMillis = 0;
+        childQueryMaxMillis = 0;
+        childRootDeadline = 0;
+        childQueryNullCount = 0;
+        childQueryNonnullCount = 0;
+        childQueryThrownCount = 0;
+        childQueryDiagnosticFailures = 0;
+        childQueryRecords.clear();
+        clearObservedChildren();
+        observedChildReuseCount = 0;
         lastDiagnosticTime(diagnostics, "snapshot_started");
         lastDiagnostic(diagnostics, "request_status", "snapshot-started");
         Bundle result = new Bundle();
@@ -391,6 +434,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
             lastDiagnostic(diagnostics, "root_wait_started_uptime_ms", Long.toString(waitStarted));
             lastDiagnostic(diagnostics, "request_status", "cache-refresh");
             long deadline = waitStarted + ROOT_WAIT_MS;
+            childRootDeadline = deadline;
             // A persistent test connection can retain an obsolete tab node
             // while a different subtree already reflects the new page. Clear
             // only this connection's accessibility-node cache before querying
@@ -429,6 +473,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                     }
                     if (!refreshed) {
                         // The node is obsolete; never reuse it as UI evidence.
+                        clearObservedChildren();
                         incompleteRoot.recycle();
                         incompleteRoot = null;
                     }
@@ -556,6 +601,18 @@ public final class SnapshotInstrumentation extends Instrumentation {
         } finally {
             result.putString("child_query_count", Integer.toString(childQueryCount));
             result.putString("child_query_ms", Long.toString(childQueryMillis));
+            result.putString("child_query_max_ms", Long.toString(childQueryMaxMillis));
+            result.putString("child_query_null_count", Integer.toString(childQueryNullCount));
+            result.putString("child_query_nonnull_count", Integer.toString(childQueryNonnullCount));
+            result.putString("child_query_thrown_count", Integer.toString(childQueryThrownCount));
+            result.putString("child_query_records_omitted", Integer.toString(childQueryCount - childQueryRecords.size()));
+            result.putString("child_query_records_policy", "last-32-calls; node-fields-first24-last23-if-longer-than48");
+            result.putString("child_query_diagnostic_failures", Integer.toString(childQueryDiagnosticFailures));
+            result.putString("observed_child_reuse_count", Integer.toString(observedChildReuseCount));
+            JSONArray records = new JSONArray();
+            for (JSONObject record : childQueryRecords) records.put(record);
+            result.putString("child_query_records", records.toString());
+            clearObservedChildren();
             if (root != null) root.recycle();
             if (incompleteRoot != null) incompleteRoot.recycle();
             lastDiagnosticTime(diagnostics, "snapshot_finished");
@@ -569,14 +626,30 @@ public final class SnapshotInstrumentation extends Instrumentation {
      */
     private int observeRoot(Bundle result, JSONArray observations, AccessibilityNodeInfo root,
             String source, long waitStarted) throws Exception {
+        // Retention never crosses an observation, refresh, root or request.
+        clearObservedChildren();
+        observedRoot = root;
         int visibleChildren = 0;
-        for (int index = 0; index < root.getChildCount(); index++) {
-            AccessibilityNodeInfo child = readChild(root, index);
+        int totalChildren = root.getChildCount();
+        int examinedChildren = 0;
+        for (int index = 0; index < totalChildren; index++) {
+            // A platform query cannot be interrupted, but its late return must
+            // not start another query outside the original root deadline.
+            if (childRootDeadline != 0 && SystemClock.uptimeMillis() >= childRootDeadline) break;
+            examinedChildren++;
+            AccessibilityNodeInfo child = readChild(root, index, "observe-root", 0);
             if (child == null) continue;
+            boolean retained = false;
             try {
-                if (child.isVisibleToUser()) visibleChildren++;
+                if (child.isVisibleToUser()) {
+                    visibleChildren++;
+                    if (observedChildren.size() < OBSERVED_CHILD_LIMIT) {
+                        observedChildren.put(index, child);
+                        retained = true;
+                    }
+                }
             } finally {
-                child.recycle();
+                if (!retained) child.recycle();
             }
         }
         String rootPackage = text(root.getPackageName());
@@ -584,23 +657,95 @@ public final class SnapshotInstrumentation extends Instrumentation {
         result.putString("last_root_window_id", Integer.toString(root.getWindowId()));
         result.putString("last_root_child_count", Integer.toString(root.getChildCount()));
         result.putString("last_root_visible_child_count", Integer.toString(visibleChildren));
+        boolean partial = examinedChildren < totalChildren;
+        boolean deadlineReached = childRootDeadline != 0 && SystemClock.uptimeMillis() >= childRootDeadline;
+        result.putString("last_root_examined_child_count", Integer.toString(examinedChildren));
+        result.putString("last_root_observation_partial", Boolean.toString(partial));
+        result.putString("last_root_observation_deadline_reached", Boolean.toString(deadlineReached));
         observations.put(new JSONObject().put("elapsed_ms", SystemClock.uptimeMillis() - waitStarted)
                 .put("source", source).put("package", rootPackage).put("window_id", root.getWindowId())
-                .put("children", root.getChildCount()).put("visible_children", visibleChildren)
+                .put("children", totalChildren).put("visible_children", visibleChildren)
+                .put("examined_children", examinedChildren).put("partial", partial).put("deadline_reached", deadlineReached)
                 .put("refresh_result", source.equals("retained-root:refresh")
                         ? result.getString("last_root_refresh_result") : JSONObject.NULL));
         result.putString("root_observations", observations.toString());
         return visibleChildren;
     }
 
-    private AccessibilityNodeInfo readChild(AccessibilityNodeInfo node, int index) {
+    private void clearObservedChildren() {
+        for (AccessibilityNodeInfo child : observedChildren.values()) child.recycle();
+        observedChildren.clear();
+        observedRoot = null;
+    }
+
+    private AccessibilityNodeInfo takeObservedChild(AccessibilityNodeInfo node, int index) {
+        if (node != observedRoot) return null;
+        AccessibilityNodeInfo child = observedChildren.remove(index);
+        if (child != null) observedChildReuseCount++;
+        return child;
+    }
+
+    private static String childDiagnosticText(CharSequence value) {
+        if (value == null) return "";
+        String text = value.toString();
+        return text.length() > 48 ? text.substring(0, 24) + "…" + text.substring(text.length() - 23) : text;
+    }
+
+    private static JSONObject childNodeEvidence(AccessibilityNodeInfo node) throws Exception {
+        // These fields are already on the returned node; none issues an
+        // accessibility query, refresh, action or IPC.
+        CharSequence className = node.getClassName();
+        String resourceId = node.getViewIdResourceName();
+        return new JSONObject().put("window", node.getWindowId())
+                .put("class", childDiagnosticText(className)).put("id", childDiagnosticText(resourceId))
+                .put("fields_truncated", className != null && className.length() > 48 || resourceId != null && resourceId.length() > 48);
+    }
+
+    private void recordChildQuery(AccessibilityNodeInfo node, int index, String stage, int depth,
+            long started, long finished, AccessibilityNodeInfo child, Throwable failure) {
+        try {
+            JSONObject record = new JSONObject().put("sequence", childQueryCount).put("stage", stage)
+                    .put("depth", depth).put("index", index).put("started_uptime_ms", started)
+                    .put("finished_uptime_ms", finished).put("duration_ms", finished - started)
+                    .put("root_deadline_uptime_ms", childRootDeadline)
+                    .put("finished_at_or_after_root_deadline", childRootDeadline != 0 && finished >= childRootDeadline)
+                    .put("outcome", failure != null ? "threw" : child == null ? "null" : "nonnull");
+            if (failure != null) record.put("exception", childDiagnosticText(failure.getClass().getName()));
+            try {
+                record.put("parent", childNodeEvidence(node));
+                if (child != null) {
+                    record.put("child", childNodeEvidence(child)).put("visible", child.isVisibleToUser());
+                }
+            } catch (Throwable metadataFailure) {
+                childQueryDiagnosticFailures++;
+                record.put("metadata_status", "failed");
+            }
+            if (childQueryRecords.size() == CHILD_QUERY_RECORD_LIMIT) childQueryRecords.removeFirst();
+            childQueryRecords.addLast(record);
+        } catch (Throwable diagnosticFailure) {
+            // Diagnostics never replace the real getter return or exception.
+            childQueryDiagnosticFailures++;
+        }
+    }
+
+    private AccessibilityNodeInfo readChild(AccessibilityNodeInfo node, int index, String stage, int depth) {
         long started = SystemClock.uptimeMillis();
         childQueryCount++;
+        AccessibilityNodeInfo child = null;
+        Throwable failure = null;
         try {
-            return node.getChild(index);
+            child = node.getChild(index);
+            if (child == null) childQueryNullCount++; else childQueryNonnullCount++;
+            return child;
+        } catch (RuntimeException | Error queryFailure) {
+            failure = queryFailure;
+            childQueryThrownCount++;
+            throw queryFailure;
         } finally {
-            // Aggregate only: no extra node query, per-node record or log I/O.
-            childQueryMillis += SystemClock.uptimeMillis() - started;
+            long finished = SystemClock.uptimeMillis();
+            childQueryMillis += finished - started;
+            childQueryMaxMillis = Math.max(childQueryMaxMillis, finished - started);
+            recordChildQuery(node, index, stage, depth, started, finished, child, failure);
         }
     }
 
@@ -631,7 +776,8 @@ public final class SnapshotInstrumentation extends Instrumentation {
         xml.attribute(null, "bounds", "[" + bounds.left + "," + bounds.top + "][" + bounds.right + "," + bounds.bottom + "]");
         nodeCount++;
         for (int childIndex = 0; childIndex < node.getChildCount(); childIndex++) {
-            AccessibilityNodeInfo child = readChild(node, childIndex);
+            AccessibilityNodeInfo child = takeObservedChild(node, childIndex);
+            if (child == null) child = readChild(node, childIndex, "export", depth);
             if (child == null) continue;
             try {
                 if (child.isVisibleToUser()) dumpNode(xml, child, childIndex, size, depth + 1);

@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from ui_snapshot_session import HELPER, ROOT_WAIT_MS, UiSnapshotSession
+from ui_snapshot_session import HELPER, ROOT_WAIT_MS, TIMING_RECORD_LIMIT, UiSnapshotSession
 
 REAL_POPEN = subprocess.Popen
 
@@ -536,6 +536,11 @@ if mode=='missing': ready=b'luoshu_snapshot_published={"protocol":1}\n'
 if mode=='partial-line-eof': ready=ready[:90]
 if mode=='fields-eof': ready=ready.split(b'INSTRUMENTATION_STATUS_CODE:')[0]
 if mode=='late': time.sleep(.2)
+if mode=='timing-split':
+    until=time.monotonic()+2
+    while not (directory/'first-stdout-seen').exists() and time.monotonic()<until: time.sleep(.001)
+    if not (directory/'first-stdout-seen').exists(): sys.exit(22)
+    time.sleep(.06)
 emit('stdout',ready,mode=='high-stderr')
 if mode in ('eof','partial-line-eof','fields-eof'): sys.exit(0)
 until=time.monotonic()+5
@@ -573,6 +578,8 @@ emit('stderr',b'\x80raw-final-stderr\n')
             return process
 
         def transport(command, **kwargs):
+            if mode == 'timing-split' and command[-1].endswith('/ready.json'):
+                time.sleep(.035)
             result = protocol.run(command, **kwargs)
             if protocol.requests:
                 (directory / 'request.json').write_text(json.dumps(protocol.requests[-1]))
@@ -587,6 +594,19 @@ emit('stderr',b'\x80raw-final-stderr\n')
 
         self.enterContext(patch('ui_snapshot_session.subprocess.Popen', side_effect=launch))
         self.enterContext(patch('ui_snapshot_session.subprocess.run', side_effect=transport))
+        if mode == 'timing-split':
+            production_wait = UiSnapshotSession._wait_publication
+
+            def acknowledged_wait(current, basename, deadline):
+                if basename == 'ready.json':
+                    with current._pipe_condition:
+                        while 'stdout' not in current._first_pipe_chunk and time.monotonic() < deadline:
+                            current._pipe_condition.wait(min(.01, max(0, deadline - time.monotonic())))
+                    if 'stdout' in current._first_pipe_chunk:
+                        (directory / 'first-stdout-seen').touch()
+                return production_wait(current, basename, deadline)
+
+            self.enterContext(patch.object(UiSnapshotSession, '_wait_publication', acknowledged_wait))
 
         def cleanup():
             (directory / 'stop').touch()
@@ -642,6 +662,35 @@ emit('stderr',b'\x80raw-final-stderr\n')
             session.capture('hierarchy-0002.xml')
         self.assertEqual(1, len(processes))
 
+    def test_real_pipe_timing_separates_launch_complete_notice_wait_and_one_json_read(self):
+        session, protocol, directory, processes = self.make_session('timing-split')
+        deadline = time.monotonic() + 2
+        session.capture('hierarchy-0001.xml', deadline=deadline)
+        session.close()
+        evidence = json.loads((directory / 'ui-snapshot-session.json').read_text())['host_transport_timing']
+        launch = evidence['launch']
+        self.assertLessEqual(launch['popen_started_monotonic_seconds'], launch['popen_returned_monotonic_seconds'])
+        self.assertLessEqual(launch['popen_returned_monotonic_seconds'], launch['readers_starting_monotonic_seconds'])
+        ready = evidence['ready_notice']
+        self.assertGreaterEqual(ready['status_frame_observed_monotonic_seconds'] -
+                                evidence['first_pipe_chunk_monotonic_seconds']['stdout'], .04)
+        self.assertLessEqual(ready['status_frame_observed_monotonic_seconds'], ready['consumed_monotonic_seconds'])
+        row = evidence['ready_json_read_attempt']
+        self.assertEqual(deadline, row['deadline_monotonic_seconds'])
+        self.assertEqual('json-decoded', row['outcome'])
+        self.assertLessEqual(ready['consumed_monotonic_seconds'], row['cat_started_monotonic_seconds'])
+        self.assertGreaterEqual(row['cat_finished_monotonic_seconds_including_host_command_evidence'] -
+                                row['cat_started_monotonic_seconds'], .025)
+        command = session.commands[row['cat_command_index'] - 1]
+        self.assertEqual(session.directory + '/ready.json', command['arguments'][-1])
+        self.assertEqual(2, evidence['publication_count'])
+        self.assertEqual(2, evidence['json_read_attempt_count'])
+        self.assertEqual(0, evidence['publication_records_omitted'])
+        self.assertEqual(0, evidence['json_read_attempt_records_omitted'])
+        self.assertEqual(1, len(processes))
+        self.assertEqual(1, sum(command[-1].endswith('/ready.json') for command, _ in protocol.calls))
+        self.assert_raw_preserved(directory)
+
     def test_notice_after_caller_deadline_cannot_salvage_timeout_or_normal_close(self):
         session, protocol, directory, processes = self.make_session('late')
         with self.assertRaisesRegex(RuntimeError, 'timed out'):
@@ -653,6 +702,11 @@ emit('stderr',b'\x80raw-final-stderr\n')
         self.assertEqual(original, session.fatal_error)
         self.assert_raw_preserved(directory)
         self.assertEqual(1, len(processes))
+        timing = json.loads((directory / 'ui-snapshot-session.json').read_text())['host_transport_timing']
+        self.assertEqual(1, timing['publication_count'])
+        self.assertNotIn('consumed_monotonic_seconds', timing['ready_notice'])
+        self.assertEqual('failed', timing['ready_json_read_attempt']['outcome'])
+        self.assertNotIn('cat_started_monotonic_seconds', timing['ready_json_read_attempt'])
 
     def test_eof_before_matching_response_is_fatal_and_cannot_read_xml(self):
         session, protocol, directory, _ = self.make_session('eof')
@@ -737,6 +791,36 @@ emit('stderr',b'\x80raw-final-stderr\n')
         self.assert_raw_preserved(directory)
 
 
+class HostTimingBoundsTest(unittest.TestCase):
+    def test_bounded_metadata_keeps_ready_and_tail_without_consuming_a_late_notice(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            session = UiSnapshotSession(['adb'], Path(temporary))
+            session.process = Mock()
+            session.process.poll.return_value = None
+            names = ['ready.json'] + [f'response-{index:032x}.json' for index in range(TIMING_RECORD_LIMIT + 5)]
+            for name in names:
+                raw = json.dumps({'protocol': 1, 'nonce': session.nonce, 'basename': name}).encode()
+                with session._pipe_condition:
+                    session._publication_frame([(b'luoshu_snapshot_published', raw)], b'1')
+                session._wait_publication(name, time.monotonic() + 1)
+            late = f'response-{999:032x}.json'
+            raw = json.dumps({'protocol': 1, 'nonce': session.nonce, 'basename': late}).encode()
+            with session._pipe_condition:
+                session._publication_frame([(b'luoshu_snapshot_published', raw)], b'1')
+            with self.assertRaisesRegex(RuntimeError, 'timed out'):
+                session._wait_publication(late, time.monotonic() - 1)
+            session._event('timing-boundary')
+            timing = json.loads((Path(temporary) / 'ui-snapshot-session.json').read_text())['host_transport_timing']
+            self.assertEqual(len(names) + 1, timing['publication_count'])
+            self.assertEqual(TIMING_RECORD_LIMIT, len(timing['publications']))
+            self.assertEqual(len(names) + 1 - TIMING_RECORD_LIMIT, timing['publication_records_omitted'])
+            self.assertEqual('ready.json', timing['ready_notice']['basename'])
+            self.assertIn('consumed_monotonic_seconds', timing['ready_notice'])
+            self.assertEqual(late, timing['publications'][-1]['basename'])
+            self.assertNotIn('consumed_monotonic_seconds', timing['publications'][-1])
+            self.assertEqual([late], list(session._publications))
+
+
 class NativeLastRequestDiagnosticsTest(unittest.TestCase):
     def test_production_java_last_request_diagnostics_and_finish_code(self):
         java = shutil.which('java')
@@ -780,6 +864,7 @@ public class NativeLastRequestDiagnosticsHarness {
     static class Activity { static final int RESULT_OK=-1, RESULT_CANCELED=0; }
     static class Context { File getFilesDir() { return new File("unused"); } }
     Bundle arguments = new Bundle();
+    private final Bundle lifecycleDiagnostics = new Bundle();
     Bundle finished;
     int finishCode=123;
     boolean failSession;

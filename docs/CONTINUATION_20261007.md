@@ -230,3 +230,22 @@ stdout/stderr 持续读取并保留原字节；错误身份、重复/中断通�
 本轮未改 App、字体生产功能、玻璃、nohook 或 frozen22。字体双系统覆盖/Google 回退/连续实时与重启/生成复用/全局字重移除沿用既有实现；仍缺两台真机整次切换及阶段计时、ColorOS 整次手机 reboot 与 App 冷启、旧 97 秒 prezygote 复现。新传输与后续四段原片须在同一新 SHA 的全量 CI 实际到终态后独立复核，不能由 host 管道或 JVM 边界回归提前宣布修复。
 
 提交前实际适用 host 回归为 UI 84、会话 39（原有 29 项与新增 10 项真实子进程管道）、生产 Java JVM 边界回归 1、逐帧分类器 20、启动源约束 11、玻璃 6，共 161 项通过，frozen22 门禁也通过；完整原 stdout/stderr 与源码哈希已保留。管道/文件测试不是真机字体或真实 App 原录像。新通知单独记录 native notice started/finished，和 JSON 发布时间分开，包括异常完成；这些计时不增加 RPC 或预算。独立协议审查没有剩余阻塞。
+
+
+## 6eb3bc9 终态与采集瓶颈的最小对照
+
+`6eb3bc9be8f988d231963bb3a390423ac33c63d2` 的 [candidate 37719108199](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37719108199) 自然成功终态，实际 96 次套件 / 1701 次测试执行，含重复 source gate；两处真实 mount namespace 因权限跳过，不能写为真机挂载通过。成品 v1/v2/v3 签名、22 个 frozen 文件、7 个实际定义 helper、9 个 Google 文件经新批原件字节核验。
+
+同 SHA [UI 37719108174](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37719108174) 为失败终态：构建 217 JVM / 124 host 通过；API 36 的 31 捕获记录 / 30 PNG / 20 检查 / 78 次请求-响应-XML 绑定通过。API 28 仅完成 2 个屏幕记录和 5 个检查，随后 `capture(light-library)` 的 `assert_running` 读取全部 main/system/crash logcat 超过原 20 秒；该异常部分输出被原 wrapper 丢弃，之后保存的 all-buffer 日志仍保留，不能据此确认超时原因。后续 API 28 页面、导航、滚动、旋转、旧主题和 Google 嵌套检查未运行。
+
+启动视觉仍失败：0 MP4 / 0 XML。亮冷 HOME 超时，暗冷复用已 fatal 会话失败，两次 warm 没有已有 App PID而未录；不能宣布四种独立视觉通过。实际原 native root wait 1107 ms、XML export 5535 ms，其中 4 次成功可见子节点查询合计 5251 ms，JSON 发布 0 ms / notice 调用 23 ms。host ready 7.269683 s 来自另一时钟域，不与 native uptime 相加或相减。原截图仅壁纸、中央浅多边形和导航条；本批 ANR 属于 GMS 资产读取，不能沿用旧 Launcher ANR 因果。127 成员原证据包、完整独立审计和检查点 v32 已保存，安装包未交付。
+
+本小批不关闭预取、不更换 API/image/GPU/视口/动画，也不新增 HOME 前预热。Java 分开记录公开 process-start、onCreate、onStart、连接、配置、ready 的 native uptime；逐 getter 记录 stage、root/window/class/id、index、耗时、返回/异常和是否越过原根节点期限，保留最后 32 条完整 JSON、总数、遗漏数和异常统计。cached 属性读取不追加 Accessibility RPC，诊断不能覆盖原异常。
+
+已确认的重复工作是同一次观察与导出对相同 root 直接 child 再次 `getChild`。新保留至多 32 个已返回、可见节点，仅按当前 root 对象和原 index 复用；每次观察清理旧记录，snapshot 结束回收余项。null、不可见、超出边界和其它 parent 仍走原查询；不跨 request/root/refresh/attempt。原八秒已过时停止追加观察查询，记录 partial/examined/total，已迟到调用仍完整保留且仍 failed/no XML。完整 XML 与同生产代码关闭保留的重查对照、另行原 6eb 源执行对照用于验证输出和真实 JVM getter 次数，不是原生 App 录像或手机速度证据。
+
+host 仍用已通过的严格 stdout 通知协议；补记本地 Popen、reader 第一段字节、完整合法状态帧解析、通知消费与单次私有 JSON 读取的 host monotonic。保留 ready 与有界 128 条尾记录及明确遗漏数；`json_read_attempt_count` 包含等通知的尝试，真实 cat 执行以原命令记录为准。不会把未执行读取计为实际 ADB 调用，也不会混 native 时钟、重连或重启预算。
+
+smoke 的 ADB wrapper 保存每条命令完整原 stdout/stderr、bytes/hash、开始/结束/结果/returncode 和 TimeoutExpired 已收到的部分原字节。超时仍失败、returncode 为未知而非伪造 0；nonzero 的控制台尾部不代替完整证据。证据写失败进入最终失败 summary，不能将命令失败转成功。全部 logcat buffer、崩溃/ANR/进程、最后日志检查和原 20 秒预算保留；默认 20 秒真实 host 子进程超时对照保留其原始失败与部分流，不属于设备 logcat 实测。
+
+App/font/runtime、玻璃/Dock、全局字重移除、nohook 和 frozen22 不变。下一准确新 SHA 必须自然跑完完整 candidate、API 28/36 与亮暗冷暖四段原录像并独立审原画面；HOME 10 秒 / 3 个稳定帧、root 8 秒、共享 host 20 秒、录像 30 秒、同 PID 与所有逐帧门禁保持。两台 OEM 字体/Google/连续实时/重启、完整生成和整次切换、ColorOS 整次手机 reboot、App 冷启与旧 97 秒 prezygote 仍如实待验，不能由采集修正外推为解决。

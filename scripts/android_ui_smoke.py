@@ -575,12 +575,61 @@ class SmokeRun:
         self.scroll_searches = 0
         self.hierarchy_backend = "uiautomator-cli"
         self.started_at = time.monotonic()
+        self.adb_command_count = 0
+        self.adb_diagnostic_errors: list[str] = []
+
+    def _record_adb(self, record: dict[str, object], stdout: bytes, stderr: bytes) -> None:
+        """Keep complete command streams; console error excerpts are not evidence."""
+        prefix = f"adb-command-{record['index']:04d}"
+        for stream, data in (("stdout", stdout), ("stderr", stderr)):
+            filename = f"{prefix}-{stream}.bin"
+            record[stream] = filename
+            record[f"{stream}_bytes"] = len(data)
+            record[f"{stream}_sha256"] = hashlib.sha256(data).hexdigest()
+            (self.output / filename).write_bytes(data)
+        record["raw_streams_written_monotonic_seconds"] = time.monotonic()
+        with (self.output / "adb-commands.jsonl").open("a", encoding="utf-8") as evidence:
+            evidence.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def adb(self, *arguments: str, timeout: float = 20, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+        self.adb_command_count += 1
+        command = self.adb_command + list(arguments)
+        record: dict[str, object] = {"index": self.adb_command_count, "arguments": command,
+                                    "timeout_seconds": timeout, "check": check,
+                                    "started_unix_seconds": time.time(),
+                                    "started_monotonic_seconds": time.monotonic()}
+        stdout = stderr = b""
         try:
-            result = subprocess.run(self.adb_command + list(arguments), capture_output=True, timeout=timeout)
+            result = subprocess.run(command, capture_output=True, timeout=timeout)
+            stdout, stderr = result.stdout, result.stderr
+            record.update({"outcome": "returned", "returncode": result.returncode})
         except subprocess.TimeoutExpired as error:
+            # subprocess.run kills and waits for its child before raising. Its
+            # exception keeps the bytes received before timeout, without a
+            # reliable child returncode. Preserve them before chaining the error.
+            stdout, stderr = error.output or b"", error.stderr or b""
+            record.update({"outcome": "timed-out", "returncode": None,
+                           "partial_streams": True, "error": f"{type(error).__name__}: {error}"})
             raise RuntimeError(f"adb timed out after {timeout}s: {' '.join(arguments)}") from error
+        except OSError as error:
+            record.update({"outcome": "exception", "returncode": None,
+                           "error": f"{type(error).__name__}: {error}"})
+            raise
+        finally:
+            ended = time.monotonic()
+            record.setdefault("outcome", "interrupted")
+            record.setdefault("returncode", None)
+            record.update({"ended_monotonic_seconds": ended,
+                           "elapsed_seconds": ended - record["started_monotonic_seconds"],
+                           "ended_unix_seconds": time.time()})
+            # Record only after the actual command. Diagnostic I/O still counts
+            # toward callers' existing absolute deadlines; no timeout is reset.
+            try:
+                self._record_adb(record, stdout, stderr)
+            except Exception as error:
+                diagnostic = f"adb command {record['index']} evidence {type(error).__name__}: {error}"
+                self.adb_diagnostic_errors.append(diagnostic)
+                print(diagnostic, file=sys.stderr, flush=True)
         if check and result.returncode:
             detail = (result.stdout + result.stderr).decode("utf-8", "replace")[-3_000:]
             raise RuntimeError(f"adb {' '.join(arguments)} failed ({result.returncode}): {detail}")
@@ -1614,10 +1663,15 @@ def main() -> int:
             final_crash = crash_reason(final_log.read_text(encoding="utf-8", errors="replace"), args.package)
             if final_crash and (error is None or final_crash not in error):
                 error = f"{error}; {final_crash}" if error else final_crash
+        if run.adb_diagnostic_errors:
+            diagnostic_error = "; ".join(run.adb_diagnostic_errors)
+            error = f"{error}; {diagnostic_error}" if error else diagnostic_error
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
                    "mode": "visual-launch-only" if run.visual_launch_only else "functional-ui-smoke",
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
                    "hierarchy_backend": run.hierarchy_backend,
+                   "adb_command_count": run.adb_command_count,
+                   "adb_diagnostic_errors": run.adb_diagnostic_errors,
                    "launch_recording_enabled": run.record_launch,
                    "screens": run.results, "checks": run.checks, "recordings": run.recordings}
         (run.output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

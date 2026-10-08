@@ -22,6 +22,7 @@ PROTOCOL = 1
 ROOT_WAIT_MS = 8000
 PUBLICATION_KEY = b"luoshu_snapshot_published"
 PUBLICATION_LIMIT = 512
+TIMING_RECORD_LIMIT = 128
 
 
 class UiSnapshotSession:
@@ -45,6 +46,15 @@ class UiSnapshotSession:
         self._pipe_threads: list[threading.Thread] = []
         self._publications: deque[str] = deque()
         self._published_names: set[str] = set()
+        self._launch_timing: dict[str, object] = {}
+        self._first_pipe_chunk: dict[str, float] = {}
+        self._notice_timings: deque[dict[str, object]] = deque(maxlen=TIMING_RECORD_LIMIT)
+        self._pending_notice_timings: dict[str, dict[str, object]] = {}
+        self._notice_count = 0
+        self._json_timings: deque[dict[str, object]] = deque(maxlen=TIMING_RECORD_LIMIT)
+        self._json_count = 0
+        self._ready_notice_timing: dict[str, object] | None = None
+        self._ready_json_timing: dict[str, object] | None = None
 
     def _publication_frame(self, values: list[tuple[bytes, bytes]], code: bytes) -> None:
         notices = [value for key, value in values if key == PUBLICATION_KEY]
@@ -80,6 +90,15 @@ class UiSnapshotSession:
             raise RuntimeError("UiAutomation session unexpected publication backlog")
         self._published_names.add(basename)
         self._publications.append(basename)
+        # This is when the reader has parsed a complete, valid status frame,
+        # not the native sendStatus return or an estimated remote arrival.
+        timing: dict[str, object] = {"basename": basename,
+                                   "status_frame_observed_monotonic_seconds": time.monotonic()}
+        self._notice_count += 1
+        self._notice_timings.append(timing)
+        self._pending_notice_timings[basename] = timing
+        if basename == "ready.json":
+            self._ready_notice_timing = timing
 
     def _read_pipe(self, stream: str) -> None:
         pending = bytearray()
@@ -91,6 +110,7 @@ class UiSnapshotSession:
             pipe = getattr(self.process, stream)
             while True:
                 chunk = pipe.read1(4096)
+                chunk_observed = time.monotonic()
                 with self._pipe_condition:
                     if not chunk:
                         if stream == "stdout" and not parser_failed and (values or pending.startswith(
@@ -100,6 +120,8 @@ class UiSnapshotSession:
                         self._pipe_condition.notify_all()
                         return
                     self._pipe_bytes[stream].extend(chunk)
+                    if stream not in self._first_pipe_chunk:
+                        self._first_pipe_chunk[stream] = chunk_observed
                     if stream == "stdout" and not parser_failed:
                         try:
                             if discard_line:
@@ -153,7 +175,7 @@ class UiSnapshotSession:
             self._pipe_threads.append(thread)
             thread.start()
 
-    def _wait_publication(self, basename: str, deadline: float) -> None:
+    def _wait_publication(self, basename: str, deadline: float) -> dict[str, object]:
         with self._pipe_condition:
             while True:
                 remaining = deadline - time.monotonic()
@@ -166,7 +188,9 @@ class UiSnapshotSession:
                 if self._publications:
                     if self._publications.popleft() != basename:
                         raise RuntimeError("UiAutomation session publication basename mismatch")
-                    return
+                    timing = self._pending_notice_timings.pop(basename)
+                    timing["consumed_monotonic_seconds"] = time.monotonic()
+                    return timing.copy()
                 self._pipe_condition.wait(min(.1, remaining))
 
     def _finish_readers(self, deadline: float) -> tuple[bytes, bytes]:
@@ -203,9 +227,26 @@ class UiSnapshotSession:
 
     def _event(self, event: str, **details: object) -> None:
         self.events.append({"event": event, "monotonic_seconds": time.monotonic(), **details})
+        # The reader never performs disk I/O or an extra RPC for timing. Copy
+        # under its existing lock and persist with this existing event write.
+        with self._pipe_condition:
+            timing = {"clock": "host time.monotonic only; not native uptime",
+                      "first_pipe_chunk_scope": "read1 returned bytes to the owned reader; not remote arrival",
+                      "status_frame_observed_scope": "complete valid frame parsed by stdout reader",
+                      "json_read_attempt_scope": "includes notice wait; actual cat execution is in ui-snapshot-commands.json",
+                      "launch": self._launch_timing.copy(),
+                      "first_pipe_chunk_monotonic_seconds": self._first_pipe_chunk.copy(),
+                      "ready_notice": self._ready_notice_timing.copy() if self._ready_notice_timing else None,
+                      "ready_json_read_attempt": self._ready_json_timing.copy() if self._ready_json_timing else None,
+                      "publication_count": self._notice_count,
+                      "publication_records_omitted": max(0, self._notice_count - len(self._notice_timings)),
+                      "publications": [record.copy() for record in self._notice_timings],
+                      "json_read_attempt_count": self._json_count,
+                      "json_read_attempt_records_omitted": max(0, self._json_count - len(self._json_timings)),
+                      "json_read_attempts": [record.copy() for record in self._json_timings]}
         self._diagnostic_write(self.output / "ui-snapshot-session.json", (json.dumps(
             {"protocol": PROTOCOL, "nonce": self.nonce, "events": self.events,
-             "diagnostic_errors": self.diagnostic_errors},
+             "diagnostic_errors": self.diagnostic_errors, "host_transport_timing": timing},
             ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
 
     def _record_command(self, record: dict[str, object], stdout: bytes, stderr: bytes) -> None:
@@ -270,26 +311,48 @@ class UiSnapshotSession:
                                (result.stdout + result.stderr).decode("utf-8", "replace"))
 
     def _wait_json(self, basename: str, evidence: Path, deadline: float) -> dict[str, object]:
-        self._wait_publication(basename, deadline)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise RuntimeError(f"UiAutomation session timed out waiting for {basename}")
-        result = self._run(["shell", "run-as", HELPER, "cat", f"{self.directory}/{basename}"], timeout=remaining)
-        if result.returncode:
-            raise RuntimeError("UiAutomation session published JSON is unavailable")
-        evidence.write_bytes(result.stdout)
-        if time.monotonic() >= deadline:
-            raise RuntimeError(f"UiAutomation session timed out while reading {basename}")
-        if self.process.poll() is not None:
-            raise RuntimeError("UiAutomation session exited before its matching response")
-        self._check_pipe_error()
+        timing: dict[str, object] = {"basename": basename, "deadline_monotonic_seconds": deadline,
+                                   "started_monotonic_seconds": time.monotonic(), "outcome": "waiting-notice"}
+        self._json_count += 1
+        self._json_timings.append(timing)
+        if basename == "ready.json":
+            self._ready_json_timing = timing
         try:
-            value = json.loads(result.stdout)
-        except (ValueError, UnicodeDecodeError) as error:
-            raise RuntimeError("UiAutomation session returned malformed JSON") from error
-        if not isinstance(value, dict):
-            raise RuntimeError("UiAutomation session response is not an object")
-        return value
+            receipt = self._wait_publication(basename, deadline)
+            timing["notice_consumed_monotonic_seconds"] = time.monotonic()
+            timing["notice_receipt"] = receipt
+            timing["outcome"] = "notice-consumed"
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(f"UiAutomation session timed out waiting for {basename}")
+            timing["cat_started_monotonic_seconds"] = time.monotonic()
+            timing["cat_command_index"] = len(self.commands) + 1
+            try:
+                result = self._run(["shell", "run-as", HELPER, "cat", f"{self.directory}/{basename}"], timeout=remaining)
+            finally:
+                timing["cat_finished_monotonic_seconds_including_host_command_evidence"] = time.monotonic()
+            if result.returncode:
+                raise RuntimeError("UiAutomation session published JSON is unavailable")
+            evidence.write_bytes(result.stdout)
+            timing["json_evidence_written_monotonic_seconds"] = time.monotonic()
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"UiAutomation session timed out while reading {basename}")
+            if self.process.poll() is not None:
+                raise RuntimeError("UiAutomation session exited before its matching response")
+            self._check_pipe_error()
+            try:
+                value = json.loads(result.stdout)
+            except (ValueError, UnicodeDecodeError) as error:
+                raise RuntimeError("UiAutomation session returned malformed JSON") from error
+            if not isinstance(value, dict):
+                raise RuntimeError("UiAutomation session response is not an object")
+            timing["outcome"] = "json-decoded"
+            return value
+        except Exception as error:
+            timing.update({"outcome": "failed", "error": f"{type(error).__name__}: {error}"})
+            raise
+        finally:
+            timing["finished_monotonic_seconds"] = time.monotonic()
 
     def _validate(self, envelope: dict[str, object], **expected: object) -> None:
         if not isinstance(envelope, dict):
@@ -306,10 +369,18 @@ class UiSnapshotSession:
         self.started = True  # A broken connection is never silently restarted.
         started = time.monotonic()
         try:
-            self.process = subprocess.Popen(self.adb_command + ["shell", "am", "instrument", "-w", "-r",
-                "-e", "session_nonce", self.nonce, f"{HELPER}/.SnapshotInstrumentation"],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self._launch_timing["popen_started_monotonic_seconds"] = time.monotonic()
+            try:
+                self.process = subprocess.Popen(self.adb_command + ["shell", "am", "instrument", "-w", "-r",
+                    "-e", "session_nonce", self.nonce, f"{HELPER}/.SnapshotInstrumentation"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            finally:
+                self._launch_timing["popen_returned_monotonic_seconds"] = time.monotonic()
+            if type(self.process.pid) is int:
+                self._launch_timing["host_adb_pid"] = self.process.pid
+            self._launch_timing["readers_starting_monotonic_seconds"] = time.monotonic()
             self._start_readers()
+            self._launch_timing["readers_started_monotonic_seconds"] = time.monotonic()
             self._event("started")
             ready = self._wait_json("ready.json", self.output / "ui-snapshot-session-ready.json", deadline)
             self._validate(ready, state="ready", root_wait_ms=ROOT_WAIT_MS)

@@ -4,6 +4,8 @@
 The JVM writes real files and independent JVM readers verify complete JSON/XML.
 Node fixtures exercise rejection/export mechanics; they are not device evidence.
 """
+import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -17,13 +19,17 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
         if java is None:
             self.skipTest('Production Java regression requires the host JDK')
         source = (Path(__file__).parent / 'ui_snapshot' / 'SnapshotInstrumentation.java').read_text()
+        for constant in ('ROOT_WAIT_MS = 8000', 'CHILD_QUERY_RECORD_LIMIT = 32', 'OBSERVED_CHILD_LIMIT = 32'):
+            self.assertIn(f'private static final int {constant};', source)
 
         def method(signature):
             start = source.index(signature)
             return source[start:source.index('\n    }', start) + len('\n    }')]
 
         methods = '\n'.join(method(signature) for signature in (
+            '    public void onCreate(',
             '    public void onStart()',
+            '    private UiAutomation connectAutomation(',
             '    private static void diagnosticTime(',
             '    private static void lastDiagnostic(',
             '    private static void lastDiagnosticTime(',
@@ -36,6 +42,11 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
             '    private void publishJson(',
             '    private Bundle snapshot(',
             '    private int observeRoot(',
+            '    private void clearObservedChildren(',
+            '    private AccessibilityNodeInfo takeObservedChild(',
+            '    private static String childDiagnosticText(',
+            '    private static JSONObject childNodeEvidence(',
+            '    private void recordChildQuery(',
             '    private AccessibilityNodeInfo readChild(',
             '    private void dumpNode(',
             '    private static String text(',
@@ -48,12 +59,26 @@ import java.util.*;
 import javax.xml.stream.*;
 import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.*;
-public class NativeSnapshotPublicationHarness {
+class InstrumentationBoundary {
+    void onCreate(NativeSnapshotPublicationHarness.Bundle arguments) {}
+}
+public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
     private Bundle arguments = new Bundle();
+    private final Bundle lifecycleDiagnostics = new Bundle();
     private int nodeCount, childQueryCount;
-    private long childQueryMillis;
+    private long childQueryMillis, childQueryMaxMillis, childRootDeadline;
+    private int childQueryNullCount, childQueryNonnullCount, childQueryThrownCount, childQueryDiagnosticFailures;
+    private final ArrayDeque<JSONObject> childQueryRecords = new ArrayDeque<>();
+    private AccessibilityNodeInfo observedRoot;
+    private final HashMap<Integer,AccessibilityNodeInfo> observedChildren = new HashMap<>();
+    private int observedChildReuseCount;
     private static final int PROTOCOL = 1;
     private static final int ROOT_WAIT_MS = 8000;
+    private static final int CHILD_QUERY_RECORD_LIMIT = 32;
+    // Test-only boundary override exercises the production overflow/fallback
+    // path at zero: it reproduces observe/requery behavior without pretending
+    // to execute all literal 6eb source, or changing the real getter boundary.
+    private static int OBSERVED_CHILD_LIMIT = 32;
     private static final String NONCE = "0123456789abcdef0123456789abcdef";
     static class Bundle {
         final Map<String,String> values = new HashMap<>();
@@ -70,7 +95,7 @@ public class NativeSnapshotPublicationHarness {
         static long uptimeMillis() { return now; }
     }
     static class Build {
-        static class VERSION { static final int SDK_INT=34; }
+        static class VERSION { static int SDK_INT=34; }
     }
     static class Activity { static final int RESULT_OK=-1, RESULT_CANCELED=0; }
     static class Context {
@@ -94,31 +119,42 @@ public class NativeSnapshotPublicationHarness {
         int getRotation() { return 1; }
     }
     static class AccessibilityNodeInfo {
+        static int getterCalls, createdCopies, recycledCopies;
+        static final List<AccessibilityNodeInfo> copies=new ArrayList<>();
         final String value;
         final boolean visible;
         final List<AccessibilityNodeInfo> children = new ArrayList<>();
-        boolean recycled, throwChild;
-        int refreshDelay=1000;
+        boolean recycled, throwChild, throwMetadata, errorMetadata;
+        int throwChildIndex=-1;
+        String className="fixture.Node", resourceId="fixture:id/content";
+        int refreshDelay=1000, childDelay=7;
         AccessibilityNodeInfo(String value,boolean visible) { this.value=value; this.visible=visible; }
         AccessibilityNodeInfo copy() {
             AccessibilityNodeInfo n=new AccessibilityNodeInfo(value,visible);
-            n.children.addAll(children); n.throwChild=throwChild; n.refreshDelay=refreshDelay; return n;
+            n.children.addAll(children); n.throwChild=throwChild; n.refreshDelay=refreshDelay;
+            n.childDelay=childDelay; n.throwMetadata=throwMetadata;
+            n.throwChildIndex=throwChildIndex; n.className=className; n.resourceId=resourceId;
+            n.errorMetadata=errorMetadata;
+            createdCopies++; copies.add(n); return n;
         }
         void usable() { require(!recycled,"recycled node reused"); }
         int getChildCount() { usable(); return children.size(); }
         AccessibilityNodeInfo getChild(int index) {
-            usable(); SystemClock.now+=7;
-            if(throwChild) throw new IllegalStateException("child query failed");
+            usable(); getterCalls++; SystemClock.now+=childDelay;
+            if(throwChild || index==throwChildIndex) throw new IllegalStateException("child query failed");
             AccessibilityNodeInfo child=children.get(index); return child==null ? null : child.copy();
         }
         boolean isVisibleToUser() { usable(); return visible; }
         boolean refresh() { usable(); SystemClock.now+=refreshDelay; return true; }
-        void recycle() { require(!recycled,"node recycled twice"); recycled=true; }
+        void recycle() { require(!recycled,"node recycled twice"); recycled=true; recycledCopies++; }
         int getWindowId() { usable(); return 2; }
         CharSequence getPackageName() { usable(); return "fixture.package"; }
         CharSequence getText() { usable(); return value; }
-        String getViewIdResourceName() { return "fixture:id/content"; }
-        CharSequence getClassName() { return "fixture.Node"; }
+        String getViewIdResourceName() { return resourceId; }
+        CharSequence getClassName() {
+            if(errorMetadata) throw new AssertionError("metadata boundary error");
+            if(throwMetadata) throw new IllegalStateException("metadata failed"); return className;
+        }
         CharSequence getContentDescription() { return "desc"; }
         void getBoundsInScreen(Rect r) { r.left=-1; r.top=-2; r.right=110; r.bottom=220; }
         boolean isCheckable() { return false; } boolean isChecked() { return false; }
@@ -137,7 +173,16 @@ public class NativeSnapshotPublicationHarness {
         int getId() { return 2; }
         void recycle() {}
     }
+    static class AccessibilityServiceInfo {
+        static final int FLAG_INCLUDE_NOT_IMPORTANT_VIEWS=2, FLAG_REPORT_VIEW_IDS=4, FLAG_RETRIEVE_INTERACTIVE_WINDOWS=8;
+        int flags=1;
+    }
     static class UiAutomation {
+        static final int FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES=1;
+        final AccessibilityServiceInfo service=new AccessibilityServiceInfo();
+        int getServiceCalls, setServiceCalls;
+        AccessibilityServiceInfo getServiceInfo() { getServiceCalls++; SystemClock.now+=20; return service; }
+        void setServiceInfo(AccessibilityServiceInfo info) { require(info==service,"different service set"); setServiceCalls++; SystemClock.now+=30; }
         AccessibilityNodeInfo root;
         final List<AccessibilityWindowInfo> windows = new ArrayList<>();
         int rootDelay=3, windowDelay;
@@ -157,8 +202,13 @@ public class NativeSnapshotPublicationHarness {
             if(value==null || value==NULL) return "null";
             if(value instanceof Number || value instanceof Boolean) return value.toString();
             if(value instanceof JSONObject || value instanceof JSONArray) return value.toString();
-            String s=value.toString();
-            return "\""+s.replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n")+"\"";
+            StringBuilder encoded=new StringBuilder("\"");
+            for(char c:value.toString().toCharArray()) {
+                if(c=='"' || c=='\\') encoded.append('\\').append(c);
+                else if(c<32) encoded.append(String.format("\\u%04x",(int)c));
+                else encoded.append(c);
+            }
+            return encoded.append('"').toString();
         }
         public String toString() {
             StringJoiner j=new StringJoiner(",","{","}");
@@ -221,6 +271,7 @@ public class NativeSnapshotPublicationHarness {
     final UiAutomation automation=new UiAutomation();
     Bundle finished;
     int finishCode=123;
+    boolean startRequested;
     boolean failSession;
     int noticeCalls;
     boolean failNotice;
@@ -228,7 +279,11 @@ public class NativeSnapshotPublicationHarness {
     Bundle expectedNoticeDiagnostics;
     final List<Bundle> notices=new ArrayList<>();
     Context getContext() { return context; }
-    UiAutomation connectAutomation(Bundle diagnostics) { return automation; }
+    void start() { startRequested=true; }
+    UiAutomation getUiAutomation(int flags) {
+        require(flags==UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES,"accessibility service suppression changed");
+        SystemClock.now+=50; return automation;
+    }
     void finish(int code,Bundle result) { finishCode=code; finished=result; }
     void expectNotice(String basename,String content,Bundle diagnostics,String timeKey) {
         expectedNoticeBasename=basename; expectedNoticeContent=content;
@@ -298,6 +353,10 @@ public class NativeSnapshotPublicationHarness {
         root.children.add(new AccessibilityNodeInfo("hidden",false)); return root;
     }
     static void clearFaults() { File.failRename=false; FileOutputStream.failure=null; FileOutputStream.failSuffix=null; }
+    static void allCopiesRecycled() {
+        for(AccessibilityNodeInfo copy:AccessibilityNodeInfo.copies) require(copy.recycled,"retained node leaked");
+    }
+    static JSONObject lastQuery(NativeSnapshotPublicationHarness h) { return h.childQueryRecords.getLast(); }
     static void checkNoticeTimes(Bundle diagnostics,String prefix,String publishedKey) {
         long published=Long.parseLong(diagnostics.getString(publishedKey));
         long started=Long.parseLong(diagnostics.getString(prefix+"_started_uptime_ms"));
@@ -317,6 +376,22 @@ public class NativeSnapshotPublicationHarness {
         File dir=new File(args[1]); require(dir.mkdir(),"cannot create fresh test directory");
         NativeSnapshotPublicationHarness h=new NativeSnapshotPublicationHarness();
         h.context.directory=dir;
+        SystemClock.now=100;
+        h.onCreate(new Bundle());
+        require(h.startRequested && "100".equals(h.lifecycleDiagnostics.getString("helper_on_create_started_uptime_ms")) &&
+                "50".equals(h.lifecycleDiagnostics.getString("helper_process_started_uptime_ms")),"public process/create lifecycle lost");
+        NativeSnapshotPublicationHarness legacy=new NativeSnapshotPublicationHarness(); Build.VERSION.SDK_INT=23;
+        legacy.onCreate(new Bundle()); Build.VERSION.SDK_INT=34;
+        require(legacy.lifecycleDiagnostics.getString("helper_process_started_uptime_ms")==null &&
+                "unavailable-before-api24".equals(legacy.lifecycleDiagnostics.getString("helper_process_start_time_status")),
+                "old API invented process uptime");
+        Bundle connectDiagnostics=new Bundle();
+        h.connectAutomation(connectDiagnostics);
+        require("100".equals(connectDiagnostics.getString("helper_automation_connect_started_uptime_ms")) &&
+                "150".equals(connectDiagnostics.getString("helper_automation_connected_uptime_ms")) &&
+                "200".equals(connectDiagnostics.getString("helper_automation_configured_uptime_ms")) &&
+                h.automation.getServiceCalls==1 && h.automation.setServiceCalls==1 && h.automation.service.flags==15,
+                "connect/config clocks or original service call count changed");
         JSONObject ready=new JSONObject().put("protocol",1).put("nonce",NONCE).put("state","ready").put("text","雪😀");
         Bundle readyDiagnostics=new Bundle();
         h.expectNotice("ready.json",ready.toString(),readyDiagnostics,"helper_ready_published_uptime_ms");
@@ -348,14 +423,24 @@ public class NativeSnapshotPublicationHarness {
         require("ok".equals(result.getString("snapshot")),"complete snapshot failed: "+result.getString("error"));
         childRead("xml",new File(dir,"hierarchy-0001.xml").getPath(),"");
         require("3".equals(result.getString("nodes")),"node count changed");
-        require("7".equals(result.getString("child_query_count")) && "49".equals(result.getString("child_query_ms")),"root/export query attribution changed");
-        require("4".equals(result.getString("export_child_query_count")) && "28".equals(result.getString("export_child_query_ms")),"export query attribution changed");
+        require("6".equals(result.getString("child_query_count")) && "42".equals(result.getString("child_query_ms")),"actual root/export query attribution changed");
+        require("3".equals(result.getString("export_child_query_count")) && "21".equals(result.getString("export_child_query_ms")) &&
+                "1".equals(result.getString("observed_child_reuse_count")),"accepted visible direct child was requeried");
+        int optimizedCalls=AccessibilityNodeInfo.getterCalls;
+        OBSERVED_CHILD_LIMIT=0;
+        Bundle baseline=h.snapshot(h.automation,"hierarchy-0012.xml",dir,new Bundle()); OBSERVED_CHILD_LIMIT=32;
+        require("7".equals(baseline.getString("child_query_count")) && "49".equals(baseline.getString("child_query_ms")) &&
+                "4".equals(baseline.getString("export_child_query_count")),"bound-zero requery fallback did not reproduce baseline");
+        require(AccessibilityNodeInfo.getterCalls-optimizedCalls==7 && optimizedCalls==6,"diagnostics added a getter query");
+        require(Arrays.equals(Files.readAllBytes(new File(dir,"hierarchy-0001.xml").toPath()),
+                Files.readAllBytes(new File(dir,"hierarchy-0012.xml").toPath())),"reuse changed complete XML bytes");
+        allCopiesRecycled();
         long previous=0;
         for(String phase:new String[]{"export_started","export_serialization_started","export_serialization_finished","export_flush_started","export_flush_finished","export_close_started","export_close_finished","export_finished"}) {
             long at=Long.parseLong(diagnostics.getString("helper_last_"+phase+"_uptime_ms"));
             require(at>=previous,"export diagnostic clocks/order changed"); previous=at;
         }
-        require(diagnostics.keySet().size()<25,"unbounded per-node diagnostic records");
+        require(diagnostics.keySet().size()<25,"per-call records leaked into per-phase keys");
         String responseName="response-11111111111111111111111111111111.json";
         JSONObject response=new JSONObject().put("protocol",1).put("nonce",NONCE).put("request_id","11111111111111111111111111111111")
                 .put("filename","hierarchy-0001.xml").put("root_wait_ms",8000).put("code",-1);
@@ -406,31 +491,173 @@ public class NativeSnapshotPublicationHarness {
         h.automation.root=tree(); h.automation.root.throwChild=true; h.automation.rootDelay=3;
         Bundle queryFailure=h.snapshot(h.automation,"hierarchy-0008.xml",dir,new Bundle());
         require("failed".equals(queryFailure.getString("snapshot")) && "1".equals(queryFailure.getString("child_query_count")) && "7".equals(queryFailure.getString("child_query_ms")),"throwing query attribution/error lost");
+        require("1".equals(queryFailure.getString("child_query_thrown_count")) &&
+                "threw".equals(lastQuery(h).values.get("outcome")) &&
+                "java.lang.IllegalStateException".equals(lastQuery(h).values.get("exception")),"getter exception evidence lost");
+        h.automation.root=new AccessibilityNodeInfo("slow-visible",true);
+        h.automation.root.children.add(new AccessibilityNodeInfo("visible",true));
+        h.automation.root.children.add(new AccessibilityNodeInfo("must-not-query",true));
+        h.automation.root.throwChildIndex=1; h.automation.root.childDelay=8000;
+        int beforeSlow=AccessibilityNodeInfo.getterCalls;
+        Bundle slowVisible=h.snapshot(h.automation,"hierarchy-0013.xml",dir,new Bundle());
+        require("failed".equals(slowVisible.getString("snapshot")) && !new File(dir,"hierarchy-0013.xml").exists() &&
+                Boolean.TRUE.equals(lastQuery(h).values.get("finished_at_or_after_root_deadline")),"slow successful child relaxed original deadline");
+        require(AccessibilityNodeInfo.getterCalls-beforeSlow==1 && "1".equals(slowVisible.getString("child_query_nonnull_count")),
+                "diagnostic duplicated actual late getters");
+        require("true".equals(slowVisible.getString("last_root_observation_partial")) &&
+                "1".equals(slowVisible.getString("last_root_examined_child_count")) &&
+                "2".equals(slowVisible.getString("last_root_child_count")) &&
+                "true".equals(slowVisible.getString("last_root_observation_deadline_reached")) &&
+                h.observedChildren.isEmpty() && h.observedRoot==null,"late child observation continued or retention survived rejection");
+        require("8000".equals(slowVisible.getString("child_query_max_ms")),"slow getter max lost");
+        allCopiesRecycled();
+        h.automation.root=new AccessibilityNodeInfo("slow-null",true);
+        h.automation.root.children.add(null); h.automation.root.children.add(new AccessibilityNodeInfo("must-not-query",true));
+        h.automation.root.throwChildIndex=1; h.automation.root.childDelay=8000;
+        beforeSlow=AccessibilityNodeInfo.getterCalls;
+        Bundle lateNull=h.snapshot(h.automation,"hierarchy-0017.xml",dir,new Bundle());
+        require("failed".equals(lateNull.getString("snapshot")) && "1".equals(lateNull.getString("child_query_null_count")) &&
+                "true".equals(lateNull.getString("last_root_observation_partial")) && AccessibilityNodeInfo.getterCalls-beforeSlow==1 &&
+                "null".equals(lastQuery(h).values.get("outcome")) && Boolean.TRUE.equals(lastQuery(h).values.get("finished_at_or_after_root_deadline")) &&
+                !new File(dir,"hierarchy-0017.xml").exists(),"late null started another child or became XML evidence");
+        allCopiesRecycled();
+        h.automation.root=new AccessibilityNodeInfo("slow-throw",true);
+        h.automation.root.children.add(null); h.automation.root.throwChild=true; h.automation.root.childDelay=9000;
+        Bundle lateThrow=h.snapshot(h.automation,"hierarchy-0018.xml",dir,new Bundle());
+        require("failed".equals(lateThrow.getString("snapshot")) && "1".equals(lateThrow.getString("child_query_thrown_count")) &&
+                "threw".equals(lastQuery(h).values.get("outcome")) && Long.valueOf(9000).equals(lastQuery(h).values.get("duration_ms")) &&
+                Boolean.TRUE.equals(lastQuery(h).values.get("finished_at_or_after_root_deadline")) && !new File(dir,"hierarchy-0018.xml").exists(),
+                "late throwing getter lost real exception/duration or became XML");
+        allCopiesRecycled();
+        h.childQueryRecords.clear(); h.childQueryCount=0; h.childQueryMillis=0;
+        AccessibilityNodeInfo nullParent=new AccessibilityNodeInfo("null-parent",true);
+        nullParent.children.add(null); nullParent.childDelay=5000;
+        h.readChild(nullParent,0,"export",0);
+        require("null".equals(lastQuery(h).values.get("outcome")) &&
+                Long.valueOf(5000).equals(lastQuery(h).values.get("duration_ms")),"slow null getter evidence lost");
+        nullParent.throwChild=true;
+        try { h.readChild(nullParent,0,"export",0); throw new AssertionError("slow throwing getter hidden"); }
+        catch(IllegalStateException expected) { require("child query failed".equals(expected.getMessage()),"diagnostics replaced original getter exception"); }
+        require("threw".equals(lastQuery(h).values.get("outcome")) &&
+                Long.valueOf(5000).equals(lastQuery(h).values.get("duration_ms")),"slow exception getter evidence lost");
+        AccessibilityNodeInfo metadataParent=new AccessibilityNodeInfo("metadata-parent",true);
+        metadataParent.children.add(new AccessibilityNodeInfo("returned",true)); metadataParent.throwMetadata=true;
+        int beforeMetadata=AccessibilityNodeInfo.getterCalls;
+        AccessibilityNodeInfo returned=h.readChild(metadataParent,0,"export",0);
+        require(returned!=null && AccessibilityNodeInfo.getterCalls==beforeMetadata+1 &&
+                "failed".equals(lastQuery(h).values.get("metadata_status")),"diagnostic failure replaced getter result or repeated query");
+        returned.recycle();
+        metadataParent.throwChild=true;
+        try { h.readChild(metadataParent,0,"export",0); throw new AssertionError("metadata failure hid real getter failure"); }
+        catch(IllegalStateException expected) { require("child query failed".equals(expected.getMessage()),"metadata failure replaced actual exception"); }
+        require("java.lang.IllegalStateException".equals(lastQuery(h).values.get("exception")),"metadata failure erased exception type");
+        metadataParent.throwChild=false; metadataParent.throwMetadata=false; metadataParent.errorMetadata=true;
+        returned=h.readChild(metadataParent,0,"export",0);
+        require(returned!=null && "failed".equals(lastQuery(h).values.get("metadata_status")),"diagnostic boundary Error replaced getter return");
+        returned.recycle();
+        AccessibilityNodeInfo escapedParent=new AccessibilityNodeInfo("escaped",true);
+        escapedParent.children.add(null);
+        escapedParent.className="\u0000".repeat(300); escapedParent.resourceId="\\\"".repeat(150);
+        h.readChild(escapedParent,0,"export",0);
+        require(lastQuery(h).toString().length()<2048 && Boolean.TRUE.equals(
+                ((JSONObject)lastQuery(h).values.get("parent")).values.get("fields_truncated")),"metadata bound lost complete record JSON");
+        System.out.println("BOUNDED_METADATA_JSON="+lastQuery(h));
+        AccessibilityNodeInfo firstRoot=tree(), otherRoot=tree();
+        h.childRootDeadline=SystemClock.now+8000;
+        h.observeRoot(new Bundle(),new JSONArray(),firstRoot,"first",SystemClock.now);
+        require(h.takeObservedChild(otherRoot,1)==null,"retained child crossed root identity");
+        h.observeRoot(new Bundle(),new JSONArray(),otherRoot,"next",SystemClock.now);
+        require(h.takeObservedChild(firstRoot,1)==null,"new observation kept previous root retention");
+        AccessibilityNodeInfo retained=h.takeObservedChild(otherRoot,1); require(retained!=null,"new exact-root retention missing"); retained.recycle();
+        h.clearObservedChildren(); allCopiesRecycled();
+        h.automation.root=new AccessibilityNodeInfo("partial-observation",true);
+        h.automation.root.children.add(new AccessibilityNodeInfo("retained-before-throw",true));
+        h.automation.root.children.add(new AccessibilityNodeInfo("throws",true)); h.automation.root.throwChildIndex=1;
+        Bundle partial=h.snapshot(h.automation,"hierarchy-0016.xml",dir,new Bundle());
+        require("failed".equals(partial.getString("snapshot")) && "2".equals(partial.getString("child_query_count")) &&
+                !new File(dir,"hierarchy-0016.xml").exists(),"partial retained observation survived query failure");
+        allCopiesRecycled();
+        h.automation.root=new AccessibilityNodeInfo("many",true); h.automation.root.childDelay=1;
+        for(int i=0;i<40;i++) h.automation.root.children.add(new AccessibilityNodeInfo("item"+i,true));
+        Bundle bounded=h.snapshot(h.automation,"hierarchy-0014.xml",dir,new Bundle());
+        require("ok".equals(bounded.getString("snapshot")) && "48".equals(bounded.getString("child_query_count")) &&
+                "8".equals(bounded.getString("export_child_query_count")) && "32".equals(bounded.getString("observed_child_reuse_count")),
+                "bounded retention did not fall back to real overflow queries");
+        require(h.childQueryRecords.size()==32 && "16".equals(bounded.getString("child_query_records_omitted")) &&
+                Integer.valueOf(17).equals(h.childQueryRecords.getFirst().values.get("sequence")) &&
+                Integer.valueOf(48).equals(lastQuery(h).values.get("sequence")),"bounded last-call retention lost distribution or omitted count");
+        Bundle boundedDiagnostics=new Bundle(); snapshotDiagnostics(boundedDiagnostics,bounded);
+        require(bounded.getString("child_query_records").length()>1024 && bounded.getString("child_query_records").equals(
+                boundedDiagnostics.getString("helper_last_snapshot_child_query_records")),"complete record JSON was truncated");
+        System.out.println("DIAGNOSTIC_JSON="+bounded.getString("child_query_records"));
+        acceptRequestDiagnostics(boundedDiagnostics,"fresh","hierarchy-0015.xml");
+        require(!boundedDiagnostics.containsKey("helper_last_snapshot_child_query_records"),"new request retained old getter JSON");
+        h.automation.root=tree(); h.automation.root.childDelay=7;
+        Bundle reset=h.snapshot(h.automation,"hierarchy-0015.xml",dir,new Bundle());
+        require("6".equals(reset.getString("child_query_count")) && "0".equals(reset.getString("child_query_records_omitted")) &&
+                "7".equals(reset.getString("child_query_max_ms")) && h.childQueryRecords.size()==6,"getter metrics crossed requests");
+        allCopiesRecycled();
+        h.automation.root.throwChild=true;
         h.arguments.putString("session_nonce","test-session"); h.onStart();
         require(h.finishCode==-1 && "finished".equals(h.finished.getString("session")) && "failed".equals(h.finished.getString("helper_last_snapshot_status")),"failed snapshot changed normal session close");
         require("1".equals(h.finished.getString("helper_last_snapshot_child_query_count")) &&
                 "7".equals(h.finished.getString("helper_last_snapshot_child_query_ms")) &&
                 h.finished.getString("helper_last_snapshot_export_child_query_count")==null,
                 "final failed-request query diagnostics missing or mixed with previous export");
-        for(String value:h.finished.values.values()) require(value.length()<=1024,"unbounded final diagnostic string");
+        require(h.finished.getString("helper_on_start_started_uptime_ms")!=null &&
+                "50".equals(h.finished.getString("helper_process_started_uptime_ms")),"lifecycle was not carried into final result");
+        for(Map.Entry<String,String> entry:h.finished.values.entrySet()) require(entry.getValue().length()<=
+                (entry.getKey().equals("helper_last_snapshot_child_query_records")?70000:1024),"unbounded final diagnostic string");
         JSONObject closed=new JSONObject().put("state","closed");
         writeJson(dir,"closed.json",closed); childRead("json",new File(dir,"closed.json").getPath(),closed.toString());
         h.failSession=true; h.onStart(); require(h.finishCode==0 && "failed".equals(h.finished.getString("snapshot")),"real session failure changed close code");
         require(FileOutputStream.syncCalls==0,"ephemeral publication forced durability");
         System.out.println("Passed production Java cross-process publication, export failures, deadlines and diagnostics");
+        System.out.println("Compared complete XML: same-production bound-zero requery 7 getters/49 ms; retained child 6 getters/42 ms; overflow 48 getters, 32 reused, last32 records/16 omitted");
     }
 ''' + methods + '\n}\n'
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             file = directory / 'NativeSnapshotPublicationHarness.java'
             file.write_text(harness)
+            process_boundary = directory / 'android' / 'os' / 'Process.java'
+            process_boundary.parent.mkdir(parents=True)
+            process_boundary.write_text('package android.os; public class Process { public static long getStartUptimeMillis() { return 50; } }')
+            def capture(name, result):
+                if destination := os.environ.get('LUOSHU_NATIVE_TEST_EVIDENCE_DIR'):
+                    evidence = Path(destination)
+                    evidence.mkdir(parents=True, exist_ok=True)
+                    (evidence / f'{name}-stdout.bin').write_bytes(result.stdout)
+                    (evidence / f'{name}-stderr.bin').write_bytes(result.stderr)
+                    if name == 'javac':
+                        (evidence / file.name).write_bytes(file.read_bytes())
+                        (evidence / 'ProcessBoundary.java').write_bytes(process_boundary.read_bytes())
+                    else:
+                        for filename, label in [('hierarchy-0001.xml', 'retained-fixture.xml'),
+                                                ('hierarchy-0012.xml', 'bound-zero-fixture.xml')]:
+                            (evidence / label).write_bytes((directory / 'session' / filename).read_bytes())
             compiled = subprocess.run([java, '--module', 'jdk.compiler/com.sun.tools.javac.Main',
-                                       '-d', str(directory), str(file)], capture_output=True, timeout=30)
+                                       '-d', str(directory), str(file), str(process_boundary)], capture_output=True, timeout=30)
+            capture('javac', compiled)
             self.assertEqual(0, compiled.returncode, compiled.stderr.decode())
             exercised = subprocess.run([java, '-cp', str(directory), 'NativeSnapshotPublicationHarness',
                                         'exercise', str(directory / 'session')],
                                        capture_output=True, timeout=30)
+            capture('java', exercised)
             self.assertEqual(0, exercised.returncode, exercised.stderr.decode())
+            for line in exercised.stdout.decode().splitlines():
+                if line.startswith('DIAGNOSTIC_JSON='):
+                    records = json.loads(line.partition('=')[2])
+                    self.assertEqual(32, len(records))
+                    self.assertEqual(list(range(17, 49)), [record['sequence'] for record in records])
+                    self.assertLess(len(line.partition('=')[2]), 70000)
+                elif line.startswith('BOUNDED_METADATA_JSON='):
+                    record = json.loads(line.partition('=')[2])
+                    self.assertEqual('null', record['outcome'])
+                    self.assertTrue(record['parent']['fields_truncated'])
+                    self.assertLess(len(line.partition('=')[2]), 2048)
+                else:
+                    print(line)
             self.assertIn('Passed production Java cross-process publication, export failures, deadlines and diagnostics',
                           exercised.stdout.decode())
 
