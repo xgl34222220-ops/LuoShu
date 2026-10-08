@@ -291,6 +291,34 @@ class UiSnapshotSessionTest(FixtureContextTestCase):
         self.assertEqual(110, self.session._ready_json_timing['deadline_monotonic_seconds'])
         self.popen.assert_called_once()
 
+    def test_first_request_evidence_write_error_prevents_later_request_and_deadline_restart(self):
+        self.session.begin(110)
+        self.session.start(110)
+        self.assertTrue(self.session.ready)
+        evidence = self.output / 'hierarchy-0001-session-request.json'
+        real_write = Path.write_text
+
+        def fail_first_request(path, *args, **kwargs):
+            if path == evidence:
+                raise OSError('first request evidence write failed')
+            return real_write(path, *args, **kwargs)
+
+        with patch.object(Path, 'write_text', fail_first_request):
+            with self.assertRaisesRegex(OSError, 'first request evidence write failed'):
+                self.session.capture('hierarchy-0001.xml', deadline=110)
+        self.assertEqual('first request evidence write failed', self.session.fatal_error)
+        self.assertEqual('protocol-failed', self.session.events[-1]['event'])
+        calls = list(self.protocol.calls)
+        self.clock.now = 111
+        with self.assertRaisesRegex(RuntimeError, 'first request evidence write failed'):
+            self.session.capture('hierarchy-0002.xml', deadline=150)
+        self.assertEqual(110, self.session._first_capture_deadline)
+        self.assertNotIn('hierarchy-0002.xml', self.session.filenames)
+        self.assertEqual(calls, self.protocol.calls)
+        self.assertEqual([], self.protocol.requests)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.popen.assert_called_once()
+
     def test_expired_begin_never_spawns_and_is_not_retried(self):
         with self.assertRaisesRegex(RuntimeError, 'timed out before starting its connection'):
             self.session.begin(100)

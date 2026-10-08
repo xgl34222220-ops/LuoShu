@@ -148,7 +148,8 @@ def prepare(source, cache, boot, temporary):
                 else:
                     if _source_identity(path.lstat()) != _source_identity(info):
                         raise ValueError('payload source changed before copy')
-                    shutil.copyfile(path, destination)
+                    if _read_source(path, info, destination) != inodes[identity]:
+                        raise ValueError('payload source changed between read and copy')
                     if _source_identity(path.lstat()) != _source_identity(info):
                         raise ValueError('payload source changed during copy')
                     os.chmod(destination, 0o644)

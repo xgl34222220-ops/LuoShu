@@ -459,9 +459,9 @@ class UiSnapshotSession:
         envelope = {"protocol": PROTOCOL, "nonce": self.nonce, "request_id": request_id,
                     "filename": filename, "root_wait_ms": ROOT_WAIT_MS}
         prefix = self.output / filename.removesuffix(".xml")
-        prefix.with_name(prefix.name + "-session-request.json").write_text(
-            json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
         try:
+            prefix.with_name(prefix.name + "-session-request.json").write_text(
+                json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
             if time.monotonic() >= deadline:
                 raise RuntimeError("UiAutomation session timed out before starting its capture")
             self.start(deadline)
