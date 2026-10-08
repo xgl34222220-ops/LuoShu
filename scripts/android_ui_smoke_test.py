@@ -2740,6 +2740,31 @@ class LibraryRestorationHarnessTest(unittest.TestCase):
 
 
 class QuickReturnHarnessTest(unittest.TestCase):
+    def test_normal_and_disabled_rapid_navigation_retain_separate_original_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+            root = self.hierarchy(dock=True)
+            run.ensure_dock = Mock(return_value=root)
+            run.wait_page = Mock(return_value=root)
+            run.assert_running = Mock()
+            header = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8 + struct.pack(">II", 1080, 1920)
+            images = iter((header + b"normal-original", header + b"disabled-original"))
+            run.adb = Mock(side_effect=lambda *args, **kwargs: subprocess.CompletedProcess(
+                args, 0, next(images) if args == ("exec-out", "screencap", "-p") else b"", b""))
+            run.verify_rapid_navigation()
+            original_png = (output / "rapid-navigation-home.png").read_bytes()
+            original_xml = (output / "rapid-navigation-home.xml").read_bytes()
+            run.verify_rapid_navigation(animations_disabled=True)
+            self.assertEqual(original_png, (output / "rapid-navigation-home.png").read_bytes())
+            self.assertEqual(original_xml, (output / "rapid-navigation-home.xml").read_bytes())
+            self.assertNotEqual(original_png, (output / "animations-disabled-rapid-navigation-home.png").read_bytes())
+            self.assertEqual(original_xml, (output / "animations-disabled-rapid-navigation-home.xml").read_bytes())
+            taps = [call for call in run.adb.call_args_list if call.args[:3] == ("shell", "input", "tap")]
+            self.assertEqual(18, len(taps))
+            self.assertEqual(["rapid-navigation", "animations-disabled-rapid-navigation"],
+                             [check["check"] for check in run.checks])
+
     def hierarchy(self, *, dock: bool, offset: int = 0):
         root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
           <node package="{PACKAGE}" scrollable="true" bounds="[0,89][1080,1920]">

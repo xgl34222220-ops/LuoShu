@@ -287,6 +287,44 @@ jobs:
           # Four bounded recordings retain every original frame/timestamp.
           # Re-covering home, black blanks and unknown frames fail acceptance.
           script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --diagnostic-video-after-baseline-failure
+      - name: Preserve complete snapshot transport diagnostics in job log
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          from pathlib import Path
+          import uuid
+          root = Path('launch-visual-output').resolve()
+          names = {
+              'ui-snapshot-session.json', 'ui-snapshot-commands.json',
+              'ui-snapshot-session-ready.json', 'ui-snapshot-session-closed.json',
+              'ui-snapshot-session-instrumentation-stdout.bin',
+              'ui-snapshot-session-instrumentation-stderr.bin',
+          }
+          paths = sorted(path for path in root.rglob('*')
+                         if path.name in names or path.name.endswith((
+                             '-baseline-readiness.json', '-session-request.json', '-session-response.json')))
+          boundary = uuid.uuid4().hex
+          # Treat emulator output as data, including any workflow-like strings.
+          print(f'::stop-commands::{boundary}', flush=True)
+          try:
+              if not paths:
+                  print('Snapshot transport evidence was not produced; no timing or visual pass is inferred.')
+              for path in paths:
+                  if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+                      raise RuntimeError(f'Invalid snapshot diagnostic path: {path}')
+                  data = path.read_bytes()
+                  print(f'FILE {path.relative_to(root)} bytes={len(data)} sha256={hashlib.sha256(data).hexdigest()}')
+                  print(data.decode('utf-8', errors='backslashreplace'))
+                  # Bounded lines also retain exact binary/long JSON bytes when
+                  # a log viewer abbreviates an individual human-readable line.
+                  for offset in range(0, len(data), 3072):
+                      print(f'BASE64 offset={offset} {base64.b64encode(data[offset:offset + 3072]).decode("ascii")}')
+          finally:
+              print(f'::{boundary}::', flush=True)
+          PY
       - name: Upload separate startup recordings and logs
         if: always()
         uses: actions/upload-artifact@v4

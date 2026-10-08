@@ -1603,7 +1603,7 @@ class SmokeRun:
         self.results.append({"screen": name, "width": width, "height": height, "passed": True})
         print(f"Captured {name}: {width}x{height}", flush=True)
 
-    def verify_rapid_navigation(self) -> None:
+    def verify_rapid_navigation(self, *, animations_disabled: bool = False) -> None:
         root = self.ensure_dock()
         coordinates = {label: center(tab_target(root, label, self.package)) for _, label, _ in PAGES}
         sequence = ("首页", "组合", "字体库", "设置", "字体库", "首页", "设置", "组合", "首页")
@@ -1611,8 +1611,10 @@ class SmokeRun:
             x, y = coordinates[label]
             self.adb("shell", "input", "tap", str(x), str(y))
         root = self.wait_page("首页", "当前字体")
-        self.capture("rapid-navigation-home", root)
-        self.record("rapid-navigation", taps=list(sequence), final_tab="首页")
+        prefix = "animations-disabled-rapid-navigation" if animations_disabled else "rapid-navigation"
+        self.capture(f"{prefix}-home", root)
+        self.record(prefix, taps=list(sequence), final_tab="首页",
+                    animation_scales="disabled" if animations_disabled else "unchanged")
 
     def verify_settings_details(self) -> None:
         self.select_tab("设置", "你的洛书")
@@ -1838,7 +1840,7 @@ class SmokeRun:
                 applied = self.text("shell", "settings", "get", "global", key).strip()
                 if float(applied) != 0:
                     raise RuntimeError(f"System animation scale {key} was not disabled: {applied}")
-            self.verify_rapid_navigation()
+            self.verify_rapid_navigation(animations_disabled=True)
             self.select_tab("设置", "你的洛书")
             self.tap_label("外观与主题", scroll_attempts=8)
             root = self.wait_ui(lambda root: "外观预览" in app_labels(root, self.package), "Appearance detail with system animations disabled")

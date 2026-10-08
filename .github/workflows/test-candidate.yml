@@ -68,6 +68,15 @@ jobs:
             sh ./scripts/prepare_composite_runtime.sh
           fi
 
+      - name: Prepare host source-check dependencies
+        run: |
+          # The full source gate includes real screenshot-helper regressions.
+          # Match the UI workflow's isolated host dependency; never bundle it.
+          python3 -m venv "$RUNNER_TEMP/luoshu-candidate-host-tests"
+          timeout 180s "$RUNNER_TEMP/luoshu-candidate-host-tests/bin/python" -m pip install --timeout 30 --retries 2 Pillow==12.3.0
+          "$RUNNER_TEMP/luoshu-candidate-host-tests/bin/python" -c 'import PIL; assert PIL.__version__ == "12.3.0"; print("Verified host Pillow", PIL.__version__)'
+          echo "$RUNNER_TEMP/luoshu-candidate-host-tests/bin" >> "$GITHUB_PATH"
+
       # Keep the layout verifier on the same FreeType as the original Ubuntu
       # 24.04 build. Jammy's 2.11.1 lacks the HVAR no-variation sentinel support
       # required by the existing variable-font layout gate.
@@ -115,8 +124,8 @@ jobs:
           set -euo pipefail
           log="$RUNNER_TEMP/luoshu-source-check.log"
           if ! sh ./scripts/check.sh >"$log" 2>&1; then
-            echo '源码门禁失败，输出最后 180 行：' >&2
-            tail -n 180 "$log" >&2
+            echo '源码门禁失败，输出完整原日志：' >&2
+            cat "$log" >&2
             mkdir -p dist
             cp -f "$log" dist/source-check.log
             exit 1
