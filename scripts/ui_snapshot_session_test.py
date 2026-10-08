@@ -817,7 +817,11 @@ emit('stderr',b'\x80raw-final-stderr\n')
                 time.sleep(.035)
             result = protocol.run(command, **kwargs)
             if protocol.requests:
-                (directory / 'request.json').write_text(json.dumps(protocol.requests[-1]))
+                # Match the production temp+rename publication contract. The
+                # real producer must never observe a truncated final request.
+                request_temporary = directory / 'request.json.tmp'
+                request_temporary.write_text(json.dumps(protocol.requests[-1]))
+                request_temporary.replace(directory / 'request.json')
             if command[-1].endswith('.xml') and mode == 'after-xml':
                 (directory / 'xml-read').touch()
                 until = time.monotonic() + 1
@@ -1016,6 +1020,39 @@ emit('stderr',b'\x80raw-final-stderr\n')
         self.assert_raw_preserved(directory)
         self.assertGreater((directory / 'producer-stderr.bin').stat().st_size, 128 * 1024)
         self.assertFalse(any('force-stop' in command for command, _ in protocol.calls))
+
+    def test_request_publication_keeps_partial_writes_private_from_real_producer(self):
+        session, protocol, directory, processes = self.make_session('high-stderr')
+        real_write = Path.write_text
+        interrupted = []
+
+        def fragmented_write(path, content, *arguments, **keywords):
+            if path.parent == directory and path.name in ('request.json', 'request.json.tmp') and not interrupted:
+                interrupted.append(path.name)
+                with path.open('w') as stream:
+                    stream.write(content[:1])
+                    stream.flush()
+                    # Simulate scheduling between open/write and publication,
+                    # inside the existing three-second capture ceiling.
+                    time.sleep(.03)
+                    stream.write(content[1:])
+                return len(content)
+            return real_write(path, content, *arguments, **keywords)
+
+        started = time.monotonic()
+        with patch.object(Path, 'write_text', fragmented_write):
+            metadata, xml = session.capture('hierarchy-0001.xml', deadline=started + 3)
+        self.assertEqual('ok', metadata['snapshot'])
+        self.assertEqual(protocol.xml.decode(), xml)
+        self.assertEqual(['request.json.tmp'], interrupted)
+        self.assertFalse((directory / 'request.json.tmp').exists())
+        self.assertEqual(protocol.requests[-1], json.loads((directory / 'request.json').read_text()))
+        self.assertIsNone(processes[0].poll())
+        self.assertLess(time.monotonic() - started, 3)
+        session.close()
+        self.assertEqual(0, processes[0].returncode)
+        self.assertFalse(any('force-stop' in command for command, _ in protocol.calls))
+        self.assert_raw_preserved(directory)
 
     def test_missing_notice_never_reads_existing_ready_json_or_reconnects(self):
         session, protocol, directory, processes = self.make_session('missing')
