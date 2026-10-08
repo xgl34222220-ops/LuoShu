@@ -23,7 +23,7 @@ from android_ui_smoke import (
     legacy_manual_colors_ready, legacy_monet_unavailable,
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
     scroll_progress, visible_action, visible_text, ScrollBudget,
-    focused_component, decode_raw_screencap, decompress_screencap_gzip, home_launcher_content, main,
+    focused_component, home_window_state, decode_raw_screencap, decompress_screencap_gzip, home_launcher_content, main,
 )
 
 
@@ -668,10 +668,28 @@ public class SnapshotCacheCompatibilityTest {
         image.save(output, format="PNG")
         return output.getvalue()
 
-    def baseline_window(self, component="com.example.launcher/com.example.launcher.Home"):
+    def baseline_window(self, component="com.example.launcher/com.example.launcher.Home", showing=False):
         return (f"mCurrentFocus=Window{{abc u0 {component}}}\n"
+                f"isKeyguardShowing={str(showing).lower()}\n"
                 "InsetsSource id=1 type=statusBars frame=[0,0][40,4] visible=true\n"
                 "InsetsSource id=2 type=navigationBars frame=[0,76][40,80] visible=true\n")
+
+    def baseline_policy(self, showing=False, current_user=0, occluded=False):
+        return ("WINDOW MANAGER POLICY STATE (dumpsys window policy)\n"
+                "    KeyguardServiceDelegate\n"
+                f"      showing={str(showing).lower()}\n"
+                f"      occluded={str(occluded).lower()}\n"
+                f"      currentUser={current_user}\n"
+                "    Looper state:\n      currentUser=-10000\n")
+
+    def baseline_adb(self, *, side_effect=None, return_value=None):
+        capture = Mock(side_effect=side_effect, return_value=return_value)
+        def command(*args, **kwargs):
+            if args == ("exec-out", "sh", "-c", "dumpsys window policy && dumpsys window displays"):
+                return subprocess.CompletedProcess([], 0,
+                    (self.baseline_policy() + self.baseline_window()).encode(), b"probe stderr")
+            return capture(*args, **kwargs)
+        return Mock(side_effect=command)
 
     def baseline_raw(self, content=20, clock=0):
         from PIL import Image
@@ -689,9 +707,372 @@ public class SnapshotCacheCompatibilityTest {
         run.snapshot_apk = Path("reader.apk")
         run.snapshot_hierarchy = Mock(side_effect=lambda **kwargs: self.baseline_hierarchy())
 
-    def baseline_batch(self, raw, window=None):
+    def baseline_batch(self, raw, window=None, policy=None):
         window = self.baseline_window() if window is None else window
-        return window.encode() + b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00" + gzip.compress(raw, compresslevel=1, mtime=0)
+        policy = self.baseline_policy() if policy is None else policy
+        return (policy + window).encode() + b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00" + gzip.compress(raw, compresslevel=1, mtime=0)
+
+    def test_home_window_state_requires_unique_matching_real_user_observations(self):
+        for showing, expected in ((True, "locked"), (False, "unlocked")):
+            with self.subTest(showing=showing):
+                window = self.baseline_policy(showing) + self.baseline_window(showing=showing)
+                state = home_window_state(window)
+                self.assertEqual(expected, state["keyguard_state"])
+                self.assertEqual(0, state["delegate_currentUser"])
+                self.assertEqual([], state["unknown_reasons"])
+                self.assertEqual("com.example.launcher/com.example.launcher.Home", state["focused_component"])
+        locked = self.baseline_policy(True) + self.baseline_window(showing=True)
+        unknown = [self.baseline_window(), self.baseline_policy(True, -10000) + self.baseline_window(showing=True),
+                   self.baseline_policy(True) + self.baseline_window(),
+                   self.baseline_policy(True, occluded=True) + self.baseline_window(showing=True),
+                   locked + self.baseline_policy(True), locked + "isKeyguardShowing=true\n",
+                   locked + "isKeyguardShowing=invalid\n"]
+        for focus in ("invalid", "Window{second u0 com.other/.Home}",
+                      "Window{abc u0 com.example.launcher/com.example.launcher.Home}"):
+            unknown.append(locked + f"mCurrentFocus={focus}\n")
+        unknown.extend([locked.replace("mCurrentFocus=Window{abc u0 com.example.launcher/com.example.launcher.Home}",
+                                       "mCurrentFocus=invalid"),
+                        locked.replace("mCurrentFocus=Window{abc u0 com.example.launcher/com.example.launcher.Home}\n", "")])
+        for field, valid in (("showing", "true"), ("occluded", "false"), ("currentUser", "0")):
+            unknown.extend([locked.replace(f"{field}={valid}", f"{field}=invalid", 1),
+                            locked.replace(f"{field}={valid}", f"{field}={valid}\n      {field}=invalid", 1),
+                            locked.replace(f"{field}={valid}", f"{field}={valid}\n      {field}={valid}", 1),
+                            locked.replace(f"      {field}={valid}\n", "", 1)])
+        unknown.append(locked.replace("currentUser=0", "currentUser=USER_NULL", 1))
+        for window in unknown:
+            with self.subTest(window=window):
+                state = home_window_state(window)
+                self.assertEqual("unknown", state["keyguard_state"])
+                self.assertTrue(state["unknown_reasons"])
+        real_null = locked.replace("Window{abc u0 com.example.launcher/com.example.launcher.Home}", "null")
+        state = home_window_state(real_null)
+        self.assertTrue(state["focus_valid"])
+        self.assertEqual("null", state["current_focus"])
+        self.assertIsNone(state["focused_component"])
+        self.assertEqual("locked", state["keyguard_state"])
+        real_shade = locked.replace("com.example.launcher/com.example.launcher.Home", "NotificationShade")
+        self.assertEqual("locked", home_window_state(real_shade)["keyguard_state"])
+
+    def test_home_ambiguous_focus_never_counts_a_launcher_match_as_stable(self):
+        for extra in ("invalid", "Window{other u0 com.other/.Home}",
+                      "Window{abc u0 com.example.launcher/com.example.launcher.Home}"):
+            with self.subTest(extra=extra), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                batch = self.baseline_batch(self.baseline_raw(), self.baseline_window() + f"mCurrentFocus={extra}\n")
+                run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess([], 0, batch, b""))
+                clock = [0.0]
+                with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                        patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)), \
+                        self.assertRaisesRegex(RuntimeError, "within 10s"):
+                    run.wait_home_baseline("light-cold-start")
+                metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+                self.assertFalse(metadata["passed"])
+                self.assertNotIn("keyguard_dismissal", metadata)
+                self.assertTrue(all(sample["stable_captures"] == 0 for sample in metadata["samples"]))
+                self.assertTrue(all(sample["window_state"]["focus_definition_count"] == 2 for sample in metadata["samples"]))
+
+    def test_home_dismissal_exit_zero_needs_later_same_user_unlocked_and_three_fresh_captures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = SmokeRun(Path("app.apk"), directory, PACKAGE, None)
+            self.prepare_baseline_reader(run)
+            clock = [0.0]
+            events = []
+            raw = self.baseline_raw()
+            states = [(True, 0), (True, -10000), (False, 10), (False, 0), (False, 0), (False, 0)]
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            def hierarchy(**kwargs):
+                events.append("hierarchy")
+                self.assertEqual(10, kwargs["deadline"])
+                clock[0] += .2
+                return self.baseline_hierarchy()
+            def command(*args, **kwargs):
+                self.assertGreater(kwargs["timeout"], 0)
+                self.assertAlmostEqual(10 - clock[0], kwargs["timeout"])
+                self.assertFalse(kwargs["check"])
+                if args[3:] == ("dumpsys window policy && dumpsys window displays",):
+                    events.append("initial")
+                    clock[0] += .4
+                    return subprocess.CompletedProcess([], 0,
+                        (self.baseline_policy(True) + self.baseline_window(showing=True)).encode(), b"initial stderr")
+                if args == ("shell", "wm", "dismiss-keyguard"):
+                    events.append("dismiss")
+                    clock[0] += .3
+                    return subprocess.CompletedProcess([], 0, b"dismiss request stdout", b"dismiss stderr")
+                events.append("capture")
+                showing, user = states.pop(0)
+                clock[0] += .5
+                return subprocess.CompletedProcess([], 0, self.baseline_batch(raw,
+                    self.baseline_window(showing=showing), self.baseline_policy(showing, user)), b"")
+            run.snapshot_hierarchy = Mock(side_effect=hierarchy)
+            run.adb = Mock(side_effect=command)
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
+                self.assertTrue(run.wait_home_baseline("light-cold-start").startswith(b"\x89PNG"))
+            metadata = json.loads((directory / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertTrue(metadata["passed"])
+            self.assertEqual([0, 0, 0, 1, 2, 3], [sample["stable_captures"] for sample in metadata["samples"]])
+            self.assertEqual(["initial", "dismiss", "hierarchy", "capture"], events[:4])
+            self.assertEqual(1, events.count("dismiss"))
+            self.assertEqual(6, run.snapshot_hierarchy.call_count)
+            self.assertEqual(6, len({sample["hierarchy"] for sample in metadata["samples"]}))
+            dismissal = metadata["keyguard_dismissal"]
+            self.assertTrue(dismissal["request_sent"])
+            self.assertTrue(dismissal["completed"])
+            self.assertEqual("sample-03", dismissal["completion_observation"])
+            self.assertEqual("initial_window_state", dismissal["trigger_observation"])
+            self.assertEqual(b"initial stderr", (directory / metadata["initial_window_state"]["stderr"]).read_bytes())
+            self.assertEqual(b"dismiss request stdout", (directory / dismissal["stdout"]).read_bytes())
+            self.assertLess(metadata["elapsed_seconds"], 10)
+
+    def test_home_pending_dismissal_never_counts_locked_unknown_or_different_user_samples(self):
+        for showing, user in ((True, 0), (True, -10000), (False, 10)):
+            with self.subTest(showing=showing, user=user), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                clock = [0.0]
+                def command(*args, **kwargs):
+                    self.assertAlmostEqual(10 - clock[0], kwargs["timeout"])
+                    if args[3:] == ("dumpsys window policy && dumpsys window displays",):
+                        return subprocess.CompletedProcess([], 0,
+                            (self.baseline_policy(True) + self.baseline_window(showing=True)).encode(), b"")
+                    if args == ("shell", "wm", "dismiss-keyguard"):
+                        return subprocess.CompletedProcess([], 0, b"", b"")
+                    clock[0] += min(.5, kwargs["timeout"])
+                    return subprocess.CompletedProcess([], 0, self.baseline_batch(self.baseline_raw(),
+                        self.baseline_window(showing=showing), self.baseline_policy(showing, user)), b"")
+                run.adb = Mock(side_effect=command)
+                with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                        patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)), \
+                        self.assertRaisesRegex(RuntimeError, "within 10s"):
+                    run.wait_home_baseline("light-cold-start")
+                metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+                self.assertFalse(metadata["passed"])
+                self.assertTrue(metadata["keyguard_dismissal"]["request_sent"])
+                self.assertFalse(metadata["keyguard_dismissal"]["completed"])
+                self.assertTrue(metadata["samples"])
+                self.assertTrue(all(sample["stable_captures"] == 0 for sample in metadata["samples"]))
+                self.assertEqual(1, sum(call.args == ("shell", "wm", "dismiss-keyguard") for call in run.adb.call_args_list))
+
+    def test_home_unknown_start_state_never_requests_dismissal_or_replaces_original_content_gates(self):
+        for has_content in (True, False):
+            with self.subTest(has_content=has_content), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                if not has_content:
+                    run.snapshot_hierarchy = Mock(return_value=ET.fromstring('<hierarchy><node package="com.example.launcher" /></hierarchy>'))
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                clock = [0.0]
+                unknown_policy = self.baseline_policy(True, -10000)
+                def command(*args, **kwargs):
+                    self.assertNotEqual(("shell", "wm", "dismiss-keyguard"), args)
+                    if args[3:] == ("dumpsys window policy && dumpsys window displays",):
+                        return subprocess.CompletedProcess([], 0,
+                            (unknown_policy + self.baseline_window(showing=True)).encode(), b"")
+                    return subprocess.CompletedProcess([], 0, self.baseline_batch(self.baseline_raw(),
+                        self.baseline_window(showing=True), unknown_policy), b"")
+                run.adb = Mock(side_effect=command)
+                with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                        patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
+                    if has_content:
+                        run.wait_home_baseline("light-cold-start")
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "within 10s"):
+                            run.wait_home_baseline("light-cold-start")
+                metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+                self.assertEqual(has_content, metadata["passed"])
+                self.assertEqual("unknown", metadata["initial_window_state"]["state"]["keyguard_state"])
+                self.assertNotIn("keyguard_dismissal", metadata)
+                self.assertEqual(3, metadata["required_stable_captures"])
+                self.assertTrue(all(sample["window_state"]["keyguard_state"] == "unknown" for sample in metadata["samples"]))
+
+    def test_home_probe_error_and_partial_timeout_preserve_complete_streams_before_any_helper_read(self):
+        for kind in ("nonzero", "timeout", "direct-timeout", "exception"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                stdout, stderr = b"full probe stdout" * 500, b"full probe stderr" * 500
+                def command(*args, **kwargs):
+                    self.assertGreater(kwargs["timeout"], 0)
+                    self.assertLessEqual(kwargs["timeout"], 10)
+                    if kind == "nonzero":
+                        return subprocess.CompletedProcess([], 7, stdout, stderr)
+                    if kind == "exception":
+                        raise OSError("probe spawn failed")
+                    cause = subprocess.TimeoutExpired("adb", kwargs["timeout"], output=stdout, stderr=stderr)
+                    if kind == "direct-timeout":
+                        raise cause
+                    raise RuntimeError("probe timed out") from cause
+                run.adb = Mock(side_effect=command)
+                with self.assertRaisesRegex(RuntimeError, "HOME baseline failed"):
+                    run.wait_home_baseline("light-cold-start")
+                metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
+                probe = metadata["initial_window_state"]
+                self.assertFalse(metadata["passed"])
+                self.assertEqual([], metadata["samples"])
+                run.snapshot_hierarchy.assert_not_called()
+                self.assertEqual(stdout if kind != "exception" else b"", (Path(temporary) / probe["stdout"]).read_bytes())
+                self.assertEqual(stderr if kind != "exception" else b"", (Path(temporary) / probe["stderr"]).read_bytes())
+                self.assertIn("started_monotonic_seconds", probe)
+                self.assertIn("ended_monotonic_seconds", probe)
+                if "timeout" in kind:
+                    self.assertTrue(probe["partial_streams"])
+                    self.assertEqual("timed-out", probe["outcome"])
+
+    def test_home_late_probe_or_dismissal_cannot_start_helper_or_pass(self):
+        for late_stage in ("probe", "dismiss", "probe-persistence"):
+            with self.subTest(late_stage=late_stage), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                run = SmokeRun(Path("app.apk"), directory, PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                clock = [0.0]
+                def command(*args, **kwargs):
+                    self.assertAlmostEqual(10 - clock[0], kwargs["timeout"])
+                    if args[3:] == ("dumpsys window policy && dumpsys window displays",):
+                        clock[0] = 10.001 if late_stage == "probe" else 1
+                        return subprocess.CompletedProcess([], 0,
+                            (self.baseline_policy(True) + self.baseline_window(showing=True)).encode(), b"real probe stderr")
+                    self.assertEqual(("shell", "wm", "dismiss-keyguard"), args)
+                    clock[0] = 10.001
+                    return subprocess.CompletedProcess([], 0, b"real dismiss stdout", b"real dismiss stderr")
+                original_write = Path.write_bytes
+                def persist(path, data):
+                    result = original_write(path, data)
+                    if late_stage == "probe-persistence" and path.name.endswith("initial_window_state-stderr.bin"):
+                        clock[0] = 10.001
+                    return result
+                run.adb = Mock(side_effect=command)
+                with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                        patch.object(Path, "write_bytes", autospec=True, side_effect=persist), \
+                        self.assertRaisesRegex(RuntimeError, "within 10s"):
+                    run.wait_home_baseline("light-cold-start")
+                metadata = json.loads((directory / "light-cold-start-baseline-readiness.json").read_text())
+                self.assertFalse(metadata["passed"])
+                self.assertEqual(10.001, metadata["elapsed_seconds"])
+                self.assertEqual([], metadata["samples"])
+                run.snapshot_hierarchy.assert_not_called()
+                self.assertEqual(b"real probe stderr", (directory / metadata["initial_window_state"]["stderr"]).read_bytes())
+                if late_stage == "dismiss":
+                    dismissal = metadata["keyguard_dismissal"]
+                    self.assertTrue(dismissal["request_sent"])
+                    self.assertFalse(dismissal["completed"])
+                    self.assertEqual(9, dismissal["timeout_seconds"])
+                    self.assertEqual(b"real dismiss stdout", (directory / dismissal["stdout"]).read_bytes())
+                else:
+                    self.assertNotIn("keyguard_dismissal", metadata)
+
+    def test_home_failed_or_timed_out_dismissal_keeps_trigger_partial_evidence_and_original_error(self):
+        for kind in ("nonzero", "timeout"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                run = SmokeRun(Path("app.apk"), directory, PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                stdout, stderr = b"dismiss output" * 500, b"dismiss error" * 500
+                def command(*args, **kwargs):
+                    if args[3:] == ("dumpsys window policy && dumpsys window displays",):
+                        return subprocess.CompletedProcess([], 0,
+                            (self.baseline_policy(True) + self.baseline_window(showing=True)).encode(), b"")
+                    self.assertEqual(("shell", "wm", "dismiss-keyguard"), args)
+                    if kind == "nonzero":
+                        return subprocess.CompletedProcess([], 9, stdout, stderr)
+                    cause = subprocess.TimeoutExpired("adb", kwargs["timeout"], output=stdout, stderr=stderr)
+                    raise RuntimeError("actual dismissal timed out") from cause
+                run.adb = Mock(side_effect=command)
+                expected_error = "dismissal failed" if kind == "nonzero" else "actual dismissal timed out"
+                with self.assertRaisesRegex(RuntimeError, expected_error):
+                    run.wait_home_baseline("light-cold-start")
+                metadata = json.loads((directory / "light-cold-start-baseline-readiness.json").read_text())
+                dismissal = metadata["keyguard_dismissal"]
+                self.assertFalse(metadata["passed"])
+                self.assertFalse(dismissal["completed"])
+                self.assertFalse(dismissal["request_sent"])
+                self.assertEqual("initial_window_state", dismissal["trigger_observation"])
+                self.assertEqual("locked", dismissal["trigger_state"]["keyguard_state"])
+                self.assertEqual(stdout, (directory / dismissal["stdout"]).read_bytes())
+                self.assertEqual(stderr, (directory / dismissal["stderr"]).read_bytes())
+                run.snapshot_hierarchy.assert_not_called()
+
+    def test_home_probe_or_dismissal_evidence_failure_is_fatal_and_does_not_replace_rpc_timeout(self):
+        for stage in ("initial_window_state", "keyguard_dismissal"):
+            for timeout in (False, True):
+                with self.subTest(stage=stage, timeout=timeout), tempfile.TemporaryDirectory() as temporary:
+                    directory = Path(temporary)
+                    run = SmokeRun(Path("app.apk"), directory, PACKAGE, None,
+                                   record_launch=True, visual_launch_only=True)
+                    self.prepare_baseline_reader(run)
+                    run.text = Mock(return_value="com.example.launcher/.Home\n")
+                    run.begin_launch_recording = Mock()
+                    run.launch_and_capture = Mock()
+                    def command(*args, **kwargs):
+                        is_probe = args[3:] == ("dumpsys window policy && dumpsys window displays",)
+                        current_stage = "initial_window_state" if is_probe else "keyguard_dismissal"
+                        if timeout and current_stage == stage:
+                            cause = subprocess.TimeoutExpired("adb", kwargs["timeout"], output=b"partial stdout", stderr=b"partial stderr")
+                            raise RuntimeError("original RPC timeout") from cause
+                        return subprocess.CompletedProcess([], 0,
+                            (self.baseline_policy(True) + self.baseline_window(showing=True)).encode() if is_probe else b"request stdout",
+                            b"real stderr")
+                    original_write = Path.write_bytes
+                    def persist(path, data):
+                        if path.name.endswith(f"{stage}-stderr.bin"):
+                            raise OSError("baseline evidence write failed")
+                        return original_write(path, data)
+                    run.adb = Mock(side_effect=command)
+                    with patch.object(Path, "write_bytes", autospec=True, side_effect=persist), \
+                            self.assertRaisesRegex(RuntimeError, "original RPC timeout" if timeout else "baseline evidence write failed") as failure:
+                        run.launch("light-cold-start")
+                    metadata = json.loads((directory / "light-cold-start-baseline-readiness.json").read_text())
+                    self.assertFalse(metadata["passed"])
+                    self.assertEqual([], metadata["samples"])
+                    self.assertIn("baseline evidence write failed", metadata[stage]["persistence_error"])
+                    self.assertIn("persistence_finished_elapsed_seconds", metadata[stage])
+                    if timeout:
+                        self.assertIsInstance(failure.exception.__cause__.__cause__, subprocess.TimeoutExpired)
+                        self.assertEqual(b"partial stdout", (directory / metadata[stage]["stdout"]).read_bytes())
+                    run.snapshot_hierarchy.assert_not_called()
+                    run.begin_launch_recording.assert_not_called()
+                    run.launch_and_capture.assert_not_called()
+
+    def test_home_later_valid_locked_sample_requests_only_one_dismissal_within_same_deadline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = SmokeRun(Path("app.apk"), directory, PACKAGE, None)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(return_value="com.example.launcher/.Home\n")
+            clock = [0.0]
+            capture_index = [0]
+            def command(*args, **kwargs):
+                self.assertAlmostEqual(10 - clock[0], kwargs["timeout"])
+                if args[3:] == ("dumpsys window policy && dumpsys window displays",):
+                    return subprocess.CompletedProcess([], 0,
+                        (self.baseline_policy(True, -10000) + self.baseline_window(showing=True)).encode(), b"")
+                if args == ("shell", "wm", "dismiss-keyguard"):
+                    self.assertEqual(1, capture_index[0])
+                    self.assertGreater(clock[0], 0)
+                    clock[0] += .3
+                    return subprocess.CompletedProcess([], 0, b"request sent", b"")
+                showing = capture_index[0] == 0
+                capture_index[0] += 1
+                clock[0] += .5
+                return subprocess.CompletedProcess([], 0, self.baseline_batch(self.baseline_raw(),
+                    self.baseline_window(showing=showing), self.baseline_policy(showing)), b"")
+            run.adb = Mock(side_effect=command)
+            with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
+                run.wait_home_baseline("light-cold-start")
+            metadata = json.loads((directory / "light-cold-start-baseline-readiness.json").read_text())
+            self.assertTrue(metadata["passed"])
+            self.assertEqual([0, 1, 2, 3], [sample["stable_captures"] for sample in metadata["samples"]])
+            self.assertEqual("sample-00", metadata["keyguard_dismissal"]["trigger_observation"])
+            self.assertEqual("sample-01", metadata["keyguard_dismissal"]["completion_observation"])
+            self.assertEqual(4, run.snapshot_hierarchy.call_count)
+            self.assertEqual(1, sum(call.args == ("shell", "wm", "dismiss-keyguard") for call in run.adb.call_args_list))
 
     def test_raw_screencap_preserves_every_rgb_pixel_and_uses_sdk_header(self):
         from PIL import Image
@@ -765,7 +1146,7 @@ public class SnapshotCacheCompatibilityTest {
             captures = [self.baseline_raw(10), self.baseline_raw(20),
                         self.baseline_raw(20, 1), self.baseline_raw(20, 2)]
             run.text = Mock(return_value="com.example.launcher/.Home\n")
-            run.adb = Mock(side_effect=[subprocess.CompletedProcess([], 0, self.baseline_batch(png), b"") for png in captures])
+            run.adb = self.baseline_adb(side_effect=[subprocess.CompletedProcess([], 0, self.baseline_batch(png), b"") for png in captures])
             clock = [0.0]
             with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
                     patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
@@ -782,8 +1163,8 @@ public class SnapshotCacheCompatibilityTest {
             self.assertEqual([0, 4, 40, 76], metadata["samples"][-1]["content_bounds"])
             self.assertEqual("com.example.launcher/com.example.launcher.Home",
                              focused_component(self.baseline_window("com.example.launcher/.Home")))
-            self.assertEqual(4, run.adb.call_count)
-            for call, png in zip(run.adb.call_args_list, captures):
+            self.assertEqual(5, run.adb.call_count)
+            for call, png in zip(run.adb.call_args_list[1:], captures):
                 self.assertEqual(("exec-out", "sh", "-c"), call.args[:3])
                 self.assertIn("dumpsys window displays", call.args[3])
                 self.assertTrue(call.args[3].endswith("screencap | gzip -1"))
@@ -799,7 +1180,7 @@ public class SnapshotCacheCompatibilityTest {
             self.assertEqual(4, len({sample["hierarchy"] for sample in metadata["samples"]}))
             self.assertEqual("ui-automation-snapshot", run.hierarchy_backend)
             run.hierarchy_once()
-            self.assertEqual(4, run.adb.call_count)  # No competing uiautomator connection.
+            self.assertEqual(5, run.adb.call_count)  # No competing uiautomator connection.
 
     def test_visual_baseline_focus_or_motion_failure_never_starts_recording_and_keeps_deadline(self):
         for cause in ("wrong-focus", "moving-home", "launcher-splash"):
@@ -818,7 +1199,7 @@ public class SnapshotCacheCompatibilityTest {
                     png = captures[count[0] % 2] if cause == "moving-home" else captures[0]
                     count[0] += 1
                     return subprocess.CompletedProcess([], 0, self.baseline_batch(png, home), b"")
-                run.adb = Mock(side_effect=capture)
+                run.adb = self.baseline_adb(side_effect=capture)
                 run.begin_launch_recording = Mock()
                 run.launch_and_capture = Mock()
                 clock = [0.0]
@@ -860,12 +1241,12 @@ public class SnapshotCacheCompatibilityTest {
             def capture(*args, **kwargs):
                 clock[0] += 2.5
                 return subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b"")
-            run.adb = Mock(side_effect=capture)
+            run.adb = self.baseline_adb(side_effect=capture)
             with patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
                     patch("android_ui_smoke.time.sleep", side_effect=lambda duration: clock.__setitem__(0, clock[0] + duration)):
                 png = run.wait_home_baseline("light-cold-start")
                 self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
-            self.assertEqual(3, run.adb.call_count)
+            self.assertEqual(4, run.adb.call_count)
             self.assertLess(clock[0], 10)
             metadata = json.loads((Path(temporary) / "light-cold-start-baseline-readiness.json").read_text())
             self.assertEqual(10, metadata["timeout_seconds"])
@@ -886,7 +1267,7 @@ public class SnapshotCacheCompatibilityTest {
                                record_launch=True, visual_launch_only=True)
                 self.prepare_baseline_reader(run)
                 run.text = Mock(return_value="com.example.launcher/.Home\n")
-                run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, raw, b""))
+                run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess([], 0, raw, b""))
                 run.begin_launch_recording = Mock()
                 run.launch_and_capture = Mock()
                 with self.assertRaisesRegex(RuntimeError, "HOME baseline failed"):
@@ -908,7 +1289,7 @@ public class SnapshotCacheCompatibilityTest {
             def timeout(*args, **kwargs):
                 cause = subprocess.TimeoutExpired("adb", kwargs["timeout"], output=partial, stderr=b"partial stderr")
                 raise RuntimeError("adb timed out during baseline batch") from cause
-            run.adb = Mock(side_effect=timeout)
+            run.adb = self.baseline_adb(side_effect=timeout)
             run.begin_launch_recording = Mock()
             run.launch_and_capture = Mock()
             with self.assertRaisesRegex(RuntimeError, "adb timed out during baseline batch"):
@@ -928,7 +1309,7 @@ public class SnapshotCacheCompatibilityTest {
             self.prepare_baseline_reader(run)
             run.text = Mock(return_value="com.example.launcher/.Home\n")
             batch = self.baseline_batch(self.baseline_raw())
-            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, batch, b"capture stderr"))
+            run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess([], 0, batch, b"capture stderr"))
             def timeout(**kwargs):
                 cause = subprocess.TimeoutExpired("adb", 1, output=b"hierarchy response", stderr=b"hierarchy stderr")
                 raise RuntimeError("hierarchy deadline expired") from cause
@@ -966,7 +1347,7 @@ public class SnapshotCacheCompatibilityTest {
                 self.assertEqual(10, kwargs["deadline"])
                 clock[0] += .7
                 return self.baseline_hierarchy()
-            run.adb = Mock(side_effect=capture)
+            run.adb = self.baseline_adb(side_effect=capture)
             run.snapshot_hierarchy = Mock(side_effect=hierarchy)
             run.begin_launch_recording = Mock()
             run.launch_and_capture = Mock()
@@ -1012,7 +1393,7 @@ public class SnapshotCacheCompatibilityTest {
                 "type=navigationBars frame=[0,0][0,0] visible=false")
             raw = self.baseline_raw()
             batch = self.baseline_batch(raw, window)
-            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, batch, b""))
+            run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess([], 0, batch, b""))
             run.begin_launch_recording = Mock()
             run.launch_and_capture = Mock()
             with self.assertRaisesRegex(RuntimeError, "Cannot identify real HOME system bars"):
@@ -1040,7 +1421,7 @@ public class SnapshotCacheCompatibilityTest {
                 self.prepare_baseline_reader(run)
                 run.text = Mock(return_value="com.example.launcher/.Home\n")
                 batch = valid_batch if cause == "capture-failed" else valid_batch[:-1]
-                run.adb = Mock(return_value=subprocess.CompletedProcess(
+                run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess(
                     [], 1 if cause == "capture-failed" else 0, batch, b"real capture stderr"))
                 run.begin_launch_recording = Mock()
                 run.launch_and_capture = Mock()
@@ -1063,14 +1444,15 @@ public class SnapshotCacheCompatibilityTest {
             self.prepare_baseline_reader(run)
             run.text = Mock(return_value="com.example.launcher/.Home\n")
             raw = self.baseline_raw()
-            run.adb = Mock(return_value=subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b""))
+            run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b""))
             with patch("android_ui_smoke.time.sleep"):
                 run.wait_home_baseline("light-cold-start")
             command = run.adb.call_args.args[3]
             binaries = directory / "bin"
             binaries.mkdir()
             dumpsys = binaries / "dumpsys"
-            dumpsys.write_text(f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write({self.baseline_window().encode()!r})\n")
+            dumpsys.write_text(f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write("
+                               f"{self.baseline_policy().encode()!r} if sys.argv[-1]=='policy' else {self.baseline_window().encode()!r})\n")
             dumpsys.chmod(0o755)
             screencap = binaries / "screencap"
             for exit_code in (0, 7):
@@ -1080,7 +1462,7 @@ public class SnapshotCacheCompatibilityTest {
                 result = subprocess.run(["bash", "-c", command], env=environment, capture_output=True, timeout=5)
                 self.assertEqual(exit_code, result.returncode)
                 window, compressed = result.stdout.split(b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00")
-                self.assertEqual(self.baseline_window().encode(), window)
+                self.assertEqual((self.baseline_policy() + self.baseline_window()).encode(), window)
                 self.assertEqual(raw, decompress_screencap_gzip(compressed))
 
     def test_launch_stage_host_timings_do_not_treat_am_total_time_as_current_elapsed(self):

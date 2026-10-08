@@ -249,3 +249,18 @@ host 仍用已通过的严格 stdout 通知协议；补记本地 Popen、reader 
 smoke 的 ADB wrapper 保存每条命令完整原 stdout/stderr、bytes/hash、开始/结束/结果/returncode 和 TimeoutExpired 已收到的部分原字节。超时仍失败、returncode 为未知而非伪造 0；nonzero 的控制台尾部不代替完整证据。证据写失败进入最终失败 summary，不能将命令失败转成功。全部 logcat buffer、崩溃/ANR/进程、最后日志检查和原 20 秒预算保留；默认 20 秒真实 host 子进程超时对照保留其原始失败与部分流，不属于设备 logcat 实测。
 
 App/font/runtime、玻璃/Dock、全局字重移除、nohook 和 frozen22 不变。下一准确新 SHA 必须自然跑完完整 candidate、API 28/36 与亮暗冷暖四段原录像并独立审原画面；HOME 10 秒 / 3 个稳定帧、root 8 秒、共享 host 20 秒、录像 30 秒、同 PID 与所有逐帧门禁保持。两台 OEM 字体/Google/连续实时/重启、完整生成和整次切换、ColorOS 整次手机 reboot、App 冷启与旧 97 秒 prezygote 仍如实待验，不能由采集修正外推为解决。
+
+
+## b7f1f74 新原件与 HOME 起始状态的接续
+
+准确提交 b7f1f74fc87b1f6f0238c1a6ad8c8d878534dc0e / tree ffcb5d80847d0f843100e3551b0aa00a2190cc49。candidate 37724458913 success；UI 37724458881 的 build/API36 success，API28 success，visual 113140977432 failure；两个 workflow 已终态。170 项适用本地 host 检查不能充当 CI 执行数；新 UI build 实际 217 JVM 单元与 133 host 执行通过。API36 原件的 31 屏幕记录、20 检查、78 请求绑定已通过独立审；99 次完整 main/system/crash logcat 在原 20 秒内，最慢 4.9727 秒。这是本次采集结果，不能证明旧 API28 超时根因、真机字体覆盖或手机整体提速。
+
+本次 visual 原始 99 成员有 0 MP4/0 XML，四种启动仍未评估。原生连接 78ms；host Popen 到 read1 首次返回约 5.149610s，完整 ready frame 解析仅 0.318ms，ready 总计 5.437408s；不能跨 host monotonic/native uptime 相减。首请求 45 次无 active window，root wait 8447ms，最后一次 getRoot 返回晚于原 8 秒预算 447ms；getChild 0、export 0、reuse 0。失败 response code0 的文件发布 414ms，实际 notice 被 reader 观察时已晚原 HOME deadline 4.849554s，未接受。正常 instrumentation finish -1 不把失败 snapshot 变成成功。不得用旧 5.251 秒 child 导出解释此批无 root 的失败，也不得以尾32调用记录声称全部调用可见。
+
+原 log 保留 SystemUI KeyguardService 与 GMS broadcast ANR、锁竞争及窗口末态。末态 awake/screenOnFully 与 keyguard showing 同时存在，Launcher 不可见、focus=null；其中 delegate currentUser=USER_NULL/showing=true/secure=true 可由服务断线后的保护默认值产生，不能回填首请求整个时间区间。现有 wm dismiss-keyguard 的 return0 只是请求已发出，不能代表 HOME 已实际解除或可用。
+
+下一小批保持 renderer、AVD、动画、原采集顺序、8/10/20 秒预算及三次 fresh XML/真实 raw frame/稳定内容门禁。在 HOME 同一 10 秒 deadline 内记录起始 window/focus/keyguard 观测；后续既有 batch 携带状态确认。这里的起始状态是保留既有 setup WAKEUP/dismiss 之后、baseline 首次 helper 之前的观测，不称所有 dismissal 前的状态。有确切有效初始状态才允许每段 baseline 在同预算内请求一次既有 dismissal，UNKNOWN/USER_NULL/缺字段/冲突必须保留，exit0 仅为 request-sent，真实后续解除才称 completed。不得计时前预等、预热、重连、禁锁屏、杀 GMS、放宽预算或用合成画面验收。本段是本次实现约束。101 项 Smoke 全套与 11 项既有真实 pipe 回归通过，独立 Smoke101 审读和冻结前后 SHA 核对通过；原91项保留，run/adb/logcat/ANR 等其它函数及 native/session 四文件与 b7f 相同。新起始探针多一个有界 adb 调用（两个 dumpsys），既有 batch 增加 policy 而不多建连接，成本仍计入原10秒，可能减少剩余空间；不是已证明的 ANR 或性能修复，未来 CI/原录像不能预先判 PASS。
+
+b7f 成品内部校验通过：外包 SHA256 3ff629d438fe1d2f44e11a178cca45f6b0920e3379e78dcf404b6df80bf4831f；模块 4c6963e8f58a2e08412a1c0441dfd3feeb10ac93c066a68b4d3360de214d6d97；APK f1b0a937bbe07031e8d4ce6114c95ecb36fc1c1021007206b1e06f565b5f1680。frozen22/defined7/Google9、CRC/hash/安全路径和 v1/v2/v3 内容签名通过，包仍内部留存。原 log 实际96次套件/1701次执行/96OK，namespace 实际跳过两处、readiness三类警告及四项真机待测均保留；没有发布、安装或修改用户设备。
+
+两台 OEM 的具体 glyph/Google 运行时回退、连续实时 A→B→A、重启持续覆盖、整个生成和切换阶段、实际内核 namespace/owned cleanup 仍缺本轮真机证据。ColorOS 整台手机重启超过两分钟、App 冷启/加载及旧 97 秒首次 zygote 前异常分别待查；600/630 秒旧失败仍属于合成/应用生成。现有字体功能、UI/玻璃/Dock、nohook 与 frozen 1.1.1 约束全部保留。原 v32、6eb/b7f 失败及收到的完整/超时/迟到字节继续保存，原录像缺失不以截图替代。

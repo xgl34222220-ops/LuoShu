@@ -43,6 +43,65 @@ def focused_component(window: str) -> str | None:
     return canonical_component(match.group(1)) if match else None
 
 
+def home_window_state(window: str) -> dict[str, object]:
+    """Read explicit keyguard evidence; delegate reset defaults are unknown.
+
+    These policy/display dumps are successive observations, not an atomic
+    snapshot. Require one matching showing value and a real delegate user
+    before requesting dismissal or confirming that a request completed.
+    """
+    evidence: dict[str, object] = {"focused_component": None}
+    focuses = re.findall(r"^\s*mCurrentFocus=(.*)$", window, re.MULTILINE)
+    focus = focuses[0].strip() if len(focuses) == 1 else None
+    evidence["current_focus"] = focus
+    evidence["focus_definition_count"] = len(focuses)
+    evidence["focus_valid"] = focus == "null" or \
+        (focus is not None and re.fullmatch(r"Window\{[^{}\r\n]+\}", focus) is not None)
+    if evidence["focus_valid"]:
+        evidence["focused_component"] = focused_component(f"mCurrentFocus={focus}")
+    blocks = list(re.finditer(r"^([ \t]*)KeyguardServiceDelegate[ \t]*$", window, re.MULTILINE))
+    reasons = []
+    if not evidence["focus_valid"]:
+        reasons.append("missing-ambiguous-or-invalid-focus")
+    if len(blocks) != 1:
+        reasons.append("missing-or-ambiguous-delegate")
+        delegate = ""
+    else:
+        indentation = blocks[0].group(1)
+        tail = window[blocks[0].end():].lstrip("\r\n")
+        # Stop when the policy resumes at the delegate heading's indentation.
+        lines = []
+        for line in tail.splitlines():
+            if line.strip() and len(line) - len(line.lstrip()) <= len(indentation):
+                break
+            lines.append(line)
+        delegate = "\n".join(lines)
+    for field in ("showing", "occluded", "currentUser"):
+        values = re.findall(rf"^\s*{field}=([^\r\n]*)$", delegate, re.MULTILINE)
+        value = values[0].strip() if len(values) == 1 else None
+        parsed = int(value) if field == "currentUser" and value is not None and re.fullmatch(r"-?\d+", value) else \
+            (value == "true" if field != "currentUser" and value in ("true", "false") else None)
+        evidence[f"delegate_{field}"] = parsed
+        if parsed is None:
+            reasons.append(f"missing-or-ambiguous-{field}")
+    showing = re.findall(r"^\s*isKeyguardShowing=([^\r\n]*)$", window, re.MULTILINE)
+    evidence["display_showing"] = showing[0].strip() == "true" if len(showing) == 1 and \
+        showing[0].strip() in ("true", "false") else None
+    if evidence["display_showing"] is None:
+        reasons.append("missing-or-ambiguous-display-showing")
+    if evidence["delegate_currentUser"] is not None and evidence["delegate_currentUser"] < 0:
+        reasons.append("delegate-user-unknown")
+    if evidence["delegate_showing"] is not None and evidence["display_showing"] is not None and \
+            evidence["delegate_showing"] != evidence["display_showing"]:
+        reasons.append("showing-conflict")
+    if evidence["delegate_occluded"]:
+        reasons.append("keyguard-occluded")
+    evidence["keyguard_state"] = "unknown" if reasons else \
+        ("locked" if evidence["delegate_showing"] else "unlocked")
+    evidence["unknown_reasons"] = reasons
+    return evidence
+
+
 def home_content_bounds(window: str, size: tuple[int, int]) -> tuple[int, int, int, int]:
     """Exclude only the real status/navigation source rectangles from comparison."""
     width, height = size
@@ -1033,11 +1092,14 @@ class SmokeRun:
 
         started = time.monotonic()
         deadline = started + 10
-        metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": []}
+        metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": [],
+                                      "started_monotonic_seconds": started, "deadline_monotonic_seconds": deadline,
+                                      "clock_scope": "host time.monotonic; not aligned with native uptime"}
         previous = None
         stable = 0
         separator = b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00"
-        command = (r"set -o pipefail || exit; dumpsys window displays && "
+        state_command = "dumpsys window policy && dumpsys window displays"
+        command = (r"set -o pipefail || exit; " + state_command + " && " +
                    r"printf '\000LUOSHU_HOME_BASELINE_RAW_GZIP\000' && screencap | gzip -1")
         metadata["capture_command"] = command
         metadata["screenshot_source"] = "real packed screencap through lossless device gzip -1; exact RGB PNG encoding on host"
@@ -1048,6 +1110,74 @@ class SmokeRun:
             if value <= 0:
                 raise RuntimeError("HOME baseline did not become focused and stable within 10s")
             return value
+
+        def bounded_command(key: str, arguments: tuple[str, ...],
+                            extra: dict[str, object] | None = None) -> subprocess.CompletedProcess[bytes]:
+            command_started = time.monotonic()
+            detail = {"arguments": list(arguments), "stdout": f"{name}-baseline-{key}-stdout.bin",
+                      "stderr": f"{name}-baseline-{key}-stderr.bin",
+                      "started_monotonic_seconds": command_started,
+                      "started_elapsed_seconds": round(command_started - started, 6),
+                      "timeout_seconds": remaining(),
+                      "scope": "host adb call interval including command evidence I/O, within the original HOME deadline; no native clock alignment"}
+            detail.update(extra or {})
+            metadata[key] = detail
+            stdout = stderr = b""
+            failure = None
+            try:
+                result = self.adb(*arguments, timeout=detail["timeout_seconds"], check=False)
+                stdout, stderr = result.stdout, result.stderr
+                detail.update(outcome="returned", returncode=result.returncode)
+                return result
+            except Exception as error:
+                failure = error
+                cause = error if isinstance(error, subprocess.TimeoutExpired) else error.__cause__
+                detail.update(outcome="exception", error=f"{type(error).__name__}: {error}")
+                if isinstance(cause, subprocess.TimeoutExpired):
+                    stdout = cause.stdout if isinstance(cause.stdout, bytes) else b""
+                    stderr = cause.stderr if isinstance(cause.stderr, bytes) else b""
+                    detail.update(outcome="timed-out", partial_streams=True,
+                                  cause=f"{type(cause).__name__}: {cause}")
+                raise
+            finally:
+                ended = time.monotonic()
+                detail.update(ended_monotonic_seconds=ended,
+                              ended_elapsed_seconds=round(ended - started, 6),
+                              command_seconds=round(ended - command_started, 6))
+                persistence_started = time.monotonic()
+                try:
+                    for stream, data in (("stdout", stdout), ("stderr", stderr)):
+                        (self.output / detail[stream]).write_bytes(data)
+                        detail[f"{stream}_bytes"] = len(data)
+                        detail[f"{stream}_sha256"] = hashlib.sha256(data).hexdigest()
+                except Exception as error:
+                    detail["persistence_error"] = f"{type(error).__name__}: {error}"
+                    if failure is None:
+                        raise
+                finally:
+                    persisted = time.monotonic()
+                    detail["persistence_finished_elapsed_seconds"] = round(persisted - started, 6)
+                    detail["persistence_seconds"] = round(persisted - persistence_started, 6)
+
+        def observe_keyguard(state: dict[str, object], observation: str) -> None:
+            dismissal = metadata.get("keyguard_dismissal")
+            if dismissal is not None:
+                if state["keyguard_state"] == "unlocked" and not dismissal.get("completed") and \
+                        state["delegate_currentUser"] == dismissal["trigger_state"]["delegate_currentUser"]:
+                    dismissal.update(completed=True, completion_observation=observation,
+                                     completed_elapsed_seconds=round(time.monotonic() - started, 6))
+                return
+            if state["keyguard_state"] != "locked":
+                return
+            result = bounded_command("keyguard_dismissal", ("shell", "wm", "dismiss-keyguard"), {
+                "trigger_observation": observation, "trigger_state": state,
+                "request_sent": False, "completed": False,
+                "completion_scope": "requires a subsequent valid unlocked observation for the same user; exit 0 is not completion"})
+            dismissal = metadata["keyguard_dismissal"]
+            dismissal["request_sent"] = result.returncode == 0
+            if result.returncode:
+                raise RuntimeError(f"HOME keyguard dismissal failed ({result.returncode})")
+            remaining()
 
         try:
             resolve_started = time.monotonic()
@@ -1072,6 +1202,15 @@ class SmokeRun:
             self.hierarchy_backend = "ui-automation-snapshot"
             metadata["hierarchy_backend"] = self.hierarchy_backend
             metadata["hierarchy_backend_reason"] = "Live visible Launcher content within the shared baseline deadline"
+            initial = bounded_command("initial_window_state", ("exec-out", "sh", "-c", state_command), {
+                "observation_scope": "baseline entry after existing cold setup; before the first helper request; not before setup dismissal"})
+            if initial.returncode:
+                raise RuntimeError(f"HOME initial window state probe failed ({initial.returncode})")
+            initial_state = home_window_state(initial.stdout.decode("utf-8", "replace"))
+            metadata["initial_window_state"]["state"] = initial_state
+            remaining()
+            observe_keyguard(initial_state, "initial_window_state")
+            remaining()
             while True:
                 remaining()
                 index = len(metadata["samples"])
@@ -1103,7 +1242,10 @@ class SmokeRun:
                 pending_sample["capture_timeout_seconds"] = remaining()
                 batch = self.adb("exec-out", "sh", "-c", command,
                                  timeout=pending_sample["capture_timeout_seconds"], check=False)
-                pending_sample["capture_seconds"] = round(time.monotonic() - batch_started, 6)
+                batch_finished = time.monotonic()
+                pending_sample["capture_seconds"] = round(batch_finished - batch_started, 6)
+                pending_sample["window_state_started_monotonic_seconds"] = batch_started
+                pending_sample["window_state_ended_monotonic_seconds"] = batch_finished
                 pending_sample["stage"] = "raw-persistence"
                 persistence_started = time.monotonic()
                 (self.output / raw_file).write_bytes(batch.stdout)
@@ -1133,7 +1275,10 @@ class SmokeRun:
                 pending_sample["raw_persistence_seconds"] = round(
                     raw_write_seconds + time.monotonic() - gzip_finished, 6)
                 window = window_bytes.decode("utf-8", "replace")
-                focused = focused_component(window)
+                state = home_window_state(window)
+                focused = state["focused_component"]
+                pending_sample["window_state"] = state
+                pending_sample["window_state_scope"] = "this sample batch only; not the initial observation or the full root-wait interval"
                 decode_started = time.monotonic()
                 pending_sample["stage"] = "raw-decode"
                 captured, raw_metadata = decode_raw_screencap(raw, self.api_level)
@@ -1161,7 +1306,12 @@ class SmokeRun:
                         pending_sample["raw_decode_seconds"] + time.monotonic() - compare_started, 6)
                 remaining()
                 pending_sample["stage"] = "stability-verification"
-                ready = focused == home and bool(launcher_content)
+                observe_keyguard(state, f"sample-{index:02d}")
+                remaining()
+                dismissal = metadata.get("keyguard_dismissal")
+                keyguard_ready = state["keyguard_state"] != "locked" and \
+                    (dismissal is None or dismissal.get("completed", False))
+                ready = state["focus_valid"] and focused == home and bool(launcher_content) and keyguard_ready
                 stable = stable + 1 if ready and signature == previous else int(ready)
                 previous = signature if ready else None
                 metadata["samples"].append({**pending_sample,
