@@ -42,6 +42,8 @@ import java.util.Set;
 public final class SnapshotInstrumentation extends Instrumentation {
     private Bundle arguments;
     private int nodeCount;
+    private int childQueryCount;
+    private long childQueryMillis;
     private static final int PROTOCOL = 1;
     private static final int ROOT_WAIT_MS = 8000;
 
@@ -132,7 +134,8 @@ public final class SnapshotInstrumentation extends Instrumentation {
         // would change the final Instrumentation code for a normal session stop.
         lastDiagnostic(diagnostics, "snapshot_status", result.getString("snapshot"));
         String[] fields = {"error", "wait_ms", "attempts", "incomplete_roots", "root_source", "nodes",
-                "last_root_package", "last_root_window_id", "last_root_child_count", "last_root_visible_child_count"};
+                "last_root_package", "last_root_window_id", "last_root_child_count", "last_root_visible_child_count",
+                "child_query_count", "child_query_ms", "export_child_query_count", "export_child_query_ms"};
         for (String key : fields) lastDiagnostic(diagnostics, "snapshot_" + key, result.getString(key));
     }
 
@@ -327,13 +330,17 @@ public final class SnapshotInstrumentation extends Instrumentation {
         if (target.exists() || temporary.exists()) throw new IllegalStateException("Session response cannot be reused");
         try (FileOutputStream output = new FileOutputStream(temporary)) {
             output.write(value.toString().getBytes(StandardCharsets.UTF_8));
-            output.getFD().sync();
         }
+        // These nonce-private files are read by the same running kernel and
+        // discarded when this session closes. Close then rename publishes all
+        // bytes atomically; crash durability is neither required nor reused.
         if (!temporary.renameTo(target)) throw new IllegalStateException("Cannot publish atomic session response");
     }
 
     private Bundle snapshot(UiAutomation automation, String filename, File outputDirectory, Bundle diagnostics) {
         nodeCount = 0;
+        childQueryCount = 0;
+        childQueryMillis = 0;
         lastDiagnosticTime(diagnostics, "snapshot_started");
         lastDiagnostic(diagnostics, "request_status", "snapshot-started");
         Bundle result = new Bundle();
@@ -478,8 +485,11 @@ public final class SnapshotInstrumentation extends Instrumentation {
             File file = new File(outputDirectory, filename);
             lastDiagnosticTime(diagnostics, "export_started");
             lastDiagnostic(diagnostics, "request_status", "export-started");
+            int exportChildQueries = childQueryCount;
+            long exportChildQueryMillis = childQueryMillis;
             try (FileOutputStream output = new FileOutputStream(file);
                  OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
+                lastDiagnosticTime(diagnostics, "export_serialization_started");
                 XmlSerializer xml = Xml.newSerializer();
                 xml.setOutput(writer);
                 xml.startDocument("UTF-8", true);
@@ -488,9 +498,17 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 dumpNode(xml, root, 0, size, 0);
                 xml.endTag(null, "hierarchy");
                 xml.endDocument();
+                lastDiagnosticTime(diagnostics, "export_serialization_finished");
+                lastDiagnosticTime(diagnostics, "export_flush_started");
                 writer.flush();
-                output.getFD().sync();
+                lastDiagnosticTime(diagnostics, "export_flush_finished");
+                // The matching response is published only after this writer
+                // closes. This ephemeral XML needs no physical-disk barrier.
+                lastDiagnosticTime(diagnostics, "export_close_started");
             }
+            lastDiagnosticTime(diagnostics, "export_close_finished");
+            result.putString("export_child_query_count", Integer.toString(childQueryCount - exportChildQueries));
+            result.putString("export_child_query_ms", Long.toString(childQueryMillis - exportChildQueryMillis));
             lastDiagnosticTime(diagnostics, "export_finished");
             if (nodeCount == 0) throw new IllegalStateException("No visible accessibility nodes");
             result.putString("snapshot", "ok");
@@ -513,6 +531,8 @@ public final class SnapshotInstrumentation extends Instrumentation {
             result.putString("snapshot", "failed");
             result.putString("error", failure.getClass().getSimpleName() + ": " + failure.getMessage());
         } finally {
+            result.putString("child_query_count", Integer.toString(childQueryCount));
+            result.putString("child_query_ms", Long.toString(childQueryMillis));
             if (root != null) root.recycle();
             if (incompleteRoot != null) incompleteRoot.recycle();
             lastDiagnosticTime(diagnostics, "snapshot_finished");
@@ -524,11 +544,11 @@ public final class SnapshotInstrumentation extends Instrumentation {
      * Keep polling on this same connection within the original eight-second wait;
      * never declare a root-only snapshot to be usable App content.
      */
-    private static int observeRoot(Bundle result, JSONArray observations, AccessibilityNodeInfo root,
+    private int observeRoot(Bundle result, JSONArray observations, AccessibilityNodeInfo root,
             String source, long waitStarted) throws Exception {
         int visibleChildren = 0;
         for (int index = 0; index < root.getChildCount(); index++) {
-            AccessibilityNodeInfo child = root.getChild(index);
+            AccessibilityNodeInfo child = readChild(root, index);
             if (child == null) continue;
             try {
                 if (child.isVisibleToUser()) visibleChildren++;
@@ -548,6 +568,17 @@ public final class SnapshotInstrumentation extends Instrumentation {
                         ? result.getString("last_root_refresh_result") : JSONObject.NULL));
         result.putString("root_observations", observations.toString());
         return visibleChildren;
+    }
+
+    private AccessibilityNodeInfo readChild(AccessibilityNodeInfo node, int index) {
+        long started = SystemClock.uptimeMillis();
+        childQueryCount++;
+        try {
+            return node.getChild(index);
+        } finally {
+            // Aggregate only: no extra node query, per-node record or log I/O.
+            childQueryMillis += SystemClock.uptimeMillis() - started;
+        }
     }
 
     private void dumpNode(XmlSerializer xml, AccessibilityNodeInfo node, int index, Point size, int depth) throws Exception {
@@ -577,7 +608,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         xml.attribute(null, "bounds", "[" + bounds.left + "," + bounds.top + "][" + bounds.right + "," + bounds.bottom + "]");
         nodeCount++;
         for (int childIndex = 0; childIndex < node.getChildCount(); childIndex++) {
-            AccessibilityNodeInfo child = node.getChild(childIndex);
+            AccessibilityNodeInfo child = readChild(node, childIndex);
             if (child == null) continue;
             try {
                 if (child.isVisibleToUser()) dumpNode(xml, child, childIndex, size, depth + 1);

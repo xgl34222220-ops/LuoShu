@@ -56,6 +56,7 @@ jobs:
         run: |
           python3 scripts/android_ui_smoke_test.py
           python3 scripts/ui_snapshot_session_test.py
+          python3 scripts/ui_snapshot_java_test.py
       - name: Run current debug unit tests
         working-directory: android-app
         shell: bash

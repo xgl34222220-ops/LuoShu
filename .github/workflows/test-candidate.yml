@@ -131,6 +131,7 @@ jobs:
           python3 scripts/task_scope_mksh_test.py
           python3 scripts/font_lock_namespace_test.py
           python3 scripts/font_state_read_test.py
+          python3 scripts/ui_snapshot_java_test.py
           sh -x scripts/background_task_test.sh
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh

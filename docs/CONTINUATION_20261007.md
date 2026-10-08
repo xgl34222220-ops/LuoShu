@@ -192,3 +192,15 @@ API 28 原 artifact 11518477392（17,539,419 bytes、SHA-256 `96701f4954174cbae3
 仅给原 native helper 的现有最终 Instrumentation Bundle 补有限 `helper_last_*` 字段：最后真实 accepted 请求 ID、文件名和状态，root 查询开始/返回、原八秒 root wait、导出及 response 原子发布的设备 uptime，最后 snapshot 的有限 scalar 摘要。新请求先清旧阶段，字符串最多 1024 字符；完整 XML、root observations 和未加前缀的 snapshot/error 不进入诊断。原响应、正常结束返回码、RPC、连接、权限、deadline 与 cleanup 均不变；晚到的成功只能作证据，不能补救原 host 超时或重新连接。没有实施独立 cold 用例换 session，也没有改变 App 启动动画、玻璃或字体功能。
 
 诊断补丁后实际重新执行 UI 84、会话 29、逐帧分类器 20 全通过，沿用未改变 App 源约束的 11 项日志，总计 144 项适用 host 通过，另外六项玻璃源/层级回归通过。新增三项会话测试包含实际生产 Java 诊断方法与 `onStart` 的 host 编译执行，验证清旧字段、白名单限长、failed snapshot 不改变正常 -1 结束，以及原异常/晚到结果继续失败。完整 Android SDK helper APK 尚未本地编译，必须由统一新 SHA CI 验证；旧 venv 首次运行因缺 numpy 的错误摘录保留，不能冒充完整原日志或实际代码失败。
+
+## b07ff66 终态与原环境恢复后的采集修正
+
+`b07ff66f204a1272c3604ca792e8919359298e07` 的 [candidate 37707333172](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37707333172) 成功；[UI 37707333140](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37707333140) 两次均失败。API 28 和 API 36 的完整功能流程成功，真实 API 28 summary 为 35 次屏幕捕获记录 / 24 项检查 / 0 录像，API 36 为 31 / 20 / 0；这些是非 Root 模拟器界面证据，不是两台手机的字体覆盖或整次切换耗时。API 28 原件 SHA-256 `e8b54e24723f01d522625e292f2b2e7c5590e3dc6c480cbac2f1fdcd19f91400`，一次同 SHA 视觉重试原件 SHA-256 `c5bb0076bc3b7e529bfd5fb541c0851c6452cb54a1e80d80733b1681ee95f91d`；原件及原失败门禁保留。
+
+首轮 HOME 采集十秒超时：helper 最后实际请求根节点等待 7828 ms，导出 2149 ms，response 发布 518 ms；最后只有 5 个 Launcher 节点，不能证明热座/工作区已加载。第二次连接就绪耗 6.594871 s，根节点等待 8470 ms，最后查询返回已超过原八秒截止点，未进入导出；失败响应发布 158 ms。不同设备 uptime 与 host monotonic 不相减，迟到响应不补救原 deadline，四段启动原录像仍为未验收。Launcher 的资源路径配置重建与采集重叠；不能仅凭这些时间认定根因，也不能把 DRAWN_APPLICATION 窗口误当平台 APPLICATION_STARTING。
+
+原环境恢复后，仅去掉 nonce 私有、一次性采集 JSON/XML 的 `FileDescriptor.sync()`：这类文件只要求同一运行内核中的完整可读性，不用于断电恢复。JSON 写入和关闭完成后仍通过临时文件 rename 原子发布；XML 的 writer flush、关闭完成后才允许发布绑定该请求的响应。写入、flush、关闭、rename 错误仍失败；请求身份、根节点可见后代、根节点超期拒绝、正常结束和任务私有清理均保留。不改变 App、字体生产代码、玻璃、nohook 或 frozen22，不增加预热、重连、等待预算或视觉放行条件。
+
+新增有限 native child-query 次数/耗时，以及导出序列化、flush、close 的阶段时间，下一真实运行可区分 Binder 节点读取与文件导出；这不预先声称根节点迟到已修复。新增 host JVM 回归执行实际生产 Java 方法、真实文件写入及独立 JVM 读取，验证完整跨进程可见性、失败发布拒绝、原八秒截止和有限诊断；两条工作流均运行该回归。完整 SDK、同一新 SHA 的 candidate、API 28/36、亮暗冷/热四段录像与逐帧独立复核仍以新 CI 终态为准。
+
+双系统覆盖、ColorOS/Google 回退、连续实时 A→B→A、重启保持、生成复用与阶段计时的既有实现保留，全局字重入口已移除；仍缺两台真机完整覆盖、整次切换、超时清理及重启后的证据。旧 600/630 属于合成/应用生成，host 热缓存改善不折算整次手机提速；ColorOS 整机重启两分多钟、App 冷启/加载与旧 97 秒首次 zygote 前异常继续分项记录。
