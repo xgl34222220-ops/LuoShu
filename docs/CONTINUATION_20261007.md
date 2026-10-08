@@ -285,3 +285,20 @@ b7f 成品内部校验通过：外包 SHA256 3ff629d438fe1d2f44e11a178cca45f6b09
 本地检查使用原候选忽略的 FontTools4.63.0 payload、host FreeType2.13.2和私有官方 Temurin17；没有 Android SDK/adb/emulator/mksh，不把本地 JVM/sh 结果当作 SDK编译、mksh 或设备结果。完整 source gate、新准确 SHA candidate/API28/API36 与亮暗冷暖四段原录像必须自然终态，再独立看原画面；没有原录像就继续失败，不交付未验收安装包。两台 OEM 覆盖/Google/连续实时与重启、全程速度、ColorOS 整机启动、App冷启/加载、97秒 prezygote 各项仍分别待真机证据。
 
 本批独立本地全量 source 自然 exit0，报告41套件/718次执行；原 namespace class 按真实环境条件跳过。适用 UI109（原101保留）、session41（原失败夹具已修，原41保留）、native JVM1、逐帧分类器20、launch11、字体20均通过。session原失败日志另存，未用跳过方法修门禁；新Android结果尚待准确提交CI。
+
+
+## aaa4787 准确终态与下一批的真实原因
+
+准确 `aaa47876d4564a280e91f24d4e4db23ecc4df11e` / tree `bfe68dca1f470920ec99780ec37fcd88d499b4bb` 的 [candidate37756992806](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37756992806) 成功，[UI37756993521](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37756993521) 失败，均自然终态。真实SDK helper编译、优化debug APK、lint、34套件217 JVM通过；candidate日志96个unittest汇总共1719次执行含重复，不能当作独立测试数量。其安装包未交付。原件一份一次取得，逐ZIP核GitHub digest/CRC，候选审计按准确Git object，不混下一批工作区。
+
+两API均在新增空态管理入口检查失败，不能套旧API通过：API28实际20屏幕记录＋failure PNG共21图、14前序checks；API36实际17屏幕记录＋failure PNG共18图、11前序checks。独立看完全部39原PNG。入口点击之后没有测试input，23/32份新根中导入按钮、文字与收起按钮一直完整可见，但没有Dock，故selected字体库要求未通过。原上滑隐藏Dock，QuickReturn明确忽略程序SideEffect；原index3定位已经成功。产品修正仅空态明确导航动作同步调用Library范围的显示Dock请求：reset policy＋hidden=false，再启动原可取消滚动；不改变普遍SideEffect规则，不在延迟帧/完成/finally抢回Dock。玻璃/首帧/showDock条件、原所有UI断言保留。restored-top及后续favorites/preservation/background/rotation/disabled animation/repeatcold/Google均未运行，不能回填。
+
+启动视觉原159文件中0MP4/4XML/3PNG，4XML对应3次独立原采样；3张PNG均独立查看，暗PNG与无损raw/gzip像素一致。亮首次raw batch在HOME8.999954秒开始，仅余1.000042秒，stdout23504字节仅window＋separator、零gzip；暗实际桌面在9.629秒才完成一个稳定样本。三次native root wait738/754/159ms，rootQuery各1且无null/omitted；child334/1601/302ms，其中第二次export仍1236ms。四notice均及时消费且正常closed，旧unconsumed/response late本批没有重现，但采样总体仍失败，无App启动/暖PID/四段视觉通过。GMS ANR和系统accessibility锁竞争原件保留；lastanr none不能推翻trace，不能跨钟或跨run归因。
+
+新HOME调度只在原十秒started/deadline建立后launch owned reader，与实际resolve/initialpolicy重叠；增加独立ready状态，未验证ready不发真实root请求，首次capture继承min(begin＋原20秒,caller deadline)，不能晚调用再给20秒。原3个真实稳定帧、每帧新root、原raw捕获与内容比较、sleep、通知/迟到/close/ANR全部保持。不把整个start丢后台线程，也不移到HOME预算之前。单变量收益必须以新准确SHA原件验收，不能承诺原约1.14秒重叠足够。
+
+下一功能证据是活跃fixed链App/router→v14_mix→all-fixed v142→runtime/engine→真实mapper→真实next transaction。真实输入变化会正确重建，但composite_layout策略+37时旧persistent key不变、generator0、旧A bbox[0,0,427,700]；当前真实生成器预期[0,37,427,737]，两者validator均PASS。8664字节invalid SFNT cache让generic真实mapper/next/outer成功，TTFont与真实font_validate均拒绝；7字节被mapper最小尺寸拒绝，无本请求commit。该坏缓存完整链仅generic，不是HyperOS/ColorOS后处理、live挂载或设备。新修正固定engine绑定生成身份与payload证明，抽出auto既有3个小proof helper共用；auto原4-line receipt/key保持。共享helper位于既有legacy目录，payload manifest已有递归entry，不添加会破坏top-level对照的重复嵌套entry。新增真正fixed回归加入source gate，旧生命周期夹具只补真实新依赖，所有原断言保留。
+
+下一准确提交必须重新跑完整candidate、API28/36与四段原视频，并独立审原画面。不将新source/host通过当设备视觉通过。1.1.1 frozen22/nohook、既有覆盖/Google/连续切换与重启、全局字重移除均保留；两台OEM真实glyph/Google/live A→B→A/reboot/full速度、ColorOS整机reboot、App冷启/加载、97秒prezygote、600/630合成现场分别仍缺真机证据。
+
+本批发布前 root 独立完整 source gate 自然 exit0：42个 unittest 报告/731次执行，原 namespace class 因当前/proc PID映射条件跳过并保留原因；session53、smoke112分别完整通过，原41/109方法及断言保留。真实fixed13、共享后auto20、lifecycle9均通过。三轮交错真实小字体fixed driver包络冷中位0.232230→0.248453秒、热0.035601→0.049753秒，是完整内容证明的成本，不是提速；每轮cold/warm字体字节相同，热仍0 generator/0 shell validator。仅host driver且可能有并发噪声，不能外推整手机切换。最终SDK编译、原屏幕/动效和四段原录像尚待新SHA。

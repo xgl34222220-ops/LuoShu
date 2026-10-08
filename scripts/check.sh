@@ -69,6 +69,7 @@ for file in \
   scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
+  common/legacy_v14_4/composite_cache_proof.sh scripts/legacy_mix_fixed_cache_identity_test.py \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -321,6 +322,7 @@ python3 "$ROOT/scripts/font_config_monospace_test.py"
 sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
 sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 python3 "$ROOT/scripts/legacy_mix_fixed_prepare_reuse_test.py"
+python3 "$ROOT/scripts/legacy_mix_fixed_cache_identity_test.py"
 sh "$ROOT/scripts/background_mix_worker_test.sh"
 sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 sh "$ROOT/scripts/font_switch_lock_test.sh"

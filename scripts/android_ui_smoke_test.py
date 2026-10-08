@@ -15,6 +15,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
+from ui_snapshot_session import HELPER, UiSnapshotSession
 
 from android_ui_smoke import (
     action_disabled, anchors_preserved, app_labels, bounds, center, choice_selected, content_anchors,
@@ -705,12 +706,189 @@ public class SnapshotCacheCompatibilityTest {
     def prepare_baseline_reader(self, run):
         run.api_level = 36
         run.snapshot_apk = Path("reader.apk")
+        run.snapshot_session = Mock(spec=UiSnapshotSession)
         run.snapshot_hierarchy = Mock(side_effect=lambda **kwargs: self.baseline_hierarchy())
 
     def baseline_batch(self, raw, window=None, policy=None):
         window = self.baseline_window() if window is None else window
         policy = self.baseline_policy() if policy is None else policy
         return (policy + window).encode() + b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00" + gzip.compress(raw, compresslevel=1, mtime=0)
+
+    def home_connection_fixture(self, directory, *, deferred=False, failed_policy=False):
+        # Fixed host scheduling costs/private-file bytes, not Android latency.
+        # Only the early begin call is deferred in the serial comparison.
+        from ui_snapshot_session_test import Clock, PrivateProtocol
+        clock = Clock()
+        events = []
+        policy_finished = [False]
+        self.enterContext(patch('android_ui_smoke.time.monotonic', side_effect=clock.monotonic))
+        self.enterContext(patch('android_ui_smoke.time.sleep', side_effect=clock.sleep))
+        run = SmokeRun(Path('app.apk'), directory, PACKAGE, None, snapshot_apk=Path('reader.apk'))
+        run.api_level = 36
+        session = UiSnapshotSession(run.adb_command, directory)
+        run.snapshot_session = session
+        protocol = PrivateProtocol(session, clock)
+        protocol.xml = ET.tostring(self.baseline_hierarchy())
+        process = Mock(pid=12345, returncode=0)
+        process.poll.return_value = None
+        process.wait.return_value = 0
+
+        def launch(command, **kwargs):
+            events.append(('popen', clock.now))
+            protocol.ready_delay = clock.now - 100 + 6
+            return process
+        popen = self.enterContext(patch('ui_snapshot_session.subprocess.Popen', side_effect=launch))
+        self.enterContext(patch.object(session, '_start_readers'))
+        def publication(basename, deadline):
+            if basename == 'ready.json':
+                clock.now = max(clock.now, min(100 + protocol.ready_delay, deadline))
+            return protocol.wait_publication(basename, deadline)
+        self.enterContext(patch.object(session, '_wait_publication', side_effect=publication))
+        self.enterContext(patch.object(session, '_finish_readers', return_value=(b'INSTRUMENTATION_CODE: -1\n', b'')))
+
+        def transport(command, **kwargs):
+            args = command[len(session.adb_command):]
+            if args[:2] == ['shell', '-T'] and 'request-' in args[-1]:
+                self.assertTrue(policy_finished[0])
+                events.append(('root-request', clock.now))
+            if command[-1].endswith('/ready.json'):
+                self.assertTrue(policy_finished[0])
+                events.append(('ready-cat', clock.now))
+            return protocol.run(command, **kwargs)
+        self.enterContext(patch('ui_snapshot_session.subprocess.run', side_effect=transport))
+
+        def resolve(*args, **kwargs):
+            self.assertIn('resolve-activity', args)
+            events.append(('resolve', clock.now))
+            clock.sleep(.5)
+            return 'com.example.launcher/.Home\n'
+        run.text = Mock(side_effect=resolve)
+        raw = self.baseline_raw()
+        def command(*args, **kwargs):
+            self.assertAlmostEqual(110 - clock.now, kwargs['timeout'])
+            if args == ('exec-out', 'sh', '-c', 'dumpsys window policy && dumpsys window displays'):
+                events.append(('policy', clock.now))
+                clock.sleep(.6)
+                policy_finished[0] = True
+                if failed_policy:
+                    # A valid ready notice may be queued by the owned reader
+                    # before this failed probe; cleanup must retain that FAIL.
+                    notice = json.dumps({'protocol': 1, 'nonce': session.nonce, 'basename': 'ready.json'}).encode()
+                    session._publication_frame([(b'luoshu_snapshot_published', notice)], b'1')
+                return subprocess.CompletedProcess([], 7 if failed_policy else 0,
+                    (self.baseline_policy() + self.baseline_window()).encode(), b'initial probe bytes')
+            self.assertTrue(policy_finished[0])
+            self.assertEqual(len(protocol.requests), len(protocol.xml_reads))
+            events.append(('frame', clock.now))
+            if kwargs['timeout'] < .5:
+                clock.sleep(kwargs['timeout'])
+                cause = subprocess.TimeoutExpired('adb', kwargs['timeout'], output=b'partial frame', stderr=b'frame timeout')
+                raise RuntimeError('fixed frame cost exceeded original HOME deadline') from cause
+            clock.sleep(.5)
+            return subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b'frame bytes')
+        run.adb = Mock(side_effect=command)
+        if deferred:
+            begin = session.begin
+            def defer_until_policy(deadline):
+                if not policy_finished[0]:
+                    events.append(('deferred-begin', clock.now))
+                    return
+                return begin(deadline)
+            session.begin = defer_until_policy
+        return run, session, protocol, clock, events, popen
+
+    def test_home_begin_overlaps_fixed_prefix_cost_and_keeps_three_fresh_captures(self):
+        results = {}
+        for deferred in (False, True):
+            with self.subTest(deferred=deferred), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                run, session, protocol, clock, events, popen = self.home_connection_fixture(directory, deferred=deferred)
+                if deferred:
+                    with self.assertRaisesRegex(RuntimeError, 'original HOME deadline'):
+                        run.wait_home_baseline('light-cold-start')
+                else:
+                    self.assertTrue(run.wait_home_baseline('light-cold-start').startswith(b'\x89PNG'))
+                metadata = json.loads((directory / 'light-cold-start-baseline-readiness.json').read_text())
+                self.assertEqual(100, metadata['started_monotonic_seconds'])
+                self.assertEqual(110, metadata['deadline_monotonic_seconds'])
+                self.assertEqual(110, metadata['session_begin']['deadline_monotonic_seconds'])
+                self.assertEqual(110, session._first_capture_deadline)
+                self.assertEqual(110, session._ready_json_timing['deadline_monotonic_seconds'])
+                self.assertEqual(3, len(protocol.requests))
+                self.assertEqual(3, len(protocol.xml_reads))
+                self.assertEqual(3, len({value['request_id'] for value in protocol.requests}))
+                self.assertEqual(['hierarchy-0001.xml', 'hierarchy-0002.xml', 'hierarchy-0003.xml'],
+                                 [value['filename'] for value in protocol.requests])
+                self.assertTrue(all(value['root_wait_ms'] == 8000 for value in protocol.requests))
+                self.assertEqual([1, 2] if deferred else [1, 2, 3],
+                                 [sample['stable_captures'] for sample in metadata['samples']])
+                self.assertEqual(not deferred, metadata['passed'])
+                self.assertEqual(.5, metadata['home_resolve_seconds'])
+                self.assertEqual(.6, metadata['initial_window_state']['command_seconds'])
+                self.assertEqual(3, sum(event == 'frame' for event, _ in events))
+                self.assertEqual(1, sum(event == 'ready-cat' for event, _ in events))
+                popen.assert_called_once()
+                session.close()
+                results['serial' if deferred else 'overlap'] = {'home': metadata, 'events': events,
+                    'first_root_request_elapsed_seconds': next(at - 100 for event, at in events if event == 'root-request')}
+        self.assertAlmostEqual(9.3, results['overlap']['home']['elapsed_seconds'])
+        self.assertAlmostEqual(10, results['serial']['home']['elapsed_seconds'])
+        self.assertAlmostEqual(1.1, results['serial']['first_root_request_elapsed_seconds'] -
+                               results['overlap']['first_root_request_elapsed_seconds'])
+        self.assertEqual('popen', results['overlap']['events'][0][0])
+        self.assertEqual('resolve', results['overlap']['events'][1][0])
+        evidence_directory = os.environ.get('LUOSHU_HOME_SCHEDULING_EVIDENCE_DIR')
+        if evidence_directory:
+            target = Path(evidence_directory)
+            target.mkdir(parents=True, exist_ok=True)
+            (target / 'fixed-host-cost-overlap-comparison.json').write_text(json.dumps(
+                {'scope': 'synthetic host scheduling fixture; no Android performance result',
+                 'fixed_cost_seconds': {'connection_ready': 6, 'resolve': .5, 'initial_policy': .6,
+                    'private_command': .1, 'frame': .5, 'between_frames': .4}, 'results': results}, indent=2) + '\n')
+
+    def test_home_initial_policy_failure_after_begin_keeps_no_root_and_failed_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run, session, protocol, clock, events, popen = self.home_connection_fixture(directory, failed_policy=True)
+            with self.assertRaisesRegex(RuntimeError, 'initial window state probe failed') as primary:
+                run.wait_home_baseline('light-cold-start')
+            self.assertEqual(['popen', 'resolve', 'policy'], [event for event, _ in events])
+            self.assertEqual([], protocol.requests)
+            self.assertEqual([], protocol.xml_reads)
+            self.assertFalse(session.ready)
+            self.assertIsNone(session._ready_json_timing)
+            with self.assertRaisesRegex(RuntimeError, 'unconsumed publication notice at close'):
+                run.close_snapshot_session()
+            self.assertIn('initial window state probe failed', str(primary.exception))
+            self.assertNotIn('consumed_monotonic_seconds', session._ready_notice_timing)
+            self.assertIn(['shell', 'am', 'force-stop', HELPER],
+                          [command[len(run.adb_command):] for command, _ in protocol.calls])
+            self.assertTrue(all(HELPER in ' '.join(command) for command, _ in protocol.calls))
+            metadata = json.loads((directory / 'light-cold-start-baseline-readiness.json').read_text())
+            self.assertFalse(metadata['passed'])
+            self.assertEqual([], metadata['samples'])
+            popen.assert_called_once()
+
+    def test_home_begin_failure_never_probes_or_retries_or_publishes_a_root_request(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run, session, protocol, clock, events, popen = self.home_connection_fixture(directory)
+            popen.side_effect = OSError('connection begin failed')
+            with self.assertRaisesRegex(RuntimeError, 'connection begin failed'):
+                run.wait_home_baseline('light-cold-start')
+            run.text.assert_not_called()
+            run.adb.assert_not_called()
+            self.assertEqual([], protocol.requests)
+            self.assertEqual(set(), session.filenames)
+            with self.assertRaisesRegex(RuntimeError, 'connection begin failed'):
+                session.begin(150)
+            run.close_snapshot_session()
+            self.assertEqual([], protocol.calls)
+            popen.assert_called_once()
+            metadata = json.loads((directory / 'light-cold-start-baseline-readiness.json').read_text())
+            self.assertFalse(metadata['passed'])
+            self.assertEqual(110, metadata['session_begin']['deadline_monotonic_seconds'])
+            self.assertEqual(100, metadata['session_begin']['finished_monotonic_seconds'])
 
     def test_home_window_state_requires_unique_matching_real_user_observations(self):
         for showing, expected in ((True, "locked"), (False, "unlocked")):

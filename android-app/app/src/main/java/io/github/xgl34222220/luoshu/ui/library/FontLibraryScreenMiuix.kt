@@ -84,6 +84,7 @@ import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LocalShowDock
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
@@ -103,6 +104,7 @@ internal fun FontLibraryScreenMiuix(
     tools: @Composable () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
+    val requestShowDock = LocalShowDock.current
     val scheme = MaterialTheme.colorScheme
     val cardColor = tokens.cardBackground
     val elevatedColor = tokens.elevatedCardBackground
@@ -293,8 +295,10 @@ internal fun FontLibraryScreenMiuix(
                         FilledTonalButton(onClick = {
                             if (filtered) { actions.setQuery(""); actions.setFilter(FontLibraryFilter.ALL) }
                             else {
-                                showTools = true
                                 toolsRevealJob?.cancel()
+                                // Restore navigation in this tap, never in a delayed scroll completion.
+                                requestShowDock()
+                                showTools = true
                                 toolsRevealJob = toolsRevealScope.launch {
                                     // collection_heading is the fourth fixed item, before any status rows.
                                     // Reveal it and the tools below in the next frame; newer taps, user

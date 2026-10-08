@@ -118,6 +118,7 @@ import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioRoute
 import io.github.xgl34222220.luoshu.ui.studio.toFontStudioUiState
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LocalShowDock
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -390,7 +391,13 @@ internal fun LuoShuAppShell(
                         AppPage.Library -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
-                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                            CompositionLocalProvider(
+                                LocalDockContentPadding provides dockContentPadding,
+                                LocalShowDock provides {
+                                    dockScrollPolicy.reset()
+                                    dockHiddenByScroll = false
+                                },
+                            ) {
                                 FontLibraryRoute(
                                     style = appearance.uiStyle,
                                     state = viewModel.toFontLibraryUiState(),

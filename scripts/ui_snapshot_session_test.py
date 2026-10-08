@@ -121,6 +121,112 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.process.wait(timeout=deadline - self.clock.now)
         return self.process.communicate.return_value
 
+    def test_begin_launches_only_and_ready_is_validated_once_before_requests(self):
+        self.session.begin(110)
+        self.assertTrue(self.session.started)
+        self.assertFalse(self.session.ready)
+        self.assertEqual(110, self.session._first_capture_deadline)
+        self.assertEqual([], self.protocol.calls)
+        self.assertEqual([], self.protocol.requests)
+        self.assertEqual(set(), self.session.filenames)
+        self.clock.sleep(2)
+        self.session.start(150)
+        self.assertTrue(self.session.ready)
+        self.assertEqual(110, self.session._ready_json_timing['deadline_monotonic_seconds'])
+        self.assertAlmostEqual(2.1, self.session.events[-1]['elapsed_seconds'])
+        self.session.start(150)
+        self.session.begin(150)
+        self.popen.assert_called_once()
+        self.assertEqual(1, len(self.protocol.calls))
+        self.session.capture('hierarchy-0001.xml', deadline=150)
+        self.assertEqual(1, len(self.protocol.requests))
+        self.assertEqual(1, sum(command[-1].endswith('/ready.json') for command, _ in self.protocol.calls))
+
+    def test_begin_twenty_second_ceiling_cannot_restart_at_later_first_capture(self):
+        self.session.begin(150)
+        self.assertEqual(120, self.session._first_capture_deadline)
+        self.clock.sleep(19)
+        self.protocol.response_transform = lambda response: None
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.session.capture('hierarchy-0001.xml', deadline=150)
+        self.assertLessEqual(self.clock.now, 120.001)
+        self.assertEqual(8000, self.protocol.requests[0]['root_wait_ms'])
+        self.assertEqual([], self.protocol.xml_reads)
+        self.assertTrue(all(0 < timeout <= 1 for _, timeout in self.protocol.calls))
+        with self.assertRaises(RuntimeError):
+            self.session.begin(160)
+        self.popen.assert_called_once()
+
+    def test_begin_caller_deadline_is_inherited_by_first_capture_without_new_caller_limit(self):
+        self.session.begin(110)
+        self.clock.sleep(9)
+        self.protocol.response_transform = lambda response: None
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.session.capture('hierarchy-0001.xml')
+        self.assertLessEqual(self.clock.now, 110.001)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.assertEqual(110, self.session._ready_json_timing['deadline_monotonic_seconds'])
+        self.popen.assert_called_once()
+
+    def test_expired_begin_never_spawns_and_is_not_retried(self):
+        with self.assertRaisesRegex(RuntimeError, 'timed out before starting its connection'):
+            self.session.begin(100)
+        for operation in (lambda: self.session.begin(150), lambda: self.session.start(150),
+                          lambda: self.session.capture('hierarchy-0001.xml', deadline=150)):
+            with self.assertRaises(RuntimeError):
+                operation()
+        self.session.close()
+        self.popen.assert_not_called()
+        self.adb.assert_not_called()
+        self.assertEqual('closed-without-process', self.session.events[-1]['event'])
+
+    def test_begin_reader_start_exhaustion_poisoned_before_ready_or_requests(self):
+        with patch.object(self.session, '_start_readers', side_effect=lambda: self.clock.sleep(10.01)):
+            with self.assertRaisesRegex(RuntimeError, 'timed out while starting its connection'):
+                self.session.begin(110)
+        self.assertFalse(self.session.ready)
+        self.assertEqual([], self.protocol.calls)
+        with self.assertRaises(RuntimeError):
+            self.session.capture('hierarchy-0001.xml', deadline=150)
+        self.popen.assert_called_once()
+
+    def test_begin_popen_failure_cannot_be_retried_by_start_or_capture(self):
+        self.popen.side_effect = OSError('missing adb at begin')
+        with self.assertRaisesRegex(OSError, 'missing adb at begin'):
+            self.session.begin(110)
+        with self.assertRaisesRegex(RuntimeError, 'missing adb at begin'):
+            self.session.start(150)
+        with self.assertRaisesRegex(RuntimeError, 'missing adb at begin'):
+            self.session.capture('hierarchy-0001.xml')
+        self.session.close()
+        self.popen.assert_called_once()
+        self.adb.assert_not_called()
+
+    def test_begin_does_not_allow_ready_identity_mismatch_to_publish_a_request(self):
+        self.protocol.files['ready.json'] = json.dumps({'protocol': 1, 'nonce': '0' * 32,
+            'state': 'ready', 'root_wait_ms': ROOT_WAIT_MS}).encode()
+        self.session.begin(110)
+        with self.assertRaisesRegex(RuntimeError, 'mismatch for nonce'):
+            self.session.capture('hierarchy-0001.xml')
+        self.assertFalse(self.session.ready)
+        self.assertEqual([], self.protocol.requests)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.popen.assert_called_once()
+
+    def test_later_capture_retains_its_own_twenty_second_ceiling_after_first_begin(self):
+        self.session.begin(110)
+        self.clock.sleep(9)
+        self.session.capture('hierarchy-0001.xml')
+        self.clock.now = 200
+        self.protocol.response_transform = lambda response: None
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.session.capture('hierarchy-0002.xml')
+        self.assertLessEqual(self.clock.now, 220.001)
+        self.assertEqual(2, len(self.protocol.requests))
+        self.assertEqual(1, len(self.protocol.xml_reads))
+        self.assertEqual(1, sum(command[-1].endswith('/ready.json') for command, _ in self.protocol.calls))
+        self.popen.assert_called_once()
+
     def test_one_connection_unique_requests_matching_xml_and_normal_finish(self):
         for index in (1, 2):
             metadata, xml = self.session.capture(f'hierarchy-{index:04d}.xml')
@@ -537,6 +643,10 @@ if mode=='missing': ready=b'luoshu_snapshot_published={"protocol":1}\n'
 if mode=='partial-line-eof': ready=ready[:90]
 if mode=='fields-eof': ready=ready.split(b'INSTRUMENTATION_STATUS_CODE:')[0]
 if mode=='late': time.sleep(.2)
+if mode=='prefix-overlap':
+    until=time.monotonic()+2
+    while not (directory/'policy-entered').exists() and time.monotonic()<until: time.sleep(.001)
+    if not (directory/'policy-entered').exists(): sys.exit(23)
 if mode=='timing-split':
     until=time.monotonic()+2
     while not (directory/'first-stdout-seen').exists() and time.monotonic()<until: time.sleep(.001)
@@ -632,6 +742,90 @@ emit('stderr',b'\x80raw-final-stderr\n')
         self.assertEqual(stdout, (directory / 'ui-snapshot-session-instrumentation-stdout.bin').read_bytes())
         self.assertEqual(stderr, (directory / 'ui-snapshot-session-instrumentation-stderr.bin').read_bytes())
         self.assertEqual(stdout + stderr, (directory / 'ui-snapshot-session-instrumentation.txt').read_bytes())
+
+    def wait_queued_ready(self, session, deadline):
+        with session._pipe_condition:
+            while not session._publications and time.monotonic() < deadline:
+                session._pipe_condition.wait(min(.01, max(0, deadline - time.monotonic())))
+        self.assertEqual(['ready.json'], list(session._publications))
+        self.assertNotIn('consumed_monotonic_seconds', session._ready_notice_timing)
+
+    def test_begin_real_reader_progresses_during_policy_without_ready_consumption(self):
+        session, protocol, directory, processes = self.make_session('prefix-overlap')
+        deadline = time.monotonic() + 2
+        session.begin(deadline)
+        self.assertFalse(session.ready)
+        self.assertIsNone(session._ready_json_timing)
+        self.assertEqual([], protocol.calls)
+        policy_entered = time.monotonic()
+        (directory / 'policy-entered').touch()
+        self.wait_queued_ready(session, deadline)
+        self.assertGreaterEqual(session._ready_notice_timing['status_frame_observed_monotonic_seconds'], policy_entered)
+        self.assertEqual([], protocol.requests)
+        policy_finished = time.monotonic()
+        session.capture('hierarchy-0001.xml', deadline=deadline)
+        request = next(command for command in session.commands
+                       if command['arguments'][len(session.adb_command):][:2] == ['shell', '-T'])
+        self.assertGreaterEqual(request['started_monotonic_seconds'], policy_finished)
+        self.assertTrue(session.ready)
+        self.assertEqual(1, len(protocol.requests))
+        self.assertEqual(1, len(processes))
+        self.assertEqual(2, len(session._pipe_threads))
+        self.assertEqual(1, sum(command[-1].endswith('/ready.json') for command, _ in protocol.calls))
+        session.close()
+        self.assert_raw_preserved(directory)
+
+    def test_begin_initial_policy_failure_cleanup_keeps_unconsumed_ready_as_failure(self):
+        session, protocol, directory, processes = self.make_session('normal')
+        deadline = time.monotonic() + 2
+        session.begin(deadline)
+        self.wait_queued_ready(session, deadline)
+        with self.assertRaisesRegex(RuntimeError, 'unconsumed publication notice at close'):
+            session.close()
+        self.assertEqual([], protocol.requests)
+        self.assertEqual([], protocol.xml_reads)
+        self.assertFalse(session.ready)
+        self.assertEqual(1, len(processes))
+        self.assertNotIn('consumed_monotonic_seconds', session._ready_notice_timing)
+        self.assertEqual(0, sum(command[-1].endswith('/ready.json') for command, _ in protocol.calls))
+        self.assertIn(['shell', 'am', 'force-stop', HELPER],
+                      [command[len(session.adb_command):] for command, _ in protocol.calls])
+        self.assert_raw_preserved(directory)
+
+    def test_begin_queued_ready_cannot_be_consumed_after_its_original_deadline(self):
+        session, protocol, directory, processes = self.make_session('normal')
+        deadline = time.monotonic() + 2
+        session.begin(deadline)
+        self.wait_queued_ready(session, deadline)
+        with patch('ui_snapshot_session.time.monotonic', return_value=deadline + .001):
+            with self.assertRaisesRegex(RuntimeError, 'timed out waiting for ready.json'):
+                session.start(deadline + 20)
+        original = session.fatal_error
+        self.assertEqual([], protocol.calls)
+        self.assertNotIn('consumed_monotonic_seconds', session._ready_notice_timing)
+        self.assertEqual(['ready.json'], list(session._publications))
+        self.assertFalse(session.ready)
+        with self.assertRaises(RuntimeError):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 2)
+        with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+            session.close()
+        self.assertEqual(original, session.fatal_error)
+        self.assertEqual(1, len(processes))
+        self.assert_raw_preserved(directory)
+
+    def test_begin_pending_ready_cannot_be_bypassed_by_first_capture(self):
+        session, protocol, directory, processes = self.make_session('missing')
+        deadline = time.monotonic() + .3
+        session.begin(deadline)
+        self.assertTrue(session.started)
+        with self.assertRaisesRegex(RuntimeError, 'timed out waiting for ready.json'):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 2)
+        self.assertEqual([], protocol.calls)
+        self.assertEqual([], protocol.requests)
+        self.assertFalse(session.ready)
+        session.close()
+        self.assertEqual(1, len(processes))
+        self.assert_raw_preserved(directory)
 
     def test_fragmented_notices_high_stderr_and_long_unrelated_stdout_keep_one_read_per_file(self):
         session, protocol, directory, processes = self.make_session('high-stderr')

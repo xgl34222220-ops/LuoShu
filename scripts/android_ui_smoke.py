@@ -1206,6 +1206,18 @@ class SmokeRun:
             remaining()
 
         try:
+            if self.snapshot_apk is not None:
+                if self.snapshot_session is None:
+                    self.snapshot_session = UiSnapshotSession(self.adb_command, self.output)
+                remaining()
+                metadata["session_begin"] = {"started_monotonic_seconds": time.monotonic(),
+                                             "deadline_monotonic_seconds": deadline,
+                                             "scope": "owned connection/readers only; ready and first root request follow initial window checks"}
+                try:
+                    self.snapshot_session.begin(deadline)
+                finally:
+                    metadata["session_begin"]["finished_monotonic_seconds"] = time.monotonic()
+                remaining()
             resolve_started = time.monotonic()
             resolved = self.text("shell", "cmd", "package", "resolve-activity", "--brief",
                                  "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME",

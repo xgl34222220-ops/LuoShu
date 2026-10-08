@@ -33,6 +33,9 @@ class UiSnapshotSession:
         self.directory = f"files/ui-snapshot-session-{self.nonce}"
         self.process = None
         self.started = False
+        self.ready = False
+        self._begin_started_monotonic: float | None = None
+        self._first_capture_deadline: float | None = None
         self.closed = False
         self.fatal_error: str | None = None
         self.filenames: set[str] = set()
@@ -361,14 +364,20 @@ class UiSnapshotSession:
             if type(envelope.get(key)) is not type(value) or envelope.get(key) != value:
                 raise RuntimeError(f"UiAutomation session response mismatch for {key}")
 
-    def start(self, deadline: float) -> None:
+    def begin(self, deadline: float) -> None:
+        """Launch the owned connection/readers; leave ready validation to start."""
         if self.closed or self.fatal_error:
             raise RuntimeError(self.fatal_error or "UiAutomation session is closed")
         if self.started:
             return
         self.started = True  # A broken connection is never silently restarted.
         started = time.monotonic()
+        self._begin_started_monotonic = started
+        self._first_capture_deadline = min(started + 20, deadline)
+        self._launch_timing["first_capture_deadline_monotonic_seconds"] = self._first_capture_deadline
         try:
+            if started >= self._first_capture_deadline:
+                raise RuntimeError("UiAutomation session timed out before starting its connection")
             self._launch_timing["popen_started_monotonic_seconds"] = time.monotonic()
             try:
                 self.process = subprocess.Popen(self.adb_command + ["shell", "am", "instrument", "-w", "-r",
@@ -382,9 +391,26 @@ class UiSnapshotSession:
             self._start_readers()
             self._launch_timing["readers_started_monotonic_seconds"] = time.monotonic()
             self._event("started")
+            if time.monotonic() >= self._first_capture_deadline:
+                raise RuntimeError("UiAutomation session timed out while starting its connection")
+        except (OSError, RuntimeError, ValueError) as error:
+            self.fatal_error = str(error)
+            self._event("start-failed", error=str(error))
+            raise
+
+    def start(self, deadline: float) -> None:
+        self.begin(deadline)
+        if self.ready:
+            return
+        # begin may run during the caller's initial probes. Neither waiting for
+        # ready nor the first later capture can restart its original ceiling.
+        deadline = min(deadline, self._first_capture_deadline)
+        try:
             ready = self._wait_json("ready.json", self.output / "ui-snapshot-session-ready.json", deadline)
             self._validate(ready, state="ready", root_wait_ms=ROOT_WAIT_MS)
-            self._event("ready", root_wait_ms=ROOT_WAIT_MS, elapsed_seconds=time.monotonic() - started)
+            self.ready = True
+            self._event("ready", root_wait_ms=ROOT_WAIT_MS,
+                        elapsed_seconds=time.monotonic() - self._begin_started_monotonic)
         except (OSError, RuntimeError, ValueError) as error:
             self.fatal_error = str(error)
             self._event("start-failed", error=str(error))
@@ -397,12 +423,15 @@ class UiSnapshotSession:
             raise RuntimeError("UiAutomation session filename cannot be reused")
         if self.closed or self.fatal_error:
             raise RuntimeError(self.fatal_error or "UiAutomation session is closed")
+        first_capture = not self.filenames
         self.filenames.add(filename)
         request_id = uuid.uuid4().hex
         started = time.monotonic()
         # A caller may share its original absolute deadline with this read.
         # The normal twenty-second host ceiling and server root wait stay fixed.
         deadline = min(started + 20, deadline) if deadline is not None else started + 20
+        if first_capture and self._first_capture_deadline is not None:
+            deadline = min(deadline, self._first_capture_deadline)
         envelope = {"protocol": PROTOCOL, "nonce": self.nonce, "request_id": request_id,
                     "filename": filename, "root_wait_ms": ROOT_WAIT_MS}
         prefix = self.output / filename.removesuffix(".xml")
