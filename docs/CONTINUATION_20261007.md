@@ -302,3 +302,27 @@ b7f 成品内部校验通过：外包 SHA256 3ff629d438fe1d2f44e11a178cca45f6b09
 下一准确提交必须重新跑完整candidate、API28/36与四段原视频，并独立审原画面。不将新source/host通过当设备视觉通过。1.1.1 frozen22/nohook、既有覆盖/Google/连续切换与重启、全局字重移除均保留；两台OEM真实glyph/Google/live A→B→A/reboot/full速度、ColorOS整机reboot、App冷启/加载、97秒prezygote、600/630合成现场分别仍缺真机证据。
 
 本批发布前 root 独立完整 source gate 自然 exit0：42个 unittest 报告/731次执行，原 namespace class 因当前/proc PID映射条件跳过并保留原因；session53、smoke112分别完整通过，原41/109方法及断言保留。真实fixed13、共享后auto20、lifecycle9均通过。三轮交错真实小字体fixed driver包络冷中位0.232230→0.248453秒、热0.035601→0.049753秒，是完整内容证明的成本，不是提速；每轮cold/warm字体字节相同，热仍0 generator/0 shell validator。仅host driver且可能有并发噪声，不能外推整手机切换。最终SDK编译、原屏幕/动效和四段原录像尚待新SHA。
+
+## be285fb0 真实终态与下一批计时证据
+
+准确 `be285fb0b19c9541645893359329395fde41bb16` / tree `593a79687435733b182e7a2b27a5f89ae6c2e4d1` 的 [candidate37762425685](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37762425685) 成功，[UI37762425702](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37762425702) 的 build/API28/API36 成功、visual失败，均自然终态。真实SDK编译/lint和34套件217 JVM通过；candidate98个unittest汇总/1745次执行含重复及两处真实namespace权限跳过。模块10662489字节/SHA256 `c0925c1cf21c10b22777faabef3f1c433f87ee52c071a2b95ad1343c616e3166`，release APK4072078字节/SHA256 `ee5fe83d8be0e32b468bda7c812176ad8eaf8e377dda4ae94eb0bf95d9cf3fa2`。frozen22、defined7、Google9及新增proof/fixed/router/auto按该Git对象逐字节核验，内嵌APK一致，签名v2/v3通过；包仍内部留存。
+
+功能原图逐张审完：API28 37张、API36 33张。空态入口点击后、零额外测试输入，导入与收起按钮和完整字体库Dock同时可见；此前缺Dock的问题在这两个未Root模拟器中通过。原跨页/筛选/后台/旋转/动画关闭/再次冷启动及Google说明仍执行。横屏验证保持路由和滚动状态，不代表下方全部管理按钮可见；静态PNG不证明首帧或动效。1347条实际命令/2694份原流的长度、摘要、身份、JSON/XML、调用汇总一致。API28原20秒logcat118次均及时，最大10.385秒；没有据此宣布旧20秒超时根因已解决。API36有真实GMS broadcast ANR，不称全系统无ANR。
+
+启动仍0 MP4/0 XML/仅一张Launcher加载状态的后置PNG，无App启动、暖PID或四段录像验收。HOME begin仅重叠约0.204秒既有准备。host ready5.341秒、notice仍迟原十秒2.114秒且未消费，close FAIL保留；native同钟process→ready2895ms、ready→accepted1006ms、request→response提交6076ms，其中root3696ms和序列化2368ms。35次root仅保留尾32及3次遗漏汇总，不补造单次分布；四次child共2822ms。原GMS ANR只有670字节头部，没有本次线程栈，不能借旧栈作此次根因。
+
+下一批仅启动视觉显式试验公开平台默认`getChild(index)`，功能API28/36继续缺省`zero`，API33以下仍默认getter。ready和每份response envelope必须包含配置mode、整数SDK和实际strategy；host核配置/准备/response一致性，冲突先于XML失败。default仍可使用平台cache，既有API34+公开clearCache保持；不是禁用cache或强制每个节点RPC，也不能由固定JVM树字节一致证明Android提速。HOME10秒/root8秒/host20秒/录像30秒、每次fresh root与原raw帧、三次稳定HOME、通知/迟到/close、同PID/ANR及全部视觉断言保留。该跨run兼容试验未固定系统负载，不能当成严格性能因果对照。
+
+功能计时分三种钟与范围：active fixed/auto用内建`/proc/uptime`记录prepare/cache/cold/validate/publish/mapper/child/finalize阶段，约10ms分辨率、含suspend；outer task_scope既有Python-monotonic cleanup receipt提供后台任务包络；App用elapsedRealtime记录接受请求至第一次准确operation+task观察终态。重叠阶段不相加；后台包络不含router预检和App观察，App总时长也不证明文字已在系统或Google像素生效。optional日志失败不改变业务返回/字体/四行proof/事务；超时取消中断记录incomplete而不伪造结束。脱敏reader限定原log256KiB/256events/3匿名requests及小额准确outer receipt，boot/PID-start不符拒绝关联，不导出原任务ID、路径、boot或绝对时钟。
+
+App仅process内最多8条随机request证据，没有额外Root请求/每操作IO/轮询预算变化。未知恢复起点、启动失败、错/缺status taskID、observer取消/失败与实际后台终态区分；清理未确认总时长unknown，后续确认不能复活已清空总时长。正常start把本次captured request传给观察器，仅恢复时按准确pair attach；重复backend ID绑定被拒绝后也不会借旧WAITING的click时钟。导出使用既有只读报告命令的固定字段。host官方Kotlin2.4.10编译真实RootShell/TaskPollBudget/计时类，38 JVM（19新增+16原RootShell+3原budget）通过，原37结果单独保留；SystemClock仅host签名stub，不能代替完整AndroidViewModel/Compose SDK编译。此批准确新SHA和所有设备/录像终态仍须实际运行后填写。
+
+新增完整auto夹具发现两个不同事实：旧fixed夹具未创建当前live目录，原SAFE正确拒绝不可读clone，补齐实际目录后才继续；其后发现既有真实生产目录标签缺口。router创建`legacy-v14-runtime`，manager仅识别`.legacy-v14-runtime`，自动九档真实SAFE/mapper/next完成后next.font仍`LuoShuAutoMix`、没有mix提交证明、fast status维持running99。只在manager既有REAL_MODDIR保护内补新精确basename，同时保留旧alias；不向夹具强塞active-label、不改SAFE核心或接受无证明终态。原失败和修后同环境链路结果必须分别保存。这是generic host完整链路发现，不回填OEM手机实测。
+
+真实SAFE会重入独立safe-switch scope，身份并非auto outer。本批仅计原manager调用外围`safe_apply`跨度；SAFE原细阶段日志继续保留，但匿名diagnostic的SAFE关联记为unavailable/identity-not-associated，不按相近时间窗或相同字符串猜父子，也不合计重叠时长。
+
+root首轮完整source门禁真实exit1，ColorOS双caller回归只得到一次helper调用：孤立函数摘录没有source新增真实phase helper，第二caller在计时函数名处失败而未执行度量helper。原非零与两次调用断言保留，只给摘录补真实helper依赖；HyperOS同类摘录也补真实依赖并新增两次marker，不能用command-not-found假通过失败传播。两项专项分别27/28通过；原首轮失败及运行中24文件完全未变的摘要保留，随后整库重跑另存。新源/host均不替代同SHA设备/录像结果。
+
+发布前root第二轮完整`check.sh`自然exit0，366.700540秒，43个unittest报告/751次执行/43 OK，运行中26文件逐字节未变。真实`/proc` PID映射类及mount namespace权限条件跳过的原证据保留。该门禁后的唯一改动是本文修正HyperOS专项数量和补实际全量结果；其余25个待提交代码/测试/工作流文件与本轮通过输入一致。native独立61/117/Java1、App真实Kotlin38/boot8及后台20/10/20/13/9已分别保存，SDK/两API/四原录像仍必须按准确新SHA实际跑到终态。
+
+1.1.1 frozen22/nohook、现有可信字体槽位/Google回退/连续切换与重启事务、已移除全局字重、玻璃渐变/Dock/首帧条件保留。两台既有设备一加15 ColorOS V16.1.0、Redmi K80 Ultra HyperOS3.0.303仍缺真实字形/Google运行时、live A→B→A、重启持续覆盖、整次速度与清理证据；不操作用户设备。ColorOS整机reboot超过两分钟、App冷启/加载、旧97秒prezygote、旧600/630合成超时分别待查，不能以此批采集或host计时替代。

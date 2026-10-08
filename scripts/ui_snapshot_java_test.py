@@ -22,7 +22,7 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
         for constant in ('ROOT_WAIT_MS = 8000', 'ROOT_QUERY_RECORD_LIMIT = 32',
                          'CHILD_QUERY_RECORD_LIMIT = 32', 'OBSERVED_CHILD_LIMIT = 32'):
             self.assertIn(f'private static final int {constant};', source)
-        child_strategy = 'Build.VERSION.SDK_INT >= 33 ? node.getChild(index, 0) : node.getChild(index)'
+        child_strategy = 'Build.VERSION.SDK_INT >= 33 && "zero".equals(childPrefetchMode) ? node.getChild(index, 0) : node.getChild(index)'
         self.assertEqual(1, source.count(child_strategy))
         self.assertIn('root = automation.getRootInActiveWindow();', source)
         self.assertIn('root = window.getRoot();', source)
@@ -45,6 +45,9 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
             '    private static void snapshotDiagnostics(',
             '    private static JSONObject serviceInfoEvidence(',
             '    private static void refreshLegacyAccessibilityCache(',
+            '    private static String checkedChildPrefetchMode(',
+            '    private String childQueryStrategy(',
+            '    private JSONObject childPrefetchEvidence(',
             '    private static JSONObject envelope(',
             '    private static void writeJson(',
             '    private void publishJson(',
@@ -59,12 +62,8 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
             '    private void dumpNode(',
             '    private static String text(',
         ))
-        # In-memory comparison only: the source file retains its fixed API gate.
-        # Both boundaries use the exact same fixture tree and synthetic cost.
+        # Exercise both production modes with the same fixture tree and synthetic cost.
         # This compares overload selection and XML/recycle behavior, not Android speed.
-        methods = methods.replace(child_strategy,
-                                  'Build.VERSION.SDK_INT >= 33 && !COMPARE_PLATFORM_DEFAULT '
-                                  '? node.getChild(index, 0) : node.getChild(index)')
         harness = r'''
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -78,6 +77,7 @@ class InstrumentationBoundary {
 }
 public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
     private Bundle arguments = new Bundle();
+    private String childPrefetchMode = "zero";
     private final Bundle lifecycleDiagnostics = new Bundle();
     private int nodeCount, childQueryCount;
     private long childQueryMillis, childQueryMaxMillis, childRootDeadline;
@@ -100,7 +100,6 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
     // path at zero: it reproduces observe/requery behavior without pretending
     // to execute all literal 6eb source, or changing the real getter boundary.
     private static int OBSERVED_CHILD_LIMIT = 32;
-    private static boolean COMPARE_PLATFORM_DEFAULT;
     private static final String NONCE = "0123456789abcdef0123456789abcdef";
     static class Bundle {
         final Map<String,String> values = new HashMap<>();
@@ -437,7 +436,16 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                 "200".equals(connectDiagnostics.getString("helper_automation_configured_uptime_ms")) &&
                 h.automation.getServiceCalls==1 && h.automation.setServiceCalls==1 && h.automation.service.flags==15,
                 "connect/config clocks or original service call count changed");
-        JSONObject ready=new JSONObject().put("protocol",1).put("nonce",NONCE).put("state","ready").put("text","雪😀");
+        require("zero".equals(checkedChildPrefetchMode(null)) && "zero".equals(checkedChildPrefetchMode(new Bundle())),
+                "missing native mode changed the zero default");
+        Bundle modeArguments=new Bundle(); modeArguments.putString("child_prefetch_mode","default");
+        require("default".equals(checkedChildPrefetchMode(modeArguments)),"explicit default native mode rejected");
+        modeArguments.putString("child_prefetch_mode","hybrid");
+        try { checkedChildPrefetchMode(modeArguments); throw new AssertionError("unknown native mode accepted"); }
+        catch(IllegalArgumentException expected) { require("Invalid child prefetch mode".equals(expected.getMessage()),"native mode error changed"); }
+        JSONObject ready=h.childPrefetchEvidence(new JSONObject().put("protocol",1).put("nonce",NONCE).put("state","ready").put("text","雪😀"));
+        require("zero".equals(ready.values.get("child_prefetch_mode")) && Integer.valueOf(34).equals(ready.values.get("sdk_api")) &&
+                "api33-zero-prefetch".equals(ready.values.get("child_query_strategy")),"ready metadata does not describe actual getter");
         Bundle readyDiagnostics=new Bundle();
         h.expectNotice("ready.json",ready.toString(),readyDiagnostics,"helper_ready_published_uptime_ms");
         h.publishJson(dir,"ready.json",ready,NONCE,readyDiagnostics,"helper_ready_published_uptime_ms");
@@ -489,6 +497,7 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         String responseName="response-11111111111111111111111111111111.json";
         JSONObject response=new JSONObject().put("protocol",1).put("nonce",NONCE).put("request_id","11111111111111111111111111111111")
                 .put("filename","hierarchy-0001.xml").put("root_wait_ms",8000).put("code",-1);
+        h.childPrefetchEvidence(response);
         h.expectNotice(responseName,response.toString(),diagnostics,"helper_last_response_published_uptime_ms");
         h.publishJson(dir,responseName,response,NONCE,diagnostics,"helper_last_response_published_uptime_ms");
         require(h.notices.size()==2,"response publication sent no matching notification");
@@ -664,7 +673,7 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         int fileNumber=40;
         for(int api:new int[]{28,32,33,36}) {
             Build.VERSION.SDK_INT=api;
-            COMPARE_PLATFORM_DEFAULT=true; SystemClock.now=100;
+            comparison.childPrefetchMode="default"; SystemClock.now=100;
             String defaultName=String.format("hierarchy-%04d.xml",fileNumber++);
             int defaultsBefore=AccessibilityNodeInfo.defaultGetterCalls, zerosBefore=AccessibilityNodeInfo.zeroGetterCalls;
             int rootsBefore=comparison.automation.rootCalls, windowsBefore=comparison.automation.windowCalls;
@@ -677,7 +686,7 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
             int defaultCacheCalls=comparison.automation.clearCacheCalls-clearBefore;
             int defaultGetInfoCalls=comparison.automation.getServiceCalls-getInfoBefore;
             int defaultSetInfoCalls=comparison.automation.setServiceCalls-setInfoBefore;
-            COMPARE_PLATFORM_DEFAULT=false; SystemClock.now=100;
+            comparison.childPrefetchMode="zero"; SystemClock.now=100;
             String candidateName=String.format("hierarchy-%04d.xml",fileNumber++);
             defaultsBefore=AccessibilityNodeInfo.defaultGetterCalls; zerosBefore=AccessibilityNodeInfo.zeroGetterCalls;
             rootsBefore=comparison.automation.rootCalls; windowsBefore=comparison.automation.windowCalls;
@@ -685,6 +694,15 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
             setInfoBefore=comparison.automation.setServiceCalls;
             Bundle candidateResult=comparison.snapshot(comparison.automation,candidateName,dir,new Bundle());
             require("ok".equals(candidateResult.getString("snapshot")),"API strategy candidate failed");
+            require("default".equals(defaultResult.getString("child_prefetch_mode")) && "zero".equals(candidateResult.getString("child_prefetch_mode")) &&
+                    Integer.toString(api).equals(defaultResult.getString("sdk_api")) && Integer.toString(api).equals(candidateResult.getString("sdk_api")) &&
+                    (api<33?"legacy-platform-default":"api33-platform-default").equals(defaultResult.getString("child_query_strategy")) &&
+                    (api<33?"legacy-platform-default":"api33-zero-prefetch").equals(candidateResult.getString("child_query_strategy")),
+                    "snapshot metadata does not describe requested mode, actual SDK and getter");
+            JSONObject candidateEnvelope=comparison.childPrefetchEvidence(envelope(NONCE));
+            require(Integer.valueOf(api).equals(candidateEnvelope.values.get("sdk_api")) &&
+                    candidateResult.getString("child_query_strategy").equals(candidateEnvelope.values.get("child_query_strategy")),
+                    "native envelope does not match the snapshot branch");
             require(AccessibilityNodeInfo.defaultGetterCalls-defaultsBefore==(api<33?6:0) &&
                     AccessibilityNodeInfo.zeroGetterCalls-zerosBefore==(api>=33?6:0),"API gate selected wrong public child overload");
             require(Arrays.equals(Files.readAllBytes(new File(dir,defaultName).toPath()),Files.readAllBytes(new File(dir,candidateName).toPath())),
@@ -703,13 +721,16 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                     (api>=34 || "true".equals(candidateResult.getString("accessibility_service_info_unchanged"))),
                     "legacy public cache branch or unchanged service configuration lost");
             allCopiesRecycled();
+            System.out.println("PREFETCH_MODE_FIXTURE SDK="+api+" default="+defaultResult.getString("child_query_strategy")+
+                    " zero="+candidateResult.getString("child_query_strategy")+" roots="+defaultRootCalls+" clearCache="+defaultCacheCalls+
+                    "; same fixture XML and recycle boundaries; not Android evidence");
             System.out.println("CHILD_STRATEGY_FIXTURE API="+api+" XML bytes same; default/candidate each 6 queries/42 synthetic ms; "
                     +"candidate overload="+(api>=33?"getChild(index,0)":"getChild(index)")+"; not Android performance evidence");
         }
         Build.VERSION.SDK_INT=36;
         // Fault/late fixtures have equal boundary costs in both overload modes.
         for(boolean platformDefault:new boolean[]{true,false}) {
-            COMPARE_PLATFORM_DEFAULT=platformDefault;
+            comparison.childPrefetchMode=platformDefault?"default":"zero";
             for(String fault:new String[]{"late-visible","late-null","late-throw"}) {
                 comparison.automation.root=new AccessibilityNodeInfo(fault,true);
                 comparison.automation.root.children.add(fault.equals("late-visible")?new AccessibilityNodeInfo("returned",true):null);
@@ -727,7 +748,7 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
                 allCopiesRecycled();
             }
         }
-        COMPARE_PLATFORM_DEFAULT=false;
+        comparison.childPrefetchMode="zero";
         comparison.automation.root=tree(); comparison.automation.rootDelay=7; comparison.automation.windowDelay=11;
         comparison.automation.rootNullCallsRemaining=20; SystemClock.now=100;
         int rootCallsBefore=comparison.automation.rootCalls, windowCallsBefore=comparison.automation.windowCalls;

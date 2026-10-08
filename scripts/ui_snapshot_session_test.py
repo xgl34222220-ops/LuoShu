@@ -33,9 +33,13 @@ class PrivateProtocol:
         self.session = session
         session._protocol_fixture = self
         self.clock = clock
+        self.prefetch = {'child_prefetch_mode': session.child_prefetch_mode,
+                         'sdk_api': session.expected_api_level or 36,
+                         'child_query_strategy': ('legacy-platform-default' if (session.expected_api_level or 36) < 33 else
+                            'api33-zero-prefetch' if session.child_prefetch_mode == 'zero' else 'api33-platform-default')}
         self.files = {
             'ready.json': json.dumps({'protocol': 1, 'nonce': session.nonce,
-                                     'state': 'ready', 'root_wait_ms': ROOT_WAIT_MS}).encode(),
+                                     'state': 'ready', 'root_wait_ms': ROOT_WAIT_MS, **self.prefetch}).encode(),
             'closed.json': json.dumps({'protocol': 1, 'nonce': session.nonce, 'state': 'closed'}).encode(),
         }
         self.response_transform = lambda value: value
@@ -70,7 +74,7 @@ class PrivateProtocol:
                 self.requests.append(value)
                 result = {'snapshot': 'ok', 'filename': value['filename'], 'nodes': '2',
                           'wait_ms': '1200', 'attempts': '13', 'root_source': 'focused-window:7'}
-                response = {**value, 'code': -1, 'result': result}
+                response = {**value, **self.prefetch, 'code': -1, 'result': result}
                 response = self.response_transform(response)
                 if response is not None:
                     self.files['response-' + value['request_id'] + '.json'] = (
@@ -120,6 +124,124 @@ class UiSnapshotSessionTest(unittest.TestCase):
     def finish_reader_fixture(self, deadline):
         self.process.wait(timeout=deadline - self.clock.now)
         return self.process.communicate.return_value
+
+    def test_child_prefetch_configuration_rejects_invalid_modes_and_sdk_before_launch(self):
+        for mode in ('hybrid', '', None, True, 0):
+            with self.subTest(mode=mode), self.assertRaisesRegex(ValueError, 'Invalid child prefetch mode'):
+                UiSnapshotSession(self.session.adb_command, self.output, child_prefetch_mode=mode)
+        for sdk in (True, '36', 0, -1, 33.0):
+            with self.subTest(sdk=sdk), self.assertRaisesRegex(ValueError, 'Invalid expected snapshot SDK'):
+                UiSnapshotSession(self.session.adb_command, self.output, expected_api_level=sdk)
+        self.popen.assert_not_called()
+
+    def test_actual_child_prefetch_modes_sdk_and_legacy_strategy_are_bound_to_one_connection(self):
+        for sdk in (28, 32, 33, 36):
+            for mode in ('zero', 'default'):
+                with self.subTest(sdk=sdk, mode=mode):
+                    session = UiSnapshotSession(self.session.adb_command, self.output,
+                        child_prefetch_mode=mode, expected_api_level=sdk)
+                    protocol = PrivateProtocol(session, self.clock)
+                    with patch('ui_snapshot_session.subprocess.run', side_effect=protocol.run):
+                        session.begin(self.clock.now + 10)
+                        self.assertEqual([], protocol.calls)
+                        self.assertEqual([], protocol.requests)
+                        result, xml = session.capture('hierarchy-0001.xml')
+                        session.capture('hierarchy-0002.xml')
+                        session.close()
+                    self.assertEqual(protocol.xml.decode(), xml)
+                    self.assertEqual('ok', result['snapshot'])
+                    self.assertEqual(sdk, session.actual_api_level)
+                    command = self.popen.call_args.args[0]
+                    self.assertEqual(['-e', 'child_prefetch_mode', mode], command[-4:-1])
+                    self.assertEqual(1, command.count('child_prefetch_mode'))
+                    ready = json.loads(protocol.files['ready.json'])
+                    self.assertEqual(protocol.prefetch, {key: ready[key] for key in protocol.prefetch})
+                    self.assertEqual(2, len(protocol.requests))
+                    self.assertTrue(all(request['root_wait_ms'] == 8000 for request in protocol.requests))
+                    self.assertEqual(1, sum(command[-1].endswith('/ready.json') for command, _ in protocol.calls))
+                    self.assertFalse(any('getprop' in command for command, _ in protocol.calls))
+                    metadata = json.loads((self.output / 'ui-snapshot-session.json').read_text())
+                    self.assertEqual((mode, sdk, sdk), (metadata['child_prefetch_mode'], metadata['expected_sdk_api'], metadata['actual_sdk_api']))
+        self.assertEqual(8, self.popen.call_count)
+
+    def test_ready_child_prefetch_metadata_mismatch_is_fatal_before_any_root_request(self):
+        cases = [('child_prefetch_mode', 'zero'), ('child_prefetch_mode', True), ('child_prefetch_mode', None),
+                 ('sdk_api', True), ('sdk_api', '36'), ('sdk_api', 0), ('sdk_api', 33), ('sdk_api', None),
+                 ('child_query_strategy', 'api33-zero-prefetch'), ('child_query_strategy', 'legacy-platform-default'),
+                 ('child_query_strategy', None)]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                session = UiSnapshotSession(self.session.adb_command, self.output,
+                    child_prefetch_mode='default', expected_api_level=36)
+                protocol = PrivateProtocol(session, self.clock)
+                ready = json.loads(protocol.files['ready.json'])
+                if value is None:
+                    del ready[key]
+                else:
+                    ready[key] = value
+                protocol.files['ready.json'] = json.dumps(ready).encode()
+                launched = self.popen.call_count
+                with patch('ui_snapshot_session.subprocess.run', side_effect=protocol.run):
+                    with self.assertRaisesRegex(RuntimeError, 'mismatch for ' + key):
+                        session.capture('hierarchy-0001.xml')
+                    with self.assertRaises(RuntimeError):
+                        session.capture('hierarchy-0002.xml')
+                    session.close()
+                self.assertEqual(launched + 1, self.popen.call_count)
+                self.assertFalse(session.ready)
+                self.assertTrue(session.fatal_error)
+                self.assertEqual([], protocol.requests)
+                self.assertEqual([], protocol.xml_reads)
+
+    def test_response_child_prefetch_metadata_mismatch_is_fatal_before_matching_xml(self):
+        cases = [('child_prefetch_mode', 'zero'), ('child_prefetch_mode', None), ('sdk_api', True),
+                 ('sdk_api', '36'), ('sdk_api', 33), ('sdk_api', None),
+                 ('child_query_strategy', 'api33-zero-prefetch'), ('child_query_strategy', None)]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                session = UiSnapshotSession(self.session.adb_command, self.output,
+                    child_prefetch_mode='default', expected_api_level=36)
+                protocol = PrivateProtocol(session, self.clock)
+                def transform(response):
+                    if value is None:
+                        del response[key]
+                    else:
+                        response[key] = value
+                    return response
+                protocol.response_transform = transform
+                launched = self.popen.call_count
+                with patch('ui_snapshot_session.subprocess.run', side_effect=protocol.run):
+                    with self.assertRaisesRegex(RuntimeError, 'mismatch for ' + key):
+                        session.capture('hierarchy-0001.xml')
+                    with self.assertRaises(RuntimeError):
+                        session.capture('hierarchy-0002.xml')
+                    session.close()
+                self.assertEqual(launched + 1, self.popen.call_count)
+                self.assertTrue(session.ready)
+                self.assertTrue(session.fatal_error)
+                self.assertEqual(1, len(protocol.requests))
+                self.assertEqual([], protocol.xml_reads)
+
+    def test_response_sdk_cannot_change_after_ready_when_sdk_was_initially_unknown(self):
+        self.protocol.response_transform = lambda response: {**response, 'sdk_api': 33}
+        with self.assertRaisesRegex(RuntimeError, 'mismatch for sdk_api'):
+            self.session.capture('hierarchy-0001.xml')
+        self.assertEqual(36, self.session.actual_api_level)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.popen.assert_called_once()
+
+    def test_snapshot_result_strategy_echo_cannot_disagree_with_validated_envelope(self):
+        for key, value in [('child_prefetch_mode', 'default'), ('sdk_api', '33'),
+                           ('child_query_strategy', 'api33-platform-default')]:
+            with self.subTest(key=key):
+                session = UiSnapshotSession(self.session.adb_command, self.output)
+                protocol = PrivateProtocol(session, self.clock)
+                protocol.response_transform = lambda response: {**response, 'result': {**response['result'], key: value}}
+                with patch('ui_snapshot_session.subprocess.run', side_effect=protocol.run):
+                    with self.assertRaisesRegex(RuntimeError, 'result mismatch for ' + key):
+                        session.capture('hierarchy-0001.xml')
+                self.assertEqual([], protocol.xml_reads)
+                self.assertTrue(session.fatal_error)
 
     def test_begin_launches_only_and_ready_is_validated_once_before_requests(self):
         self.session.begin(110)
@@ -669,11 +791,12 @@ emit('stdout',b'INSTRUMENTATION_RESULT: session=finished\nINSTRUMENTATION_CODE: 
 emit('stderr',b'\x80raw-final-stderr\n')
 '''
 
-    def make_session(self, mode, *, frame=None):
+    def make_session(self, mode, *, frame=None, child_prefetch_mode='zero'):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         directory = Path(temporary.name)
-        session = UiSnapshotSession(['adb', '-s', 'emulator-5554'], directory)
+        session = UiSnapshotSession(['adb', '-s', 'emulator-5554'], directory,
+            child_prefetch_mode=child_prefetch_mode, expected_api_level=36)
         protocol = PrivateProtocol(session, Clock())
         config = {'mode': mode}
         if frame is not None:
@@ -749,6 +872,56 @@ emit('stderr',b'\x80raw-final-stderr\n')
                 session._pipe_condition.wait(min(.01, max(0, deadline - time.monotonic())))
         self.assertEqual(['ready.json'], list(session._publications))
         self.assertNotIn('consumed_monotonic_seconds', session._ready_notice_timing)
+
+    def test_default_mode_real_notice_barrier_keeps_policy_before_first_request_and_normal_close(self):
+        session, protocol, directory, processes = self.make_session('prefix-overlap', child_prefetch_mode='default')
+        deadline = time.monotonic() + 2
+        session.begin(deadline)
+        (directory / 'policy-entered').touch()
+        self.wait_queued_ready(session, deadline)
+        self.assertEqual([], protocol.calls)
+        self.assertEqual([], protocol.requests)
+        policy_finished = time.monotonic()
+        metadata, xml = session.capture('hierarchy-0001.xml', deadline=deadline)
+        request = next(command for command in session.commands
+                       if command['arguments'][len(session.adb_command):][:2] == ['shell', '-T'])
+        self.assertGreaterEqual(request['started_monotonic_seconds'], policy_finished)
+        self.assertEqual(protocol.xml.decode(), xml)
+        self.assertEqual('ok', metadata['snapshot'])
+        ready = json.loads((directory / 'ui-snapshot-session-ready.json').read_text())
+        response = json.loads((directory / 'hierarchy-0001-session-response.json').read_text())
+        for envelope in (ready, response):
+            self.assertEqual(('default', 36, 'api33-platform-default'),
+                tuple(envelope[key] for key in ('child_prefetch_mode', 'sdk_api', 'child_query_strategy')))
+        self.assertEqual(deadline, session._first_capture_deadline)
+        self.assertEqual(8000, protocol.requests[0]['root_wait_ms'])
+        session.close()
+        self.assertEqual(1, len(processes))
+        self.assertEqual('closed', session.events[-1]['event'])
+        self.assertFalse(any('force-stop' in command for command, _ in protocol.calls))
+        self.assert_raw_preserved(directory)
+
+    def test_default_mode_queued_ready_after_original_deadline_is_unconsumed_and_close_fails(self):
+        session, protocol, directory, processes = self.make_session('normal', child_prefetch_mode='default')
+        deadline = time.monotonic() + 2
+        session.begin(deadline)
+        self.wait_queued_ready(session, deadline)
+        with patch('ui_snapshot_session.time.monotonic', return_value=deadline + .001):
+            with self.assertRaisesRegex(RuntimeError, 'timed out waiting for ready.json'):
+                session.start(deadline + 20)
+        self.assertNotIn('consumed_monotonic_seconds', session._ready_notice_timing)
+        self.assertEqual(['ready.json'], list(session._publications))
+        self.assertEqual([], protocol.calls)
+        self.assertEqual([], protocol.requests)
+        self.assertEqual([], protocol.xml_reads)
+        original = session.fatal_error
+        with self.assertRaises(RuntimeError):
+            session.capture('hierarchy-0001.xml', deadline=time.monotonic() + 2)
+        with self.assertRaisesRegex(RuntimeError, 'cleanup failed'):
+            session.close()
+        self.assertEqual(original, session.fatal_error)
+        self.assertEqual(1, len(processes))
+        self.assert_raw_preserved(directory)
 
     def test_begin_real_reader_progresses_during_policy_without_ready_consumption(self):
         session, protocol, directory, processes = self.make_session('prefix-overlap')

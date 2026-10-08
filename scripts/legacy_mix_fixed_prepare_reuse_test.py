@@ -65,7 +65,7 @@ class LegacyMixPrepareReuse(unittest.TestCase):
             directory.mkdir(parents=True)
         self.script = self.module / "common/v143_auto_multiweight_mix.sh"
         shutil.copyfile(ENGINE, self.script)
-        for name in ("font_check.sh", "font_instance.py", "composite_font.py", "composite_layout.py", "composite_cache_proof.sh"):
+        for name in ("font_check.sh", "font_instance.py", "composite_font.py", "composite_layout.py", "composite_cache_proof.sh", "mix_phase_timing.sh"):
             shutil.copyfile(ROOT / "common/legacy_v14_4" / name, self.module / "common" / name)
         (self.module / "common/util_functions.sh").write_text(
             "detect_font_family() { printf '%s\\n' \"${1%%-*}\"; }\n"

@@ -642,7 +642,11 @@ def assert_single_stage_startup(log: str, pid: str, api_level: int) -> list[str]
 
 class SmokeRun:
     def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None,
-                 record_launch: bool = False, visual_launch_only: bool = False):
+                 record_launch: bool = False, visual_launch_only: bool = False, snapshot_child_prefetch: str = "zero"):
+        if snapshot_child_prefetch not in ("zero", "default"):
+            raise ValueError("Invalid child prefetch mode")
+        if snapshot_child_prefetch == "default" and not visual_launch_only:
+            raise ValueError("Default child prefetch experiment requires visual-launch-only")
         self.apk = apk
         self.output = output
         self.package = package
@@ -655,6 +659,7 @@ class SmokeRun:
         self.visual_launch_only = visual_launch_only
         self.api_level: int | None = None
         self.snapshot_apk = snapshot_apk
+        self.snapshot_child_prefetch = snapshot_child_prefetch
         self.snapshot_session: UiSnapshotSession | None = None
         self.hierarchy_attempts = 0
         self.scroll_searches = 0
@@ -804,7 +809,8 @@ class SmokeRun:
     def snapshot_hierarchy(self, *, deadline: float | None = None) -> ET.Element:
         filename = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
         if self.snapshot_session is None:
-            self.snapshot_session = UiSnapshotSession(self.adb_command, self.output)
+            self.snapshot_session = UiSnapshotSession(self.adb_command, self.output,
+                child_prefetch_mode=self.snapshot_child_prefetch, expected_api_level=self.api_level)
         metadata, xml = (self.snapshot_session.capture(filename) if deadline is None else
                          self.snapshot_session.capture(filename, deadline=deadline))
         evidence = {"transport": "persistent-ui-automation", "session_nonce": self.snapshot_session.nonce,
@@ -1208,7 +1214,8 @@ class SmokeRun:
         try:
             if self.snapshot_apk is not None:
                 if self.snapshot_session is None:
-                    self.snapshot_session = UiSnapshotSession(self.adb_command, self.output)
+                    self.snapshot_session = UiSnapshotSession(self.adb_command, self.output,
+                        child_prefetch_mode=self.snapshot_child_prefetch, expected_api_level=self.api_level)
                 remaining()
                 metadata["session_begin"] = {"started_monotonic_seconds": time.monotonic(),
                                              "deadline_monotonic_seconds": deadline,
@@ -1872,9 +1879,13 @@ def main() -> int:
                         help="Optional raw cold-start video evidence; disabled by default to keep encoding load out of UI validation")
     parser.add_argument("--visual-launch-only", action="store_true",
                         help="Require every-frame light/dark cold and same-process warm launch evidence, separately from functional UI regression")
+    parser.add_argument("--snapshot-child-prefetch", choices=("zero", "default"), default="zero",
+                        help="Public child getter strategy; default is an explicit visual compatibility experiment")
     args = parser.parse_args()
     if args.visual_launch_only and not args.record_launch:
         parser.error("--visual-launch-only requires --record-launch")
+    if args.snapshot_child_prefetch == "default" and (not args.visual_launch_only or args.snapshot_apk is None):
+        parser.error("--snapshot-child-prefetch default requires --visual-launch-only and --snapshot-apk")
     if not args.apk.is_file():
         parser.error(f"APK does not exist: {args.apk}")
     if args.snapshot_apk is not None and not args.snapshot_apk.is_file():
@@ -1883,7 +1894,8 @@ def main() -> int:
         parser.error("Invalid Android package name")
     run = SmokeRun(args.apk.resolve(), args.output.resolve(), args.package, args.serial,
                    args.snapshot_apk.resolve() if args.snapshot_apk is not None else None,
-                   record_launch=args.record_launch, visual_launch_only=args.visual_launch_only)
+                   record_launch=args.record_launch, visual_launch_only=args.visual_launch_only,
+                   snapshot_child_prefetch=args.snapshot_child_prefetch)
     error = None
     try:
         run.run()
@@ -1922,6 +1934,7 @@ def main() -> int:
         summary = {"passed": error is None, "error": error, "seconds": round(time.monotonic() - run.started_at, 2),
                    "mode": "visual-launch-only" if run.visual_launch_only else "functional-ui-smoke",
                    "api_level": run.api_level, "scope": "unrooted emulator UI; no real-device font replacement validation",
+                   "snapshot_child_prefetch": run.snapshot_child_prefetch,
                    "hierarchy_backend": run.hierarchy_backend,
                    "adb_command_count": run.adb_command_count,
                    "adb_diagnostic_errors": run.adb_diagnostic_errors,

@@ -35,6 +35,16 @@ FINALIZE_LOCK="${LUOSHU_TASKS_DIR:-$REALMOD/.luoshu-state/tasks}/mix-stage-final
 . "$REALMOD/common/font_switch_lock.sh" || exit 126
 FINALIZE_FONT_LOCK="$REALMOD/.font_switch.lock"
 
+# Timing is optional and cannot replace a business operation.
+_mix_phase_helper="$REALMOD/common/mix_phase_timing.sh"
+[ -f "$_mix_phase_helper" ] || _mix_phase_helper="$REALMOD/common/legacy_v14_4/mix_phase_timing.sh"
+if [ -f "$_mix_phase_helper" ]; then . "$_mix_phase_helper"
+else
+    luoshu_mix_phase_begin() { return 0; }
+    luoshu_mix_phase_end() { return 0; }
+    luoshu_mix_phase_run() { shift 4; "$@"; }
+fi
+
 read_value() {
     _lrv_file="$1"; _lrv_key="$2"
     # This runs during every progress poll and commit check. Keep first-key,
@@ -508,7 +518,7 @@ complete_hyperos_stage() {
     if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
        [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
         [ -f "$_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" luoshu_mix_phase_run finalize complete_hyperos fixed finalize sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
     fi
 }
 
@@ -526,7 +536,7 @@ complete_coloros_stage() {
        [ -e /system/fonts/SysSans-En-Regular.ttf ] || \
        [ -e /system/fonts/SysFont-Regular.ttf ]; then
         [ -f "$_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" luoshu_mix_phase_run finalize complete_coloros fixed finalize sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
     fi
     return 0
 }
@@ -636,6 +646,7 @@ commit_mix_stage_if_needed() {
         complete_hyperos_stage || return 1
         complete_coloros_stage || return 1
     fi
+    luoshu_mix_phase_begin finalize next_commit fixed finalize
     write_next_state || return 1
     if ! luoshu_next_transaction_begin "$REALMOD" "$MIX_STAGE" "$STAGED_NEXT_STATE"; then
         rm -f "$STAGED_NEXT_STATE" 2>/dev/null || true
@@ -647,6 +658,7 @@ commit_mix_stage_if_needed() {
         return 1
     fi
     mark_mix_request_committed || return 1
+    luoshu_mix_phase_end 0
     rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
     printf '[%s] legacy composite staged for next boot: mix\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG_FILE" 2>/dev/null || true
@@ -694,6 +706,14 @@ write_legacy_mix_mode() {
 }
 
 finalize_mix_stage() {
+    luoshu_mix_phase_begin finalize finalize_lock fixed finalize
+    _mix_finalize_stage
+    _luompt_finalize_rc=$?
+    luoshu_mix_phase_end "$_luompt_finalize_rc"
+    return "$_luompt_finalize_rc"
+}
+
+_mix_finalize_stage() {
     if ! finalize_lock_acquire; then
         printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
         return 1
@@ -720,16 +740,21 @@ finalize_mix_stage() {
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    luoshu_mix_phase_end 0
     if ! luoshu_next_transaction_recover "$REALMOD" || ! commit_mix_stage_if_needed; then
         printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
         return 1
     fi
+    luoshu_mix_phase_begin finalize live_mount fixed finalize
     _live_result=$(MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REALMOD/common/font_live_switch.sh" 2>> "$LOG_FILE")
+    _luompt_live_rc=$?
+    luoshu_mix_phase_end "$_luompt_live_rc"
     _live_applied=false; _activation=pending-reboot
     if printf '%s\n' "$_live_result" | grep -q '"liveApplied":true'; then
         _live_applied=true; _activation=live-mounted
     fi
     printf '[LIVE-SWITCH] %s\n' "$_live_result" >> "$LOG_FILE" 2>/dev/null || true
+    luoshu_mix_phase_begin finalize finalize_release fixed finalize
     luoshu_font_lock_release "$FINALIZE_FONT_LOCK" "$$" >/dev/null 2>&1 || true
     finalize_lock_release >/dev/null 2>&1 || true
     trap - EXIT HUP INT TERM
@@ -760,6 +785,7 @@ setup_runtime() {
     force_link "$LEGACY/composite_font.py" "$RUNTIME/common/composite_font.py" || return 1
     force_link "$LEGACY/composite_layout.py" "$RUNTIME/common/composite_layout.py" || return 1
     force_link "$LEGACY/composite_cache_proof.sh" "$RUNTIME/common/composite_cache_proof.sh" || return 1
+    [ ! -f "$LEGACY/mix_phase_timing.sh" ] || force_link "$LEGACY/mix_phase_timing.sh" "$RUNTIME/common/mix_phase_timing.sh" || return 1
     force_link "$REALMOD/common/luoshu_composite.sh" "$RUNTIME/common/luoshu_composite.sh" || return 1
     force_link "$LEGACY/mix_weight_mode.sh" "$RUNTIME/common/mix_weight_mode.sh" || return 1
     force_link "$REALMOD/common/font_role_check.sh" "$RUNTIME/common/font_role_check.sh" || return 1

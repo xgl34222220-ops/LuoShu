@@ -477,7 +477,8 @@ _hyperos_clock_ui_files() { :; }
     def test_stage_failure_propagates_through_both_callers(self):
         helper = self.module / 'common/hyperos_stage_complete.sh'
         helper.parent.mkdir(parents=True)
-        helper.write_text('exit 7\n')
+        helper.write_text('printf "called\\n" >> "$TEST_CALLS"\nexit 7\n')
+        marker = self.root / 'calls'
         for relative, function in (
             ('common/legacy_v14_4/font_switch_safe.sh', 'stage_hyperos_complete'),
             ('common/legacy_v14_4/mix_router.sh', 'complete_hyperos_stage'),
@@ -485,11 +486,14 @@ _hyperos_clock_ui_files() { :; }
             source = (ROOT / relative).read_text()
             start = source.index(function + '() {')
             code = source[start:source.index('\n}', start) + 2]
-            result = subprocess.run(['sh', '-c', code + '\ngetprop() { echo HyperOS; }\n' + function],
+            result = subprocess.run(['sh', '-c', '. "$1"\n' + code + '\ngetprop() { echo HyperOS; }\n' + function,
+                                     'sh', str(ROOT / 'common/legacy_v14_4/mix_phase_timing.sh')],
                 env={**os.environ, 'IS_HYPEROS': 'true', 'MODDIR': str(self.module),
                      'REALMOD': str(self.module), 'LOG_FILE': str(self.root / 'log'),
-                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage)})
+                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage),
+                     'TEST_CALLS': str(marker)})
             self.assertNotEqual(result.returncode, 0, relative)
+        self.assertEqual(marker.read_text().splitlines(), ['called', 'called'])
 
     def test_shell_entry_uses_one_python_process(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(),

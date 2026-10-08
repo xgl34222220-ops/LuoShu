@@ -28,6 +28,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.AppFontTaskTimings
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
@@ -44,6 +45,7 @@ internal data class DiagnosticExportState(
 }
 
 internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
+    val taskTiming = RootShell.quote(AppFontTaskTimings.sanitizedSnapshot())
     val command = """
         MOD=/data/adb/modules/LuoShu
         CFG="${'$'}MOD/config"
@@ -192,6 +194,7 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'recentErrorCount=%s\n' "${'$'}errorCount"
             printf 'privacy=device identifiers, accounts, chat content and source font names omitted; system slots and APK font resource names may be included\n'
         } > "${'$'}OUT" 2>/dev/null || exit 21
+        printf '\n[app-font-task-timing]\n%s' $taskTiming >> "${'$'}OUT"
         LAYOUT_HELPER="${'$'}MOD/common/font_layout_diagnostic.sh"
         LAYOUT_OUT="${'$'}OUT_DIR/LuoShu-font-layout.json"
         if [ -f "${'$'}LAYOUT_HELPER" ]; then

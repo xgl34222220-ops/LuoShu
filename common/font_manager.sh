@@ -399,7 +399,7 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
     # resolves and validates the temporary source family normally.
     if [ -n "${LUOSHU_REAL_MODDIR:-}" ]; then
         case "$MODDIR" in
-            */.legacy-v14-runtime)
+            */legacy-v14-runtime|*/.legacy-v14-runtime)
                 LUOSHU_SWITCH_ACTIVE_LABEL="${LUOSHU_SWITCH_ACTIVE_LABEL:-mix}"
                 export LUOSHU_SWITCH_ACTIVE_LABEL
                 ;;

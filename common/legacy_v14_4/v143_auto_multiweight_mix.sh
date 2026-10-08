@@ -42,6 +42,16 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
+# Timing is optional and cannot replace a business operation.
+_mix_phase_helper="$MODDIR/common/mix_phase_timing.sh"
+[ -f "$_mix_phase_helper" ] || _mix_phase_helper="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/legacy_v14_4/mix_phase_timing.sh"
+if [ -f "$_mix_phase_helper" ]; then . "$_mix_phase_helper"
+else
+    luoshu_mix_phase_begin() { return 0; }
+    luoshu_mix_phase_end() { return 0; }
+    luoshu_mix_phase_run() { shift 4; "$@"; }
+fi
+
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 clean_spec() { printf '%s' "$1" | tr -d '\r\n'; }
@@ -357,6 +367,14 @@ prune_composite_cache() {
 . "$MODDIR/common/composite_cache_proof.sh" || exit 126
 
 build_composite_cached() (
+    luoshu_mix_phase_begin composite cache_lookup "${LUOSHU_MIX_PHASE_UNIT:-fixed}" probe
+    _mix_build_composite_cached "$@"
+    _luompt_build_rc=$?
+    luoshu_mix_phase_end "$_luompt_build_rc"
+    exit "$_luompt_build_rc"
+)
+
+_mix_build_composite_cached() {
     # The worker retains family names in _cjk/_latin/_digit for the next weight
     # and its saved public config; only this call uses prepared file paths.
     _cjk="$1"
@@ -394,25 +412,34 @@ build_composite_cached() (
     if [ -s "$_cached" ] && [ ! -L "$_cached" ]; then
         _payload_digest=$(hash_file "$_cached")
         _cache_valid=false
+        _luompt_cache_method=receipt-hit
         if [ -n "$_payload_digest" ] && composite_receipt_matches "$_receipt" \
             "$_payload_digest" "$_engine_identity" "$_validator_identity"; then
             _cache_valid=true
-        elif [ ! -e "$_receipt" ] && [ ! -L "$_receipt" ] && font_validate "$_cached" text; then
+        elif [ ! -e "$_receipt" ] && [ ! -L "$_receipt" ] && {
+            luoshu_mix_phase_end 0 miss
+            luoshu_mix_phase_run composite validate "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit font_validate "$_cached" text
+        }; then
             # Interrupted publication/old entries without evidence must run the
             # actual validator once. An existing mismatched receipt instead
             # requires rebuilding, even if altered bytes still look like SFNT.
+            luoshu_mix_phase_begin composite cache_publish "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit
             [ -n "$_payload_digest" ] && [ "$(hash_file "$_cached")" = "$_payload_digest" ] || return 1
             [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
                 [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || return 1
             _composite_tmp_init || return 1
             write_composite_receipt "$_receipt" "$_tmp_receipt" "$_payload_digest" \
                 "$_engine_identity" "$_validator_identity" || return 1
+            luoshu_mix_phase_end 0
             _cache_valid=true
+            _luompt_cache_method=legacy-validated-hit
+            luoshu_mix_phase_begin composite cache_lookup "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit
         fi
         if [ "$_cache_valid" = true ]; then
             [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
                 [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || return 1
-            link_or_copy "$_cached" "$_output" || return 1
+            luoshu_mix_phase_end 0 "$_luompt_cache_method"
+            luoshu_mix_phase_run composite reuse_output "${LUOSHU_MIX_PHASE_UNIT:-fixed}" copy link_or_copy "$_cached" "$_output" || return 1
             chmod 0644 "$_output" 2>/dev/null || true
             return 0
         fi
@@ -420,19 +447,23 @@ build_composite_cached() (
     elif [ -L "$_cached" ]; then
         rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || return 1
     fi
+    luoshu_mix_phase_end 0 miss
     [ -n "$_build_tmp" ] || _composite_tmp_init || return 1
+    luoshu_mix_phase_begin composite cold_composite_runner "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold
     MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_cjk" --latin "$_latin" --digit "$_digit" \
         --output "$_tmp" --progress "$_progress" >"$_tmp_report" 2>"$_tmp_error"
     _code=$?
+    luoshu_mix_phase_end "$_code"
     [ "$_code" -eq 0 ] && [ -s "$_tmp" ] || {
         [ ! -s "$_tmp_error" ] || cat "$_tmp_error" >>"$LOG_FILE" 2>/dev/null || true
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
         return 1
     }
-    font_validate "$_tmp" text || {
+    luoshu_mix_phase_run composite validate "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold font_validate "$_tmp" text || {
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
         return 1
     }
+    luoshu_mix_phase_begin composite cache_publish "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold
     _payload_digest=$(hash_file "$_tmp")
     [ -n "$_payload_digest" ] && [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
         [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] &&
@@ -448,12 +479,13 @@ build_composite_cached() (
         [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || {
         rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || true; return 1;
     }
+    luoshu_mix_phase_end 0
     mv -f "$_tmp_report" "${_cached}.json" 2>/dev/null || true
     rm -f "$_tmp_error" 2>/dev/null || true
     link_or_copy "$_cached" "$_output" || return 1
     chmod 0644 "$_output" 2>/dev/null || true
     prune_composite_cache
-)
+}
 
 save_mix_config() {
     _tmp="$MIX_CONF.auto.$$"
@@ -476,6 +508,7 @@ save_mix_config() {
 worker() {
     trap '' HUP
     _wanted="$1"
+    export LUOSHU_MIX_PHASE_OUTER_TASK="$_wanted"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
     _latin=$(read_value "$TASK_FILE" latin)
@@ -506,21 +539,22 @@ worker() {
 
     _index=0
     for _weight in 100 200 300 400 500 600 700 800 900; do
+        export LUOSHU_MIX_PHASE_UNIT="w$_weight" LUOSHU_MIX_PHASE_WEIGHT="$_weight"
         _index=$((_index + 1))
         _percent=$((4 + _index * 8))
         _role=$(weight_role "$_weight")
         update_task "$_wanted" running "正在生成 ${_weight} 字重复合字体" "$_percent" ''
         _dir="$_root/prepared/$_weight"
         mkdir -p "$_dir" 2>/dev/null || exit 1
-        prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_mode" "$_weight" "$_dir/cjk.ttf" || {
+        luoshu_mix_phase_run prepare prepare cjk prepare prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_mode" "$_weight" "$_dir/cjk.ttf" || {
             update_task "$_wanted" failed "中文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
-        prepare_source latin "$_latin" "$_latin_axes" "$_latin_mode" "$_weight" "$_dir/latin.ttf" || {
+        luoshu_mix_phase_run prepare prepare latin prepare prepare_source latin "$_latin" "$_latin_axes" "$_latin_mode" "$_weight" "$_dir/latin.ttf" || {
             update_task "$_wanted" failed "英文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
-        prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
+        luoshu_mix_phase_run prepare prepare digit prepare prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
             update_task "$_wanted" failed "数字字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
@@ -536,21 +570,30 @@ worker() {
         rm -rf "$_dir" 2>/dev/null || true
     done
 
+    unset LUOSHU_MIX_PHASE_UNIT LUOSHU_MIX_PHASE_WEIGHT
     update_task "$_wanted" running '正在应用自动多字重字体族' 88 ''
+    luoshu_mix_phase_begin worker safe_apply fixed apply
     _result=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$FONT_MANAGER" action switch "$_family" 2>&1)
+    _luompt_safe_rc=$?
     printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
+    luoshu_mix_phase_end "$_luompt_safe_rc"
     printf '%s\n' "$_result" | grep -q '"status":"ok"' || {
         update_task "$_wanted" failed '自动多字重字体族应用失败' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
+    luoshu_mix_phase_begin worker worker_finalize fixed finalize
     save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
         "$_cjk_mode" "$_latin_mode" "$_digit_mode" || {
+        luoshu_mix_phase_end 1
         update_task "$_wanted" failed '组合配置保存失败' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" success '自动多字重复合字体已准备，完整重启后生效' 100 "$(date +%s)"
     rm -rf "$_root" 2>/dev/null || true
     clear_auto_worker_pid "$_wanted"
+    _luompt_finalize_rc=$?
+    luoshu_mix_phase_end "$_luompt_finalize_rc"
+    return "$_luompt_finalize_rc"
 }
 
 precheck_mix() {

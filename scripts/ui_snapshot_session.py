@@ -26,9 +26,17 @@ TIMING_RECORD_LIMIT = 128
 
 
 class UiSnapshotSession:
-    def __init__(self, adb_command: list[str], output: Path):
+    def __init__(self, adb_command: list[str], output: Path, *, child_prefetch_mode: str = "zero",
+                 expected_api_level: int | None = None):
+        if type(child_prefetch_mode) is not str or child_prefetch_mode not in ("zero", "default"):
+            raise ValueError("Invalid child prefetch mode")
+        if expected_api_level is not None and (type(expected_api_level) is not int or expected_api_level <= 0):
+            raise ValueError("Invalid expected snapshot SDK")
         self.adb_command = adb_command
         self.output = output
+        self.child_prefetch_mode = child_prefetch_mode
+        self.expected_api_level = expected_api_level
+        self.actual_api_level: int | None = None
         self.nonce = uuid.uuid4().hex
         self.directory = f"files/ui-snapshot-session-{self.nonce}"
         self.process = None
@@ -249,6 +257,8 @@ class UiSnapshotSession:
                       "json_read_attempts": [record.copy() for record in self._json_timings]}
         self._diagnostic_write(self.output / "ui-snapshot-session.json", (json.dumps(
             {"protocol": PROTOCOL, "nonce": self.nonce, "events": self.events,
+             "child_prefetch_mode": self.child_prefetch_mode, "expected_sdk_api": self.expected_api_level,
+             "actual_sdk_api": self.actual_api_level,
              "diagnostic_errors": self.diagnostic_errors, "host_transport_timing": timing},
             ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
 
@@ -364,6 +374,18 @@ class UiSnapshotSession:
             if type(envelope.get(key)) is not type(value) or envelope.get(key) != value:
                 raise RuntimeError(f"UiAutomation session response mismatch for {key}")
 
+    def _validate_child_prefetch(self, envelope: dict[str, object]) -> None:
+        sdk = envelope.get("sdk_api")
+        if type(sdk) is not int or sdk <= 0:
+            raise RuntimeError("UiAutomation session response mismatch for sdk_api")
+        if ((self.expected_api_level is not None and sdk != self.expected_api_level) or
+                (self.actual_api_level is not None and sdk != self.actual_api_level)):
+            raise RuntimeError("UiAutomation session response mismatch for sdk_api")
+        strategy = ("legacy-platform-default" if sdk < 33 else
+                    "api33-zero-prefetch" if self.child_prefetch_mode == "zero" else "api33-platform-default")
+        self._validate(envelope, child_prefetch_mode=self.child_prefetch_mode, child_query_strategy=strategy)
+        self.actual_api_level = sdk
+
     def begin(self, deadline: float) -> None:
         """Launch the owned connection/readers; leave ready validation to start."""
         if self.closed or self.fatal_error:
@@ -381,7 +403,8 @@ class UiSnapshotSession:
             self._launch_timing["popen_started_monotonic_seconds"] = time.monotonic()
             try:
                 self.process = subprocess.Popen(self.adb_command + ["shell", "am", "instrument", "-w", "-r",
-                    "-e", "session_nonce", self.nonce, f"{HELPER}/.SnapshotInstrumentation"],
+                    "-e", "session_nonce", self.nonce, "-e", "child_prefetch_mode", self.child_prefetch_mode,
+                    f"{HELPER}/.SnapshotInstrumentation"],
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             finally:
                 self._launch_timing["popen_returned_monotonic_seconds"] = time.monotonic()
@@ -408,6 +431,7 @@ class UiSnapshotSession:
         try:
             ready = self._wait_json("ready.json", self.output / "ui-snapshot-session-ready.json", deadline)
             self._validate(ready, state="ready", root_wait_ms=ROOT_WAIT_MS)
+            self._validate_child_prefetch(ready)
             self.ready = True
             self._event("ready", root_wait_ms=ROOT_WAIT_MS,
                         elapsed_seconds=time.monotonic() - self._begin_started_monotonic)
@@ -447,11 +471,15 @@ class UiSnapshotSession:
             response = self._wait_json(f"response-{request_id}.json",
                 prefix.with_name(prefix.name + "-session-response.json"), deadline)
             self._validate(response, request_id=request_id, filename=filename, root_wait_ms=ROOT_WAIT_MS)
+            self._validate_child_prefetch(response)
             result = response.get("result")
             code = response.get("code")
             if not isinstance(result, dict) or not all(isinstance(k, str) and isinstance(v, str)
                                                      for k, v in result.items()):
                 raise RuntimeError("UiAutomation session result is malformed")
+            for key in ("child_prefetch_mode", "sdk_api", "child_query_strategy"):
+                if key in result and result[key] != str(response[key]):
+                    raise RuntimeError(f"UiAutomation session result mismatch for {key}")
             if type(code) is not int or (result.get("snapshot"), code) not in (("ok", -1), ("failed", 0)):
                 raise RuntimeError("UiAutomation session result/code disagree")
             if result.get("snapshot") == "ok" and result.get("filename") != filename:

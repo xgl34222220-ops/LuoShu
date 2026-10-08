@@ -2771,5 +2771,87 @@ class AdbCommandEvidenceTest(unittest.TestCase):
             self.assertEqual(1, summary["adb_command_count"])
 
 
+class ChildPrefetchExperimentHarnessTest(unittest.TestCase):
+    def test_functional_run_keeps_zero_and_rejects_default_experiment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path('app.apk'), Path(temporary), PACKAGE, None)
+            self.assertEqual('zero', run.snapshot_child_prefetch)
+            for mode in ('default', 'hybrid'):
+                with self.subTest(mode=mode), self.assertRaises(ValueError):
+                    SmokeRun(Path('app.apk'), Path(temporary), PACKAGE, None, snapshot_child_prefetch=mode)
+
+    def test_snapshot_session_receives_visual_mode_and_known_sdk_without_extra_connection(self):
+        for sdk, mode in ((28, 'zero'), (36, 'zero'), (36, 'default')):
+            with self.subTest(sdk=sdk, mode=mode), tempfile.TemporaryDirectory() as temporary:
+                output = Path(temporary)
+                run = SmokeRun(Path('app.apk'), output, PACKAGE, None, Path('reader.apk'),
+                    record_launch=True, visual_launch_only=True, snapshot_child_prefetch=mode)
+                run.api_level = sdk
+                xml = '<hierarchy><node package="' + PACKAGE + '" bounds="[0,0][100,100]" /></hierarchy>'
+                session = Mock(nonce='fixture-session')
+                session.capture.return_value = ({'snapshot': 'ok', 'filename': 'hierarchy-0000.xml'}, xml)
+                with patch('android_ui_smoke.UiSnapshotSession', return_value=session) as factory:
+                    run.snapshot_hierarchy()
+                    run.snapshot_hierarchy()
+                factory.assert_called_once_with(run.adb_command, output, child_prefetch_mode=mode, expected_api_level=sdk)
+                self.assertEqual(2, session.capture.call_count)
+
+    def test_visual_default_begin_keeps_initial_policy_failure_before_root_and_cleanup_owned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            run = SmokeRun(Path('app.apk'), output, PACKAGE, None, Path('reader.apk'),
+                record_launch=True, visual_launch_only=True, snapshot_child_prefetch='default')
+            run.api_level = 36
+            session = Mock(spec=UiSnapshotSession)
+            events = []
+            session.begin.side_effect = lambda deadline: events.append(('begin', deadline))
+            run.text = Mock(side_effect=lambda *args, **kwargs: events.append(('resolve', kwargs['timeout'])) or 'com.example.launcher/.Home\n')
+            run.adb = Mock(side_effect=lambda *args, **kwargs: events.append(('initial-policy', kwargs['timeout'])) or
+                subprocess.CompletedProcess([], 7, b'actual failed initial policy fixture', b''))
+            with patch('android_ui_smoke.UiSnapshotSession', return_value=session) as factory:
+                with self.assertRaisesRegex(RuntimeError, 'HOME initial window state probe failed'):
+                    run.wait_home_baseline('default-mode')
+            factory.assert_called_once_with(run.adb_command, output, child_prefetch_mode='default', expected_api_level=36)
+            self.assertEqual(['begin', 'resolve', 'initial-policy'], [event[0] for event in events])
+            session.capture.assert_not_called()
+            metadata = json.loads((output / 'default-mode-baseline-readiness.json').read_text())
+            self.assertEqual(10, metadata['timeout_seconds'])
+            self.assertEqual(metadata['deadline_monotonic_seconds'], events[0][1])
+            run.close_snapshot_session()
+            session.close.assert_called_once()
+
+    def test_cli_explicit_default_is_visual_only_and_summary_keeps_requested_mode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            apk = output / 'app.apk'; apk.write_bytes(b'path fixture')
+            reader = output / 'reader.apk'; reader.write_bytes(b'path fixture')
+            base = ['android_ui_smoke.py', '--apk', str(apk), '--output', str(output), '--snapshot-apk', str(reader)]
+            with patch('android_ui_smoke.sys.argv', base + ['--snapshot-child-prefetch', 'default']), \
+                    patch('android_ui_smoke.SmokeRun') as factory, patch('android_ui_smoke.sys.stderr', new=io.StringIO()):
+                with self.assertRaises(SystemExit) as error:
+                    main()
+                self.assertEqual(2, error.exception.code)
+                factory.assert_not_called()
+            for mode in ('zero', 'default'):
+                with self.subTest(mode=mode):
+                    visual = mode == 'default'
+                    run = SmokeRun(apk, output, PACKAGE, None, reader, record_launch=visual,
+                        visual_launch_only=visual, snapshot_child_prefetch=mode)
+                    run.run = Mock(); run.diagnostics = Mock(); run.close_snapshot_session = Mock()
+                    args = base + (['--record-launch', '--visual-launch-only', '--snapshot-child-prefetch', 'default'] if visual else [])
+                    with patch('android_ui_smoke.sys.argv', args), patch('android_ui_smoke.SmokeRun', return_value=run) as factory:
+                        self.assertEqual(0, main())
+                    self.assertEqual(mode, factory.call_args.kwargs['snapshot_child_prefetch'])
+                    self.assertEqual(mode, json.loads((output / 'summary.json').read_text())['snapshot_child_prefetch'])
+                    run.close_snapshot_session.assert_called_once()
+
+    def test_only_independent_visual_workflow_explicitly_selects_default(self):
+        workflow = (Path(__file__).parent.parent / '.github/workflows/android-ui-smoke.yml').read_text()
+        functional, visual = workflow.split('\n  launch-visual:', 1)
+        self.assertNotIn('--snapshot-child-prefetch', functional)
+        self.assertEqual(1, visual.count('--snapshot-child-prefetch default'))
+        self.assertIn('--record-launch --visual-launch-only --snapshot-child-prefetch default', visual)
+
+
 if __name__ == "__main__":
     unittest.main()

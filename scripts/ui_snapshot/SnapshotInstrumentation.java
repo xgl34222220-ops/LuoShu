@@ -43,6 +43,7 @@ import java.util.Set;
  */
 public final class SnapshotInstrumentation extends Instrumentation {
     private Bundle arguments;
+    private String childPrefetchMode = "zero";
     private final Bundle lifecycleDiagnostics = new Bundle();
     private int nodeCount;
     private int childQueryCount;
@@ -210,7 +211,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 "last_root_examined_child_count", "last_root_observation_partial", "last_root_observation_deadline_reached",
                 "root_query_count", "root_query_ms", "root_query_max_ms", "root_query_null_count", "root_query_nonnull_count",
                 "root_query_true_count", "root_query_false_count", "root_query_thrown_count", "root_query_records_omitted",
-                "root_query_records_policy", "root_query_diagnostic_failures", "child_query_strategy",
+                "root_query_records_policy", "root_query_diagnostic_failures", "child_query_strategy", "child_prefetch_mode", "sdk_api",
                 "child_query_count", "child_query_ms", "export_child_query_count", "export_child_query_ms",
                 "child_query_max_ms", "child_query_null_count", "child_query_nonnull_count", "child_query_thrown_count",
                 "child_query_records_omitted", "child_query_records_policy", "child_query_diagnostic_failures", "observed_child_reuse_count"};
@@ -293,6 +294,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
 
     private Bundle runSession(String nonce, Bundle diagnostics) throws Exception {
         if (!nonce.matches("[0-9a-f]{32}")) throw new IllegalArgumentException("Invalid session nonce");
+        childPrefetchMode = checkedChildPrefetchMode(arguments);
         diagnostics.putString("helper_session_nonce", nonce);
         diagnostics.putString("helper_pid", Integer.toString(android.os.Process.myPid()));
         diagnosticTime(diagnostics, "helper_run_session_started_uptime_ms");
@@ -301,7 +303,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         if (!directory.mkdir()) throw new IllegalStateException("Cannot create fresh session directory");
         UiAutomation automation = connectAutomation(diagnostics);
         diagnosticTime(diagnostics, "helper_ready_write_started_uptime_ms");
-        JSONObject ready = envelope(nonce).put("state", "ready").put("root_wait_ms", ROOT_WAIT_MS);
+        JSONObject ready = childPrefetchEvidence(envelope(nonce)).put("state", "ready").put("root_wait_ms", ROOT_WAIT_MS);
         try {
             JSONObject timing = new JSONObject();
             for (String key : diagnostics.keySet()) timing.put(key, diagnostics.getString(key));
@@ -369,7 +371,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 lastDiagnostic(diagnostics, "request_status", "response-write-started");
                 lastDiagnosticTime(diagnostics, "response_write_started");
                 try {
-                    publishJson(directory, "response-" + requestId + ".json", envelope(nonce)
+                    publishJson(directory, "response-" + requestId + ".json", childPrefetchEvidence(envelope(nonce))
                             .put("request_id", requestId).put("filename", filename).put("root_wait_ms", ROOT_WAIT_MS)
                             .put("code", code).put("result", values), nonce, diagnostics,
                             "helper_last_response_published_uptime_ms");
@@ -383,6 +385,24 @@ public final class SnapshotInstrumentation extends Instrumentation {
             }
             Thread.sleep(50);
         }
+    }
+
+    private static String checkedChildPrefetchMode(Bundle arguments) {
+        String mode = arguments == null ? "zero" : arguments.getString("child_prefetch_mode", "zero");
+        if (!"zero".equals(mode) && !"default".equals(mode)) {
+            throw new IllegalArgumentException("Invalid child prefetch mode");
+        }
+        return mode;
+    }
+
+    private String childQueryStrategy() {
+        if (Build.VERSION.SDK_INT < 33) return "legacy-platform-default";
+        return "zero".equals(childPrefetchMode) ? "api33-zero-prefetch" : "api33-platform-default";
+    }
+
+    private JSONObject childPrefetchEvidence(JSONObject value) throws Exception {
+        return value.put("child_prefetch_mode", childPrefetchMode).put("sdk_api", Build.VERSION.SDK_INT)
+                .put("child_query_strategy", childQueryStrategy());
     }
 
     private static JSONObject envelope(String nonce) throws Exception {
@@ -677,7 +697,9 @@ public final class SnapshotInstrumentation extends Instrumentation {
             JSONArray rootRecords = new JSONArray();
             for (JSONObject record : rootQueryRecords) rootRecords.put(record);
             result.putString("root_query_records", rootRecords.toString());
-            result.putString("child_query_strategy", Build.VERSION.SDK_INT >= 33 ? "api33-zero-prefetch" : "legacy-platform-default");
+            result.putString("child_prefetch_mode", childPrefetchMode);
+            result.putString("sdk_api", Integer.toString(Build.VERSION.SDK_INT));
+            result.putString("child_query_strategy", childQueryStrategy());
             result.putString("child_query_count", Integer.toString(childQueryCount));
             result.putString("child_query_ms", Long.toString(childQueryMillis));
             result.putString("child_query_max_ms", Long.toString(childQueryMaxMillis));
@@ -813,10 +835,11 @@ public final class SnapshotInstrumentation extends Instrumentation {
         AccessibilityNodeInfo child = null;
         Throwable failure = null;
         try {
-            // API33 exposes a public strategy overload. Request this child
-            // without descendant prefetch; older devices retain their getter.
+            // API33 exposes a public strategy overload. Zero requests this child
+            // without descendant prefetch; explicit default and older APIs use
+            // the platform getter. Cache and root selection remain unchanged.
             // Real Android measurements, not JVM fixtures, decide its cost.
-            child = Build.VERSION.SDK_INT >= 33 ? node.getChild(index, 0) : node.getChild(index);
+            child = Build.VERSION.SDK_INT >= 33 && "zero".equals(childPrefetchMode) ? node.getChild(index, 0) : node.getChild(index);
             if (child == null) childQueryNullCount++; else childQueryNonnullCount++;
             return child;
         } catch (RuntimeException | Error queryFailure) {

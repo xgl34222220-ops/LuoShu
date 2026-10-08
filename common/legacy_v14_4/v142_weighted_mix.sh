@@ -41,6 +41,16 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
 
+# Timing is optional and cannot replace a business operation.
+_mix_phase_helper="$MODDIR/common/mix_phase_timing.sh"
+[ -f "$_mix_phase_helper" ] || _mix_phase_helper="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/legacy_v14_4/mix_phase_timing.sh"
+if [ -f "$_mix_phase_helper" ]; then . "$_mix_phase_helper"
+else
+    luoshu_mix_phase_begin() { return 0; }
+    luoshu_mix_phase_end() { return 0; }
+    luoshu_mix_phase_run() { shift 4; "$@"; }
+fi
+
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
@@ -305,6 +315,7 @@ rewrite_public_config() {
 worker() {
     trap '' HUP
     _wanted="$1"
+    export LUOSHU_MIX_PHASE_OUTER_TASK="$_wanted"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
     _latin=$(read_value "$TASK_FILE" latin)
@@ -315,21 +326,22 @@ worker() {
     _root=$(read_value "$TASK_FILE" root)
 
     update_task "$_wanted" running '正在准备中文字体' 4 '' ''
-    prepare_slot cjk "$_cjk" "$_cjk_axes" "$_root" LuoShuMixCJK || {
+    luoshu_mix_phase_run prepare prepare cjk prepare prepare_slot cjk "$_cjk" "$_cjk_axes" "$_root" LuoShuMixCJK || {
         update_task "$_wanted" failed '中文字体准备失败' 100 '' "$(date +%s)"
         rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" running '正在准备英文字体' 14 '' ''
-    prepare_slot latin "$_latin" "$_latin_axes" "$_root" LuoShuMixLatin || {
+    luoshu_mix_phase_run prepare prepare latin prepare prepare_slot latin "$_latin" "$_latin_axes" "$_root" LuoShuMixLatin || {
         update_task "$_wanted" failed '英文字体准备失败' 100 '' "$(date +%s)"
         rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" running '正在准备数字字体' 24 '' ''
-    prepare_slot digit "$_digit" "$_digit_axes" "$_root" LuoShuMixDigit || {
+    luoshu_mix_phase_run prepare prepare digit prepare prepare_slot digit "$_digit" "$_digit_axes" "$_root" LuoShuMixDigit || {
         update_task "$_wanted" failed '数字字体准备失败' 100 '' "$(date +%s)"
         rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     }
 
+    luoshu_mix_phase_begin worker child_start fixed wait
     update_task "$_wanted" running '正在启动完整复合字体引擎' 34 '' ''
     _previous_child=$(read_value "$BASE_TASK_FILE" task)
     _response_file="$_root/base-engine-start.json"
@@ -359,6 +371,7 @@ worker() {
             LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
     fi
     if [ -z "$_child" ]; then
+        luoshu_mix_phase_end 1
         kill "$_starter_pid" 2>/dev/null || true
         if type luoshu_mix_task_message_from_response >/dev/null 2>&1; then
             _message=$(luoshu_mix_task_message_from_response "$_response_file" 2>/dev/null)
@@ -369,6 +382,7 @@ worker() {
         update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
         rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     fi
+    luoshu_mix_phase_end 0
     rm -f "$_response_file" 2>/dev/null || true
 
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
@@ -388,13 +402,16 @@ worker() {
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             case "$_base_state" in
                 success)
-                    wait_child_cleanup "$_child" || {
+                    luoshu_mix_phase_run worker wait_child_cleanup fixed wait wait_child_cleanup "$_child" || {
                         update_task "$_wanted" failed '字体生成已结束，但子任务回收尚未确认' 100 "$_child" "$(date +%s)"
                         rm -rf "$_root"; exit 125
                     }
+                    luoshu_mix_phase_begin worker worker_finalize fixed finalize
                     update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"
                     rewrite_public_config
-                    rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
+                    rm -rf "$_root"; clear_worker_pid "$_wanted"
+                    luoshu_mix_phase_end 0
+                    exit 0
                     ;;
                 failed)
                     wait_child_cleanup "$_child" || true

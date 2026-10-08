@@ -373,7 +373,8 @@ class ColorOSMetricsTest(unittest.TestCase):
             start = source.index(function + '() {')
             code = source[start:source.index('\n}', start) + 2]
             getprop = '\ngetprop() { [ "$1" != ro.build.version.oplusrom ] || echo 16; }\n'
-            result = subprocess.run(['sh', '-c', code + getprop + function],
+            result = subprocess.run(['sh', '-c', '. "$1"\n' + code + getprop + function,
+                                     'sh', str(ROOT / 'common/legacy_v14_4/mix_phase_timing.sh')],
                 env={**os.environ, 'IS_COLOROS': 'true', 'MODDIR': str(self.module),
                      'REALMOD': str(self.module), 'STAGE_PAYLOAD': str(self.stage),
                      'MIX_STAGE': str(self.stage), 'LOG_FILE': str(self.root / 'log'),

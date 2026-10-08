@@ -54,7 +54,7 @@ class LegacyFontTaskLifecycle(unittest.TestCase):
             shutil.copyfile(ROOT / "common" / name, self.module / "common" / name)
         shutil.copyfile(ROOT / "common/legacy_v14_4/font_mix_engine.sh", self.module / "common/font_mix_engine.sh")
         shutil.copyfile(ROOT / "common/legacy_v14_4/font_mix_runtime.sh", self.module / "common/font_mix.sh")
-        for name in ("composite_layout.py", "composite_cache_proof.sh"):
+        for name in ("composite_layout.py", "composite_cache_proof.sh", "mix_phase_timing.sh"):
             shutil.copyfile(ROOT / "common/legacy_v14_4" / name, self.module / "common" / name)
         utilities = '''get_weight_file() { printf '%s/fonts/%s-Regular.ttf\\n' "$LUOSHU_PUBLIC_DIR" "$1"; }
 detect_font_family() { printf '%s\\n' "${1%%-*}"; }
