@@ -172,3 +172,23 @@ API 28 原 artifact 11517257816（13,549,454 bytes、SHA-256 `b903d7630358856e5c
 后续只补命令的真正起止、原 argv/timeout/退出码/超时原 stdout-stderr，以及同 nonce/helper PID/连接和 ready 原生 uptime 阶段诊断。诊断不能改变原成功条件、掩盖原错误、增加 RPC/重连/权限、预算外预热或延长原十秒/八秒/二十秒及清理预算；较晚 ready 仅保留诊断。App 默认启动退场、首帧提交与玻璃、OEM/Google 字体和合成/切换实现均保留。最终完整 SDK、API 28/36 和四段原录像必须由下一准确 SHA 的真实 CI 重新核验，旧 97 秒及两台真机整次切换/ColorOS 整机 reboot 仍未解决或实测。
 
 本次合并后的适用 host 回归实际为 UI 工具 75、会话 26、逐帧分类器 20、启动源约束 11，共 132 项通过；原 Java 24 案例也在 UI host 用例中实际编译执行。新增八项会话行为回归验证原始二进制输出、超时部分输出、原始 OS 错误、诊断存储失败、原生时间仅为证据、迟到 ready 拒绝及诊断 I/O 消耗原截止时间。正常结束仍为原七次 RPC，没有新增连接或清理调用。完整 Android SDK 编译和新的模拟器运行未在这些 host 结果中发生。统一原日志 SHA-256 为 `11272ba0e4cf78f34bc5b59dcfec607244582391d257a2138ec0540f50bac4d7`；942 原失败保持，下一提交未验收前不交付安装包。
+
+## 991c0320 真实竖屏模态窗口与 response 等待失败
+
+`991c0320e2575d551127a1ab5c2067fb8963ed1b` 的 [candidate 37702305936](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37702305936) 于 2026-10-07 23:49:10 UTC 成功终态，App、模块、候选验证及上传均通过。原 artifact 11517984547 为 12,340,212 bytes、SHA-256 `1b9b732db4233c0bfff0b290940d323660fd5977bce3692bb631c47f806248fc`，内部保留校验，不交付安装。完整字体与 App 生产改动沿用原提交，没有重做。
+
+同 SHA [UI 37702305934](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37702305934) 于 23:41:13 UTC 失败终态。build 实际 34 suites / 217 tests、0 failure/error/skip，75+26 host、lint 和新诊断 helper 的完整 Android SDK 编译通过。API 36 原 artifact 11518806308（50,755,419 bytes、SHA-256 `069e1fc908dd87b5cf521f400ecc8626db5e615eda77cc9154b9f23fcfa9dd44`）完成 31 次捕获 / 30 张独立 PNG / 20 项检查，223.24 秒；真实 selected 与正文、11 项跨 tab 锚点、19 项后台锚点、旋转和 Google 中文入口通过。本次功能 API 36 原记录没有发现旧 942 的 GMS ANR，不沿用旧 PID/ANR。
+
+API 28 原 artifact 11518477392（17,539,419 bytes、SHA-256 `96701f4954174cbae35a635782ec32a685d8806dfe125924ca9222079a47cfef`）于 433.59 秒完成 22 屏 / 15 项检查后失败：`App hierarchy window (120, 622, 960, 1234) exceeds logical input display 1920x1080`。此前零矩形异常已消除，真实 Quick Return 7.137 秒及字体库跨 tab 的 11 项锚点通过。本次失败尚未执行旋转或后台/Google 检查，不能称为旋转测试失败或完整 API 28 通过。
+
+独立原 XML 和失败 PNG 明确是“Family 与收藏管理”模态框；hierarchy-0058.xml 的真实 `rotation=0`，窗口为 `(120,622,960,1234)`，原 display/window 为 1080×1920、r0。工具以模态框自身 840×612 的宽高比推断显示方向，错误交换了 wm override 的尺寸。这个几何缺陷可以直接复现；较短手势起点位于管理卡片与随后弹窗出现只是上下文，原输入没有逐条 journal，不能把手势被当作点击写成已证根因。
+
+后续几何仅使用完整实际 snapshot 的严格 0/1/2/3 rotation 决定逻辑 wm 尺寸是否交换，缺失或非法旋转仍拒绝；原越界断言保留。恢复顶部复用已有真实两秒手势、可观察进展与稳定、可见目标和原收藏选中/页面正文条件，每阶段在同一 90 秒/最多 8 次预算内执行。模态框不能因尺寸纠正就被当作字体库内容通过，也不能自动关闭来掩盖失败。原模态框与其前一份真实库页按原字节保留为带来源的夹具。
+
+启动视觉原 artifact 11518985099（810,697 bytes、SHA-256 `2e150eef9a195f7c203026ec3c63f1b17850eccd55aaa534423b7518574c1f81`）有 91 个成员及 33 对原始命令输出，但仍为 0 MP4、0 基线 raw/gzip/PNG/XML。与 942 不同，本次 matching ready 在约 4.099563 秒内成功读取，helper PID 2279 原生连接耗 325 ms，ready 写入到发布 416 ms；同 nonce 请求原子写入命令正常返回 0。随后 response 读取原 stderr 持续为 ENOENT，第 30 命令仅剩 0.065056 秒预算，0.067877 秒后超时。暗冷继承同 fatal 状态，warm PID 为空未录制。没有保存服务端 root 的结果，不能据此断言 root 未执行或超过八秒；GMS ANR 在这次 host deadline 之后，也不能据此定为根因。启动视觉仍为 INCOMPLETE/FAIL，原 178 双徽标、6af 暗冷黑帧、97 秒 prezygote 异常与两台真机完整切换/整机 reboot 证据继续独立保留。
+
+几何修正的适用 host 回归为 UI 84、会话 26、逐帧分类器 20、启动源约束 11，共 141 项通过；原生产 Java 24 个兼容案例包含在 UI host 中。新增九项 UI 回归覆盖原竖屏宽模态框、四种 rotation、缺失/非法 rotation 与真实越界拒绝，以及两阶段的实际两秒手势、预算耗尽和选中状态拒绝。原 XML 夹具与原失败断言均保留；host 改写的旋转案例不冒充新增设备证据。完整 SDK、模拟器和四段启动原录像仍须统一新 SHA CI 验收。
+
+仅给原 native helper 的现有最终 Instrumentation Bundle 补有限 `helper_last_*` 字段：最后真实 accepted 请求 ID、文件名和状态，root 查询开始/返回、原八秒 root wait、导出及 response 原子发布的设备 uptime，最后 snapshot 的有限 scalar 摘要。新请求先清旧阶段，字符串最多 1024 字符；完整 XML、root observations 和未加前缀的 snapshot/error 不进入诊断。原响应、正常结束返回码、RPC、连接、权限、deadline 与 cleanup 均不变；晚到的成功只能作证据，不能补救原 host 超时或重新连接。没有实施独立 cold 用例换 session，也没有改变 App 启动动画、玻璃或字体功能。
+
+诊断补丁后实际重新执行 UI 84、会话 29、逐帧分类器 20 全通过，沿用未改变 App 源约束的 11 项日志，总计 144 项适用 host 通过，另外六项玻璃源/层级回归通过。新增三项会话测试包含实际生产 Java 诊断方法与 `onStart` 的 host 编译执行，验证清旧字段、白名单限长、failed snapshot 不改变正常 -1 结束，以及原异常/晚到结果继续失败。完整 Android SDK helper APK 尚未本地编译，必须由统一新 SHA CI 验证；旧 venv 首次运行因缺 numpy 的错误摘录保留，不能冒充完整原日志或实际代码失败。

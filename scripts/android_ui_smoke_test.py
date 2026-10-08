@@ -8,6 +8,7 @@ import json
 import subprocess
 import struct
 import gzip
+import hashlib
 import os
 import sys
 import shutil
@@ -16,7 +17,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from android_ui_smoke import (
-    action_disabled, anchors_preserved, app_labels, center, choice_selected, content_anchors,
+    action_disabled, anchors_preserved, app_labels, bounds, center, choice_selected, content_anchors,
     crash_reason, label_target, orientation_matches, page_ready, tab_target,
     SmokeRun, instrumentation_results, library_state_preserved, assert_single_stage_startup,
     legacy_manual_colors_ready, legacy_monet_unavailable,
@@ -170,7 +171,7 @@ public class SnapshotCacheCompatibilityTest {
         # Reduced from the API 36 CI XML: the selected tab is focusable but not
         # clickable; the three unselected sibling tabs are clickable. Preserve
         # the actual bounds and the unrelated clickable font-library home card.
-        return ET.fromstring(f'''<hierarchy>
+        return ET.fromstring(f'''<hierarchy rotation="0">
           <node package="{PACKAGE}" bounds="[0,144][1440,3120]">
             <node package="{PACKAGE}" text="当前字体" clickable="false" bounds="[70,640][360,720]" />
             <node package="{PACKAGE}" clickable="true" enabled="true" focusable="true" bounds="[70,2179][699,2661]">
@@ -295,7 +296,7 @@ public class SnapshotCacheCompatibilityTest {
         self.assertFalse(anchors_preserved({}, {}))
 
     def scroll_hierarchy(self, offset=0, target=None, selected=True):
-        root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+        root = ET.fromstring(f'''<hierarchy rotation="0"><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
           <node package="{PACKAGE}" text="fixed header" bounds="[40,70][600,120]" />
           <node package="{PACKAGE}" scrollable="true" bounds="[0,140][1080,1794]">
             <node package="{PACKAGE}" text="anchor one" bounds="[40,{300 + offset}][700,{360 + offset}]" />
@@ -313,12 +314,13 @@ public class SnapshotCacheCompatibilityTest {
     def test_scroll_geometry_uses_logical_override_and_current_rotation_not_screenshot_size(self):
         root = self.scroll_hierarchy()
         wm = "Physical size: 1440x3120\nOverride size: 1080x1920\n"
-        self.assertEqual((1080, 1920), logical_input_size(wm, app_window_bounds(root, PACKAGE)))
-        self.assertEqual((1920, 1080), logical_input_size(wm, (0, 0, 1920, 1080)))
+        self.assertEqual((1080, 1920), logical_input_size(wm, app_window_bounds(root, PACKAGE), root))
+        landscape = ET.fromstring('<hierarchy rotation="1" />')
+        self.assertEqual((1920, 1080), logical_input_size(wm, (0, 0, 1920, 1080), landscape))
         with self.assertRaisesRegex(RuntimeError, "exceeds logical"):
-            logical_input_size(wm, (0, 0, 1440, 3120))
+            logical_input_size(wm, (0, 0, 1440, 3120), root)
         with self.assertRaisesRegex(RuntimeError, "Cannot verify"):
-            logical_input_size("unknown screen size", (0, 0, 1080, 1920))
+            logical_input_size("unknown screen size", (0, 0, 1080, 1920), root)
 
     def test_scroll_geometry_uses_actual_vertical_container_and_excludes_header_system_and_chips(self):
         root = self.scroll_hierarchy()
@@ -1150,7 +1152,7 @@ public class SnapshotCacheCompatibilityTest {
     def test_scroll_uses_live_content_and_override_dimensions(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
-            root = ET.fromstring(f'''<hierarchy><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
+            root = ET.fromstring(f'''<hierarchy rotation="0"><node package="{PACKAGE}" bounds="[0,0][1080,1920]">
               <node package="{PACKAGE}" scrollable="true" bounds="[0,63][1080,1700]">
                 <node package="{PACKAGE}" text="管理字体库" bounds="[150,1300][400,1390]" />
               </node>
@@ -1360,6 +1362,283 @@ class SnapshotCleanupHarnessTest(unittest.TestCase):
             with patch("android_ui_smoke.sys.argv", arguments), patch("android_ui_smoke.SmokeRun", return_value=run):
                 self.assertEqual(1, main())
             self.assertFalse(json.loads((output / "summary.json").read_text())["passed"])
+
+
+class LibraryRestorationHarnessTest(unittest.TestCase):
+    """Replay the retained failure and controlled variants; no device PASS is claimed."""
+    def fixture(self, name):
+        return ET.parse(Path(__file__).parent / f"ui_smoke_fixtures/api28-{name}-991c0320.xml").getroot()
+
+    def library(self, offset=0, *, favorite=None, search=False):
+        # Controlled host variants of the complete recorded main-content tree.
+        # Header bounds/selected-parent semantics are reduced from the same
+        # failed run's library-favorite-filter.xml; these are not new device dumps.
+        root = self.fixture("library-return")
+        content, _ = scroll_content(root, PACKAGE)
+        for node in content.iter("node"):
+            if node is content:
+                continue
+            try:
+                left, top, right, bottom = bounds(node)
+            except ValueError:
+                continue
+            node.set("bounds", f"[{left},{top + offset}][{right},{bottom + offset}]")
+        ET.SubElement(content, "node", {"package": PACKAGE, "text": "筛选结果",
+            "bounds": "[47,612][223,677]"})
+        if favorite is not None:
+            chip = ET.SubElement(content, "node", {"package": PACKAGE, "enabled": "true",
+                "focusable": "true", "selected": "true" if favorite else "false",
+                "clickable": "false" if favorite else "true", "bounds": "[205,442][397,569]"})
+            ET.SubElement(chip, "node", {"package": PACKAGE, "text": "收藏", "bounds": "[292,486][360,526]"})
+        if search:
+            ET.SubElement(content, "node", {"package": PACKAGE, "text": "搜索你的字体",
+                "bounds": "[179,306][413,367]"})
+        return root
+
+    def prepare(self, output, snapshots, *, clock=None, background_delay=0):
+        run = SmokeRun(Path("app.apk"), output, PACKAGE, None)
+        scrolled = self.fixture("library-return")
+        expanded = self.library(offset=100)
+        ET.SubElement(scroll_content(expanded, PACKAGE)[0], "node", {"package": PACKAGE,
+            "text": "收起管理", "bounds": "[50,500][400,580]"})
+        run.adb = Mock(side_effect=lambda *args, **kwargs: clock.__setitem__(0, clock[0] + 10)
+                       if clock is not None and args[:3] == ("shell", "input", "swipe") else None)
+        run.assert_running = Mock()
+        run.hierarchy = Mock(side_effect=snapshots)
+        run.select_tab = Mock()
+        run.tap_label = Mock()
+        run.ensure_dock = Mock(return_value=scrolled)
+        run.capture = Mock()
+        run.record = Mock()
+        run.scroll = Mock(side_effect=AssertionError("Restoration must use measured reach_content, not blind 400ms drags"))
+
+        def text(*args, **kwargs):
+            if args == ("shell", "wm", "size"):
+                return "Physical size: 1440x3120\nOverride size: 1080x1920\n"
+            raise StopIteration("Restoration completed before the rotation stage")
+        run.text = Mock(side_effect=text)
+
+        def wait(predicate, description, **kwargs):
+            if description == "Favorite library filter":
+                current = self.library(favorite=True)
+            elif description == "Expanded production font management tools":
+                current = expanded
+            elif description == "Font library scroll position after leaving and returning to its tab":
+                current = scrolled
+            elif description == "Library page, filter and scroll position on returning from the background":
+                current = next(call.args[1] for call in run.capture.call_args_list
+                               if call.args[0] == "library-filter-after-tab")
+                if clock is not None:
+                    clock[0] += background_delay
+            else:
+                raise AssertionError(f"Unexpected wait: {description}")
+            self.assertTrue(predicate(current), description)
+            return current
+        run.wait_ui = Mock(side_effect=wait)
+
+        reach = run.reach_content
+        def replay(predicate, description, **kwargs):
+            # The pre-existing up-scroll coverage verifies the earlier phase.
+            # Replay only its result here; both changed restoration calls run
+            # the production reach_content with the actual retained tree.
+            if description == "Font library real scroll below expanded management rows":
+                return scrolled
+            return reach(predicate, description, **kwargs)
+        run.reach_content = Mock(side_effect=replay)
+        return run
+
+    def checks(self, run):
+        return [call.args[0] for call in run.record.call_args_list]
+
+    def swipes(self, run):
+        return [call for call in run.adb.call_args_list if call.args[:3] == ("shell", "input", "swipe")]
+
+    def test_retained_api28_snapshots_match_provenance_and_portrait_modal_geometry(self):
+        directory = Path(__file__).parent / "ui_smoke_fixtures"
+        source = json.loads((directory / "api28-family-modal-991c0320.source.json").read_text())
+        self.assertEqual("991c0320e2575d551127a1ab5c2067fb8963ed1b", source["sourceCommit"])
+        self.assertEqual(37702305934, source["sourceWorkflowRun"])
+        for member in source["sourceMembers"]:
+            raw = (directory / member["fixtureFile"]).read_bytes()
+            self.assertEqual(member["fixtureBytes"], len(raw))
+            self.assertEqual(member["fixtureSha256"], hashlib.sha256(raw).hexdigest())
+        modal = self.fixture("family-modal")
+        self.assertEqual("0", modal.get("rotation"))
+        window = app_window_bounds(modal, PACKAGE)
+        self.assertEqual((120, 622, 960, 1234), window)
+        self.assertGreater(window[2] - window[0], window[3] - window[1])
+        self.assertEqual((1080, 1920), logical_input_size(
+            "Physical size: 1440x3120\nOverride size: 1080x1920\n", window, modal))
+        self.assertIn("Family 与收藏管理", app_labels(modal, PACKAGE))
+        self.assertFalse(page_ready(modal, "字体库", "搜索你的字体", PACKAGE))
+        self.assertFalse(choice_selected(modal, "收藏", PACKAGE))
+
+    def test_complete_snapshot_rotation_controls_all_four_input_orientations(self):
+        # 0 is retained device evidence; 1/2/3 are explicit host metadata variants.
+        # A square/portrait-shaped dialog must never choose the display rotation.
+        for rotation, expected in (("0", (1080, 1920)), ("1", (1920, 1080)),
+                                   ("2", (1080, 1920)), ("3", (1920, 1080))):
+            with self.subTest(rotation=rotation):
+                root = self.fixture("family-modal")
+                root.set("rotation", rotation)
+                self.assertEqual(expected, logical_input_size(
+                    "Physical size: 1440x3120\nOverride size: 1080x1920\n", (120, 200, 800, 900), root))
+                self.assertEqual((expected[0] * 2, expected[1] * 2), logical_input_size(
+                    "Physical size: 2160x3840\n", (120, 200, 800, 900), root))
+
+    def test_unknown_rotation_partial_snapshot_and_outside_window_refuse_both_scroll_paths(self):
+        for invalid in (None, "", "4", "-1", "90", "unknown", " 0 ", "0.0", "partial", "outside"):
+            for path in ("scroll", "reach_content"):
+                with self.subTest(rotation=invalid, path=path), tempfile.TemporaryDirectory() as temporary:
+                    root = self.fixture("library-return")
+                    if invalid is None:
+                        root.attrib.pop("rotation")
+                    elif invalid == "partial":
+                        root.tag = "node"
+                    elif invalid == "outside":
+                        next(node for node in root.iter("node") if node.get("package") == PACKAGE).set(
+                            "bounds", "[0,0][1440,3120]")
+                    else:
+                        root.set("rotation", invalid)
+                    run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                    run.adb = Mock()
+                    run.text = Mock(return_value="Physical size: 1440x3120\nOverride size: 1080x1920\n")
+                    run.assert_running = Mock()
+                    error = "exceeds logical input" if invalid == "outside" else "actual display rotation"
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        if path == "scroll":
+                            run.scroll(root, "down")
+                        else:
+                            run.reach_content(lambda current: True, "invalid snapshot", root=root)
+                    run.adb.assert_not_called()
+                    if path == "reach_content":
+                        evidence = json.loads((Path(temporary) / "scroll-search-0001.json").read_text())
+                        self.assertFalse(evidence["passed"])
+                        self.assertEqual(0, evidence["gestures_used"])
+
+    def test_original_family_modal_has_no_vertical_content_and_never_receives_a_gesture(self):
+        modal = self.fixture("family-modal")
+        for path in ("scroll", "reach_content"):
+            with self.subTest(path=path), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                run.adb = Mock()
+                run.text = Mock(return_value="Physical size: 1440x3120\nOverride size: 1080x1920\n")
+                with self.assertRaisesRegex(RuntimeError, "No visible vertical App scroll container"):
+                    if path == "scroll":
+                        run.scroll(modal, "down")
+                    else:
+                        run.reach_content(lambda current: True, "modal cannot pass", root=modal)
+                run.adb.assert_not_called()
+                if path == "reach_content":
+                    evidence = json.loads((Path(temporary) / "scroll-search-0001.json").read_text())
+                    self.assertFalse(evidence["passed"])
+                    self.assertEqual(0, evidence["gestures_used"])
+                    self.assertEqual(ET.tostring(modal), ET.tostring(
+                        ET.parse(Path(temporary) / "scroll-search-0001-000.xml").getroot()))
+
+    def test_library_restoration_measures_progress_and_keeps_separate_original_phase_budgets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            moving = self.library(offset=80)
+            favorite = self.library(offset=200, favorite=True)
+            ready = self.library(offset=220, favorite=True, search=True)
+            clock = [0.0]
+            run = self.prepare(Path(temporary), [moving, moving, favorite, ready], clock=clock, background_delay=75)
+            with patch("android_ui_smoke.time.sleep"), patch("android_ui_smoke.time.monotonic", side_effect=lambda: clock[0]), \
+                    self.assertRaisesRegex(StopIteration, "before the rotation stage"):
+                run.verify_library_preservation()
+            restores = run.reach_content.call_args_list[1:]
+            self.assertEqual(2, len(restores))
+            first, second = (call.kwargs["budget"] for call in restores)
+            self.assertIsNot(first, second)
+            self.assertEqual((8, 8, 2, 1), (first.max_gestures, second.max_gestures, first.used, second.used))
+            self.assertEqual((90, 185), (first.deadline, second.deadline))
+            self.assertTrue(all(call.kwargs["direction"] == "down" for call in restores))
+            self.assertEqual(3, len(self.swipes(run)))
+            self.assertTrue(all(call.args[-1] == "2000" for call in self.swipes(run)))
+            self.assertIn("library-filter-across-tabs", self.checks(run))
+            self.assertIn("library-background-preserved", self.checks(run))
+            self.assertIn("library-background-return", self.checks(run))
+            for number, used in ((1, 2), (2, 1)):
+                evidence = json.loads((Path(temporary) / f"scroll-search-{number:04d}.json").read_text())
+                self.assertTrue(evidence["passed"])
+                self.assertEqual(used, evidence["gestures_used"])
+                self.assertTrue(all(sample["rotation"] == "0" for sample in evidence["samples"]))
+            run.scroll.assert_not_called()
+
+    def test_tab_restoration_rejects_visible_but_unselected_favorite(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = self.prepare(Path(temporary), [self.library(offset=100, favorite=False)])
+            with patch("android_ui_smoke.time.sleep"), \
+                    self.assertRaisesRegex(RuntimeError, "selection was not preserved after changing tabs"):
+                run.verify_library_preservation()
+            self.assertNotIn("library-filter-across-tabs", self.checks(run))
+            self.assertFalse(any("KEYCODE_HOME" in call.args for call in run.adb.call_args_list))
+            self.assertEqual(1, len(self.swipes(run)))
+            run.scroll.assert_not_called()
+
+    def test_background_restoration_requires_visible_search_selected_filter_and_selected_page(self):
+        for invalid in ("filter", "page", "search", "offscreen-search", "offscreen-filter"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                favorite = self.library(offset=200, favorite=True)
+                current = self.library(offset=200, favorite=invalid != "filter", search=invalid != "search")
+                if invalid == "page":
+                    library_tab, home_tab = (tab_target(current, label, PACKAGE) for label in ("字体库", "首页"))
+                    library_tab.set("selected", "false")
+                    library_tab.set("clickable", "true")
+                    home_tab.set("selected", "true")
+                    home_tab.set("clickable", "false")
+                elif invalid == "offscreen-search":
+                    next(node for node in current.iter("node") if node.get("text") == "搜索你的字体").set(
+                        "bounds", "[179,10][413,40]")
+                elif invalid == "offscreen-filter":
+                    label_target(current, "收藏", PACKAGE).set("bounds", "[205,10][397,40]")
+                run = self.prepare(Path(temporary), [favorite] + [current] * 8)
+                with patch("android_ui_smoke.time.sleep"), \
+                        self.assertRaisesRegex(RuntimeError, "stalled or reached a boundary"):
+                    run.verify_library_preservation()
+                self.assertIn("library-filter-across-tabs", self.checks(run))
+                self.assertIn("library-background-preserved", self.checks(run))
+                self.assertNotIn("library-background-return", self.checks(run))
+                evidence = json.loads((Path(temporary) / "scroll-search-0002.json").read_text())
+                self.assertFalse(evidence["passed"])
+                self.assertEqual(1, evidence["gestures_used"])
+                run.scroll.assert_not_called()
+
+    def test_modal_after_either_restore_gesture_preserves_failure_and_does_not_dismiss_it(self):
+        for stage in ("tab", "background"):
+            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as temporary:
+                modal = self.fixture("family-modal")
+                snapshots = [modal] if stage == "tab" else [self.library(offset=200, favorite=True), modal]
+                run = self.prepare(Path(temporary), snapshots)
+                with patch("android_ui_smoke.time.sleep"), \
+                        self.assertRaisesRegex(RuntimeError, "No visible vertical App scroll container"):
+                    run.verify_library_preservation()
+                self.assertNotIn("library-background-return", self.checks(run))
+                if stage == "tab":
+                    self.assertNotIn("library-filter-across-tabs", self.checks(run))
+                number = 1 if stage == "tab" else 2
+                evidence = json.loads((Path(temporary) / f"scroll-search-{number:04d}.json").read_text())
+                self.assertFalse(evidence["passed"])
+                self.assertEqual(1, evidence["gestures_used"])
+                self.assertEqual(ET.tostring(modal), ET.tostring(
+                    ET.parse(Path(temporary) / f"scroll-search-{number:04d}-001.xml").getroot()))
+                self.assertEqual(number, len(self.swipes(run)))
+                self.assertFalse(any(call.args[:3] == ("shell", "input", "tap")
+                                     or "user_rotation" in call.args for call in run.adb.call_args_list))
+                run.scroll.assert_not_called()
+
+    def test_original_main_content_stalling_cannot_pass_tab_restoration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            original = self.fixture("library-return")
+            run = self.prepare(Path(temporary), [original] * 8)
+            with patch("android_ui_smoke.time.sleep"), \
+                    self.assertRaisesRegex(RuntimeError, "stalled or reached a boundary"):
+                run.verify_library_preservation()
+            self.assertNotIn("library-filter-across-tabs", self.checks(run))
+            self.assertEqual(1, len(self.swipes(run)))
+            evidence = json.loads((Path(temporary) / "scroll-search-0001.json").read_text())
+            self.assertFalse(evidence["passed"])
+            self.assertEqual(1, evidence["gestures_used"])
 
 
 class QuickReturnHarnessTest(unittest.TestCase):

@@ -60,7 +60,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
             String nonce = arguments.getString("session_nonce");
             if (nonce == null) {
                 result = snapshot(connectAutomation(null), arguments.getString("filename", "hierarchy-0000.xml"),
-                        getContext().getFilesDir());
+                        getContext().getFilesDir(), null);
             } else {
                 result = runSession(nonce, diagnostics);
             }
@@ -90,6 +90,50 @@ public final class SnapshotInstrumentation extends Instrumentation {
 
     private static void diagnosticTime(Bundle diagnostics, String key) {
         if (diagnostics != null) diagnostics.putString(key, Long.toString(SystemClock.uptimeMillis()));
+    }
+
+    private static void lastDiagnostic(Bundle diagnostics, String suffix, String value) {
+        if (diagnostics != null && value != null) {
+            // Only bounded diagnostic strings enter the final session Bundle.
+            diagnostics.putString("helper_last_" + suffix, value.length() > 1024 ? value.substring(0, 1024) : value);
+        }
+    }
+
+    private static void lastDiagnosticTime(Bundle diagnostics, String suffix) {
+        if (diagnostics != null) lastDiagnostic(diagnostics, suffix + "_uptime_ms", Long.toString(SystemClock.uptimeMillis()));
+    }
+
+    private static void acceptRequestDiagnostics(Bundle diagnostics, String requestId, String filename) {
+        // Never combine the next accepted request with the previous one's times.
+        for (String key : new HashSet<String>(diagnostics.keySet())) {
+            if (key.startsWith("helper_last_")) diagnostics.remove(key);
+        }
+        lastDiagnostic(diagnostics, "request_id", requestId);
+        lastDiagnostic(diagnostics, "request_filename", filename);
+        lastDiagnostic(diagnostics, "request_status", "accepted");
+        lastDiagnosticTime(diagnostics, "request_accepted");
+    }
+
+    private static void rootQueryStarted(Bundle diagnostics, String kind) {
+        if (diagnostics != null) diagnostics.remove("helper_last_root_query_returned_uptime_ms");
+        lastDiagnostic(diagnostics, "request_status", "root-query");
+        lastDiagnostic(diagnostics, "root_query_kind", kind);
+        lastDiagnostic(diagnostics, "root_query_status", "started");
+        lastDiagnosticTime(diagnostics, "root_query_started");
+    }
+
+    private static void rootQueryReturned(Bundle diagnostics) {
+        lastDiagnosticTime(diagnostics, "root_query_returned");
+        lastDiagnostic(diagnostics, "root_query_status", "returned");
+    }
+
+    private static void snapshotDiagnostics(Bundle diagnostics, Bundle result) {
+        // Do not merge a snapshot result: its unprefixed snapshot/error keys
+        // would change the final Instrumentation code for a normal session stop.
+        lastDiagnostic(diagnostics, "snapshot_status", result.getString("snapshot"));
+        String[] fields = {"error", "wait_ms", "attempts", "incomplete_roots", "root_source", "nodes",
+                "last_root_package", "last_root_window_id", "last_root_child_count", "last_root_visible_child_count"};
+        for (String key : fields) lastDiagnostic(diagnostics, "snapshot_" + key, result.getString(key));
     }
 
     private static JSONObject serviceInfoEvidence(AccessibilityServiceInfo info) throws Exception {
@@ -181,6 +225,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         // instrumentation result preserves it only as a diagnostic, never as a
         // substitute for a matching timely ready/request/response/XML exchange.
         diagnosticTime(diagnostics, "helper_ready_published_uptime_ms");
+        lastDiagnostic(diagnostics, "request_status", "none-accepted");
         Set<String> requests = new HashSet<>();
         Set<String> filenames = new HashSet<>();
         while (true) {
@@ -226,13 +271,25 @@ public final class SnapshotInstrumentation extends Instrumentation {
                     throw new IllegalStateException("Snapshot file cannot be reused");
                 }
                 requests.add(requestId);
-                Bundle result = snapshot(automation, filename, directory);
+                acceptRequestDiagnostics(diagnostics, requestId, filename);
+                Bundle result = snapshot(automation, filename, directory, diagnostics);
+                snapshotDiagnostics(diagnostics, result);
                 JSONObject values = new JSONObject();
                 for (String key : result.keySet()) values.put(key, result.getString(key));
                 int code = "ok".equals(result.getString("snapshot")) ? Activity.RESULT_OK : Activity.RESULT_CANCELED;
-                writeJson(directory, "response-" + requestId + ".json", envelope(nonce)
-                        .put("request_id", requestId).put("filename", filename).put("root_wait_ms", ROOT_WAIT_MS)
-                        .put("code", code).put("result", values));
+                lastDiagnostic(diagnostics, "response_code", Integer.toString(code));
+                lastDiagnostic(diagnostics, "request_status", "response-write-started");
+                lastDiagnosticTime(diagnostics, "response_write_started");
+                try {
+                    writeJson(directory, "response-" + requestId + ".json", envelope(nonce)
+                            .put("request_id", requestId).put("filename", filename).put("root_wait_ms", ROOT_WAIT_MS)
+                            .put("code", code).put("result", values));
+                } catch (Exception failure) {
+                    lastDiagnostic(diagnostics, "request_status", "response-write-failed");
+                    throw failure;
+                }
+                lastDiagnosticTime(diagnostics, "response_published");
+                lastDiagnostic(diagnostics, "request_status", "response-published");
             }
             Thread.sleep(50);
         }
@@ -275,8 +332,10 @@ public final class SnapshotInstrumentation extends Instrumentation {
         if (!temporary.renameTo(target)) throw new IllegalStateException("Cannot publish atomic session response");
     }
 
-    private Bundle snapshot(UiAutomation automation, String filename, File outputDirectory) {
+    private Bundle snapshot(UiAutomation automation, String filename, File outputDirectory, Bundle diagnostics) {
         nodeCount = 0;
+        lastDiagnosticTime(diagnostics, "snapshot_started");
+        lastDiagnostic(diagnostics, "request_status", "snapshot-started");
         Bundle result = new Bundle();
         AccessibilityNodeInfo root = null;
         AccessibilityNodeInfo incompleteRoot = null;
@@ -302,6 +361,8 @@ public final class SnapshotInstrumentation extends Instrumentation {
             // Keep this bounded and read only active/focused real windows; the
             // host still checks the App package, selected tab and page content.
             waitStarted = SystemClock.uptimeMillis();
+            lastDiagnostic(diagnostics, "root_wait_started_uptime_ms", Long.toString(waitStarted));
+            lastDiagnostic(diagnostics, "request_status", "cache-refresh");
             long deadline = waitStarted + ROOT_WAIT_MS;
             // A persistent test connection can retain an obsolete tab node
             // while a different subtree already reflects the new page. Clear
@@ -321,12 +382,15 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 // It shares the original connection and eight-second deadline.
                 if (incompleteRoot != null) {
                     refreshAttempts++;
+                    rootQueryStarted(diagnostics, "retained-root.refresh");
                     boolean refreshed = incompleteRoot.refresh();
+                    rootQueryReturned(diagnostics);
                     if (refreshed) refreshSuccesses++; else refreshFailures++;
                     result.putString("root_refresh_attempts", Integer.toString(refreshAttempts));
                     result.putString("root_refresh_successes", Integer.toString(refreshSuccesses));
                     result.putString("root_refresh_failures", Integer.toString(refreshFailures));
                     result.putString("last_root_refresh_result", Boolean.toString(refreshed));
+                    lastDiagnostic(diagnostics, "request_status", "observe-descendants");
                     int visibleChildren = observeRoot(result, rootObservations, incompleteRoot,
                             "retained-root:refresh", waitStarted);
                     if (refreshed && visibleChildren > 0 && SystemClock.uptimeMillis() < deadline) {
@@ -342,16 +406,21 @@ public final class SnapshotInstrumentation extends Instrumentation {
                     }
                 }
                 if (SystemClock.uptimeMillis() >= deadline) break;
+                rootQueryStarted(diagnostics, "getRootInActiveWindow");
                 root = automation.getRootInActiveWindow();
+                rootQueryReturned(diagnostics);
                 if (root != null) {
                     rootSource = "getRootInActiveWindow";
+                    lastDiagnostic(diagnostics, "request_status", "observe-descendants");
                     if (observeRoot(result, rootObservations, root, rootSource, waitStarted) > 0) break;
                     incompleteRoots++;
                     if (incompleteRoot == null) incompleteRoot = root; else root.recycle();
                     root = null;
                 }
                 if (SystemClock.uptimeMillis() >= deadline) break;
+                rootQueryStarted(diagnostics, "getWindows");
                 List<AccessibilityWindowInfo> windows = automation.getWindows();
+                rootQueryReturned(diagnostics);
                 try {
                     int active = 0;
                     int focused = 0;
@@ -367,9 +436,12 @@ public final class SnapshotInstrumentation extends Instrumentation {
                         for (AccessibilityWindowInfo window : windows) {
                             if (SystemClock.uptimeMillis() >= deadline) break;
                             if (!(priority == 0 ? window.isActive() : window.isFocused())) continue;
+                            rootQueryStarted(diagnostics, "window.getRoot");
                             root = window.getRoot();
+                            rootQueryReturned(diagnostics);
                             if (root != null) {
                                 rootSource = (priority == 0 ? "active-window:" : "focused-window:") + window.getId();
+                                lastDiagnostic(diagnostics, "request_status", "observe-descendants");
                                 if (observeRoot(result, rootObservations, root, rootSource, waitStarted) > 0) break;
                                 incompleteRoots++;
                                 if (incompleteRoot == null) incompleteRoot = root; else root.recycle();
@@ -385,6 +457,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
                     if (remaining > 0) Thread.sleep(Math.min(100, remaining));
                 }
             }
+            lastDiagnosticTime(diagnostics, "root_wait_finished");
             result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
             result.putString("attempts", Integer.toString(attempts));
             result.putString("incomplete_roots", Integer.toString(incompleteRoots));
@@ -396,11 +469,15 @@ public final class SnapshotInstrumentation extends Instrumentation {
             if (root == null) throw new IllegalStateException(incompleteRoots == 0
                     ? "No active accessibility window"
                     : "No visible accessibility descendants within 8s");
+            lastDiagnosticTime(diagnostics, "root_ready");
+            lastDiagnostic(diagnostics, "request_status", "display-metadata");
             WindowManager manager = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
             Display display = manager.getDefaultDisplay();
             Point size = new Point();
             display.getRealSize(size);
             File file = new File(outputDirectory, filename);
+            lastDiagnosticTime(diagnostics, "export_started");
+            lastDiagnostic(diagnostics, "request_status", "export-started");
             try (FileOutputStream output = new FileOutputStream(file);
                  OutputStreamWriter writer = new OutputStreamWriter(output, StandardCharsets.UTF_8)) {
                 XmlSerializer xml = Xml.newSerializer();
@@ -414,12 +491,21 @@ public final class SnapshotInstrumentation extends Instrumentation {
                 writer.flush();
                 output.getFD().sync();
             }
+            lastDiagnosticTime(diagnostics, "export_finished");
             if (nodeCount == 0) throw new IllegalStateException("No visible accessibility nodes");
             result.putString("snapshot", "ok");
             result.putString("filename", filename);
             result.putString("nodes", Integer.toString(nodeCount));
             result.putString("root_package", text(root.getPackageName()));
         } catch (Exception failure) {
+            if (diagnostics != null && waitStarted != 0 &&
+                    !diagnostics.containsKey("helper_last_root_wait_finished_uptime_ms")) {
+                lastDiagnosticTime(diagnostics, "root_wait_finished");
+            }
+            if (diagnostics != null && "started".equals(diagnostics.getString("helper_last_root_query_status"))) {
+                lastDiagnostic(diagnostics, "root_query_status", "threw");
+            }
+            lastDiagnostic(diagnostics, "request_status", "snapshot-failed");
             if (waitStarted != 0) result.putString("wait_ms", Long.toString(SystemClock.uptimeMillis() - waitStarted));
             result.putString("attempts", Integer.toString(attempts));
             result.putString("incomplete_roots", Integer.toString(incompleteRoots));
@@ -429,6 +515,7 @@ public final class SnapshotInstrumentation extends Instrumentation {
         } finally {
             if (root != null) root.recycle();
             if (incompleteRoot != null) incompleteRoot.recycle();
+            lastDiagnosticTime(diagnostics, "snapshot_finished");
         }
         return result;
     }

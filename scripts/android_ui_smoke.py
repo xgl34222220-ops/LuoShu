@@ -347,8 +347,12 @@ def app_window_bounds(root: ET.Element, package: str) -> tuple[int, int, int, in
     return max(windows, key=lambda rect: (rect[2] - rect[0]) * (rect[3] - rect[1]))
 
 
-def logical_input_size(wm_size: str, window: tuple[int, int, int, int]) -> tuple[int, int]:
-    """Android input uses the rotated logical override; screencap may be letterboxed."""
+def logical_input_size(wm_size: str, window: tuple[int, int, int, int],
+                       root: ET.Element) -> tuple[int, int]:
+    """Rotate the logical wm display from snapshot metadata, never from modal shape."""
+    rotation = root.get("rotation")
+    if root.tag != "hierarchy" or rotation not in ("0", "1", "2", "3"):
+        raise RuntimeError(f"Cannot verify actual display rotation from complete snapshot: {rotation!r}")
     sizes = {
         kind: (int(width), int(height))
         for kind, width, height in re.findall(r"(Physical|Override) size:\s*(\d+)x(\d+)", wm_size)
@@ -357,7 +361,7 @@ def logical_input_size(wm_size: str, window: tuple[int, int, int, int]) -> tuple
     if size is None:
         raise RuntimeError(f"Cannot verify logical input dimensions from adb wm size: {wm_size.strip()}")
     width, height = size
-    if (window[2] - window[0] > window[3] - window[1]) != (width > height):
+    if rotation in ("1", "3"):
         width, height = height, width
     if window[0] < 0 or window[1] < 0 or window[2] > width or window[3] > height:
         raise RuntimeError(f"App hierarchy window {window} exceeds logical input display {width}x{height}")
@@ -850,11 +854,12 @@ class SmokeRun:
             filename = f"{prefix}-{len(samples):03d}.xml"
             ET.ElementTree(current).write(self.output / filename, encoding="utf-8", xml_declaration=True)
             window = app_window_bounds(current, self.package)
-            input_size = logical_input_size(wm_size, window)
+            input_size = logical_input_size(wm_size, window, current)
             _, rect = scroll_content(current, self.package)
             anchors = visible_scroll_anchors(current, self.package)
             samples.append({"phase": phase, "xml": filename, "elapsed_seconds": round(time.monotonic() - started, 3),
-                            "input_size": input_size, "window_bounds": window, "content_bounds": rect,
+                            "input_size": input_size, "rotation": current.get("rotation"),
+                            "window_bounds": window, "content_bounds": rect,
                             "anchors": anchors, "gestures_used": budget.used, **extra})
             return anchors
 
@@ -934,7 +939,7 @@ class SmokeRun:
 
     def scroll(self, root: ET.Element, direction: str = "up") -> None:
         window = app_window_bounds(root, self.package)
-        logical_input_size(self.text("shell", "wm", "size"), window)
+        logical_input_size(self.text("shell", "wm", "size"), window, root)
         _, rect = scroll_content(root, self.package)
         x = (rect[0] + rect[2]) // 2
         height = rect[3] - rect[1]
@@ -1323,12 +1328,10 @@ class SmokeRun:
                     library_data="production App data on the unrooted emulator; no imported font fixture")
         # Restore the top to inspect selected semantics rather than inferring the
         # filter from a screenshot color or from an unselected label still present.
-        for _ in range(8):
-            if choice_selected(root, "收藏", self.package):
-                break
-            self.scroll(root, "down")
-            root = self.hierarchy()
-        else:
+        root = self.reach_content(lambda current: visible_action(current, "收藏", self.package),
+            "Favorite filter after changing tabs", direction="down", root=root,
+            budget=ScrollBudget(timeout=90, max_gestures=8))
+        if not choice_selected(root, "收藏", self.package):
             raise RuntimeError("Favorite filter selection was not preserved after changing tabs")
         self.capture("library-filter-after-tab", root)
         self.record("library-filter-across-tabs", selected_label="收藏")
@@ -1345,12 +1348,17 @@ class SmokeRun:
         # Verify the saved state before scrolling: the search field can be above
         # the viewport. Then reach it by a real gesture and keep the original
         # selected-page, search-content and selected-filter assertions intact.
-        for _ in range(8):
-            if page_ready(root, "字体库", "搜索你的字体", self.package) and choice_selected(root, "收藏", self.package):
-                break
-            self.scroll(root, "down")
-            root = self.hierarchy()
-        else:
+        # This separate return phase retains its own original eight-gesture cap;
+        # HOME/am waits do not consume either restoration search's time budget.
+        root = self.reach_content(
+            lambda current: page_ready(current, "字体库", "搜索你的字体", self.package)
+                and choice_selected(current, "收藏", self.package)
+                and visible_text(current, "搜索你的字体", self.package)
+                and visible_action(current, "收藏", self.package),
+            "Library search and preserved favorite filter after background return",
+            direction="down", root=root, budget=ScrollBudget(timeout=90, max_gestures=8))
+        if not (page_ready(root, "字体库", "搜索你的字体", self.package)
+                and choice_selected(root, "收藏", self.package)):
             raise RuntimeError("Font library search and preserved favorite filter were not reachable after background return")
         self.capture("library-background-return", root)
         self.record("library-background-return", selected_label="收藏")

@@ -2,6 +2,7 @@
 """Exercise transport identities/deadlines, not an invented accessibility tree."""
 import json
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -395,6 +396,56 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.assertEqual(transcript, (self.output / 'ui-snapshot-session-instrumentation.txt').read_bytes())
         self.assertEqual(7, len(self.protocol.calls))  # Original ready/write/response/XML/stop/closed/rm only.
 
+    def test_last_failed_native_snapshot_diagnostic_keeps_normal_session_close(self):
+        failure = {'snapshot': 'failed', 'error': 'No active accessibility window', 'wait_ms': '8000'}
+        self.protocol.response_transform = lambda response: {**response, 'code': 0, 'result': failure}
+        metadata, xml = self.session.capture('hierarchy-0001.xml')
+        request = self.protocol.requests[-1]
+        transcript = (f'INSTRUMENTATION_RESULT: helper_session_nonce={self.session.nonce}\n'
+                      f'INSTRUMENTATION_RESULT: helper_last_request_id={request["request_id"]}\n'
+                      'INSTRUMENTATION_RESULT: helper_last_request_status=response-published\n'
+                      'INSTRUMENTATION_RESULT: helper_last_snapshot_status=failed\n'
+                      'INSTRUMENTATION_RESULT: helper_last_snapshot_error=No active accessibility window\n'
+                      'INSTRUMENTATION_RESULT: helper_last_response_code=0\n'
+                      'INSTRUMENTATION_RESULT: session=finished\n'
+                      f'INSTRUMENTATION_RESULT: session_nonce={self.session.nonce}\n'
+                      'INSTRUMENTATION_CODE: -1\n').encode()
+        self.process.communicate.return_value = (transcript, b'')
+        self.session.close()
+        self.assertEqual(failure, metadata)
+        self.assertIsNone(xml)
+        self.assertIsNone(self.session.fatal_error)
+        self.assertEqual('closed', self.session.events[-1]['event'])
+        self.assertEqual(transcript, (self.output / 'ui-snapshot-session-instrumentation.txt').read_bytes())
+        self.assertEqual(6, len(self.protocol.calls))  # No XML read; original stop/closed/rm only.
+        self.assertFalse(any('force-stop' in command for command, _ in self.protocol.calls))
+        self.popen.assert_called_once()
+
+    def test_final_late_native_success_cannot_salvage_host_timeout_or_restart(self):
+        self.protocol.response_transform = lambda response: None
+        with self.assertRaisesRegex(RuntimeError, 'timed out'):
+            self.session.capture('hierarchy-0001.xml', deadline=102)
+        original_error = self.session.fatal_error
+        request = self.protocol.requests[-1]
+        # The matching response exists only after the original host deadline.
+        self.protocol.files['response-' + request['request_id'] + '.json'] = json.dumps(
+            {**request, 'code': -1, 'result': {'snapshot': 'ok', 'filename': request['filename']}}).encode()
+        transcript = (f'INSTRUMENTATION_RESULT: helper_last_request_id={request["request_id"]}\n'
+                      'INSTRUMENTATION_RESULT: helper_last_request_status=response-published\n'
+                      'INSTRUMENTATION_RESULT: helper_last_snapshot_status=ok\n'
+                      'INSTRUMENTATION_RESULT: helper_last_response_published_uptime_ms=73100\n'
+                      'INSTRUMENTATION_CODE: -1\n').encode()
+        self.process.communicate.return_value = (transcript, b'')
+        self.session.close()
+        self.assertEqual(original_error, self.session.fatal_error)
+        self.assertEqual([], self.protocol.xml_reads)
+        self.assertEqual('closed', self.session.events[-1]['event'])
+        self.assertEqual(transcript, (self.output / 'ui-snapshot-session-instrumentation.txt').read_bytes())
+        with self.assertRaises(RuntimeError):
+            self.session.capture('hierarchy-0002.xml', deadline=110)
+        self.popen.assert_called_once()
+        self.assertEqual(1, len(self.protocol.requests))
+
     def test_late_ready_native_diagnostics_cannot_publish_a_request_or_restart(self):
         ready = json.loads(self.protocol.files['ready.json'])
         ready['helper_diagnostics'] = {'helper_pid': '2409', 'helper_ready_write_started_uptime_ms': '65100'}
@@ -426,6 +477,133 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.assertEqual(2, self.session.commands[0]['timeout_seconds'])
         self.assertEqual([], self.protocol.requests)
         self.popen.assert_called_once()
+
+
+class NativeLastRequestDiagnosticsTest(unittest.TestCase):
+    def test_production_java_last_request_diagnostics_and_finish_code(self):
+        java = shutil.which('java')
+        if java is None:
+            self.skipTest('Production Java diagnostic regression requires the host JDK')
+        source = (Path(__file__).parent / 'ui_snapshot' / 'SnapshotInstrumentation.java').read_text()
+
+        def method(signature):
+            start = source.index(signature)
+            return source[start:source.index('\n    }', start) + len('\n    }')]
+
+        methods = '\n'.join(method(signature) for signature in (
+            '    private static void lastDiagnostic(',
+            '    private static void lastDiagnosticTime(',
+            '    private static void acceptRequestDiagnostics(',
+            '    private static void rootQueryStarted(',
+            '    private static void rootQueryReturned(',
+            '    private static void snapshotDiagnostics(',
+            '    public void onStart()',
+        ))
+        harness = r'''
+import java.io.File;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
+public class NativeLastRequestDiagnosticsHarness {
+    static class Bundle {
+        final HashMap<String,String> values = new HashMap<>();
+        void putString(String key,String value) { values.put(key,value); }
+        String getString(String key) { return values.get(key); }
+        String getString(String key,String fallback) { return values.getOrDefault(key,fallback); }
+        void putAll(Bundle other) { values.putAll(other.values); }
+        Set<String> keySet() { return values.keySet(); }
+        void remove(String key) { values.remove(key); }
+        boolean containsKey(String key) { return values.containsKey(key); }
+    }
+    static class SystemClock {
+        static long now;
+        static long uptimeMillis() { return now; }
+    }
+    static class Activity { static final int RESULT_OK=-1, RESULT_CANCELED=0; }
+    static class Context { File getFilesDir() { return new File("unused"); } }
+    Bundle arguments = new Bundle();
+    Bundle finished;
+    int finishCode=123;
+    boolean failSession;
+    void finish(int code,Bundle result) { finishCode=code; finished=result; }
+    Context getContext() { throw new AssertionError("Must use the session path"); }
+    Object connectAutomation(Bundle diagnostics) { throw new AssertionError("No automation in this method regression"); }
+    Bundle snapshot(Object automation,String filename,File directory,Bundle diagnostics) { throw new AssertionError("No snapshot in this method regression"); }
+    static Bundle failedSnapshot() {
+        Bundle result=new Bundle();
+        result.putString("snapshot","failed");
+        char[] error=new char[4096]; java.util.Arrays.fill(error,'x');
+        result.putString("error",new String(error));
+        result.putString("wait_ms","8000"); result.putString("attempts","5");
+        result.putString("last_root_visible_child_count","0");
+        result.putString("root_observations","must not be copied");
+        result.putString("window_counts","must not be copied");
+        result.putString("filename","must not be copied");
+        return result;
+    }
+    Bundle runSession(String nonce,Bundle diagnostics) throws Exception {
+        if(failSession) throw new IllegalStateException("original session failure");
+        acceptRequestDiagnostics(diagnostics,"new-request","hierarchy-0002.xml");
+        snapshotDiagnostics(diagnostics,failedSnapshot());
+        Bundle result=new Bundle(); result.putString("session","finished"); result.putString("session_nonce",nonce);
+        return result;
+    }
+    static void require(boolean ok,String message) { if(!ok) throw new AssertionError(message); }
+    public static void main(String[] args) {
+        Bundle diagnostics=new Bundle();
+        diagnostics.putString("helper_ready_published_uptime_ms","100");
+        diagnostics.putString("helper_last_request_id","old-request");
+        diagnostics.putString("helper_last_export_finished_uptime_ms","200");
+        diagnostics.putString("helper_last_snapshot_status","ok");
+        SystemClock.now=700;
+        acceptRequestDiagnostics(diagnostics,"new-request","hierarchy-0002.xml");
+        require("new-request".equals(diagnostics.getString("helper_last_request_id")),"request identity not replaced");
+        require("hierarchy-0002.xml".equals(diagnostics.getString("helper_last_request_filename")),"filename missing");
+        require("700".equals(diagnostics.getString("helper_last_request_accepted_uptime_ms")),"accept time changed clocks");
+        require("accepted".equals(diagnostics.getString("helper_last_request_status")),"missing accepted status");
+        require(!diagnostics.containsKey("helper_last_export_finished_uptime_ms") &&
+                !diagnostics.containsKey("helper_last_snapshot_status"),"stale last-request result or time retained");
+        require("100".equals(diagnostics.getString("helper_ready_published_uptime_ms")),"connection evidence removed");
+        diagnostics.putString("helper_last_root_query_returned_uptime_ms","300");
+        SystemClock.now=710; rootQueryStarted(diagnostics,"getRootInActiveWindow");
+        require(!diagnostics.containsKey("helper_last_root_query_returned_uptime_ms"),"old query return mixed with new query");
+        require("started".equals(diagnostics.getString("helper_last_root_query_status")),"query entered status missing");
+        SystemClock.now=713; rootQueryReturned(diagnostics);
+        require("710".equals(diagnostics.getString("helper_last_root_query_started_uptime_ms")) &&
+                "713".equals(diagnostics.getString("helper_last_root_query_returned_uptime_ms")),"query times not native uptime");
+        require("returned".equals(diagnostics.getString("helper_last_root_query_status")),"query return status missing");
+        snapshotDiagnostics(diagnostics,failedSnapshot());
+        require("failed".equals(diagnostics.getString("helper_last_snapshot_status")),"failed status lost");
+        require(diagnostics.getString("helper_last_snapshot_error").length()==1024,"unbounded error summary");
+        require("8000".equals(diagnostics.getString("helper_last_snapshot_wait_ms")),"scalar summary lost");
+        require(!diagnostics.containsKey("snapshot") && !diagnostics.containsKey("error") &&
+                !diagnostics.containsKey("helper_last_snapshot_root_observations") &&
+                !diagnostics.containsKey("helper_last_snapshot_window_counts") &&
+                !diagnostics.containsKey("helper_last_snapshot_filename"),"full or unprefixed snapshot result leaked");
+        lastDiagnostic(null,"request_status","ignored"); lastDiagnosticTime(null,"snapshot_started");
+        rootQueryStarted(null,"ignored"); rootQueryReturned(null);
+        NativeLastRequestDiagnosticsHarness normal=new NativeLastRequestDiagnosticsHarness();
+        normal.arguments.putString("session_nonce","test-nonce"); normal.onStart();
+        require(normal.finishCode==-1 && "finished".equals(normal.finished.getString("session")),"last failed snapshot changed normal finish code");
+        require("failed".equals(normal.finished.getString("helper_last_snapshot_status")) &&
+                !normal.finished.containsKey("snapshot") && !normal.finished.containsKey("error"),"final diagnostic merge altered session result");
+        NativeLastRequestDiagnosticsHarness broken=new NativeLastRequestDiagnosticsHarness();
+        broken.arguments.putString("session_nonce","test-nonce"); broken.failSession=true; broken.onStart();
+        require(broken.finishCode==0 && "failed".equals(broken.finished.getString("snapshot")),"original session failure no longer fails");
+        System.out.println("Passed production Java last-request diagnostics and finish-code regression");
+    }
+''' + methods + '\n}\n'
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            file = directory / 'NativeLastRequestDiagnosticsHarness.java'
+            file.write_text(harness)
+            compiled = subprocess.run([java, '--module', 'jdk.compiler/com.sun.tools.javac.Main',
+                                       '-d', str(directory), str(file)], capture_output=True, timeout=30)
+            self.assertEqual(0, compiled.returncode, compiled.stderr.decode())
+            exercised = subprocess.run([java, '-cp', str(directory), 'NativeLastRequestDiagnosticsHarness'],
+                                       capture_output=True, timeout=10)
+            self.assertEqual(0, exercised.returncode, exercised.stderr.decode())
+            self.assertIn('Passed production Java last-request diagnostics and finish-code regression', exercised.stdout.decode())
 
 
 if __name__ == '__main__':
