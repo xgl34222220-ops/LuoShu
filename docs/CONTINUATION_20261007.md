@@ -326,3 +326,21 @@ root首轮完整source门禁真实exit1，ColorOS双caller回归只得到一次h
 发布前root第二轮完整`check.sh`自然exit0，366.700540秒，43个unittest报告/751次执行/43 OK，运行中26文件逐字节未变。真实`/proc` PID映射类及mount namespace权限条件跳过的原证据保留。该门禁后的唯一改动是本文修正HyperOS专项数量和补实际全量结果；其余25个待提交代码/测试/工作流文件与本轮通过输入一致。native独立61/117/Java1、App真实Kotlin38/boot8及后台20/10/20/13/9已分别保存，SDK/两API/四原录像仍必须按准确新SHA实际跑到终态。
 
 1.1.1 frozen22/nohook、现有可信字体槽位/Google回退/连续切换与重启事务、已移除全局字重、玻璃渐变/Dock/首帧条件保留。两台既有设备一加15 ColorOS V16.1.0、Redmi K80 Ultra HyperOS3.0.303仍缺真实字形/Google运行时、live A→B→A、重启持续覆盖、整次速度与清理证据；不操作用户设备。ColorOS整机reboot超过两分钟、App冷启/加载、旧97秒prezygote、旧600/630合成超时分别待查，不能以此批采集或host计时替代。
+
+## 33cf3203 实际失败证据与下一最小批
+
+准确 `33cf3203a8953191aa2274b285b613e6595ee8de` / tree `8210df555d60dd98a31cf0818a7978dc7a55262c` 的 [candidate37770831931](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37770831931) 与 [UI37770831963](https://github.com/xgl34222220-ops/LuoShu/actions/runs/37770831963) 均自然 failure。SDK 构建、35套件236 JVM、API28和API36成功；candidate源门禁43汇总763次执行通过后，补充namespace原16项中目标方法的mksh/dash六分支返回127。旧夹具只抽取 `apply_mix` 外层，漏新 `_mix_apply` 与真实计时依赖，后续readiness、签名、App/模块构建和候选验证未运行，未生成候选包。修正仅让夹具抽取两真实函数并source真实helper；原返回2、错误信息、空stderr、模块不变与恢复哨兵断言和矩阵保留。
+
+官方私有Ubuntu Jammy mksh59c-16经签名Release→Packages→deb→binary校验；真实KSH_VERSION和原不支持的 `--version` 失败均保留。修后目标原六分支在root和独立任务中分别通过；两次完整16方法本机运行仍31 failures/1 error，包含29处明文caller PID mapping mismatch、两处readiness exit126与一处holder procstat缺失，不将后三项伪称同一明文错误。宿主pid与 `/proc/self` 外层pid不同，NSpid保留内外两值，是实际限制而非降低门禁理由。完整兼容性仍须新CI实际通过。
+
+API28/36原件70张不同PNG均逐张独立看过，共72屏幕记录、46功能检查、无MP4；PNG/XML并非原子同帧。API36再次冷启动PNG显示正在检测，原先传入的XML已显示Root不可用，不能以XML覆盖原图、倒推首帧或声称秒加载。API28原20秒logcat116次及时，最大13.570558秒；API36为110次、最大2.648903秒。旧20秒超时根因未据此宣布解决。实际2736份命令输出流及6份instrumentation流完整绑定，API28尾记录37次deadline_reached保留；lastanr-traces不支持等采集缺项不能当全系统无ANR。
+
+启动视觉原156成员实为0MP4、4XML（含latest别名）、3PNG；原PNG都只有Launcher加载画面，前三请求XML仅5个ProgressBar相关节点，没有桌面内容或洛书画面。亮冷首ready消耗原HOME预算5.359587秒，首hierarchy8.269899秒，真正截图只剩0.091539秒并超时；暗冷两次完整raw帧batch1.989611/2.338588秒，但Launcher内容均为空，稳定计数保持0；第三请求notice迟到1.629468秒未消费，close继续失败。两次warm无已有App PID而未录，不补造四段视频。
+
+同native uptime的process→ready提交3089ms、公开连接1139ms、配置130ms有真实证据；不能与host首次read5.260秒相减。原截图batch串行policy/display查询及screencap/gzip没有内部时间，不能凭总2秒归因某一步。下一批只在同一设备 `/proc/uptime` 加best-effort内建stderr分段诊断，保留原stdout/raw/gzip、真实exit与全部异常。拆screencap返回需要保留一个左段shell上下文，必须记录可能测量成本；不称零扰动或提速。并行pipeline全长不是gzip独占时长，其尾段也只代表消费/收集及上下文收尾。缺坏诊断只为unknown，不能隐藏坏原流/业务失败/超时。UI宿主准备真实官方mksh以强制管道兼容门禁，不随模块或APK交付。
+
+字体库管理按钮改为同一箭头0↔180度可逆旋转，沿用展开220ms/收起170ms及既有缓动，在graphics layer读取状态；布局、触控、文本、语义、玻璃、Dock和已有展开容器不改。旧布局及六项玻璃层级检查通过，完整SDK编译、实际反向动效、动画关闭与重建仍待新SHA；70张旧静图不证明新动画。
+
+此批HOME10秒/root8秒/host20秒/录像30秒、三次fresh root与真实稳定raw帧、Launcher内容、迟到通知/close、同PID、ANR与所有视觉断言保持。两台OEM/Google/连续实时及reboot持续覆盖、整次字体切换与阶段速度、ColorOS整机reboot、App冷启/加载、97秒prezygote、600/630合成清理仍分别待真机证据，不以UI或采集诊断替代。
+
+发布前root完整source门禁374.311158秒自然exit0，43个unittest汇总/751次执行/43 OK；运行中六文件字节全部未变。原MissingNamespaceLifecycleTest因native一对一/proc PID映射条件setUpClass跳过一次，原原因和日志保留；JSON中字体slot skipped并非测试skip。另行完整namespace16的31fail/1error依然保存，不用source通过覆盖。root独立smoke122全部通过，真实mksh强制存在；所有108 shell原流与18组对照经独立审字节核同。此门禁后只有本文补实际结果，其余五代码/测试/工作流文件与已通过输入一致；SDK、实际动效及四启动原录像仍须准确新SHA实跑。

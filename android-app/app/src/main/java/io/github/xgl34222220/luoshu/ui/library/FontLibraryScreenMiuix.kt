@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -37,7 +38,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.MoreVert
@@ -75,6 +75,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -177,6 +178,14 @@ internal fun FontLibraryScreenMiuix(
             }
         }
         item(key = "collection_heading") {
+            val toolsChevronRotation = animateFloatAsState(
+                targetValue = if (showTools) 180f else 0f,
+                animationSpec = tween(
+                    durationMillis = if (showTools) LuoShuMotionTokens.Normal else 170,
+                    easing = FastOutSlowInEasing,
+                ),
+                label = "fontManagementChevronRotation",
+            )
             Column {
                 LuoShuSectionHeading(
                     title = if (filtered) "筛选结果" else "本地字体",
@@ -210,9 +219,11 @@ internal fun FontLibraryScreenMiuix(
                         Text(if (showTools) "收起管理" else "导入与管理", fontSize = 12.sp)
                         Spacer(Modifier.width(4.dp))
                         Icon(
-                            if (showTools) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            Icons.Rounded.ExpandMore,
                             contentDescription = null,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(18.dp).graphicsLayer {
+                                rotationZ = toolsChevronRotation.value
+                            },
                         )
                     }
                 }

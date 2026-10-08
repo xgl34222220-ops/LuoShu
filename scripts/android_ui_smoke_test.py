@@ -25,6 +25,7 @@ from android_ui_smoke import (
     app_window_bounds, logical_input_size, scroll_content, visible_scroll_anchors,
     scroll_progress, visible_action, visible_control, visible_text, ScrollBudget,
     focused_component, home_window_state, decode_raw_screencap, decompress_screencap_gzip, home_launcher_content, main,
+    HOME_BATCH_TIMING_HELPER, HOME_BATCH_TIMING_CLOCK, home_batch_capture_command, home_batch_timing,
 )
 
 
@@ -1345,7 +1346,9 @@ public class SnapshotCacheCompatibilityTest {
             for call, png in zip(run.adb.call_args_list[1:], captures):
                 self.assertEqual(("exec-out", "sh", "-c"), call.args[:3])
                 self.assertIn("dumpsys window displays", call.args[3])
-                self.assertTrue(call.args[3].endswith("screencap | gzip -1"))
+                self.assertIn("screencap\n    _luoshu_home_capture_rc=$?", call.args[3])
+                self.assertIn("} | gzip -1\n_luoshu_home_rc=$?", call.args[3])
+                self.assertTrue(call.args[3].endswith('exit "$_luoshu_home_rc"\n'))
                 self.assertTrue(call.args[3].startswith("set -o pipefail || exit;"))
                 self.assertNotIn("screencap -p", call.args[3])
                 self.assertLessEqual(call.kwargs["timeout"], 10)
@@ -1642,6 +1645,270 @@ public class SnapshotCacheCompatibilityTest {
                 window, compressed = result.stdout.split(b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00")
                 self.assertEqual((self.baseline_policy() + self.baseline_window()).encode(), window)
                 self.assertEqual(raw, decompress_screencap_gzip(compressed))
+
+    def test_home_batch_timing_uses_one_remote_clock_and_rejects_untrusted_markers(self):
+        token = "0123456789abcdef"
+        entries = [("policy", "started", "100.00", "-"), ("policy", "returned", "100.03", "0"),
+                   ("display", "started", "100.03", "-"), ("display", "returned", "100.10", "0"),
+                   ("pipeline", "started", "100.10", "-"), ("screencap", "started", "100.11", "-"),
+                   ("screencap", "returned", "100.23", "7"), ("pipeline", "returned", "100.27", "7")]
+        def encode(values):
+            return b"original remote stderr\n" + b"".join(
+                (f"[LUOSHU_HOME_BATCH_TIMING_V1] token={token} stage={stage} event={event} "
+                 f"uptime_seconds={uptime} rc={rc} [/LUOSHU_HOME_BATCH_TIMING_V1]\n").encode()
+                for stage, event, uptime, rc in values)
+        stderr = encode(entries)
+        timing = home_batch_timing(stderr, token)
+        self.assertEqual("known", timing["status"])
+        self.assertEqual(HOME_BATCH_TIMING_CLOCK, timing["clock_scope"])
+        self.assertIn("including suspend", timing["clock_scope"])
+        self.assertIn("not synchronized", timing["clock_scope"])
+        self.assertTrue(timing["diagnostic_only"])
+        self.assertEqual([.03, .07, .12, .17],
+                         [timing["segments"][stage]["duration_seconds"]
+                          for stage in ("policy", "display", "screencap", "pipeline")])
+        self.assertEqual(7, timing["segments"]["screencap"]["returncode"])
+        self.assertEqual(7, timing["segments"]["pipeline"]["returncode"])
+        self.assertEqual([2] * 8, [event["printed_fractional_digits"] for event in timing["events"]])
+        self.assertEqual(stderr, encode(entries))
+        reversed_clock = list(entries)
+        reversed_clock[6] = ("screencap", "returned", "99.99", "7")
+        invalid_rc = list(entries)
+        invalid_rc[6] = ("screencap", "returned", "100.23", "999")
+        invalid_started = list(entries)
+        invalid_started[0] = ("policy", "started", "100.00", "0")
+        equal_clock = [(stage, event, "100.00", rc) for stage, event, _, rc in entries]
+        self.assertEqual("known", home_batch_timing(encode(equal_clock), token)["status"])
+        malformed = (b"", b"original stderr only", encode(entries[:-1]),
+                     encode(entries + entries[:1]), encode(entries[2:] + entries[:2]),
+                     encode(reversed_clock), encode(invalid_rc), encode(invalid_started),
+                     stderr.replace(b"0123456789abcdef", b"fedcba9876543210"),
+                     stderr.replace(b"100.23", b"nan"), stderr.replace(b"100.23", b"1:2.3"),
+                     stderr.replace(b"100.23", b"100.1234567890"),
+                     stderr.replace(b"[/LUOSHU_HOME_BATCH_TIMING_V1]", b""))
+        for raw in malformed:
+            with self.subTest(stderr=raw):
+                result = home_batch_timing(raw, token)
+                self.assertEqual("unknown", result["status"])
+                self.assertTrue(result["unknown_reasons"])
+                self.assertTrue(result["diagnostic_only"])
+                self.assertTrue(all(segment["status"] == "unknown" and segment["duration_seconds"] is None
+                                    for segment in result["segments"].values()))
+
+    def test_home_batch_timing_never_changes_readiness_or_raw_failure_evidence(self):
+        token = "0123456789abcdef"
+        events = [("policy", "started"), ("policy", "returned"),
+                  ("display", "started"), ("display", "returned"),
+                  ("pipeline", "started"), ("screencap", "started"),
+                  ("screencap", "returned"), ("pipeline", "returned")]
+        markers = b"".join(
+            (f"\n[LUOSHU_HOME_BATCH_TIMING_V1] token={token} stage={stage} event={event} "
+             f"uptime_seconds=100.{index:02d} rc={'-' if event == 'started' else '0'} "
+             "[/LUOSHU_HOME_BATCH_TIMING_V1]\n").encode()
+            for index, (stage, event) in enumerate(events))
+        for outcome in ("success", "batch-failure", "bad-gzip", "missing", "malformed", "timeout"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path("app.apk"), Path(temporary), PACKAGE, None)
+                self.prepare_baseline_reader(run)
+                run.text = Mock(return_value="com.example.launcher/.Home\n")
+                stderr = b"unchanged remote diagnostic\n" + (markers if outcome != "missing" else b"")
+                if outcome == "malformed":
+                    stderr = stderr.replace(b"100.05", b"not-a-clock")
+                batch = self.baseline_batch(self.baseline_raw())
+                if outcome == "bad-gzip":
+                    batch = batch[:-1]
+                def capture(*args, **kwargs):
+                    actual_token = args[3].split("_luoshu_home_timing_token=", 1)[1].split()[0]
+                    actual_stderr = stderr.replace(token.encode(), actual_token.encode())
+                    if outcome == "timeout":
+                        cause = subprocess.TimeoutExpired("adb", kwargs["timeout"],
+                                                          output=batch, stderr=actual_stderr)
+                        raise RuntimeError("actual batch timeout") from cause
+                    return subprocess.CompletedProcess([], 7 if outcome == "batch-failure" else 0,
+                                                       batch, actual_stderr)
+                run.adb = self.baseline_adb(side_effect=capture)
+                with patch("android_ui_smoke.time.sleep"):
+                    if outcome in ("batch-failure", "bad-gzip", "timeout"):
+                        with self.assertRaisesRegex(RuntimeError, "HOME baseline failed"):
+                            run.wait_home_baseline("light-cold-start")
+                    else:
+                        run.wait_home_baseline("light-cold-start")
+                directory = Path(temporary)
+                metadata = json.loads((directory / "light-cold-start-baseline-readiness.json").read_text())
+                actual_stderr = stderr.replace(token.encode(), metadata["capture_timing_token"].encode())
+                sample = metadata.get("failed_sample") or metadata["samples"][0]
+                self.assertEqual(batch, (directory / sample["batch_raw"]).read_bytes())
+                self.assertEqual(actual_stderr, (directory / sample["stderr"]).read_bytes())
+                self.assertEqual(hashlib.sha256(actual_stderr).hexdigest(), sample["stderr_sha256"])
+                self.assertEqual(10, metadata["timeout_seconds"])
+                self.assertEqual(3, metadata["required_stable_captures"])
+                self.assertEqual(metadata["capture_timing_token"], sample["remote_capture_timing"]["timing_token"])
+                self.assertIn(metadata["capture_timing_token"], metadata["capture_command"])
+                expected = "unknown" if outcome in ("missing", "malformed") else "known"
+                self.assertEqual(expected, sample["remote_capture_timing"]["status"])
+                if outcome in ("batch-failure", "bad-gzip", "timeout"):
+                    self.assertFalse(metadata["passed"])
+                    self.assertEqual([], metadata["samples"])
+                else:
+                    self.assertTrue(metadata["passed"])
+                    self.assertEqual([1, 2, 3], [item["stable_captures"] for item in metadata["samples"]])
+                    self.assertEqual(3, run.snapshot_hierarchy.call_count)
+
+    def real_home_timing_mksh(self):
+        shell = os.environ.get("LUOSHU_TEST_MKSH") or shutil.which("mksh")
+        self.assertTrue(shell and Path(shell).is_file() and os.access(shell, os.X_OK),
+                        "Real mksh is required: use the official package or LUOSHU_TEST_MKSH; no compatibility skip")
+        return str(Path(shell).resolve())
+
+    def test_home_batch_timing_real_mksh_keeps_original_stdout_and_both_pipeline_failures(self):
+        # This exercises an actual official host mksh and actual host gzip.
+        # The fake device commands cannot prove Android screencap pixels/speed.
+        shell = self.real_home_timing_mksh()
+        real_gzip = shutil.which("gzip")
+        self.assertIsNotNone(real_gzip, "Real gzip is required")
+        token = "0123456789abcdef"
+        command = home_batch_capture_command(token)
+        original = (r"set -o pipefail || exit; dumpsys window policy && dumpsys window displays && "
+                    r"printf '\000LUOSHU_HOME_BASELINE_RAW_GZIP\000' && screencap | gzip -1")
+        write_failure = r"""printf() {
+    case "$1" in *LUOSHU_HOME_BATCH_TIMING_V1*) command printf "$@" > /dev/full ;;
+        *) command printf "$@" ;; esac
+}
+"""
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            binaries = directory / "bin"
+            binaries.mkdir()
+            raw = self.baseline_raw()
+            for name, script in {
+                "dumpsys": ("import os,sys\nkind=sys.argv[-1]\n"
+                            f"sys.stdout.buffer.write({self.baseline_policy().encode()!r} if kind=='policy' "
+                            f"else {self.baseline_window().encode()!r})\n"
+                            "sys.stderr.write('actual fixture '+kind+' stderr\\n')\n"
+                            "sys.exit(int(os.environ['LUOSHU_FIXTURE_'+kind.upper()+'_RC']))\n"),
+                "screencap": ("import os,sys\nrc=int(os.environ['LUOSHU_FIXTURE_CAPTURE_RC'])\n"
+                              f"raw={raw!r}\nsys.stdout.buffer.write(raw if rc==0 else raw[:len(raw)//2])\n"
+                              "sys.stderr.write('actual fixture screencap stderr\\n')\nsys.exit(rc)\n"),
+                "gzip": ("import os,subprocess,sys\narguments=sys.argv[1:]\n"
+                         "if os.environ['LUOSHU_FIXTURE_GZIP_FAIL']=='1': arguments+=['--luoshu-fixture-invalid-option']\n"
+                         f"result=subprocess.run([{real_gzip!r}]+arguments,input=sys.stdin.buffer.read(),capture_output=True)\n"
+                         "sys.stdout.buffer.write(result.stdout)\nsys.stderr.buffer.write(result.stderr)\n"
+                         "sys.exit(result.returncode)\n"),
+            }.items():
+                path = binaries / name
+                path.write_text(f"#!{sys.executable}\n" + script)
+                path.chmod(0o755)
+            invalid_uptime = directory / "invalid-uptime"
+            invalid_uptime.write_text("not-a-clock 25.00\n")
+            matrix = (
+                    (0, 0, 0, 0, 0), (0, 0, 7, 0, 7), (0, 0, 0, 1, 1),
+                    (0, 0, 7, 1, 1), (13, 0, 0, 0, 13), (0, 17, 0, 0, 17))
+            for diagnostic, policy_rc, display_rc, capture_rc, gzip_fail, expected in (
+                    (diagnostic, *case) for diagnostic in ("normal", "write-failure", "invalid-proc")
+                    for case in matrix):
+                with self.subTest(diagnostic=diagnostic, policy_rc=policy_rc, display_rc=display_rc,
+                                  capture_rc=capture_rc, gzip_fail=gzip_fail):
+                    environment = {**os.environ, "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
+                        "LUOSHU_FIXTURE_POLICY_RC": str(policy_rc), "LUOSHU_FIXTURE_DISPLAYS_RC": str(display_rc),
+                        "LUOSHU_FIXTURE_CAPTURE_RC": str(capture_rc), "LUOSHU_FIXTURE_GZIP_FAIL": str(gzip_fail)}
+                    tested_command, tested_original = command, original
+                    if diagnostic == "write-failure":
+                        self.assertTrue(Path("/dev/full").exists(), "A real failing write device is required")
+                        prefix = "set -o pipefail || exit; "
+                        tested_command = prefix + write_failure + command[len(prefix):]
+                        tested_original = prefix + write_failure + original[len(prefix):]
+                    elif diagnostic == "invalid-proc":
+                        self.assertEqual(1, command.count("< /proc/uptime;"))
+                        tested_command = command.replace("< /proc/uptime;", f'< "{invalid_uptime}";')
+                    before = subprocess.run([shell, "-c", tested_original], env=environment, capture_output=True, timeout=5)
+                    after = subprocess.run([shell, "-c", tested_command], env=environment, capture_output=True, timeout=5)
+                    self.assertEqual(expected, before.returncode)
+                    self.assertEqual(before.returncode, after.returncode)
+                    self.assertEqual(before.stdout, after.stdout)
+                    self.assertEqual(hashlib.sha256(before.stdout).hexdigest(), hashlib.sha256(after.stdout).hexdigest())
+                    for original_line in before.stderr.splitlines():
+                        self.assertIn(original_line, after.stderr)
+                    self.assertIn(b"actual fixture policy stderr", after.stderr)
+                    parsed = home_batch_timing(after.stderr, token)
+                    if policy_rc or display_rc:
+                        self.assertEqual("unknown", parsed["status"])
+                        self.assertNotIn(b"stage=screencap", after.stderr)
+                        self.assertNotIn(b"LUOSHU_HOME_BASELINE_RAW_GZIP", after.stdout)
+                    else:
+                        self.assertEqual("known" if diagnostic == "normal" else "unknown", parsed["status"])
+                        if diagnostic == "normal":
+                            self.assertEqual(capture_rc, parsed["segments"]["screencap"]["returncode"])
+                            self.assertEqual(expected, parsed["segments"]["pipeline"]["returncode"])
+                        self.assertIn(b"actual fixture screencap stderr", after.stderr)
+                        if gzip_fail:
+                            self.assertIn(b"unrecognized option", after.stderr)
+                        else:
+                            window, compressed = after.stdout.split(b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00")
+                            self.assertEqual((self.baseline_policy() + self.baseline_window()).encode(), window)
+                            self.assertEqual(raw if capture_rc == 0 else raw[:len(raw)//2],
+                                             decompress_screencap_gzip(compressed))
+
+    def test_home_batch_timing_builtin_helper_keeps_rc_for_bad_clock_or_marker_write(self):
+        # Dash covers the POSIX helper, not the production pipefail pipeline.
+        shells = (self.real_home_timing_mksh(), shutil.which("dash"))
+        self.assertIsNotNone(shells[1], "Real dash is required")
+        token = "0123456789abcdef"
+        write_failure = r"""printf() {
+    case "$1" in *LUOSHU_HOME_BATCH_TIMING_V1*) command printf "$@" > /dev/full ;;
+        *) command printf "$@" ;; esac
+}
+"""
+        self.assertTrue(Path("/dev/full").exists(), "A real failing write device is required")
+        with tempfile.TemporaryDirectory() as temporary:
+            uptime = Path(temporary) / "uptime"
+            for shell in shells:
+                for kind, clock in (("valid", "100.01 25.02\n"), ("empty", ""),
+                                    ("nan", "nan 0\n"), ("colon", "1:2.3 0\n"),
+                                    ("extra-dot", "1.2.3 0\n"), ("negative", "-1.23 0\n"),
+                                    ("missing", None), ("write-failure", "100.01 25.02\n")):
+                    with self.subTest(shell=shell, clock=kind):
+                        if clock is None:
+                            uptime.unlink(missing_ok=True)
+                        else:
+                            uptime.write_text(clock)
+                        self.assertEqual(1, HOME_BATCH_TIMING_HELPER.count("< /proc/uptime;"))
+                        helper = HOME_BATCH_TIMING_HELPER.replace("< /proc/uptime;", f'< "{uptime}";')
+                        command = (write_failure if kind == "write-failure" else "") + helper + \
+                            f"_luoshu_home_timing_token={token}\n" + r"""
+_luoshu_home_mark policy started -
+saved_start=$?
+_luoshu_home_mark policy returned 7
+saved_return=$?
+printf '\000unchanged raw\377'
+[ "$saved_start" -eq 0 ] && [ "$saved_return" -eq 0 ] || exit 99
+exit 7
+"""
+                        result = subprocess.run([shell, "-c", command], capture_output=True, timeout=5)
+                        self.assertEqual(7, result.returncode)
+                        self.assertEqual(b"\x00unchanged raw\xff", result.stdout)
+                        self.assertEqual(hashlib.sha256(b"\x00unchanged raw\xff").hexdigest(),
+                                         hashlib.sha256(result.stdout).hexdigest())
+                        parsed = home_batch_timing(result.stderr, token)
+                        self.assertEqual("unknown", parsed["status"])  # Only one helper pair, not a complete batch.
+                        self.assertEqual(2 if kind == "valid" else 0, len(parsed["events"]))
+                        if kind in ("missing", "write-failure"):
+                            self.assertTrue(result.stderr)  # Preserve the actual shell/read or printf write error.
+
+    def test_home_batch_timing_real_dash_keeps_original_pipefail_guard_rejection(self):
+        shell = shutil.which("dash")
+        self.assertIsNotNone(shell, "Real dash is required")
+        original = (r"set -o pipefail || exit; dumpsys window policy && dumpsys window displays && "
+                    r"printf '\000LUOSHU_HOME_BASELINE_RAW_GZIP\000' && screencap | gzip -1")
+        before = subprocess.run([shell, "-c", original], capture_output=True, timeout=5)
+        after = subprocess.run([shell, "-c", home_batch_capture_command("0123456789abcdef")],
+                               capture_output=True, timeout=5)
+        self.assertEqual(2, before.returncode)
+        self.assertEqual(before.returncode, after.returncode)
+        self.assertEqual(b"", before.stdout)
+        self.assertEqual(before.stdout, after.stdout)
+        self.assertEqual(before.stderr, after.stderr)
+        self.assertIn(b"pipefail", after.stderr)
+        self.assertEqual("unknown", home_batch_timing(after.stderr, "0123456789abcdef")["status"])
 
     def test_launch_stage_host_timings_do_not_treat_am_total_time_as_current_elapsed(self):
         with tempfile.TemporaryDirectory() as temporary:

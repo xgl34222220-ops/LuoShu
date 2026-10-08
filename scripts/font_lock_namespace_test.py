@@ -526,10 +526,14 @@ class FontLockNamespaceTests(unittest.TestCase):
 
     def test_engine_distinguishes_validation_failure_from_busy(self):
         engine = (ROOT / 'common/legacy_v14_4/font_mix_engine.sh').read_text()
-        match = re.search(r'(?ms)^apply_mix\(\) \{.*?^\}', engine)
-        self.assertIsNotNone(match)
+        definitions = []
+        for name in ('apply_mix', '_mix_apply'):
+            match = re.search(r'(?ms)^' + name + r'\(\) \{.*?^\}', engine)
+            self.assertIsNotNone(match, name)
+            definitions.append(match.group(0))
         harness = self.directory / 'engine-apply-harness.sh'
-        harness.write_text('. "$MODDIR/common/font_switch_lock.sh"\n' + match.group(0) + r'''
+        harness.write_text('. "$MODDIR/common/font_switch_lock.sh"\n'
+                           '. "$LUOSHU_TEST_MIX_PHASE_HELPER"\n' + '\n'.join(definitions) + r'''
 set_mix_error() { printf '%s\n' "$1"; }
 luoshu_font_lock_acquire() { LUOSHU_FONT_LOCK_FAILURE_REASON="$LUOSHU_TEST_FAILURE_REASON"; return "$LUOSHU_TEST_ACQUIRE_RC"; }
 recover_interrupted_payload() { printf 'unexpected payload work\n' >&2; exit 99; }
@@ -547,7 +551,8 @@ exit $?
                     self.configure(shell, 'normal')
                     before = snapshot(self.module)
                     result = subprocess.run([shell, str(harness)],
-                        env=dict(self.env, LUOSHU_TEST_ACQUIRE_RC=acquire_rc, LUOSHU_TEST_FAILURE_REASON=reason),
+                        env=dict(self.env, LUOSHU_TEST_ACQUIRE_RC=acquire_rc, LUOSHU_TEST_FAILURE_REASON=reason,
+                                 LUOSHU_TEST_MIX_PHASE_HELPER=str(ROOT / 'common/legacy_v14_4/mix_phase_timing.sh')),
                         capture_output=True, text=True, timeout=5)
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     self.assertEqual(result.stderr, '')

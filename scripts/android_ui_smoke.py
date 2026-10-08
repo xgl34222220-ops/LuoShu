@@ -9,6 +9,7 @@ real adb screencap pixels; no mock data, screenshots or crash suppression are in
 from __future__ import annotations
 
 import argparse
+from decimal import Decimal
 import hashlib
 import io
 import json
@@ -31,6 +32,117 @@ PAGES = (
     ("settings", "设置", "你的洛书"),
 )
 BOUNDS = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+
+
+HOME_BATCH_TIMING_CLOCK = (
+    "remote Linux /proc/uptime seconds, including suspend; source printed decimal precision; "
+    "not synchronized with native SystemClock.uptimeMillis or host time.monotonic"
+)
+HOME_BATCH_TIMING_PREFIX = b"[LUOSHU_HOME_BATCH_TIMING_V1]"
+HOME_BATCH_TIMING_SUFFIX = b"[/LUOSHU_HOME_BATCH_TIMING_V1]"
+HOME_BATCH_TIMING_HELPER = r"""_luoshu_home_mark() {
+    _luoshu_home_uptime=
+    _luoshu_home_unused=
+    { IFS=' ' read -r _luoshu_home_uptime _luoshu_home_unused < /proc/uptime; } || return 0
+    case "$_luoshu_home_uptime" in *.*) ;; *) return 0 ;; esac
+    _luoshu_home_whole=${_luoshu_home_uptime%%.*}
+    _luoshu_home_fraction=${_luoshu_home_uptime#*.}
+    case "$_luoshu_home_whole" in ''|*[!0-9]*) return 0 ;; esac
+    case "$_luoshu_home_fraction" in ''|*[!0-9]*) return 0 ;; esac
+    [ "${#_luoshu_home_whole}" -le 12 ] && [ "${#_luoshu_home_fraction}" -le 9 ] || return 0
+    printf '\n[LUOSHU_HOME_BATCH_TIMING_V1] token=%s stage=%s event=%s uptime_seconds=%s rc=%s [/LUOSHU_HOME_BATCH_TIMING_V1]\n' \
+        "$_luoshu_home_timing_token" "$1" "$2" "$_luoshu_home_uptime" "$3" >&2 || :
+    return 0
+}
+"""
+
+
+def home_batch_capture_command(timing_token: str) -> str:
+    """Time this one batch without changing stdout or the business exit code."""
+    if not re.fullmatch(r"[0-9a-f]{16}", timing_token):
+        raise ValueError("Invalid HOME batch timing token")
+    # The left pipeline shell context is diagnostic overhead: it must remain
+    # alive to record screencap's return before gzip finishes. No external
+    # timing tools are started, and all work remains in the HOME deadline.
+    return ("set -o pipefail || exit; " + HOME_BATCH_TIMING_HELPER +
+            f"_luoshu_home_timing_token={timing_token}\n" + r"""
+_luoshu_home_mark policy started -
+dumpsys window policy
+_luoshu_home_rc=$?
+_luoshu_home_mark policy returned "$_luoshu_home_rc"
+[ "$_luoshu_home_rc" -eq 0 ] || exit "$_luoshu_home_rc"
+_luoshu_home_mark display started -
+dumpsys window displays
+_luoshu_home_rc=$?
+_luoshu_home_mark display returned "$_luoshu_home_rc"
+[ "$_luoshu_home_rc" -eq 0 ] || exit "$_luoshu_home_rc"
+printf '\000LUOSHU_HOME_BASELINE_RAW_GZIP\000' || exit
+_luoshu_home_mark pipeline started -
+{
+    _luoshu_home_mark screencap started -
+    screencap
+    _luoshu_home_capture_rc=$?
+    _luoshu_home_mark screencap returned "$_luoshu_home_capture_rc"
+    exit "$_luoshu_home_capture_rc"
+} | gzip -1
+_luoshu_home_rc=$?
+_luoshu_home_mark pipeline returned "$_luoshu_home_rc"
+exit "$_luoshu_home_rc"
+""")
+
+
+def home_batch_timing(stderr: bytes, timing_token: str) -> dict[str, object]:
+    """Parse diagnostics only; missing or invalid timings never decide readiness."""
+    expected = [("policy", "started"), ("policy", "returned"),
+                ("display", "started"), ("display", "returned"),
+                ("pipeline", "started"), ("screencap", "started"),
+                ("screencap", "returned"), ("pipeline", "returned")]
+    marker = re.compile(
+        re.escape(HOME_BATCH_TIMING_PREFIX) +
+        rb" token=([0-9a-f]{16}) stage=(policy|display|screencap|pipeline) "
+        rb"event=(started|returned) uptime_seconds=([0-9]{1,12}\.[0-9]{1,9}) "
+        rb"rc=(-|[0-9]{1,3}) " + re.escape(HOME_BATCH_TIMING_SUFFIX))
+    events = []
+    problems = []
+    for line in stderr.splitlines():
+        if HOME_BATCH_TIMING_PREFIX not in line and HOME_BATCH_TIMING_SUFFIX not in line:
+            continue
+        match = marker.fullmatch(line)
+        if match is None:
+            problems.append("malformed marker")
+            continue
+        token, stage, event, uptime, rc = [value.decode("ascii") for value in match.groups()]
+        if token != timing_token:
+            problems.append("unexpected timing token")
+            continue
+        if (event == "started" and rc != "-") or \
+                (event == "returned" and (rc == "-" or int(rc) > 255)):
+            problems.append("invalid marker return code")
+            continue
+        events.append({"stage": stage, "event": event, "uptime_seconds": uptime,
+                       "printed_fractional_digits": len(uptime.split(".")[1]),
+                       "returncode": None if rc == "-" else int(rc)})
+    order = [(event["stage"], event["event"]) for event in events]
+    if order != expected:
+        problems.append("missing, repeated or out-of-order markers")
+    if any(Decimal(right["uptime_seconds"]) < Decimal(left["uptime_seconds"])
+           for left, right in zip(events, events[1:])):
+        problems.append("remote uptime moved backwards")
+    segments = {}
+    for stage in ("policy", "display", "screencap", "pipeline"):
+        pair = [event for event in events if event["stage"] == stage]
+        detail: dict[str, object] = {"status": "unknown", "duration_seconds": None}
+        if not problems and len(pair) == 2:
+            first, last = pair
+            detail.update(status="known", started_uptime_seconds=first["uptime_seconds"],
+                          returned_uptime_seconds=last["uptime_seconds"],
+                          duration_seconds=float(Decimal(last["uptime_seconds"]) - Decimal(first["uptime_seconds"])),
+                          returncode=last["returncode"])
+        segments[stage] = detail
+    return {"status": "unknown" if problems else "known", "clock_scope": HOME_BATCH_TIMING_CLOCK,
+            "timing_token": timing_token, "events": events, "segments": segments,
+            "unknown_reasons": list(dict.fromkeys(problems)),
+            "diagnostic_only": True, "measurement_overhead": "builtin reads/printf and a retained left pipeline shell context"}
 
 
 def canonical_component(component: str) -> str:
@@ -1131,9 +1243,14 @@ class SmokeRun:
         stable = 0
         separator = b"\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00"
         state_command = "dumpsys window policy && dumpsys window displays"
-        command = (r"set -o pipefail || exit; " + state_command + " && " +
-                   r"printf '\000LUOSHU_HOME_BASELINE_RAW_GZIP\000' && screencap | gzip -1")
+        timing_token = hashlib.sha256(f"{name}:{started}".encode("utf-8")).hexdigest()[:16]
+        command = home_batch_capture_command(timing_token)
         metadata["capture_command"] = command
+        metadata["capture_timing_token"] = timing_token
+        metadata["capture_timing_clock_scope"] = HOME_BATCH_TIMING_CLOCK
+        metadata["capture_timing_scope"] = (
+            "best-effort diagnostics in this same HOME batch; builtin reads/printf and a retained left "
+            "pipeline shell context add measurement overhead inside the original deadline; never readiness evidence")
         metadata["screenshot_source"] = "real packed screencap through lossless device gzip -1; exact RGB PNG encoding on host"
         pending_sample = None
 
@@ -1295,6 +1412,9 @@ class SmokeRun:
                 persistence_started = time.monotonic()
                 (self.output / raw_file).write_bytes(batch.stdout)
                 (self.output / stderr_file).write_bytes(batch.stderr)
+                pending_sample["remote_capture_timing"] = home_batch_timing(batch.stderr, timing_token)
+                pending_sample["stderr_bytes"] = len(batch.stderr)
+                pending_sample["stderr_sha256"] = hashlib.sha256(batch.stderr).hexdigest()
                 pending_sample["returncode"] = batch.returncode
                 pending_sample["batch_bytes"] = len(batch.stdout)
                 if batch.returncode:
@@ -1387,6 +1507,9 @@ class SmokeRun:
                             (self.output / pending_sample["screencap_gzip"]).write_bytes(partial_frame)
                     if isinstance(cause.stderr, bytes):
                         (self.output / pending_sample["stderr"]).write_bytes(cause.stderr)
+                        pending_sample["remote_capture_timing"] = home_batch_timing(cause.stderr, timing_token)
+                        pending_sample["stderr_bytes"] = len(cause.stderr)
+                        pending_sample["stderr_sha256"] = hashlib.sha256(cause.stderr).hexdigest()
                 pending_sample["failed_elapsed_seconds"] = round(time.monotonic() - started, 6)
             raise RuntimeError(f"{name}: HOME baseline failed: {error}") from error
         finally:

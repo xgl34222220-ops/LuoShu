@@ -47,8 +47,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Prepare real screenshot baseline regression dependency
+      - name: Prepare real screenshot baseline regression dependencies
         run: |
+          # Host-only Android-shell compatibility gate; never bundled in APK/module.
+          # Missing the real shell must fail rather than skip the pipeline checks.
+          timeout 120s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+          timeout 120s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends mksh
+          mksh -c 'printf "%s\n" "$KSH_VERSION"'
           python3 -m venv "$RUNNER_TEMP/luoshu-ui-host-tests"
           "$RUNNER_TEMP/luoshu-ui-host-tests/bin/pip" install Pillow==12.3.0
           echo "$RUNNER_TEMP/luoshu-ui-host-tests/bin" >> "$GITHUB_PATH"
