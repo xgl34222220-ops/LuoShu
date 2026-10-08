@@ -1946,6 +1946,124 @@ exit 7
             self.assertEqual("173202", timing["am_total_time_ms"])
             self.assertIn("startup evidence collection", timing["ui_ready_seconds_scope"])
 
+    def test_visual_reader_preparation_is_separate_and_baseline_uses_three_fresh_requests(self):
+        from ui_snapshot_session_test import Clock, PrivateProtocol
+        for slow_baseline in (False, True):
+            with self.subTest(slow_baseline=slow_baseline), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                clock = Clock()
+                run = SmokeRun(Path('app.apk'), directory, PACKAGE, None, Path('reader.apk'),
+                               record_launch=True, visual_launch_only=True)
+                run.api_level = 36
+                session = UiSnapshotSession(run.adb_command, directory)
+                run.snapshot_session = session
+                protocol = PrivateProtocol(session, clock)
+                protocol.ready_delay = 4.7
+                protocol.xml = ET.tostring(self.baseline_hierarchy())
+                process = Mock(pid=12345, returncode=0)
+                process.poll.return_value = None
+                def transport(command, **kwargs):
+                    result = protocol.run(command, **kwargs)
+                    if len(protocol.requests) == 1 and command[len(session.adb_command):][:2] == ['shell', '-T'] and 'request-' in command[-1]:
+                        clock.sleep(7.8)  # Cold test connection cost, not App startup.
+                    return result
+                run.text = Mock(return_value='com.example.launcher/.Home\n')
+                def command(*args, **kwargs):
+                    if slow_baseline:
+                        clock.sleep(kwargs['timeout'])
+                        raise RuntimeError('original HOME deadline exhausted')
+                    return subprocess.CompletedProcess([], 0,
+                        (self.baseline_policy() + self.baseline_window()).encode()
+                        if args[-1] == 'dumpsys window policy && dumpsys window displays'
+                        else self.baseline_batch(self.baseline_raw()), b'')
+                run.adb = Mock(side_effect=command)
+                run.launch_and_capture = Mock(side_effect=AssertionError('No App launch during preparation'))
+                run.begin_launch_recording = Mock(side_effect=AssertionError('No recording during preparation'))
+                with patch('android_ui_smoke.time.monotonic', side_effect=clock.monotonic), \
+                        patch('android_ui_smoke.time.sleep', side_effect=clock.sleep), \
+                        patch('ui_snapshot_session.subprocess.Popen', return_value=process) as popen, \
+                        patch.object(session, '_start_readers'), \
+                        patch.object(session, '_wait_publication', side_effect=protocol.wait_publication), \
+                        patch('ui_snapshot_session.subprocess.run', side_effect=transport):
+                    run.prepare_visual_snapshot_reader()
+                    preparation = json.loads((directory / 'visual-snapshot-reader-preparation.json').read_text())
+                    self.assertTrue(preparation['passed'])
+                    self.assertGreater(preparation['elapsed_seconds'], 12)
+                    self.assertEqual(120, preparation['deadline_monotonic_seconds'])
+                    self.assertEqual('hierarchy-0001.xml', preparation['hierarchy'])
+                    self.assertEqual(1, len(protocol.requests))
+                    run.adb.assert_not_called()
+                    self.assertEqual([], run.checks)
+                    self.assertEqual([], run.recordings)
+                    baseline_started = clock.now
+                    if slow_baseline:
+                        with self.assertRaisesRegex(RuntimeError, 'original HOME deadline'):
+                            run.wait_home_baseline('light-cold-start')
+                    else:
+                        self.assertTrue(run.wait_home_baseline('light-cold-start').startswith(b'\x89PNG'))
+                    baseline = json.loads((directory / 'light-cold-start-baseline-readiness.json').read_text())
+                    self.assertEqual(baseline_started + 10, baseline['deadline_monotonic_seconds'])
+                    self.assertEqual(not slow_baseline, baseline['passed'])
+                    self.assertEqual(0 if slow_baseline else 3, len(baseline['samples']))
+                    if not slow_baseline:
+                        self.assertEqual(['hierarchy-0002.xml', 'hierarchy-0003.xml', 'hierarchy-0004.xml'],
+                                         [sample['hierarchy'] for sample in baseline['samples']])
+                        self.assertEqual(4, len({request['request_id'] for request in protocol.requests}))
+                    self.assertIs(session, run.snapshot_session)
+                    popen.assert_called_once()
+                    run.launch_and_capture.assert_not_called()
+                    run.begin_launch_recording.assert_not_called()
+
+    def test_visual_reader_preparation_failure_or_late_result_is_not_retried(self):
+        for failure in (RuntimeError('broken connection'), None):
+            with self.subTest(failure=str(failure)), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path('app.apk'), Path(temporary), PACKAGE, None, Path('reader.apk'),
+                               record_launch=True, visual_launch_only=True)
+                clock = [100.0]
+                def capture(**kwargs):
+                    self.assertEqual(120, kwargs['deadline'])
+                    if failure is not None:
+                        raise failure
+                    clock[0] = 120
+                    return self.baseline_hierarchy()
+                run.snapshot_hierarchy = Mock(side_effect=capture)
+                with patch('android_ui_smoke.time.monotonic', side_effect=lambda: clock[0]):
+                    with self.assertRaisesRegex(RuntimeError, 'broken connection|exceeded 20s'):
+                        run.prepare_visual_snapshot_reader()
+                    with self.assertRaisesRegex(RuntimeError, 'cannot be retried'):
+                        run.prepare_visual_snapshot_reader()
+                run.snapshot_hierarchy.assert_called_once()
+                evidence = json.loads((Path(temporary) / 'visual-snapshot-reader-preparation.json').read_text())
+                self.assertFalse(evidence['passed'])
+                self.assertEqual([], run.recordings)
+                self.assertEqual([], run.checks)
+
+    def test_visual_run_prepares_helper_before_any_scenario_and_fails_closed(self):
+        for failed in (False, True):
+            with self.subTest(failed=failed), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path('app.apk'), Path(temporary), PACKAGE, None, Path('reader.apk'),
+                               record_launch=True, visual_launch_only=True)
+                events = []
+                run.adb = Mock()
+                run.text = Mock(side_effect=['36', '123', '123', '456', '456'])
+                def prepare():
+                    events.append('prepare')
+                    if failed:
+                        raise RuntimeError('helper setup failed')
+                run.prepare_visual_snapshot_reader = Mock(side_effect=prepare)
+                run.launch = Mock(side_effect=lambda name: events.append(name))
+                run.assert_running = Mock()
+                if failed:
+                    with self.assertRaisesRegex(RuntimeError, 'helper setup failed'):
+                        run.run()
+                    run.launch.assert_not_called()
+                    run.assert_running.assert_not_called()
+                else:
+                    run.run()
+                    self.assertEqual(['prepare', 'light-cold-start', 'light-warm-start',
+                                      'dark-cold-start', 'dark-warm-start'], events)
+                run.prepare_visual_snapshot_reader.assert_called_once()
+
     def test_cold_baseline_error_is_not_masked_by_missing_or_failed_warm_pid(self):
         for pid_result in ("", RuntimeError("pidof connection timed out")):
             with self.subTest(pid_result=str(pid_result)), tempfile.TemporaryDirectory() as temporary:

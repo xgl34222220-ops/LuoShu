@@ -775,6 +775,7 @@ class SmokeRun:
         self.snapshot_apk = snapshot_apk
         self.snapshot_child_prefetch = snapshot_child_prefetch
         self.snapshot_session: UiSnapshotSession | None = None
+        self.snapshot_preparation_started = False
         self.hierarchy_attempts = 0
         self.scroll_searches = 0
         self.hierarchy_backend = "uiautomator-cli"
@@ -943,6 +944,36 @@ class SmokeRun:
     def close_snapshot_session(self) -> None:
         if self.snapshot_session is not None:
             self.snapshot_session.close()
+
+    def prepare_visual_snapshot_reader(self) -> None:
+        """Prepare only the test connection, never an App launch or baseline sample."""
+        if self.snapshot_preparation_started:
+            raise RuntimeError("Visual snapshot reader preparation cannot be retried")
+        self.snapshot_preparation_started = True
+        started = time.monotonic()
+        deadline = started + 20
+        evidence = {"scope": "test-helper preparation only; not HOME baseline or App startup acceptance",
+                    "timeout_seconds": 20, "started_monotonic_seconds": started,
+                    "deadline_monotonic_seconds": deadline, "passed": False}
+        try:
+            if not self.visual_launch_only or self.snapshot_apk is None:
+                raise RuntimeError("Visual snapshot reader preparation requires the independent helper")
+            self.hierarchy_attempts += 1
+            evidence["hierarchy"] = f"hierarchy-{self.hierarchy_attempts:04d}.xml"
+            # The first real handshake consumes the existing twenty-second
+            # session ceiling. Its XML is diagnostic setup evidence only; each
+            # later baseline still requests three new live samples within 10s.
+            self.snapshot_hierarchy(deadline=deadline)
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Visual snapshot reader preparation exceeded 20s")
+            evidence["passed"] = True
+        except Exception as error:
+            evidence["error"] = f"{type(error).__name__}: {error}"
+            raise
+        finally:
+            evidence["elapsed_seconds"] = time.monotonic() - started
+            (self.output / "visual-snapshot-reader-preparation.json").write_text(
+                json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
 
     def logcat(self, filename: str = "logcat.txt") -> str:
         log = self.text("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime")
@@ -1873,6 +1904,8 @@ class SmokeRun:
         self.adb("shell", "wm", "dismiss-keyguard")
         self.adb("shell", "cmd", "uimode", "night", "no")
         if self.visual_launch_only:
+            if self.snapshot_apk is not None:
+                self.prepare_visual_snapshot_reader()
             errors = []
             for theme, mode in (("light", "no"), ("dark", "yes")):
                 self.adb("shell", "cmd", "uimode", "night", mode)
