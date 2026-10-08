@@ -1346,13 +1346,13 @@ public class SnapshotCacheCompatibilityTest {
                              focused_component(self.baseline_window("com.example.launcher/.Home")))
             self.assertEqual(5, run.adb.call_count)
             for call, png in zip(run.adb.call_args_list[1:], captures):
-                self.assertEqual(("exec-out", "sh", "-c"), call.args[:3])
-                self.assertIn("dumpsys window displays", call.args[3])
-                self.assertIn("screencap\n    _luoshu_home_capture_rc=$?", call.args[3])
-                self.assertIn("} | gzip -1\n_luoshu_home_rc=$?", call.args[3])
-                self.assertTrue(call.args[3].endswith('exit "$_luoshu_home_rc"\n'))
-                self.assertTrue(call.args[3].startswith("set -o pipefail || exit;"))
-                self.assertNotIn("screencap -p", call.args[3])
+                self.assertEqual(("shell", "-T"), call.args[:2])
+                self.assertIn("dumpsys window displays", call.args[2])
+                self.assertIn("screencap\n    _luoshu_home_capture_rc=$?", call.args[2])
+                self.assertIn("} | gzip -1\n_luoshu_home_rc=$?", call.args[2])
+                self.assertTrue(call.args[2].endswith('exit "$_luoshu_home_rc"\n'))
+                self.assertTrue(call.args[2].startswith("set -o pipefail || exit;"))
+                self.assertNotIn("screencap -p", call.args[2])
                 self.assertLessEqual(call.kwargs["timeout"], 10)
             self.assertEqual(4, run.snapshot_hierarchy.call_count)
             self.assertTrue(all(call.kwargs == {"deadline": 10} for call in run.snapshot_hierarchy.call_args_list))
@@ -1630,7 +1630,7 @@ public class SnapshotCacheCompatibilityTest {
             run.adb = self.baseline_adb(return_value=subprocess.CompletedProcess([], 0, self.baseline_batch(raw), b""))
             with patch("android_ui_smoke.time.sleep"):
                 run.wait_home_baseline("light-cold-start")
-            command = run.adb.call_args.args[3]
+            command = run.adb.call_args.args[2]
             binaries = directory / "bin"
             binaries.mkdir()
             dumpsys = binaries / "dumpsys"
@@ -1720,7 +1720,7 @@ public class SnapshotCacheCompatibilityTest {
                 if outcome == "bad-gzip":
                     batch = batch[:-1]
                 def capture(*args, **kwargs):
-                    actual_token = args[3].split("_luoshu_home_timing_token=", 1)[1].split()[0]
+                    actual_token = args[2].split("_luoshu_home_timing_token=", 1)[1].split()[0]
                     actual_stderr = stderr.replace(token.encode(), actual_token.encode())
                     if outcome == "timeout":
                         cause = subprocess.TimeoutExpired("adb", kwargs["timeout"],
@@ -1945,6 +1945,55 @@ exit 7
             self.assertEqual(5, timing["startup_evidence_seconds"])
             self.assertEqual("173202", timing["am_total_time_ms"])
             self.assertIn("startup evidence collection", timing["ui_ready_seconds_scope"])
+
+    def test_home_binary_transport_keeps_stderr_separate_and_rejects_merged_gzip(self):
+        # Real host pipes with a model of ADB raw/shell-v2 stream routing;
+        # Android behavior is evidenced by CI 37842823523, not this fixture.
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = SmokeRun(Path('app.apk'), directory, PACKAGE, None)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(return_value='com.example.launcher/.Home\n')
+            raw = self.baseline_raw()
+            batch = self.baseline_batch(raw)
+            policy = (self.baseline_policy() + self.baseline_window()).encode()
+            marker = b'\n[LUOSHU_HOME_BATCH_TIMING_V1] retained diagnostic bytes\n'
+            separator = b'\x00LUOSHU_HOME_BASELINE_RAW_GZIP\x00'
+            fixture = directory / 'adb_transport_fixture.py'
+            fixture.write_text(
+                'import sys\n'
+                f'batch={batch!r}\npolicy={policy!r}\nmarker={marker!r}\nseparator={separator!r}\n'
+                'args=sys.argv[1:]\n'
+                'if args == ["exec-out", "sh", "-c", "dumpsys window policy && dumpsys window displays"]:\n'
+                ' sys.stdout.buffer.write(policy)\n'
+                'elif args[:2] == ["shell", "-T"] and len(args)==3:\n'
+                ' sys.stdout.buffer.write(batch); sys.stderr.buffer.write(marker)\n'
+                'elif args[:3] == ["exec-out", "sh", "-c"]:\n'
+                ' before,compressed=batch.split(separator)\n'
+                ' sys.stdout.buffer.write(before+separator+marker+compressed+marker)\n'
+                'else:\n'
+                ' raise SystemExit(42)\n', encoding='utf-8')
+            run.adb_command = [sys.executable, str(fixture)]
+            old = run.adb('exec-out', 'sh', '-c', home_batch_capture_command('0123456789abcdef'))
+            self.assertEqual(b'', old.stderr)
+            with self.assertRaisesRegex(RuntimeError, 'gzip integrity failure'):
+                decompress_screencap_gzip(old.stdout.split(separator)[1])
+            baseline = run.wait_home_baseline('light-cold-start')
+            evidence = json.loads((directory / 'light-cold-start-baseline-readiness.json').read_text())
+            self.assertTrue(evidence['passed'])
+            self.assertEqual(10, evidence['timeout_seconds'])
+            self.assertEqual(3, len(evidence['samples']))
+            for sample in evidence['samples']:
+                self.assertEqual(batch, (directory / sample['batch_raw']).read_bytes())
+                self.assertEqual(marker, (directory / sample['stderr']).read_bytes())
+                compressed = (directory / sample['screencap_gzip']).read_bytes()
+                self.assertTrue(compressed.startswith(b'\x1f\x8b'))
+                self.assertEqual(raw, decompress_screencap_gzip(compressed))
+                bad_crc = compressed[:-8] + bytes([compressed[-8] ^ 0xff]) + compressed[-7:]
+                for corrupt in (compressed + marker, compressed[:-1], bad_crc):
+                    with self.assertRaises(RuntimeError):
+                        decompress_screencap_gzip(corrupt)
+            self.assertEqual(baseline, (directory / 'light-cold-start-baseline-02.png').read_bytes())
 
     def test_visual_reader_preparation_is_separate_and_baseline_uses_three_fresh_requests(self):
         from ui_snapshot_session_test import Clock, PrivateProtocol

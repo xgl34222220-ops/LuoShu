@@ -1435,7 +1435,10 @@ class SmokeRun:
                 pending_sample["stage"] = "capture"
                 pending_sample["capture_started_elapsed_seconds"] = round(batch_started - started, 6)
                 pending_sample["capture_timeout_seconds"] = remaining()
-                batch = self.adb("exec-out", "sh", "-c", command,
+                # exec-out's raw protocol merges remote stderr into stdout,
+                # corrupting this binary gzip stream with timing diagnostics.
+                # No PTY: shell v2 keeps both streams and the remote exit code.
+                batch = self.adb("shell", "-T", command,
                                  timeout=pending_sample["capture_timeout_seconds"], check=False)
                 batch_finished = time.monotonic()
                 pending_sample["capture_seconds"] = round(batch_finished - batch_started, 6)
