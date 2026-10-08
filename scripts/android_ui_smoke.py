@@ -776,6 +776,7 @@ class SmokeRun:
         self.snapshot_child_prefetch = snapshot_child_prefetch
         self.snapshot_session: UiSnapshotSession | None = None
         self.snapshot_preparation_started = False
+        self.visual_environment_preparation_started = False
         self.hierarchy_attempts = 0
         self.scroll_searches = 0
         self.hierarchy_backend = "uiautomator-cli"
@@ -973,6 +974,49 @@ class SmokeRun:
         finally:
             evidence["elapsed_seconds"] = time.monotonic() - started
             (self.output / "visual-snapshot-reader-preparation.json").write_text(
+                json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
+
+    def prepare_visual_environment(self) -> None:
+        """One bounded helper/Launcher setup; never prelaunch the target App."""
+        if self.visual_environment_preparation_started:
+            raise RuntimeError("Visual environment preparation cannot be retried")
+        self.visual_environment_preparation_started = True
+        started = time.monotonic()
+        deadline = started + 50
+        evidence = {"role": "fixture-preparation-only", "timeout_seconds": 50,
+                    "helper_timeout_seconds": 20, "launcher_timeout_seconds": 30,
+                    "started_monotonic_seconds": started, "deadline_monotonic_seconds": deadline,
+                    "passed": False, "app_launch_requested": False,
+                    "samples_reusable_for_acceptance": False}
+        try:
+            self.prepare_visual_snapshot_reader()
+            if time.monotonic() - started >= 20:
+                raise RuntimeError("Visual helper preparation exceeded 20s")
+            launcher_started = time.monotonic()
+            launcher_deadline = min(deadline, launcher_started + 30)
+            evidence["launcher_started_monotonic_seconds"] = launcher_started
+            evidence["launcher_deadline_monotonic_seconds"] = launcher_deadline
+            self.adb("shell", "input", "keyevent", "KEYCODE_HOME",
+                     timeout=launcher_deadline - time.monotonic())
+            remaining = launcher_deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("Visual Launcher preparation exceeded 30s")
+            # The booted emulator can still be loading Launcher predictions and
+            # installing stock-app icons. Verify its real pixels once; this is
+            # not any of the four measured cold/warm startup baselines.
+            self._capture_home_baseline("fixture-launcher-preparation", timeout=remaining,
+                                        role="fixture-preparation-only")
+            if time.monotonic() >= launcher_deadline:
+                raise RuntimeError("Visual Launcher preparation exceeded 30s")
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Visual environment preparation exceeded 50s")
+            evidence["passed"] = True
+        except Exception as error:
+            evidence["error"] = f"{type(error).__name__}: {error}"
+            raise
+        finally:
+            evidence["elapsed_seconds"] = time.monotonic() - started
+            (self.output / "visual-environment-preparation.json").write_text(
                 json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
 
     def logcat(self, filename: str = "logcat.txt") -> str:
@@ -1266,10 +1310,12 @@ class SmokeRun:
 
     def wait_home_baseline(self, name: str) -> bytes:
         """Require real Launcher content and three stable captures within 10s."""
+        return self._capture_home_baseline(name, timeout=10, role="startup-acceptance-baseline")
 
+    def _capture_home_baseline(self, name: str, *, timeout: float, role: str) -> bytes:
         started = time.monotonic()
-        deadline = started + 10
-        metadata: dict[str, object] = {"timeout_seconds": 10, "required_stable_captures": 3, "samples": [],
+        deadline = started + timeout
+        metadata: dict[str, object] = {"role": role, "timeout_seconds": timeout, "required_stable_captures": 3, "samples": [],
                                       "started_monotonic_seconds": started, "deadline_monotonic_seconds": deadline,
                                       "clock_scope": "host time.monotonic; not aligned with native uptime"}
         previous = None
@@ -1290,7 +1336,7 @@ class SmokeRun:
         def remaining() -> float:
             value = deadline - time.monotonic()
             if value <= 0:
-                raise RuntimeError("HOME baseline did not become focused and stable within 10s")
+                raise RuntimeError(f"HOME baseline did not become focused and stable within {timeout:g}s")
             return value
 
         def bounded_command(key: str, arguments: tuple[str, ...],
@@ -1430,7 +1476,7 @@ class SmokeRun:
                 launcher_content = home_launcher_content(root, home)
                 remaining()
                 # One fixed remote command avoids separate adb connections and
-                # unrelated full-window dump sections within the same 10s budget.
+                # unrelated full-window dump sections within the same fixed budget.
                 batch_started = time.monotonic()
                 pending_sample["stage"] = "capture"
                 pending_sample["capture_started_elapsed_seconds"] = round(batch_started - started, 6)
@@ -1487,7 +1533,7 @@ class SmokeRun:
                 pending_sample["raw_decode_seconds"] = round(time.monotonic() - decode_started, 6)
                 with captured:
                     # Preserve the exact full frame even when HOME geometry or
-                    # readiness fails; encoding remains inside the same 10s.
+                    # readiness fails; encoding remains inside the same fixed budget.
                     png_started = time.monotonic()
                     pending_sample["stage"] = "png-encode"
                     encoded = io.BytesIO()
@@ -1526,7 +1572,8 @@ class SmokeRun:
                     return png
                 time.sleep(min(.4, remaining()))
         except Exception as error:
-            self.home_baseline_failures.append({"name": name, "error": str(error)})
+            if role == "startup-acceptance-baseline":
+                self.home_baseline_failures.append({"name": name, "error": str(error)})
             metadata.update(passed=False, error=str(error))
             if pending_sample is not None:
                 metadata["failed_sample"] = pending_sample
@@ -1908,7 +1955,7 @@ class SmokeRun:
         self.adb("shell", "cmd", "uimode", "night", "no")
         if self.visual_launch_only:
             if self.snapshot_apk is not None:
-                self.prepare_visual_snapshot_reader()
+                self.prepare_visual_environment()
             errors = []
             for theme, mode in (("light", "no"), ("dark", "yes")):
                 self.adb("shell", "cmd", "uimode", "night", mode)

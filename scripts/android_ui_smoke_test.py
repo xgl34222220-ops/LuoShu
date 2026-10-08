@@ -2099,7 +2099,7 @@ exit 7
                     events.append('prepare')
                     if failed:
                         raise RuntimeError('helper setup failed')
-                run.prepare_visual_snapshot_reader = Mock(side_effect=prepare)
+                run.prepare_visual_environment = Mock(side_effect=prepare)
                 run.launch = Mock(side_effect=lambda name: events.append(name))
                 run.assert_running = Mock()
                 if failed:
@@ -2111,7 +2111,106 @@ exit 7
                     run.run()
                     self.assertEqual(['prepare', 'light-cold-start', 'light-warm-start',
                                       'dark-cold-start', 'dark-warm-start'], events)
+                run.prepare_visual_environment.assert_called_once()
+
+    def test_environment_preflight_samples_cannot_satisfy_startup_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            run = SmokeRun(Path('app.apk'), directory, PACKAGE, None, Path('reader.apk'),
+                           record_launch=True, visual_launch_only=True)
+            clock = [100.0]
+            self.prepare_baseline_reader(run)
+            filenames = []
+            def hierarchy(**kwargs):
+                filenames.append(f'hierarchy-{run.hierarchy_attempts:04d}.xml')
+                return self.baseline_hierarchy()
+            run.snapshot_hierarchy = Mock(side_effect=hierarchy)
+            def helper():
+                clock[0] += 10
+                run.hierarchy_attempts = 1  # Independent first-handshake evidence.
+            run.prepare_visual_snapshot_reader = Mock(side_effect=helper)
+            run.text = Mock(return_value='com.example.launcher/.Home\n')
+            baseline_adb = self.baseline_adb(return_value=subprocess.CompletedProcess(
+                [], 0, self.baseline_batch(self.baseline_raw()), b''))
+            def command(*args, **kwargs):
+                if args == ('shell', 'input', 'keyevent', 'KEYCODE_HOME'):
+                    clock[0] += .2
+                    return subprocess.CompletedProcess([], 0, b'', b'')
+                return baseline_adb(*args, **kwargs)
+            run.adb = Mock(side_effect=command)
+            with patch('android_ui_smoke.time.monotonic', side_effect=lambda: clock[0]), \
+                    patch('android_ui_smoke.time.sleep', side_effect=lambda amount: clock.__setitem__(0, clock[0]+amount)):
+                run.prepare_visual_environment()
+                run.wait_home_baseline('light-cold-start')
+                with self.assertRaisesRegex(RuntimeError, 'cannot be retried'):
+                    run.prepare_visual_environment()
+            preparation = json.loads((directory / 'fixture-launcher-preparation-baseline-readiness.json').read_text())
+            baseline = json.loads((directory / 'light-cold-start-baseline-readiness.json').read_text())
+            self.assertEqual('fixture-preparation-only', preparation['role'])
+            self.assertLessEqual(preparation['timeout_seconds'], 30)
+            self.assertEqual('startup-acceptance-baseline', baseline['role'])
+            self.assertEqual(10, baseline['timeout_seconds'])
+            self.assertEqual([1, 2, 3], [s['stable_captures'] for s in preparation['samples']])
+            self.assertEqual([1, 2, 3], [s['stable_captures'] for s in baseline['samples']])
+            self.assertEqual([f'hierarchy-{i:04d}.xml' for i in range(2, 8)], filenames)
+            self.assertFalse({s['hierarchy'] for s in preparation['samples']} &
+                             {s['hierarchy'] for s in baseline['samples']})
+            self.assertFalse(any('am' in call.args for call in run.adb.call_args_list))
+            self.assertEqual([], run.recordings)
+            self.assertEqual([], run.checks)
+            run.prepare_visual_snapshot_reader.assert_called_once()
+
+    def test_environment_preparation_keeps_twenty_thirty_and_fifty_second_limits(self):
+        for helper_seconds, home_seconds, capture_seconds, passed in (
+                (19, .2, 29, True), (20, 0, 0, False),
+                (19, 30, 0, False), (19, .2, 30, False)):
+            with self.subTest(timing=(helper_seconds, home_seconds, capture_seconds)), tempfile.TemporaryDirectory() as temporary:
+                run = SmokeRun(Path('app.apk'), Path(temporary), PACKAGE, None, Path('reader.apk'),
+                               record_launch=True, visual_launch_only=True)
+                clock = [100.0]
+                def advance(amount):
+                    clock[0] += amount
+                run.prepare_visual_snapshot_reader = Mock(side_effect=lambda: advance(helper_seconds))
+                run.adb = Mock(side_effect=lambda *args, **kwargs: advance(home_seconds))
+                def capture(name, *, timeout, role):
+                    self.assertEqual('fixture-launcher-preparation', name)
+                    self.assertEqual('fixture-preparation-only', role)
+                    self.assertLessEqual(timeout, 30-home_seconds)
+                    advance(capture_seconds)
+                run._capture_home_baseline = Mock(side_effect=capture)
+                with patch('android_ui_smoke.time.monotonic', side_effect=lambda: clock[0]):
+                    if passed:
+                        run.prepare_visual_environment()
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, 'exceeded'):
+                            run.prepare_visual_environment()
+                    with self.assertRaisesRegex(RuntimeError, 'cannot be retried'):
+                        run.prepare_visual_environment()
+                evidence = json.loads((Path(temporary) / 'visual-environment-preparation.json').read_text())
+                self.assertEqual(passed, evidence['passed'])
+                self.assertEqual(150, evidence['deadline_monotonic_seconds'])
+                self.assertFalse(evidence['app_launch_requested'])
+                self.assertFalse(evidence['samples_reusable_for_acceptance'])
                 run.prepare_visual_snapshot_reader.assert_called_once()
+                if helper_seconds >= 20:
+                    run.adb.assert_not_called()
+                if helper_seconds >= 20 or home_seconds >= 30:
+                    run._capture_home_baseline.assert_not_called()
+
+    def test_failed_launcher_preparation_cannot_trigger_diagnostic_app_launch(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = SmokeRun(Path('app.apk'), Path(temporary), PACKAGE, None, Path('reader.apk'),
+                           record_launch=True, visual_launch_only=True)
+            self.prepare_baseline_reader(run)
+            run.text = Mock(side_effect=RuntimeError('unresolved real Launcher'))
+            with self.assertRaisesRegex(RuntimeError, 'unresolved real Launcher'):
+                run._capture_home_baseline('fixture-launcher-preparation', timeout=30,
+                                           role='fixture-preparation-only')
+            self.assertEqual([], run.home_baseline_failures)
+            evidence = json.loads((Path(temporary) / 'fixture-launcher-preparation-baseline-readiness.json').read_text())
+            self.assertFalse(evidence['passed'])
+            self.assertEqual('fixture-preparation-only', evidence['role'])
+            self.assertEqual([], run.recordings)
 
     def test_cold_baseline_error_is_not_masked_by_missing_or_failed_warm_pid(self):
         for pid_result in ("", RuntimeError("pidof connection timed out")):
