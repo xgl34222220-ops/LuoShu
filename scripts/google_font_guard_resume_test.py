@@ -36,6 +36,18 @@ class ExplicitReconcileTest(unittest.TestCase):
 
 
 class DisabledModuleFallbackRequestTest(unittest.TestCase):
+    command = fixtures.ProviderLifecycleTest.command
+
+    def request_env(self, module, uid):
+        # The host may be unprivileged; model only the wrapper's id -u boundary.
+        self.bin = module / 'bin'
+        self.bin.mkdir()
+        self.command('id', '[ "$#" = 1 ] && [ "$1" = -u ] || exit 2\n'
+                     f"printf '{uid}\\n'\n")
+        return dict(os.environ, MODDIR=str(module),
+                    LUOSHU_TASK_SCOPE_PID=str(os.getpid()),
+                    PATH=f'{self.bin}:{os.environ["PATH"]}')
+
     def test_disabled_or_removing_module_rejects_writes_before_initialization(self):
         source = Path(__file__).resolve().parents[1] / 'common/google_font_fallback.sh'
         for marker in ('disable', 'remove'):
@@ -67,23 +79,59 @@ class DisabledModuleFallbackRequestTest(unittest.TestCase):
 
     def test_disabled_module_keeps_explicit_restore_available(self):
         source = Path(__file__).resolve().parents[1] / 'common/google_font_fallback.sh'
-        for action in ('restore', 'restore-owned'):
-            with self.subTest(action=action), tempfile.TemporaryDirectory() as tmp:
+        for marker, action in ((marker, action) for marker in ('disable', 'remove')
+                               for action in ('restore', 'restore-owned')):
+            with self.subTest(marker=marker, action=action), tempfile.TemporaryDirectory() as tmp:
                 module = Path(tmp)
                 common = module / 'common'
                 common.mkdir()
                 bridge = common / source.name
                 bridge.write_bytes(source.read_bytes())
-                (module / 'disable').touch()
+                (module / marker).touch()
                 launcher = common / 'python/bin/luoshu-python'
                 launcher.parent.mkdir(parents=True)
                 launcher.write_text('#!/bin/sh\nprintf \'{"status":"ok","action":"%s"}\\n\' "$2"\n')
                 launcher.chmod(0o700)
                 result = subprocess.run(['sh', str(bridge), action],
-                    env=dict(os.environ, MODDIR=str(module), LUOSHU_TASK_SCOPE_PID=str(os.getpid())),
+                    env=self.request_env(module, uid=0),
                     text=True, capture_output=True, timeout=5)
                 self.assertEqual(result.returncode, 0, result)
                 self.assertEqual(json.loads(result.stdout)['action'], action)
+
+    def test_non_root_fixture_denies_restore_before_launcher_or_component_writes(self):
+        source = Path(__file__).resolve().parents[1] / 'common/google_font_fallback.sh'
+        for marker in ('disable', 'remove'):
+            for action in ('restore', 'restore-owned'):
+                with self.subTest(marker=marker, action=action), tempfile.TemporaryDirectory() as tmp:
+                    module = Path(tmp)
+                    common = module / 'common'
+                    common.mkdir()
+                    bridge = common / source.name
+                    bridge.write_bytes(source.read_bytes())
+                    (module / marker).touch()
+                    # Runtime initialization precedes the permission check; this
+                    # fixture makes no claim about all initialization writes.
+                    (common / 'runtime_paths.sh').write_text(
+                        'luoshu_runtime_paths_init() { return 0; }\n')
+                    journal = module / 'original-undo.json'
+                    original = b'{"original":0,"fixture":"preserve"}\n'
+                    journal.write_bytes(original)
+                    launcher = common / 'python/bin/luoshu-python'
+                    launcher.parent.mkdir(parents=True)
+                    launcher.write_text('#!/bin/sh\ntouch "$MODDIR/executed"\n'
+                                        'pm disable fixture-component\n')
+                    launcher.chmod(0o700)
+                    env = self.request_env(module, uid=1001)
+                    self.command('pm', 'touch "$MODDIR/component-write"\n')
+                    result = subprocess.run(['sh', str(bridge), action], env=env,
+                                            text=True, capture_output=True, timeout=5)
+                    self.assertEqual(result.returncode, 1, result)
+                    response = json.loads(result.stdout)
+                    self.assertEqual(response['status'], 'error')
+                    self.assertIn('Root', response['message'])
+                    self.assertFalse((module / 'executed').exists(), result)
+                    self.assertFalse((module / 'component-write').exists(), result)
+                    self.assertEqual(journal.read_bytes(), original)
 
 
 if __name__ == '__main__':

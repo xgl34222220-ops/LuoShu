@@ -202,6 +202,70 @@ public final class SnapshotInstrumentation extends Instrumentation {
         }
     }
 
+    private static int windowCountWhitespaceEnd(String value, int offset) {
+        while (offset < value.length()) {
+            char character = value.charAt(offset);
+            if (character != ' ' && character != '\t' && character != '\r' && character != '\n') break;
+            offset++;
+        }
+        return offset;
+    }
+
+    private static boolean completeWindowCountEvidence(String records) {
+        if (records == null || records.length() > 70000) return false;
+        int offset = windowCountWhitespaceEnd(records, 0);
+        if (offset == records.length() || records.charAt(offset++) != '[') return false;
+        offset = windowCountWhitespaceEnd(records, offset);
+        if (offset < records.length() && records.charAt(offset) == ']') {
+            return windowCountWhitespaceEnd(records, offset + 1) == records.length();
+        }
+        // This is the helper's four-number metadata grammar, not arbitrary JSON.
+        // Iterate flat records rather than a recursive array regex or a lenient
+        // parser that could retain comments, text, duplicate keys or hierarchy.
+        java.util.regex.Matcher object = java.util.regex.Pattern.compile(
+                "[ \\t\\r\\n]*\\{([^{}]*)\\}[ \\t\\r\\n]*").matcher(records);
+        java.util.regex.Pattern memberPattern = java.util.regex.Pattern.compile(
+                "[ \\t\\r\\n]*\"(elapsed_ms|windows|active|focused)\"[ \\t\\r\\n]*:[ \\t\\r\\n]*(0|[1-9][0-9]{0,18})[ \\t\\r\\n]*");
+        while (offset < records.length()) {
+            object.region(offset, records.length());
+            if (!object.lookingAt()) return false;
+            String fields = object.group(1);
+            java.util.regex.Matcher member = memberPattern.matcher(fields);
+            long[] values = new long[4];
+            int seen = 0;
+            int fieldOffset = 0;
+            while (fieldOffset < fields.length()) {
+                member.region(fieldOffset, fields.length());
+                if (!member.lookingAt()) return false;
+                String key = member.group(1);
+                int index = "elapsed_ms".equals(key) ? 0 : "windows".equals(key) ? 1 : "active".equals(key) ? 2 : 3;
+                if ((seen & (1 << index)) != 0) return false;
+                seen |= 1 << index;
+                try {
+                    values[index] = Long.parseLong(member.group(2));
+                } catch (NumberFormatException invalidNumber) {
+                    return false;
+                }
+                fieldOffset = member.end();
+                if (fieldOffset == fields.length()) break;
+                if (fields.charAt(fieldOffset++) != ',') return false;
+                // Require another member after a comma, even with whitespace.
+                if (windowCountWhitespaceEnd(fields, fieldOffset) == fields.length()) return false;
+            }
+            if (seen != 15 || values[1] > Integer.MAX_VALUE || values[2] > values[1] || values[3] > values[1]) return false;
+            // Active and focused can overlap; elapsed_ms can include a real
+            // return after the unchanged root deadline. Preserve both facts.
+            offset = object.end();
+            if (offset == records.length()) return false;
+            if (records.charAt(offset) == ']') {
+                return windowCountWhitespaceEnd(records, offset + 1) == records.length();
+            }
+            if (records.charAt(offset++) != ',') return false;
+            offset = windowCountWhitespaceEnd(records, offset);
+        }
+        return false;
+    }
+
     private static void snapshotDiagnostics(Bundle diagnostics, Bundle result) {
         // Do not merge a snapshot result: its unprefixed snapshot/error keys
         // would change the final Instrumentation code for a normal session stop.
@@ -218,10 +282,22 @@ public final class SnapshotInstrumentation extends Instrumentation {
         for (String key : fields) lastDiagnostic(diagnostics, "snapshot_" + key, result.getString(key));
         // Keep the bounded JSON complete; generic 1024-character truncation
         // would turn the retained call records into invalid JSON.
-        for (String field : new String[] {"child_query_records", "root_query_records", "window_counts"}) {
+        for (String field : new String[] {"child_query_records", "root_query_records"}) {
             String records = result.getString(field);
             if (diagnostics != null && records != null && records.length() <= 70000) {
                 diagnostics.putString("helper_last_snapshot_" + field, records);
+            }
+        }
+        if (diagnostics != null) {
+            // An unavailable/rejected observation must not retain old counts.
+            diagnostics.remove("helper_last_snapshot_window_counts");
+            String counts = result.getString("window_counts");
+            if (completeWindowCountEvidence(counts)) {
+                diagnostics.putString("helper_last_snapshot_window_counts", counts);
+                lastDiagnostic(diagnostics, "snapshot_window_counts_status", "complete");
+            } else {
+                lastDiagnostic(diagnostics, "snapshot_window_counts_status", counts == null ? "unavailable"
+                        : counts.length() > 70000 ? "oversize" : "invalid-schema");
             }
         }
     }

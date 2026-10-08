@@ -42,6 +42,8 @@ class NativeSnapshotPublicationTest(unittest.TestCase):
             '    private void rootQueryStarted(',
             '    private void rootQueryReturned(',
             '    private void recordRootQuery(',
+            '    private static int windowCountWhitespaceEnd(',
+            '    private static boolean completeWindowCountEvidence(',
             '    private static void snapshotDiagnostics(',
             '    private static JSONObject serviceInfoEvidence(',
             '    private static void refreshLegacyAccessibilityCache(',

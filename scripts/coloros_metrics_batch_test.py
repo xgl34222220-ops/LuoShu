@@ -16,6 +16,7 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib.sfnt import SFNTReader
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from font_inventory import _read_metrics
 import coloros_metrics_batch as batch
@@ -107,6 +108,30 @@ class ColorOSMetricsTest(unittest.TestCase):
             font_file(path)
         os.environ[f'LUOSHU_{partition.upper()}_FONTS_ROOT'] = str(root)
         return path
+
+    def collection_file(self, path, faces=2, missing_last_cmap=False):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        members = []
+        try:
+            for index in range(faces):
+                member = self.root / f'collection-face-{index}.ttf'
+                font_file(member, top=800 + index * 100)
+                font = TTFont(member)
+                if missing_last_cmap and index == faces - 1:
+                    del font['cmap']
+                members.append(font)
+            collection = TTCollection()
+            collection.fonts = members
+            collection.save(path)
+        finally:
+            for font in members:
+                font.close()
+        return path
+
+    def real_collection_slot(self, name='SysFont-Regular.ttf', face=1):
+        path = self.collection_file(self.stock_file(name))
+        fmt, metrics = _read_metrics(path, face)
+        return path, {'format': fmt, 'faceIndex': face, 'metrics': metrics}
 
     def test_restores_each_existing_alias_and_preserves_real_weight_source(self):
         regular = self.target()
@@ -292,10 +317,225 @@ class ColorOSMetricsTest(unittest.TestCase):
         with TTFont(first) as a, TTFont(second) as b:
             collection = TTCollection(); collection.fonts = [a, b]; collection.save(path)
         original = path.read_bytes()
+        stock_path = self.stock_file(path.name)
+        stock_path.write_bytes(original)
         self.inventory({'/system/fonts/SysSans-Hans-Regular.ttc': {**stock(), 'faceIndex': 1}})
         self.assertEqual(batch.build(self.module, self.stage)['mapped'], 0)
         self.assertEqual(path.read_bytes(), original)
         self.assertEqual(self.report()[0]['reason'], 'collection-metrics-preserved')
+
+    def test_incomplete_staged_collection_keeps_every_stock_face_visible(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        original = stock_path.read_bytes()
+        path = self.collection_file(self.target(name), faces=1)
+        self.inventory({f'/system/fonts/{name}': slot})
+
+        result = batch.build(self.module, self.stage)
+
+        self.assertFalse(path.exists(), 'ttcf header is not proof that stock face 1 survives')
+        self.assertEqual(stock_path.read_bytes(), original)
+        with TTFont(stock_path, fontNumber=1) as retained:
+            self.assertEqual(retained['glyf']['A'].yMax, 900)
+        self.assertEqual(result['mapped'], 0)
+        self.assertEqual(self.report()[0]['reason'], 'stock-collection-slot-preserved')
+
+    def test_staged_collection_requires_all_faces_readable_not_only_selected_index(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name, face=0)
+        original = stock_path.read_bytes()
+        path = self.collection_file(self.target(name), missing_last_cmap=True)
+        self.inventory({f'/system/fonts/{name}': slot})
+        result = batch.build(self.module, self.stage)
+        self.assertFalse(path.exists(), 'an unreadable unselected face still violates the stock collection')
+        self.assertEqual(stock_path.read_bytes(), original)
+        self.assertEqual(result['mapped'], 0)
+
+    def test_truncated_staged_collection_exposes_stock_without_parsing_metrics(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        original = stock_path.read_bytes()
+        path = self.target(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'ttcf\x00\x01\x00\x00\x00\x00\x00\x02\x00')
+        self.inventory({f'/system/fonts/{name}': slot})
+        with patch.object(batch, 'write_metrics', side_effect=AssertionError('unreadable collection writer')):
+            batch.build(self.module, self.stage)
+        self.assertFalse(path.exists())
+        self.assertEqual(stock_path.read_bytes(), original)
+
+    def test_collection_stock_missing_or_invalid_contract_fails_without_stage_mutation(self):
+        name = 'SysFont-Regular.ttf'
+        for failure in ('missing-stock', 'broken-stock', 'invalid-index'):
+            with self.subTest(failure=failure):
+                stock_path, slot = self.real_collection_slot(name)
+                path = self.collection_file(self.target(name))
+                original = path.read_bytes()
+                if failure == 'missing-stock':
+                    stock_path.unlink()
+                elif failure == 'broken-stock':
+                    stock_path.write_bytes(b'ttcfbroken')
+                else:
+                    slot['faceIndex'] = 2
+                self.inventory({f'/system/fonts/{name}': slot})
+                with self.assertRaisesRegex(ValueError, '原厂.*集合|原厂.*索引'):
+                    batch.build(self.module, self.stage)
+                self.assertEqual(path.read_bytes(), original)
+
+    def test_matching_staged_collection_keeps_faces_and_bytes(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        original_stock = stock_path.read_bytes()
+        path = self.collection_file(self.target(name))
+        original = path.read_bytes()
+        self.inventory({f'/system/fonts/{name}': slot})
+        self.assertEqual(batch.build(self.module, self.stage)['mapped'], 0)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(stock_path.read_bytes(), original_stock)
+        self.assertEqual(self.report()[0]['reason'], 'collection-metrics-preserved')
+
+    def test_collection_index_type_and_declared_container_must_match_real_stock(self):
+        name = 'SysFont-Regular.ttf'
+        for failure in ('negative-index', 'boolean-index', 'string-index',
+                        'stock-collection-declared-single', 'stock-single-declared-collection'):
+            with self.subTest(failure=failure):
+                stock_path, slot = self.real_collection_slot(name, face=0)
+                path = self.collection_file(self.target(name))
+                if failure == 'negative-index':
+                    slot['faceIndex'] = -1
+                elif failure == 'boolean-index':
+                    slot['faceIndex'] = False
+                    font_file(path)
+                elif failure == 'string-index':
+                    slot['faceIndex'] = '0'
+                elif failure == 'stock-collection-declared-single':
+                    slot['format'] = 'TTF'
+                else:
+                    font_file(stock_path)
+                original_stock, original_stage = stock_path.read_bytes(), path.read_bytes()
+                self.inventory({f'/system/fonts/{name}': slot})
+                with self.assertRaisesRegex(ValueError, '原厂.*集合|原厂.*索引'):
+                    batch.build(self.module, self.stage)
+                self.assertEqual(stock_path.read_bytes(), original_stock)
+                self.assertEqual(path.read_bytes(), original_stage)
+
+    def test_extra_staged_faces_are_not_a_matching_stock_collection(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        original_stock = stock_path.read_bytes()
+        path = self.collection_file(self.target(name), faces=3)
+        self.inventory({f'/system/fonts/{name}': slot})
+        batch.build(self.module, self.stage)
+        self.assertFalse(path.exists())
+        self.assertEqual(stock_path.read_bytes(), original_stock)
+
+    def test_unselected_stock_face_must_be_readable_before_alias_can_be_removed(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name, face=0)
+        self.collection_file(stock_path, missing_last_cmap=True)
+        path = self.collection_file(self.target(name), faces=1)
+        original_stock, original_stage = stock_path.read_bytes(), path.read_bytes()
+        self.inventory({f'/system/fonts/{name}': slot})
+        with self.assertRaisesRegex(ValueError, '原厂.*集合结构无效'):
+            batch.build(self.module, self.stage)
+        self.assertEqual(stock_path.read_bytes(), original_stock)
+        self.assertEqual(path.read_bytes(), original_stage)
+
+    def test_invalid_unselected_face_header_is_not_a_readable_collection_contract(self):
+        name = 'SysFont-Regular.ttf'
+        for bad_stock in (True, False):
+            with self.subTest(bad_stock=bad_stock):
+                stock_path, slot = self.real_collection_slot(name, face=0)
+                path = self.collection_file(self.target(name))
+                invalid = stock_path if bad_stock else path
+                with TTCollection(invalid) as collection:
+                    collection.fonts[1]['head'].unitsPerEm = 0
+                    collection.save(invalid)
+                original_stock, original_stage = stock_path.read_bytes(), path.read_bytes()
+                self.inventory({f'/system/fonts/{name}': slot})
+                if bad_stock:
+                    with self.assertRaisesRegex(ValueError, '原厂.*集合结构无效'):
+                        batch.build(self.module, self.stage)
+                    self.assertEqual(path.read_bytes(), original_stage)
+                else:
+                    batch.build(self.module, self.stage)
+                    self.assertFalse(path.exists())
+                self.assertEqual(stock_path.read_bytes(), original_stock)
+
+    def test_collection_guard_uses_stock_namespace_for_cross_partition_absolute_links(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        product = self.collection_file(self.stock_file('RealCollection.ttc', 'product'))
+        stock_path.unlink()
+        stock_path.symlink_to('/product/fonts/RealCollection.ttc')
+        original_stock = product.read_bytes()
+        path = self.collection_file(self.target(name), faces=1)
+        self.inventory({f'/system/fonts/{name}': slot})
+        batch.build(self.module, self.stage)
+        self.assertFalse(path.exists())
+        self.assertEqual(product.read_bytes(), original_stock)
+
+    def test_collection_guard_rejects_stage_as_an_explicit_stock_view(self):
+        name = 'SysFont-Regular.ttf'
+        path = self.collection_file(self.target(name))
+        original = path.read_bytes()
+        os.environ['LUOSHU_SYSTEM_FONTS_ROOT'] = str(path.parent)
+        self.inventory({f'/system/fonts/{name}': {**stock(), 'format': 'TTC', 'faceIndex': 1}})
+        with self.assertRaisesRegex(ValueError, '原厂.*可信'):
+            batch.build(self.module, self.stage)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_collection_all_face_inspection_is_cached_for_hardlinked_aliases(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        path = self.collection_file(self.target(name))
+        second_name = 'SysFont-Bold.ttf'
+        os.link(stock_path, stock_path.with_name(second_name))
+        second = self.target(second_name)
+        os.link(path, second)
+        self.inventory({f'/system/fonts/{name}': slot,
+                        f'/system/fonts/{second_name}': {**slot, 'faceIndex': 0}})
+        reads = []
+        table_reads = {}
+        original_open = Path.open
+        original_table_read = SFNTReader.__getitem__
+        def counted_open(candidate, *args, **kwargs):
+            if candidate in (path, second, stock_path, stock_path.with_name(second_name)):
+                reads.append(candidate.name + ':' + (args[0] if args else kwargs.get('mode', 'r')))
+            return original_open(candidate, *args, **kwargs)
+        def counted_table_read(reader, tag):
+            key = (str(reader.file.name), reader.tables['head'].offset, str(tag))
+            table_reads[key] = table_reads.get(key, 0) + 1
+            return original_table_read(reader, tag)
+        with patch.object(Path, 'open', counted_open), \
+                patch.object(SFNTReader, '__getitem__', counted_table_read), \
+                patch.object(batch, 'write_metrics', side_effect=AssertionError('collection writer')):
+            result = batch.build(self.module, self.stage)
+        self.assertEqual(result['mapped'], 0)
+        self.assertEqual(reads, ['SysFont-Bold.ttf:rb', 'SysFont-Bold.ttf:rb',
+                                 'SysFont-Bold.ttf:rb', 'SysFont-Regular.ttf:rb'])
+        self.assertEqual({row['stockFaceCount'] for row in self.report()}, {2})
+        self.assertEqual(len(table_reads), 32, 'eight core tables per face in each namespace')
+        self.assertEqual(set(table_reads.values()), {1}, 'hardlinked aliases never reread font tables')
+
+    def test_incomplete_collection_is_not_removed_if_another_job_fails(self):
+        name = 'SysFont-Regular.ttf'
+        stock_path, slot = self.real_collection_slot(name)
+        path = self.collection_file(self.target(name), faces=1)
+        normal = self.target('SysSans-Hans-Regular.ttf'); font_file(normal)
+        broken = self.target('SysSans-Z-Broken.ttf'); broken.write_bytes(b'brokenfont')
+        original_stage, original_stock = path.read_bytes(), stock_path.read_bytes()
+        original_normal = normal.read_bytes()
+        self.inventory({f'/system/fonts/{name}': slot,
+                        '/system/fonts/SysSans-Hans-Regular.ttf': stock(),
+                        '/system/fonts/SysSans-Z-Broken.ttf': stock()})
+        with self.assertRaises(Exception):
+            batch.build(self.module, self.stage)
+        self.assertEqual(path.read_bytes(), original_stage)
+        self.assertEqual(stock_path.read_bytes(), original_stock)
+        self.assertEqual(normal.read_bytes(), original_normal)
+        self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
+        self.assertFalse(list(self.stage.glob('.coloros-metrics-*')))
 
     def test_single_face_alias_keeps_stock_collection_and_nonzero_faces_visible(self):
         for name, fmt, face in (('SysFont-Regular.ttf', 'TTC', 1),
@@ -329,7 +569,7 @@ class ColorOSMetricsTest(unittest.TestCase):
     def test_nonzero_stock_index_alias_is_preserved_before_metrics_reads(self):
         path = self.target('SysFont-Regular.ttf')
         font_file(path)
-        slot = {**stock(), 'faceIndex': 1}
+        _, slot = self.real_collection_slot(path.name)
         self.inventory({'/system/fonts/SysFont-Regular.ttf': slot})
         with patch.object(batch, 'write_metrics', side_effect=AssertionError('unsafe single-face write')):
             result = batch.build(self.module, self.stage)
@@ -340,6 +580,7 @@ class ColorOSMetricsTest(unittest.TestCase):
     def test_stock_collection_alias_is_preserved_even_when_metrics_are_invalid(self):
         path = self.target('SysFont-Regular.ttf')
         font_file(path)
+        self.real_collection_slot(path.name)
         self.inventory({'/system/fonts/SysFont-Regular.ttf': {'format': 'TTC', 'metrics': {}}})
         result = batch.build(self.module, self.stage)
         self.assertFalse(path.exists())
@@ -373,6 +614,7 @@ class ColorOSMetricsTest(unittest.TestCase):
         first = self.target('SysSans-Hans-Regular.ttf'); font_file(first)
         second = self.target('SysSans-Z-Broken.ttf'); second.write_bytes(b'brokenfont')
         guarded = self.target('SysFont-Regular.ttf'); font_file(guarded)
+        self.real_collection_slot(guarded.name)
         self.inventory({'/system/fonts/SysSans-Hans-Regular.ttf': stock(),
                         '/system/fonts/SysSans-Z-Broken.ttf': stock(),
                         '/system/fonts/SysFont-Regular.ttf': {**stock(), 'format': 'TTC', 'faceIndex': 1}})
@@ -542,6 +784,40 @@ class ColorOSRoutingTest(unittest.TestCase):
         self.assertEqual(donor.read_bytes(), before)
         self.assertEqual(self.reports[self.GOOGLE]['cjkRoutingReason'], 'stock-latin-primary')
         self.assertEqual(self.reports[self.GOOGLE]['slotSource'], 'stock-inventory')
+
+    def test_empty_final_fallback_mapping_keeps_visible_primary_han(self):
+        self.pair()
+        main = self.fonts / Path(self.MAIN).name
+        with TTFont(main) as font:
+            name = font.getBestCmap()[self.HAN]
+            font['glyf'][name] = TTGlyphPen(None).glyph()
+            font.save(main)
+        self.build()
+        google = self.stage / 'product/fonts' / Path(self.GOOGLE).name
+        with TTFont(google) as font:
+            cmap = font.getBestCmap()
+            self.assertIn(self.HAN, cmap, 'an empty staged fallback cannot authorize primary pruning')
+            self.assertGreater(font['glyf'][cmap[self.HAN]].numberOfContours, 0)
+            self.assertNotIn(self.EXTRA_HAN, cmap, 'positive final fallback geometry still permits pruning')
+        with TTFont(main) as font:
+            self.assertEqual(font['glyf'][font.getBestCmap()[self.HAN]].numberOfContours, 0)
+        report = self.reports[self.GOOGLE]
+        self.assertEqual(report['cjkUnprovenMappingsPreserved'], 1)
+        self.assertEqual(report['cjkRoutingReason'], 'stock-latin-primary-unproven-glyphs-preserved')
+
+    def test_final_fallback_failure_keeps_every_alias_and_removal_pending(self):
+        self.pair()
+        main = self.fonts / Path(self.MAIN).name
+        donor = self.fonts / '.luoshu-font-store/regular.font'
+        original_main, original_donor = main.read_bytes(), donor.read_bytes()
+        with patch.object(batch, 'write_metrics', side_effect=ValueError('final fallback generation')):
+            with self.assertRaisesRegex(ValueError, 'final fallback generation'):
+                self.build()
+        self.assertEqual(main.read_bytes(), original_main)
+        self.assertEqual(donor.read_bytes(), original_donor)
+        self.assertFalse((self.stage / 'product/fonts' / Path(self.GOOGLE).name).exists())
+        self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
+        self.assertFalse(list(self.stage.glob('.coloros-metrics-*')))
 
     def test_cff_and_variable_retained_outlines_and_variants_survive(self):
         for cff, variable in ((True, False), (False, True)):

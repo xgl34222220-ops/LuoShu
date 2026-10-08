@@ -63,6 +63,7 @@ jobs:
           python3 scripts/ui_snapshot_session_test.py
           python3 scripts/ui_snapshot_java_test.py
       - name: Run current debug unit tests
+        if: ${{ !cancelled() }}
         working-directory: android-app
         shell: bash
         run: |
@@ -84,7 +85,9 @@ jobs:
           set -o pipefail
           gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-build.log"
       - name: Upload emulator APK
-        if: ${{ steps.apk-build.outcome == 'success' }}
+        # A failed helper gate still fails this job. Preserve a successfully
+        # built exact-SHA APK for independent emulator evidence, not delivery.
+        if: ${{ !cancelled() && steps.apk-build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: LuoShu-UI-Smoke-APK
@@ -93,13 +96,13 @@ jobs:
           retention-days: 7
       - name: Build independent real accessibility snapshot test helper
         id: snapshot-build
-        if: ${{ steps.apk-build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.apk-build.outcome == 'success' }}
         shell: bash
         run: |
           set -o pipefail
           sh scripts/build_ui_snapshot_helper.sh ui-snapshot-apk/luoshu-ui-snapshot.apk 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-snapshot-build.log"
       - name: Upload independent snapshot test helper
-        if: ${{ steps.snapshot-build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.snapshot-build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: LuoShu-UI-Snapshot-Test-Helper

@@ -529,5 +529,107 @@ _hyperos_clock_ui_files() { :; }
         self.assertIn('HyperOS 字体处理失败', result.stderr)
 
 
+class FinalFallbackRoutingTest(unittest.TestCase):
+    """Actual SFNT routing; these fixtures are never incident-device fonts."""
+    CHAT = 0x804A
+
+    def chat_pair(self, *, empty=True):
+        from coloros_metrics_batch_test import ColorOSRoutingTest, font_file as make_font
+        import composite_font
+        from fontTools.pens.boundsPen import BoundsPen
+        harness = ColorOSRoutingTest()
+        harness.setUp(); self.addCleanup(harness.doCleanups)
+        harness.pair()
+        points = set(harness.POINTS) | set(composite_font.REQUIRED_LATIN) | set(composite_font.REQUIRED_DIGITS) | set(composite_font.CJK_PROBES) | {self.CHAT}
+        donor = harness.fonts / '.luoshu-font-store/regular.font'
+        fallback = harness.fonts / 'SysSans-Hans-Regular.ttf'
+        for path in (donor, fallback):
+            make_font(path, points=points)
+            with TTFont(path, recalcTimestamp=False) as font:
+                font['head'].created = font['head'].modified = 3500000000
+                if empty and path == fallback:
+                    font['glyf'][font.getBestCmap()[self.CHAT]] = TTGlyphPen(None).glyph()
+                font.save(path)
+        validation = composite_font._validate_output(fallback)
+        self.assertEqual(validation['inkValidation']['codepoints'], 77, 'all original bounded probes still pass')
+        return harness, donor, fallback
+
+    def bounds(self, path, codepoint):
+        from fontTools.pens.boundsPen import BoundsPen
+        with TTFont(path) as font:
+            name = font.getBestCmap().get(codepoint)
+            if name is None: return None
+            glyphs = font.getGlyphSet(); pen = BoundsPen(glyphs)
+            glyphs[name].draw(pen)
+            return pen.bounds
+
+    def test_empty_chat_fallback_does_not_prune_visible_primary(self):
+        harness, donor, fallback = self.chat_pair()
+        self.assertIsNotNone(self.bounds(donor, self.CHAT))
+        self.assertIsNone(self.bounds(fallback, self.CHAT))
+        harness.build()
+        primary = harness.stage / 'product/fonts/GoogleSansText-Regular.ttf'
+        with TTFont(primary) as font:
+            self.assertIn(self.CHAT, font.getBestCmap(), 'unproved final fallback must retain the visible primary glyph')
+            self.assertNotIn(harness.HAN, font.getBestCmap(), 'proved fallback glyphs still route normally')
+        self.assertIsNotNone(self.bounds(primary, self.CHAT))
+        self.assertGreater(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 0)
+        self.assertIn('unproven-glyphs-preserved', harness.reports[harness.GOOGLE]['cjkRoutingReason'])
+
+    def test_unmapped_final_fallback_is_counted_and_primary_is_retained(self):
+        harness, donor, fallback = self.chat_pair(empty=False)
+        with TTFont(fallback, recalcTimestamp=False) as font:
+            for table in font['cmap'].tables:
+                if table.isUnicode() and table.format != 14: table.cmap.pop(self.CHAT, None)
+            font.save(fallback)
+        harness.build()
+        self.assertIsNotNone(self.bounds(harness.stage/'product/fonts/GoogleSansText-Regular.ttf', self.CHAT))
+        self.assertEqual(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 1)
+
+    def test_another_fallback_cannot_mask_mapped_empty_main_glyph(self):
+        from coloros_metrics_batch_test import font_file as make_font
+        harness, donor, fallback = self.chat_pair()
+        with TTFont(donor) as font: points = tuple(font.getBestCmap())
+        second = harness.fonts/'MiSansVF.ttf';make_font(second, points=points)
+        harness.stock('/system/fonts/MiSansVF.ttf', points)
+        harness.build()
+        self.assertIsNone(self.bounds(fallback, self.CHAT))
+        self.assertIsNotNone(self.bounds(second, self.CHAT))
+        self.assertIsNotNone(self.bounds(harness.stage/'product/fonts/GoogleSansText-Regular.ttf', self.CHAT))
+        self.assertGreater(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 0)
+
+    def test_final_generated_fallback_not_only_source_cmap_is_checked(self):
+        import coloros_metrics_batch as coloros
+        harness, donor, fallback = self.chat_pair(empty=False)
+        original = coloros.write_metrics
+        def empty_final(source, output, *args, **kwargs):
+            report = original(source, output, *args, **kwargs)
+            if source == fallback:
+                with TTFont(output, recalcTimestamp=False) as font:
+                    font['glyf'][font.getBestCmap()[self.CHAT]] = TTGlyphPen(None).glyph()
+                    font.save(output)
+            return report
+        with patch.object(coloros, 'write_metrics', side_effect=empty_final):
+            harness.build()
+        self.assertIsNotNone(self.bounds(donor, self.CHAT))
+        self.assertIsNone(self.bounds(fallback, self.CHAT))
+        self.assertIsNotNone(self.bounds(harness.stage / 'product/fonts/GoogleSansText-Regular.ttf', self.CHAT))
+        self.assertGreater(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 0)
+
+    def test_collapsed_final_fallback_keeps_primary_and_multiple_slots_share_proof(self):
+        harness, donor, fallback = self.chat_pair(empty=False)
+        with TTFont(fallback, recalcTimestamp=False) as font:
+            pen = TTGlyphPen(None);pen.moveTo((0, 0));pen.lineTo((500, 0));pen.closePath()
+            font['glyf'][font.getBestCmap()[self.CHAT]] = pen.glyph();font.save(fallback)
+        for index in range(4):
+            harness.stock(f'/product/fonts/GoogleSansText-Extra{index}.ttf', (65,49), ('google-sans-text',))
+        with patch.object(batch, 'final_fallback_codepoints', wraps=batch.final_fallback_codepoints) as proof:
+            harness.build()
+        self.assertEqual(proof.call_count, 1, 'one actual fallback output is validated once for all primary aliases')
+        for name in ('GoogleSansText-Regular.ttf', *[f'GoogleSansText-Extra{i}.ttf' for i in range(4)]):
+            self.assertIsNotNone(self.bounds(harness.stage/'product/fonts'/name, self.CHAT))
+        self.assertFalse(list(harness.stage.glob('.coloros-metrics-*')))
+
+
 if __name__ == '__main__':
     unittest.main()

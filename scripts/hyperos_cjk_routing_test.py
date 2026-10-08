@@ -106,7 +106,18 @@ class RoutingTest(unittest.TestCase):
             'schema': inventory.SCHEMA, 'inventoryRevision': 1, 'metricsRevision': 3,
             'state': 'ready', 'buildKey': 'routing-test', 'slots': self.slots,
             'preservedDynamicAliases': self.dynamic_aliases}))
-        with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('rebuild outlines')):
+        read_glyph_set = TTFont.getGlyphSet
+        proof_code = batch.final_fallback_codepoints.__code__
+
+        def guarded_glyph_set(font, *args, **kwargs):
+            caller = sys._getframe(1)
+            # The generated fallback needs read-only geometry proof. Keep the
+            # old ban on rebuilding outlines in metrics/subsetting helpers.
+            if caller.f_code is not proof_code or caller.f_locals.get('font') is not font:
+                raise AssertionError('rebuild outlines')
+            return read_glyph_set(font, *args, **kwargs)
+
+        with patch.object(TTFont, 'getGlyphSet', new=guarded_glyph_set):
             result = batch.build(self.module, self.stage,
                                  names or [Path(logical).name for logical in (*self.slots, *self.dynamic_aliases)])
         self.reports = {entry['slot']: entry for entry in json.loads(
@@ -158,6 +169,40 @@ class RoutingTest(unittest.TestCase):
 
     def test_cff_cjk_routes_to_fallback_with_compact_latin_outlines(self):
         self.assert_routing_and_compact_outlines(cff=True)
+
+    def test_final_geometry_guard_keeps_mapped_empty_han_in_primary(self):
+        self.default_pair()
+        (self.fonts / '400.ttf').rename(self.fonts / 'Roboto-Regular.ttf')
+        fallback = self.fonts / 'MiSansVF.ttf'
+        make_font(fallback)
+        with TTFont(fallback, recalcBBoxes=False) as font:
+            font['glyf'][font.getBestCmap()[HAN]] = TTGlyphPen(None).glyph()
+            font.save(fallback)
+        self.build()
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as primary:
+            self.assertIn(HAN, primary.getBestCmap(), 'mapped-empty final fallback is not proof')
+            self.assertNotIn(OTHER_HAN, primary.getBestCmap(), 'positive final geometry still routes')
+        report = self.reports['/system/fonts/Roboto-Regular.ttf']
+        self.assertEqual(report['cjkUnprovenMappingsPreserved'], 1)
+        self.assertEqual(report['cjkRoutingReason'], 'stock-latin-primary-unproven-glyphs-preserved')
+
+    def test_final_geometry_exception_does_not_allow_metrics_outline_rebuild(self):
+        self.default_pair(cff=True)
+        source = self.fonts / '400.ttf'
+        before = source.read_bytes()
+        original_writer = batch.write_metrics
+
+        def rebuilding_writer(source, output, *args, **kwargs):
+            with TTFont(source, lazy=True) as font:
+                font.getGlyphSet()
+            return original_writer(source, output, *args, **kwargs)
+
+        with patch.object(batch, 'write_metrics', new=rebuilding_writer):
+            with self.assertRaisesRegex(AssertionError, 'rebuild outlines'):
+                self.build()
+        self.assertEqual(source.read_bytes(), before)
+        self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
+        self.assertFalse(list((self.fonts / '.luoshu-font-store').glob('hyperos-metrics-*')))
 
     def test_compaction_preserves_legacy_symbol_and_variation_only_mappings(self):
         self.default_pair()

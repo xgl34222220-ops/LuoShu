@@ -1208,6 +1208,8 @@ class NativeLastRequestDiagnosticsTest(unittest.TestCase):
             '    private void rootQueryReturned(',
             '    private void recordRootQuery(',
             '    private static String childDiagnosticText(',
+            '    private static int windowCountWhitespaceEnd(',
+            '    private static boolean completeWindowCountEvidence(',
             '    private static void snapshotDiagnostics(',
             '    public void onStart()',
         ))
@@ -1339,6 +1341,38 @@ public class NativeLastRequestDiagnosticsHarness {
                 !diagnostics.containsKey("helper_last_snapshot_root_observations") &&
                 !diagnostics.containsKey("helper_last_snapshot_window_counts") &&
                 !diagnostics.containsKey("helper_last_snapshot_filename"),"full or unprefixed snapshot result leaked");
+        String validCounts="[{\"elapsed_ms\":9823,\"windows\":2,\"active\":2,\"focused\":2}]";
+        Bundle countResult=failedSnapshot(); countResult.putString("window_counts",validCounts);
+        snapshotDiagnostics(diagnostics,countResult);
+        require(validCounts.equals(diagnostics.getString("helper_last_snapshot_window_counts")),"late overlapping window counts were lost");
+        String reordered=" [ { \"focused\": 1, \"active\": 1, \"windows\": 1, \"elapsed_ms\": 0 } ] \n";
+        countResult.putString("window_counts",reordered); snapshotDiagnostics(diagnostics,countResult);
+        require(reordered.equals(diagnostics.getString("helper_last_snapshot_window_counts")),"valid count order/whitespace changed");
+        String[] invalidCounts={"must not be copied", "{}", "null", "[", "[] trailing", "[{}]", "[1]", "[[]]",
+            validCounts.substring(0,validCounts.length()-1), validCounts.replace("9823","\"9823\""),
+            validCounts.replace("9823","9823.0"), validCounts.replace("9823","1e3"), validCounts.replace("9823","-1"),
+            validCounts.replace("9823","01"), validCounts.replace("9823","true"), validCounts.replace("9823","null"),
+            validCounts.replace("9823","9223372036854775808"), validCounts.replace("\"windows\":2","\"windows\":2147483648"),
+            validCounts.replace("\"active\":2","\"active\":3"), validCounts.replace("\"focused\":2","\"focused\":3"),
+            validCounts.replace("\"active\":2","\"active\":{\"text\":\"private\"}"),
+            validCounts.replace("\"focused\":2","\"focused\":2,\"text\":\"private\""),
+            validCounts.replace("\"focused\":2","\"focused\":2,\"focused\":2"),
+            validCounts.replace("\"focused\":2","\"focused\":2,"),
+            validCounts.replace("}]","},]"), "[/* private */]", "[\f]"};
+        for(String invalid:invalidCounts) {
+            countResult.putString("window_counts",validCounts); snapshotDiagnostics(diagnostics,countResult);
+            countResult.putString("window_counts",invalid); snapshotDiagnostics(diagnostics,countResult);
+            require(!diagnostics.containsKey("helper_last_snapshot_window_counts"),"invalid window metadata leaked or retained old counts");
+            require("invalid-schema".equals(diagnostics.getString("helper_last_snapshot_window_counts_status")),"rejection reason unavailable");
+            require(!diagnostics.containsKey("snapshot") && !diagnostics.containsKey("error"),"window validation merged unprefixed result");
+        }
+        countResult.putString("window_counts",validCounts); snapshotDiagnostics(diagnostics,countResult);
+        countResult.values.remove("window_counts"); snapshotDiagnostics(diagnostics,countResult);
+        require(!diagnostics.containsKey("helper_last_snapshot_window_counts") &&
+                "unavailable".equals(diagnostics.getString("helper_last_snapshot_window_counts_status")),"unavailable window metadata retained old counts");
+        countResult.putString("window_counts","[{\"elapsed_ms\":9223372036854775807,\"windows\":0,\"active\":0,\"focused\":0}]");
+        snapshotDiagnostics(diagnostics,countResult);
+        require(countResult.getString("window_counts").equals(diagnostics.getString("helper_last_snapshot_window_counts")),"native long maximum or zero counts lost");
         lastDiagnostic(null,"request_status","ignored"); lastDiagnosticTime(null,"snapshot_started");
         h.rootQueryStarted(null,"ignored"); h.rootQueryReturned(null,"null");
         require(h.rootQueryNullCount==1,"null diagnostics changed root return accounting");
@@ -1367,6 +1401,8 @@ public class NativeLastRequestDiagnosticsHarness {
         System.out.println("ROOT_NATIVE_DIAGNOSTIC_JSON="+rootRecords);
         acceptRequestDiagnostics(diagnostics,"next-request","hierarchy-0003.xml");
         require(!diagnostics.containsKey("helper_last_snapshot_root_query_records"),"new request mixed prior root records");
+        require(!diagnostics.containsKey("helper_last_snapshot_window_counts") &&
+                !diagnostics.containsKey("helper_last_snapshot_window_counts_status"),"new request retained prior window evidence");
         SystemClock.now=1200; bounded.rootQueryStarted(diagnostics,"getRootInActiveWindow");
         SystemClock.now=1207; bounded.recordRootQuery(SystemClock.now,"threw",new IllegalStateException("original root failure"));
         require(bounded.rootQueryThrownCount==1 && "threw".equals(bounded.rootQueryRecords.getLast().values.get("outcome")) &&
