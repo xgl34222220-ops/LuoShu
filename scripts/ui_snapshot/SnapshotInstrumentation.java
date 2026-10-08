@@ -116,17 +116,33 @@ public final class SnapshotInstrumentation extends Instrumentation {
         finish("failed".equals(result.getString("snapshot")) ? Activity.RESULT_CANCELED : Activity.RESULT_OK, result);
     }
 
-    private UiAutomation connectAutomation(Bundle diagnostics) {
+    private UiAutomation connectAutomation(Bundle diagnostics) throws Exception {
         diagnosticTime(diagnostics, "helper_automation_connect_started_uptime_ms");
         UiAutomation automation = getUiAutomation(UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES);
         if (automation == null) throw new IllegalStateException("UiAutomation test connection failed");
         diagnosticTime(diagnostics, "helper_automation_connected_uptime_ms");
         AccessibilityServiceInfo service = automation.getServiceInfo();
+        if (diagnostics != null) {
+            diagnostics.putString("helper_automation_service_info_before", serviceInfoEvidence(service).toString());
+        }
         service.flags |= AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
                 | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
                 | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        if (diagnostics != null) {
+            diagnostics.putString("helper_automation_service_info_requested", serviceInfoEvidence(service).toString());
+        }
         automation.setServiceInfo(service);
         diagnosticTime(diagnostics, "helper_automation_configured_uptime_ms");
+        if (diagnostics != null) {
+            // Diagnose the server's actual configuration separately from the
+            // requested flags. This is one measured read, not a reconnect,
+            // changed service scope or evidence that a window is available.
+            diagnosticTime(diagnostics, "helper_automation_service_confirm_started_uptime_ms");
+            AccessibilityServiceInfo confirmed = automation.getServiceInfo();
+            diagnostics.putString("helper_automation_service_info_confirmed",
+                    confirmed == null ? "null" : serviceInfoEvidence(confirmed).toString());
+            diagnosticTime(diagnostics, "helper_automation_service_confirm_finished_uptime_ms");
+        }
         return automation;
     }
 

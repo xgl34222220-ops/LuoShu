@@ -75,6 +75,42 @@ class FontDirectoryMonitorTest {
         assertEquals(pending.drop(32), fontDirectoryImportBatch(pending, 99))
     }
 
+    @Test
+    fun replacingASlowScanRejectsItsResultAndItsCleanup() {
+        val requests = FontDirectoryScanRequests()
+        val old = requests.start("content://tree/a")
+        val latest = requests.start("content://tree/b")
+
+        assertFalse(requests.isCurrent(old, "content://tree/b"))
+        assertFalse(requests.isCurrent(old, "content://tree/a"))
+        assertTrue(requests.isCurrent(latest, "content://tree/b"))
+    }
+
+    @Test
+    fun disconnectAndSameUriReconnectDoNotReviveTheOldRequest() {
+        val requests = FontDirectoryScanRequests()
+        val old = requests.start("content://tree/a")
+        requests.invalidate()
+        assertFalse(requests.isCurrent(old, "content://tree/a"))
+
+        val reconnect = requests.start("content://tree/a")
+        assertFalse(requests.isCurrent(old, "content://tree/a"))
+        assertTrue(requests.isCurrent(reconnect, "content://tree/a"))
+    }
+
+    @Test
+    fun repeatedScanOfTheSameTreeAcceptsOnlyTheLatestRequest() {
+        val requests = FontDirectoryScanRequests()
+        val first = requests.start("content://tree/a")
+        val second = requests.start("content://tree/a")
+        val latest = requests.start("content://tree/a")
+
+        assertFalse(requests.isCurrent(first, "content://tree/a"))
+        assertFalse(requests.isCurrent(second, "content://tree/a"))
+        assertTrue(requests.isCurrent(latest, "content://tree/a"))
+        assertFalse(requests.isCurrent(latest, "content://tree/b"))
+    }
+
     private fun watched(path: String, size: Long, modified: Long): WatchedFontDocument = WatchedFontDocument(
         key = path,
         name = path.substringAfterLast('/'),

@@ -218,7 +218,12 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         static final int FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES=1;
         final AccessibilityServiceInfo service=new AccessibilityServiceInfo();
         int getServiceCalls, setServiceCalls;
-        AccessibilityServiceInfo getServiceInfo() { getServiceCalls++; SystemClock.now+=20; return service; }
+        Integer confirmedFlags;
+        AccessibilityServiceInfo getServiceInfo() {
+            getServiceCalls++; SystemClock.now+=20;
+            if(setServiceCalls>0 && confirmedFlags!=null)service.flags=confirmedFlags;
+            return service;
+        }
         void setServiceInfo(AccessibilityServiceInfo info) { require(info==service,"different service set"); setServiceCalls++; SystemClock.now+=30; }
         AccessibilityNodeInfo root;
         final List<AccessibilityWindowInfo> windows = new ArrayList<>();
@@ -436,8 +441,24 @@ public class NativeSnapshotPublicationHarness extends InstrumentationBoundary {
         require("100".equals(connectDiagnostics.getString("helper_automation_connect_started_uptime_ms")) &&
                 "150".equals(connectDiagnostics.getString("helper_automation_connected_uptime_ms")) &&
                 "200".equals(connectDiagnostics.getString("helper_automation_configured_uptime_ms")) &&
-                h.automation.getServiceCalls==1 && h.automation.setServiceCalls==1 && h.automation.service.flags==15,
-                "connect/config clocks or original service call count changed");
+                h.automation.getServiceCalls==2 && h.automation.setServiceCalls==1 && h.automation.service.flags==15,
+                "connect/config clocks or measured service call count changed");
+        require("200".equals(connectDiagnostics.getString("helper_automation_service_confirm_started_uptime_ms")) &&
+                "220".equals(connectDiagnostics.getString("helper_automation_service_confirm_finished_uptime_ms")),
+                "configuration confirmation cost was hidden");
+        require(connectDiagnostics.getString("helper_automation_service_info_before").contains("\"flags\":1,") &&
+                connectDiagnostics.getString("helper_automation_service_info_requested").contains("\"flags\":15") &&
+                connectDiagnostics.getString("helper_automation_service_info_requested").equals(
+                        connectDiagnostics.getString("helper_automation_service_info_confirmed")),
+                "requested configuration replaced actual confirmation or initial state");
+        NativeSnapshotPublicationHarness unconfirmed=new NativeSnapshotPublicationHarness();
+        unconfirmed.automation.confirmedFlags=1;
+        Bundle unconfirmedDiagnostics=new Bundle();
+        unconfirmed.connectAutomation(unconfirmedDiagnostics);
+        require(unconfirmedDiagnostics.getString("helper_automation_service_info_requested").contains("\"flags\":15,") &&
+                unconfirmedDiagnostics.getString("helper_automation_service_info_confirmed").contains("\"flags\":1,") &&
+                unconfirmed.automation.getServiceCalls==2 && unconfirmed.automation.setServiceCalls==1,
+                "unconfirmed configuration was concealed or caused a retry");
         require("zero".equals(checkedChildPrefetchMode(null)) && "zero".equals(checkedChildPrefetchMode(new Bundle())),
                 "missing native mode changed the zero default");
         Bundle modeArguments=new Bundle(); modeArguments.putString("child_prefetch_mode","default");

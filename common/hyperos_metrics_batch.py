@@ -494,7 +494,11 @@ def prepare_cjk_routing(data: dict, jobs: list, stage: Path, outputs: Path, *, w
         logical = '/' + destination.relative_to(stage).as_posix()
         routing, punctuation, _reason = _cjk_routing(data, logical, frozenset({0x4E2D}))
         if not routing or contract[-1] != 'stock': continue
-        identity = source.resolve()
+        info = source.stat()
+        # Weight aliases can be hardlinks. Reuse byte-derived face/cmap data
+        # only within this pinned build, and invalidate ordinary mutations
+        # even when mtime is restored. Slot punctuation stays outside cache.
+        identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
         if identity not in source_points:
             face = _pick_face(source); options = {'fontNumber': face} if face >= 0 else {}
             with TTFont(source, lazy=True, recalcBBoxes=False, **options) as font:

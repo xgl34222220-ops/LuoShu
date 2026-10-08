@@ -30,12 +30,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +56,9 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import java.util.ArrayDeque
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -98,7 +102,24 @@ internal data class FontDirectoryWatchConfig(
 private data class FontDirectoryScan(
     val documents: List<WatchedFontDocument>,
     val diff: FontDirectoryDiff,
+    val request: FontDirectoryScanRequests.Request,
 )
+
+/** Identity also distinguishes a reconnect or a replacement request for the same URI. */
+internal class FontDirectoryScanRequests {
+    class Request(val treeUri: String)
+
+    private var current: Request? = null
+
+    fun start(treeUri: String): Request = Request(treeUri).also { current = it }
+
+    fun invalidate() {
+        current = null
+    }
+
+    fun isCurrent(request: Request, treeUri: String): Boolean =
+        current === request && request.treeUri == treeUri
+}
 
 internal class FontDirectoryWatchStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -203,36 +224,61 @@ internal fun FontDirectoryMonitorTool(
     val scope = rememberCoroutineScope()
     val store = remember(context.applicationContext) { FontDirectoryWatchStore(context.applicationContext) }
     val importViewModel = rememberNativeImportViewModel()
-    var config by remember { mutableStateOf(store.load()) }
+    // A same-URI selection still has its own identity for the asynchronous label lookup.
+    var config by remember { mutableStateOf(store.load(), referentialEqualityPolicy()) }
     var scan by remember { mutableStateOf<FontDirectoryScan?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var importRequestMessage by remember { mutableStateOf("") }
     var showDialog by remember { mutableStateOf(false) }
+    val scanRequests = remember { FontDirectoryScanRequests() }
+    var scanJob by remember { mutableStateOf<Job?>(null) }
 
-    suspend fun scanNow(target: FontDirectoryWatchConfig) {
-        if (!target.configured || scanning) return
-        scanning = true
-        errorMessage = ""
-        importRequestMessage = ""
-        val result = runCatching {
-            withContext(Dispatchers.IO) {
-                val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
-                FontDirectoryScan(documents, diffFontDirectorySnapshots(target.snapshot, documents))
-            }
-        }
-        scan = result.getOrNull()
-        errorMessage = result.exceptionOrNull()?.message.orEmpty()
+    fun cancelScan() {
+        scanRequests.invalidate()
+        scanJob?.cancel()
+        scanJob = null
         scanning = false
+        scan = null
     }
 
     fun requestScan(target: FontDirectoryWatchConfig = config) {
-        if (!target.configured || scanning) return
-        scope.launch { scanNow(target) }
+        if (!target.configured || target.treeUri != config.treeUri) return
+        val request = scanRequests.start(target.treeUri)
+        scanJob?.cancel()
+        scanning = true
+        scan = null
+        errorMessage = ""
+        importRequestMessage = ""
+        scanJob = scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
+                    FontDirectoryScan(documents, diffFontDirectorySnapshots(target.snapshot, documents), request)
+                }
+                if (scanRequests.isCurrent(request, config.treeUri)) scan = result
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (scanRequests.isCurrent(request, config.treeUri)) errorMessage = error.message.orEmpty()
+            } finally {
+                if (scanRequests.isCurrent(request, config.treeUri)) {
+                    scanning = false
+                    scanJob = null
+                }
+            }
+        }
     }
 
-    LaunchedEffect(config.treeUri) {
-        if (config.configured) scanNow(config)
+    DisposableEffect(Unit) {
+        onDispose {
+            scanRequests.invalidate()
+            scanJob?.cancel()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        requestScan()
     }
 
     val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -257,9 +303,9 @@ internal fun FontDirectoryMonitorTool(
                     )
                 }
             }
+            cancelScan()
             val next = FontDirectoryWatchConfig(
                 treeUri = uri.toString(),
-                label = withContext(Dispatchers.IO) { queryTreeLabel(context, uri) },
                 snapshot = emptyMap(),
             )
             store.save(next)
@@ -267,6 +313,13 @@ internal fun FontDirectoryMonitorTool(
             scan = null
             importRequestMessage = ""
             showDialog = true
+            requestScan(next)
+            val label = withContext(Dispatchers.IO) { queryTreeLabel(context, uri) }
+            if (config === next) {
+                val labelled = next.copy(label = label)
+                store.save(labelled)
+                config = labelled
+            }
         }
     }
 
@@ -296,8 +349,12 @@ internal fun FontDirectoryMonitorTool(
             onScan = { requestScan() },
             onImport = { documents ->
                 val importState = importViewModel.state
-                if (enabled && !scanning && !importState.busy && !importState.paused) {
-                    val selected = documents.take(FONT_WATCH_IMPORT_BATCH_SIZE)
+                val currentScan = scan
+                if (enabled && !scanning && !importState.busy && !importState.paused &&
+                    config.configured && currentScan != null &&
+                    scanRequests.isCurrent(currentScan.request, config.treeUri)
+                ) {
+                    val selected = documents.filter { it in currentScan.diff.actionable }.take(FONT_WATCH_IMPORT_BATCH_SIZE)
                     if (selected.isNotEmpty()) {
                         importViewModel.startImport(selected.map { Uri.parse(it.uri) })
                         importRequestMessage = "已请求导入 ${selected.size} 项，结果请在任务中心查看。目录变更仍保留，确认处理完后可选择“仅记录基线”。"
@@ -305,8 +362,11 @@ internal fun FontDirectoryMonitorTool(
                 }
             },
             onUseBaseline = {
-                if (!scanning && scan != null) {
-                    val current = scan?.documents.orEmpty().associateBy { it.key }
+                val currentScan = scan
+                if (!scanning && config.configured && currentScan != null &&
+                    scanRequests.isCurrent(currentScan.request, config.treeUri)
+                ) {
+                    val current = currentScan.documents.associateBy { it.key }
                     val next = config.copy(snapshot = current)
                     store.save(next)
                     config = next
@@ -315,6 +375,7 @@ internal fun FontDirectoryMonitorTool(
                 }
             },
             onDisconnect = {
+                cancelScan()
                 runCatching {
                     context.contentResolver.releasePersistableUriPermission(
                         Uri.parse(config.treeUri),
@@ -611,7 +672,7 @@ private fun scanFontDirectory(context: Context, treeUri: Uri): List<WatchedFontD
 }
 
 private fun queryTreeLabel(context: Context, treeUri: Uri): String {
-    return runCatching {
+    return try {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
         context.contentResolver.query(
@@ -622,6 +683,10 @@ private fun queryTreeLabel(context: Context, treeUri: Uri): String {
             null,
         )?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else ""
-        }.orEmpty()
-    }.getOrDefault("").ifBlank { "字体监视目录" }
+        }.orEmpty().ifBlank { "字体监视目录" }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        "字体监视目录"
+    }
 }

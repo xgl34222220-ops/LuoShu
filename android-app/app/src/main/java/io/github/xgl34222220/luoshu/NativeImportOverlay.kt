@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
@@ -37,19 +38,51 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.library.FontLibraryAccessState
+import io.github.xgl34222220.luoshu.ui.library.fontLibraryAccessState
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+
+internal data class NativeImportEntryGate(
+    val canStart: Boolean,
+    val canResume: Boolean,
+    val blockedMessage: String,
+)
+
+internal fun nativeImportEntryGate(
+    access: FontLibraryAccessState,
+    fontLoading: Boolean,
+    state: NativeImportState,
+): NativeImportEntryGate {
+    val ready = !access.actionsBlocked && !fontLoading && !state.busy
+    val message = when {
+        access.error.isNotBlank() -> access.error
+        access.operationRunning -> "当前有字体操作进行中，请稍后重新选择文件。"
+        access.actionsBlocked -> "正在检查模块状态，请稍后重新选择文件。"
+        fontLoading -> "正在刷新字体库，请稍后重新选择文件。"
+        state.busy -> "导入任务正在进行，请在任务中心查看。"
+        state.paused -> "导入任务已暂停，请继续或取消当前任务后再选择文件。"
+        else -> ""
+    }
+    return NativeImportEntryGate(
+        canStart = ready && !state.paused,
+        canResume = ready && state.paused,
+        blockedMessage = message,
+    )
+}
 
 @Composable
 internal fun NativeImportOverlay(
@@ -59,8 +92,16 @@ internal fun NativeImportOverlay(
     embedded: Boolean = false,
 ) {
     val importViewModel = rememberNativeImportViewModel()
+    val context = LocalContext.current
     val state = importViewModel.state
     var expanded by remember { mutableStateOf(false) }
+    val readGate by rememberUpdatedState(newValue = {
+        nativeImportEntryGate(
+            access = fontLibraryAccessState(viewModel.snapshot, viewModel.operationBusy, viewModel.mixState.busy),
+            fontLoading = viewModel.fontLoading || viewModel.fontRefreshing,
+            state = importViewModel.state,
+        )
+    })
 
     LaunchedEffect(embedded, state.busy, state.paused) {
         expanded = embedded || state.busy || state.paused
@@ -73,18 +114,21 @@ internal fun NativeImportOverlay(
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        importViewModel.startImport(uris)
+        if (uris.isNotEmpty()) {
+            val gate = readGate()
+            if (gate.canStart) importViewModel.startImport(uris)
+            else Toast.makeText(context, gate.blockedMessage, Toast.LENGTH_LONG).show()
+        }
     }
 
-    val importEnabled = viewModel.snapshot.installed &&
-        !viewModel.operationBusy &&
-        !viewModel.mixState.busy &&
-        (!state.busy || state.paused)
+    val gate = readGate()
+    val importEnabled = gate.canStart || gate.canResume
     val onImport = {
-        if (state.paused) {
-            importViewModel.resumeImport()
-        } else {
-            launcher.launch(arrayOf("*/*"))
+        val currentGate = readGate()
+        when {
+            currentGate.canResume -> importViewModel.resumeImport()
+            currentGate.canStart -> launcher.launch(arrayOf("*/*"))
+            else -> Toast.makeText(context, currentGate.blockedMessage, Toast.LENGTH_LONG).show()
         }
     }
 

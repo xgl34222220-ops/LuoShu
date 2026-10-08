@@ -11,6 +11,7 @@ import unittest
 import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
+from fixture_context_test_case import FixtureContextTestCase
 
 from ui_snapshot_session import HELPER, ROOT_WAIT_MS, TIMING_RECORD_LIMIT, UiSnapshotSession
 
@@ -97,7 +98,7 @@ class PrivateProtocol:
         raise AssertionError(f'Unexpected adb transport command: {args}')
 
 
-class UiSnapshotSessionTest(unittest.TestCase):
+class UiSnapshotSessionTest(FixtureContextTestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -735,7 +736,7 @@ class UiSnapshotSessionTest(unittest.TestCase):
         self.popen.assert_called_once()
 
 
-class PublicationPipeTest(unittest.TestCase):
+class PublicationPipeTest(FixtureContextTestCase):
     """Real child-process pipes test the production framing/drain/deadline code."""
 
     producer = r'''
@@ -1157,6 +1158,61 @@ emit('stderr',b'\x80raw-final-stderr\n')
         with self.assertRaisesRegex(RuntimeError, 'unconsumed'):
             session.close()
         self.assert_raw_preserved(directory)
+
+
+class FixtureContextCompatibilityTest(unittest.TestCase):
+    def test_contexts_preserve_interleaved_cleanup_order_and_return_values(self):
+        events = []
+        class Context:
+            def __init__(self, name): self.name = name
+            def __enter__(self):
+                events.append('enter-' + self.name)
+                return self.name
+            def __exit__(self, *exception):
+                self_test.assertEqual((None, None, None), exception)
+                events.append('exit-' + self.name)
+        self_test = self
+        case = FixtureContextTestCase()
+        self.assertEqual('first', case.enterContext(Context('first')))
+        case.addCleanup(events.append, 'between')
+        self.assertEqual('second', case.enterContext(Context('second')))
+        self.assertTrue(case.doCleanups())
+        self.assertEqual(['enter-first', 'enter-second', 'exit-second', 'between', 'exit-first'], events)
+
+    def test_failed_context_entry_does_not_register_an_exit(self):
+        context = Mock()
+        context.__enter__ = Mock(side_effect=RuntimeError('entry-failed'))
+        context.__exit__ = Mock()
+        case = FixtureContextTestCase()
+        with self.assertRaisesRegex(RuntimeError, 'entry-failed'):
+            case.enterContext(context)
+        self.assertTrue(case.doCleanups())
+        context.__exit__.assert_not_called()
+
+    def test_patch_is_restored_after_test_failure_without_the_new_base_api(self):
+        original = {'state': 'original'}
+        case = FixtureContextTestCase()
+        # Python 3.10 has no TestCase.enterContext. Never depend on its newer
+        # implementation even when the local/UI runner supplies that method.
+        with patch.object(unittest.TestCase, 'enterContext', None, create=True):
+            case.enterContext(patch.dict(original, state='fixture'))
+            try:
+                self.assertEqual('fixture', original['state'])
+                raise AssertionError('intentional-test-failure')
+            except AssertionError:
+                self.assertTrue(case.doCleanups())
+            self.assertEqual({'state': 'original'}, original)
+
+    def test_fixture_cleanup_is_owned_by_its_test_instance(self):
+        first, second = FixtureContextTestCase(), FixtureContextTestCase()
+        left, right = {'v': 1}, {'v': 2}
+        first.enterContext(patch.dict(left, v=3))
+        second.enterContext(patch.dict(right, v=4))
+        self.assertTrue(first.doCleanups())
+        self.assertEqual({'v': 1}, left)
+        self.assertEqual({'v': 4}, right)
+        self.assertTrue(second.doCleanups())
+        self.assertEqual({'v': 2}, right)
 
 
 class HostTimingBoundsTest(unittest.TestCase):

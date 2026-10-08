@@ -15,6 +15,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
+from fixture_context_test_case import FixtureContextTestCase
 from ui_snapshot_session import HELPER, UiSnapshotSession
 
 from android_ui_smoke import (
@@ -33,7 +34,7 @@ from android_ui_smoke import (
 PACKAGE = "io.github.xgl34222220.luoshu.debug"
 
 
-class UiSmokeHarnessTest(unittest.TestCase):
+class UiSmokeHarnessTest(FixtureContextTestCase):
     @unittest.skipUnless(shutil.which("java"), "Java runtime is required for public snapshot cache compatibility checks")
     def test_java_snapshot_refresh_keeps_configuration_deadline_and_modern_clear_path(self):
         # Compile the production methods against only the public-interface test
