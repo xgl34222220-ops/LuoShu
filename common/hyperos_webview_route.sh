@@ -34,6 +34,10 @@ _lwr_init() {
     LWR_THEME_TARGET="${LUOSHU_WEBVIEW_ROUTE_THEME_TARGET:-/data/system/theme/fonts/Roboto-Regular.ttf}"
     # Roboto variants are ~1-2 MiB; theme-store CJK fonts are far larger.
     LWR_THEME_MAX_BYTES="${LUOSHU_WEBVIEW_ROUTE_THEME_MAX_BYTES:-4194304}"
+    # With the theme store on DEFAULT, HyperOS leaves an ~8.9 KiB near-glyphless
+    # "empty font theme" sfnt here and Latin falls back to stock fonts. Real
+    # theme-store fonts are far larger, so a tiny valid sfnt is the ROM default.
+    LWR_THEME_PLACEHOLDER_MAX_BYTES="${LUOSHU_WEBVIEW_ROUTE_THEME_PLACEHOLDER_MAX_BYTES:-65536}"
     LWR_MOUNTINFO="${LUOSHU_WEBVIEW_ROUTE_MOUNTINFO:-/proc/self/mountinfo}"
     LWR_BOOT_ID_FILE="${LUOSHU_WEBVIEW_ROUTE_BOOT_ID:-/proc/sys/kernel/random/boot_id}"
     LWR_PAYLOAD="${LUOSHU_WEBVIEW_ROUTE_PAYLOAD:-$LWR_MODULE/.luoshu-payload/system/fonts/Roboto-Regular.ttf}"
@@ -102,6 +106,13 @@ _lwr_theme_is_roboto() {
     _lwr_t_size=$(stat -L -c '%s' "$1" 2>/dev/null)
     [ -n "$_lwr_t_size" ] && [ "$_lwr_t_size" -le "$LWR_THEME_MAX_BYTES" ] || return 1
     tr -d '\000' < "$1" 2>/dev/null | tr -c 'A-Za-z' '\n' 2>/dev/null | grep -q 'Roboto'
+}
+
+# ROM default-theme placeholder: regular valid sfnt (checked by caller), tiny.
+_lwr_theme_is_placeholder() {
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    _lwr_p_size=$(stat -L -c '%s' "$1" 2>/dev/null)
+    [ -n "$_lwr_p_size" ] && [ "$_lwr_p_size" -le "$LWR_THEME_PLACEHOLDER_MAX_BYTES" ]
 }
 
 _lwr_sha() {
@@ -190,7 +201,11 @@ _lwr_ensure_internal() {
         "$LWR_THEME_TARGET")
             [ ! -L "$_lwr_target" ] || return 2
             _lwr_single_font "$_lwr_target" || { _lwr_log "skip theme-target-missing-or-not-font target=$_lwr_target"; return 2; }
-            if ! _lwr_theme_is_roboto "$_lwr_target"; then
+            if _lwr_theme_is_roboto "$_lwr_target"; then
+                :
+            elif _lwr_theme_is_placeholder "$_lwr_target" && ! _lwr_is_mountpoint "$_lwr_target"; then
+                _lwr_log "theme engine placeholder accepted target=$_lwr_target size=$(stat -L -c '%s' "$_lwr_target" 2>/dev/null) sha256=$(_lwr_sha "$_lwr_target")"
+            else
                 _lwr_log "skip theme-font-is-user-theme (not Roboto) target=$_lwr_target size=$(stat -L -c '%s' "$_lwr_target" 2>/dev/null) sha256=$(_lwr_sha "$_lwr_target")"
                 return 2
             fi
