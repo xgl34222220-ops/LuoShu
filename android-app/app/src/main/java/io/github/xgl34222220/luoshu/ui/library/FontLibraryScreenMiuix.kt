@@ -261,7 +261,14 @@ internal fun FontLibraryScreenMiuix(
                 }
             }
         }
-        if (state.error.isNotBlank()) item(key = "error") { NoticeCard(state.error, error = true) }
+        if (state.error.isNotBlank()) item(key = "error") {
+            // A failed list read must offer the next step right where the error is shown.
+            NoticeCard(
+                state.error, error = true,
+                actionLabel = if (state.loading || state.operationBusy) null else "重试",
+                onAction = actions.refresh,
+            )
+        }
         if (state.operationMessage.isNotBlank()) {
             item(key = "operation") { NoticeCard(state.operationMessage, error = false) }
         }
@@ -272,7 +279,9 @@ internal fun FontLibraryScreenMiuix(
                 onRestore = actions.restoreDefault,
             )
         }
-        if (!state.loading && state.fonts.isEmpty()) {
+        // With a read error and no fonts, the error card above is the truthful state;
+        // "start with your first font" would wrongly suggest the library is empty.
+        if (!state.loading && state.fonts.isEmpty() && (filtered || state.error.isBlank())) {
             item(key = "empty") {
                 Card(
                     modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
@@ -520,17 +529,30 @@ private fun ChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun NoticeCard(message: String, error: Boolean) {
+private fun NoticeCard(
+    message: String,
+    error: Boolean,
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
+) {
     val scheme = MaterialTheme.colorScheme
+    val content = if (error) scheme.onErrorContainer else scheme.onPrimaryContainer
     Surface(
         shape = LuoShuSmoothShape(20.dp),
         color = if (error) scheme.errorContainer else scheme.primaryContainer,
     ) {
-        Text(
-            message, modifier = Modifier.fillMaxWidth().padding(16.dp),
-            color = if (error) scheme.onErrorContainer else scheme.onPrimaryContainer,
-            fontSize = 13.sp, lineHeight = 20.sp,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                message, modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+                color = content, fontSize = 13.sp, lineHeight = 20.sp,
+            )
+            if (actionLabel != null) {
+                TextButton(onClick = onAction) { Text(actionLabel, color = content, fontSize = 13.sp) }
+            }
+        }
     }
 }
 

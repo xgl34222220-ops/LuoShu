@@ -166,6 +166,10 @@ internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): She
         val stderr = ByteArrayOutputStream()
         val buffer = ByteArray(8_192)
         val startedAt = System.nanoTime()
+        // Short commands return within a few ms; long font tasks may run for minutes.
+        // Start with a short idle wait and back off to the old 50 ms ceiling so quick
+        // calls are not padded by a fixed 50 ms tick and long calls stay cheap.
+        var idleWaitMs = IDLE_WAIT_MIN_MS
         try {
             // No command accepts interactive input. Closing stdin also lets commands waiting
             // for EOF finish normally. Never wait for pipe EOF: descendants may inherit it.
@@ -186,7 +190,8 @@ internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): She
                 }
                 // Suspending checks avoid uninterruptible waitFor/readText workers. Both pipes
                 // are drained together so a full stderr pipe cannot stall a stdout reader.
-                delay(minOf(if (outputBytes > 0) 1L else 50L, remaining))
+                idleWaitMs = if (outputBytes > 0) IDLE_WAIT_MIN_MS else minOf(idleWaitMs * 2L, IDLE_WAIT_MAX_MS)
+                delay(minOf(if (outputBytes > 0) 1L else idleWaitMs, remaining))
             }
             @Suppress("UNREACHABLE_CODE")
             error("Process loop ended unexpectedly")
@@ -197,6 +202,9 @@ internal suspend fun executeProcess(command: List<String>, timeoutMs: Long): She
             runCatching { process.outputStream.close() }
         }
     }
+
+private const val IDLE_WAIT_MIN_MS = 4L
+private const val IDLE_WAIT_MAX_MS = 50L
 
 private fun drainAvailable(stream: InputStream, target: ByteArrayOutputStream, buffer: ByteArray, maxBytes: Int = 65_536): Int {
     // A bounded pass prevents an endlessly verbose process from starving cancellation/the deadline.
