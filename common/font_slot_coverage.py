@@ -41,12 +41,30 @@ def preferred_unicode_codepoints(font) -> set[int]:
     return {cp for cp, glyph in (font.getBestCmap() or {}).items() if glyph != '.notdef'}
 
 
+def is_latin_ui_codepoint(codepoint: int) -> bool:
+    """Latin/Latin-1/extended Latin, combining marks and common UI punctuation.
+
+    Everything outside these ranges counts as script-specific coverage that a
+    digit/display face must not carry before it can be treated as a UI slot.
+    """
+    return (codepoint <= 0x024F or 0x0300 <= codepoint <= 0x036F
+            or 0x2000 <= codepoint <= 0x206F or 0x20A0 <= codepoint <= 0x20CF
+            or 0x2100 <= codepoint <= 0x215F or 0x2190 <= codepoint <= 0x2199
+            or 0x2212 <= codepoint <= 0x2215 or codepoint in (0x00A0, 0xFEFF, 0xFFFD))
+
+
 def summarize_coverage(font) -> dict:
     points = unicode_codepoints(font)
     han = sum(is_han(cp) for cp in points)
     latin = sum(0x41 <= cp <= 0x5A or 0x61 <= cp <= 0x7A for cp in points)
+    # Digit/display faces (lock-screen and OEM numeric fonts) carry digits and
+    # little else. Record that evidence so such slots can be admitted by
+    # measured coverage instead of by an OEM filename list.
+    digits = sum(0x30 <= cp <= 0x39 for cp in points)
+    extended = sum(not is_latin_ui_codepoint(cp) for cp in points)
     return {'hasHan': bool(han), 'hasLatin': bool(latin), 'hanCount': han,
             'latinCount': latin, 'unicodeCount': len(points),
+            'digitCount': digits, 'extendedCount': extended,
             'cjkPunctuation': sorted(cp for cp in points if is_cjk_punctuation(cp))}
 
 
@@ -57,6 +75,10 @@ def valid_coverage(value) -> bool:
     if any(type(count) is not int or not 0 <= count <= 0x110000 for count in counts):
         return False
     han, latin, total = counts
+    # Optional since scanner revision 5; older inventories stay valid.
+    for key, limit in (('digitCount', 10), ('extendedCount', total)):
+        if key in value and (type(value[key]) is not int or not 0 <= value[key] <= min(limit, total)):
+            return False
     punctuation = value.get('cjkPunctuation')
     return (type(value.get('hasHan')) is bool and value['hasHan'] == (han > 0)
             and type(value.get('hasLatin')) is bool and value['hasLatin'] == (latin > 0)

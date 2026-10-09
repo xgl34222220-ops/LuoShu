@@ -20,7 +20,8 @@ from fontTools.ttLib import TTFont
 from fontTools import subset
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_inventory import (LOGICAL_FONT_ROOTS, _generic_font_name_candidate,
-                            _generic_text_slot_candidate, _heuristic_candidate)
+                            _generic_text_slot_candidate, _heuristic_candidate,
+                            _numeric_display_slot_candidate)
 from font_inventory_scan import _is_ui_family, _safe_dynamic_partition_name
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
@@ -28,6 +29,10 @@ from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
+# Families the HyperOS physical mappers (legacy and full coverage) write aliases for.
+MAPPER_FAMILY_PREFIXES = ("MiSans", "XiaomiSans", "MiLanPro", "Mitype", "MiClock",
+                          "AndroidClock", "Roboto", "GoogleSans", "SourceSansPro",
+                          "NotoSans", "DroidSans")
 
 
 def weight_for_name(name: str) -> int:
@@ -83,16 +88,24 @@ def inventory_completion_slot(slot: object, logical: str) -> bool:
         return False
     name = Path(logical).name
     # A single-face donor cannot preserve a collection's other face references.
+    metrics = slot.get('metrics', {})
+    # A measured digit/display face (e.g. a "clock" numeral font) is the one
+    # exception to the generic name deny list. Admission uses the stock face's
+    # own coverage evidence, whichever scan pass (XML/heuristic/verified) found it.
+    numeric = _numeric_display_slot_candidate(name, metrics)
     if (Path(name).suffix.lower() not in {'.ttf', '.otf'} or
             slot.get('format') in {'TTC', 'OTC'} or slot.get('faceIndex', 0) != 0 or
-            slot.get('style', 'normal') != 'normal' or not _generic_font_name_candidate(name)):
+            slot.get('style', 'normal') != 'normal' or
+            not (_generic_font_name_candidate(name) or numeric)):
         return False
+    if numeric:
+        return True
     families = slot.get('families', [])
     return (_heuristic_candidate(name) or
             (isinstance(families, list) and any(
                 isinstance(family, str) and _is_ui_family(family) for family in families)) or
             (slot.get('source') == 'verified-scan' and
-             _generic_text_slot_candidate(name, slot.get('metrics', {}))))
+             _generic_text_slot_candidate(name, metrics)))
 
 
 def inventory_completion_source(fonts: Path, slot: dict, name: str) -> Path:
@@ -203,6 +216,81 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         # compact fallback explicit in the report; never read the mounted overlay
         # as stock and never silently use an unnormalized raw font on errors.
         return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, None, 'fallback')
+
+
+# Weight/style tokens that may trail an OEM family filename ("OplusOSUI-Medium",
+# "SysSans-Hans-Bold", "GoogleSansText-SemiBold"). Every weight of one family
+# shares one vertical contract on the ROMs inspected; the stem before them is
+# the family a missing slot can borrow its stock line metrics from.
+_FAMILY_WEIGHT_TOKENS = frozenset({
+    'xthin', 'thin', 'hairline', 'extralight', 'ultralight', 'light', 'regular',
+    'normal', 'book', 'medium', 'semibold', 'demibold', 'bold', 'extrabold',
+    'ultrabold', 'black', 'heavy',
+})
+
+
+def family_stem(name: str) -> str:
+    """Filename family key used only to borrow a sibling's stock contract."""
+    stem = Path(name).stem.lower()
+    if stem.isdigit():
+        return '#numeric'  # 100.ttf..900.ttf form one weight family.
+    tokens = [token for token in stem.replace('_', '-').split('-') if token]
+    while len(tokens) > 1 and tokens[-1] in _FAMILY_WEIGHT_TOKENS:
+        tokens.pop()
+    return '-'.join(tokens)
+
+
+def _slot_weight(slot: dict, name: str) -> int:
+    weight = slot.get('weight') if isinstance(slot, dict) else None
+    if type(weight) is int and 1 <= weight <= 1000:
+        return weight
+    return weight_for_name(name)
+
+
+def resolve_slot_contract(data: dict, logical: str) -> tuple[tuple, str | None]:
+    """Stock contract for a slot, borrowing a verified sibling's when it has none.
+
+    A staged physical slot that the stock inventory does not describe (an OTA
+    rename, a partition copy recorded under one path only, a family member the
+    scanner has not refreshed yet) used to fall back to one fixed compact line
+    box (HyperOS) or keep the donor's own hhea/OS2 (ColorOS). Either one moves
+    the baseline and line box away from the ROM's real metrics. The same file
+    name on another partition, else the nearest weight of the same family, is
+    measured stock data for the same design and is used instead. Coverage,
+    routing and bitmap corrections are never borrowed: the result is labelled
+    'stock-sibling', not 'stock'. Without any inventory the old fallback stays.
+    """
+    contract = contract_for_slot(data, logical)
+    if contract[-1] == 'stock':
+        return contract, None
+    slots = (data or {}).get('slots') if isinstance(data, dict) else None
+    if not isinstance(slots, dict) or not slots:
+        return contract, None
+    name = Path(logical).name
+    own = slots.get(logical) if isinstance(slots.get(logical), dict) else {}
+    target_weight = _slot_weight(own, name)
+    stem = family_stem(name)
+    ranked = []
+    for other, entry in slots.items():
+        if (other == logical or not isinstance(other, str) or not isinstance(entry, dict)
+                or entry.get('style', 'normal') != 'normal' or entry.get('faceIndex', 0) != 0):
+            continue
+        other_name = Path(other).name
+        if other_name == name:
+            rank = 0
+        elif family_stem(other_name) == stem:
+            rank = 1
+        else:
+            continue
+        candidate = contract_for_slot(data, other)
+        if candidate[-1] != 'stock':
+            continue
+        distance = abs(_slot_weight(entry, other_name) - target_weight)
+        ranked.append(((rank, distance, not other.startswith('/system/'), other), candidate))
+    if not ranked:
+        return contract, None
+    (_rank, _distance, _system, reference), borrowed = min(ranked, key=lambda item: item[0])
+    return (*borrowed[:-1], 'stock-sibling'), reference
 
 
 def _latin_ink_bottom(font: TTFont) -> int | None:
@@ -338,7 +426,8 @@ def write_metrics(source: Path, output: Path, contract: tuple,
             else:
                 bottom_reason = 'no-excess-bottom-padding'
         # MVAR can restore source line metrics at non-default variable weights.
-        if 'MVAR' in font:
+        had_mvar = 'MVAR' in font
+        if had_mvar:
             del font['MVAR']
         removed = (remove_cjk_mappings(font, cjk_fallback_codepoints, stock_cjk_punctuation)
                    if cjk_fallback_codepoints else 0)
@@ -347,7 +436,9 @@ def write_metrics(source: Path, output: Path, contract: tuple,
         # their original reader bytes instead of reserializing the outlines.
         for tag in ('glyf', 'CFF ', 'CFF2', 'gvar'):
             font.tables.pop(tag, None)
-        font.save(output, reorderTables=False)
+        if (face >= 0 or had_mvar or removed or
+                not _patch_metric_tables(source, output, font, stream.fileno())):
+            font.save(output, reorderTables=False)
         report = {'sourceUpem': upem, 'sourceHead': list(source_frame),
                   'outputHead': [int(head.yMin), int(head.yMax)],
                   'layoutBoundsSource': ('stock-line-descent' if bottom_correction else
@@ -358,6 +449,76 @@ def write_metrics(source: Path, output: Path, contract: tuple,
                   'removedCjkMappings': removed}
     os.chmod(output, 0o644)
     return report
+
+
+PATCHED_METRIC_TABLES = ('head', 'hhea', 'OS/2')
+
+
+def _patch_metric_tables(source: Path, output: Path, font: TTFont, descriptor: int) -> bool:
+    """Write a metrics-only alias as a kernel copy plus three table patches.
+
+    Re-saving with fontTools rereads and re-checksums every table, ~1.8 s for a
+    20 MB CJK donor on a desktop and several seconds per distinct stock contract
+    on a phone. When only head/hhea/OS/2 change and their compiled sizes are
+    unchanged, the result is the source file with those tables (and their
+    directory checksums plus head.checkSumAdjustment) rewritten in place.
+    Returns False, writing nothing, whenever that equivalence does not hold.
+    """
+    try:
+        # pread on the writer's own descriptor: no extra open, no seek race
+        # with the lazy fontTools reader that shares this stream.
+        header = os.pread(descriptor, 12, 0)
+        if len(header) != 12:
+            return False
+        version, count = header[:4], struct.unpack('>H', header[4:6])[0]
+        if version not in (b'\x00\x01\x00\x00', b'OTTO', b'true') or not 1 <= count <= 512:
+            return False
+        directory = os.pread(descriptor, 16 * count, 12)
+        if len(directory) != 16 * count:
+            return False
+        entries = {}
+        for index in range(count):
+            tag, checksum, offset, length = struct.unpack_from('>4sIII', directory, 16 * index)
+            entries[tag.decode('latin-1')] = (index, checksum, offset, length)
+        compiled = {}
+        for tag in PATCHED_METRIC_TABLES:
+            if tag not in entries:
+                return False
+            data = font[tag].compile(font)
+            if len(data) != entries[tag][3]:
+                return False
+            compiled[tag] = data
+        size = source.stat().st_size
+        if any(not 0 < offset and offset + length <= size
+               for _index, _checksum, offset, length in entries.values()):
+            return False
+    except Exception:
+        return False
+    from fontTools.ttLib.sfnt import calcChecksum
+    output.unlink(missing_ok=True)
+    try:
+        shutil.copyfile(source, output)
+        table_directory = bytearray(header + directory)
+        with output.open('r+b') as stream:
+            for tag, data in compiled.items():
+                index, _checksum, offset, _length = entries[tag]
+                if tag == 'head':
+                    data = data[:8] + b'\0\0\0\0' + data[12:]
+                stream.seek(offset)
+                stream.write(data)
+                struct.pack_into('>I', table_directory, 12 + 16 * index + 4, calcChecksum(data))
+            stream.seek(0)
+            stream.write(table_directory)
+            total = calcChecksum(bytes(table_directory))
+            for index in range(count):
+                total += struct.unpack_from('>I', table_directory, 12 + 16 * index + 4)[0]
+            adjustment = (0xB1B0AFBA - total) & 0xFFFFFFFF
+            stream.seek(entries['head'][2] + 8)
+            stream.write(struct.pack('>I', adjustment))
+        return True
+    except Exception:
+        output.unlink(missing_ok=True)
+        return False
 
 
 def link_copy(source: Path, dest: Path) -> None:
@@ -459,26 +620,165 @@ def final_fallback_codepoints(path: Path, candidates: frozenset[int]) -> tuple:
                            or getattr(records, 'BaseGlyphPaintRecord', None) or [])
                 color_names.update(record.BaseGlyph for record in records)
         glyphs = font.getGlyphSet() if mapped else {}
-        cache = {}; drawn = 0; proven = set()
-        for cp in mapped:
-            name = cmap[cp]
-            if name not in cache:
-                valid = False
-                if name != '.notdef' and name in glyphs and name not in color_names:
-                    try:
-                        pen = BoundsPen(glyphs); drawn += 1; glyphs[name].draw(pen)
-                        bounds = pen.bounds
-                        valid = (bounds is not None and all(math.isfinite(v) for v in bounds)
-                                 and bounds[2] > bounds[0] and bounds[3] > bounds[1])
-                    except MemoryError:
-                        raise
-                    except Exception:
-                        # A malformed optional fallback glyph is not proof that
-                        # the already visible primary can safely be removed.
-                        valid = False
-                cache[name] = valid
-            if cache[name]: proven.add(cp)
+        names = {cmap[cp] for cp in mapped}
+        cache = {name: False for name in names
+                 if name == '.notdef' or name not in glyphs or name in color_names}
+        pending = [name for name in sorted(names) if name not in cache]
+        # glyphsDrawn keeps counting every outline given a geometric verdict.
+        drawn = len(pending)
+        # A CJK donor maps tens of thousands of glyphs. Drawing every outline in
+        # Python took ~50 s on a desktop for a 20 MB font (minutes on a phone).
+        # Well-formed simple TrueType glyphs are proven from their own glyf
+        # record instead; anything else is still drawn exactly as before.
+        if 'glyf' in font and pending:
+            fast = _glyf_simple_outline_proof(font, pending)
+            cache.update(fast)
+            pending = [name for name in pending if name not in fast]
+        cache.update(_draw_outline_proof(path, glyphs, pending, BoundsPen))
+        proven = {cp for cp in mapped if cache.get(cmap[cp], False)}
         return frozenset(proven), frozenset(mapped), drawn
+
+
+def _glyf_simple_outline_proof(font: TTFont, names: list) -> dict:
+    """Prove non-empty simple glyf outlines without decoding coordinates.
+
+    The glyf record of a simple glyph carries the bounding box of its control
+    points. For quadratic outlines the exact outline bounds have positive width
+    (height) exactly when the control points do, so a positive stored box is the
+    same proof the BoundsPen draw gives. The record is also checked to be
+    structurally complete (contour end points, instructions, flags inside the
+    record). Composite, empty, malformed or degenerate records are not decided
+    here: they return no verdict and are drawn by the caller.
+    """
+    try:
+        raw = font.reader['glyf']
+        locations = font['loca'].locations
+        order = {name: index for index, name in enumerate(font.getGlyphOrder())}
+    except Exception:
+        return {}
+    size = len(raw)
+    verdict = {}
+    unpack = struct.unpack_from
+    for name in names:
+        index = order.get(name)
+        if index is None or index + 1 >= len(locations):
+            continue
+        start, end = locations[index], locations[index + 1]
+        if not 0 <= start <= end <= size or end - start < 10:
+            continue
+        contours, x_min, y_min, x_max, y_max = unpack('>hhhhh', raw, start)
+        if contours <= 0 or x_max <= x_min or y_max <= y_min:
+            continue
+        cursor = start + 10 + 2 * contours
+        if cursor + 2 > end:
+            continue
+        ends = unpack(f'>{contours}H', raw, start + 10)
+        if any(later < earlier for earlier, later in zip(ends, ends[1:])):
+            continue
+        instructions = unpack('>H', raw, cursor)[0]
+        cursor += 2 + instructions
+        # At least one flag byte must follow the instructions, and the points
+        # must fit into the remaining record (one flag byte can repeat, each
+        # coordinate needs zero to two bytes per axis).
+        if cursor >= end or ends[-1] + 1 > 255 * (end - cursor):
+            continue
+        verdict[name] = True
+    return verdict
+
+
+def _draw_names(path: Path, names: list, pen_class) -> dict:
+    result = {}
+    with TTFont(path, lazy=True, recalcBBoxes=False, recalcTimestamp=False) as font:
+        glyphs = font.getGlyphSet()
+        for name in names:
+            result[name] = _draw_one(glyphs, name, pen_class)
+    return result
+
+
+def _draw_one(glyphs, name: str, pen_class) -> bool:
+    try:
+        pen = pen_class(glyphs); glyphs[name].draw(pen)
+        bounds = pen.bounds
+        return (bounds is not None and all(math.isfinite(v) for v in bounds)
+                and bounds[2] > bounds[0] and bounds[3] > bounds[1])
+    except MemoryError:
+        raise
+    except Exception:
+        # A malformed optional fallback glyph is not proof that
+        # the already visible primary can safely be removed.
+        return False
+
+
+# Below this many outlines a fork costs more than it saves.
+PARALLEL_DRAW_MIN_GLYPHS = 1500
+
+
+def _draw_outline_proof(path: Path, glyphs, names: list, pen_class) -> dict:
+    """Draw remaining outlines (CFF/CFF2, composites) on all CPU cores.
+
+    Android Python has no working multiprocessing semaphores, so plain
+    fork()+pipe workers are used. Each worker reopens the font (no shared
+    file offset) and returns one byte per glyph. Any worker failure falls back
+    to drawing the whole set in-process, so the verdict never depends on it.
+    """
+    if not names:
+        return {}
+    try:
+        workers = min(len(os.sched_getaffinity(0)), 8)
+    except (AttributeError, OSError):
+        workers = os.cpu_count() or 1
+    if (len(names) < PARALLEL_DRAW_MIN_GLYPHS or workers < 2 or
+            not hasattr(os, 'fork') or os.environ.get('LUOSHU_SERIAL_GLYPH_PROOF') == '1'):
+        return {name: _draw_one(glyphs, name, pen_class) for name in names}
+    chunks = [names[index::workers] for index in range(workers)]
+    children = []  # (pid, read_fd or None, chunk)
+    result = {}
+    failed = False
+    try:
+        for chunk in chunks:
+            read_fd, write_fd = os.pipe()
+            pid = os.fork()
+            if pid == 0:  # pragma: no cover - exercised through the parent
+                code = 1
+                try:
+                    os.close(read_fd)
+                    verdict = _draw_names(path, chunk, pen_class)
+                    view = memoryview(bytes(1 if verdict[name] else 0 for name in chunk))
+                    while view:
+                        view = view[os.write(write_fd, view):]
+                    code = 0
+                finally:
+                    os._exit(code)
+            os.close(write_fd)
+            children.append([pid, read_fd, chunk])
+    except OSError:
+        failed = True
+    for child in children:
+        pid, read_fd, chunk = child
+        data = b''
+        try:
+            with os.fdopen(read_fd, 'rb') as stream:
+                child[1] = None
+                data = stream.read()
+        except OSError:
+            failed = True
+        finally:
+            if child[1] is not None:
+                try:
+                    os.close(child[1])
+                except OSError:
+                    pass
+        try:
+            _pid, status = os.waitpid(pid, 0)
+        except OSError:
+            status = -1
+        if status != 0 or len(data) != len(chunk):
+            failed = True
+            continue
+        result.update((name, bool(flag)) for name, flag in zip(chunk, data))
+    if failed:
+        return {name: _draw_one(glyphs, name, pen_class) for name in names}
+    return result
 
 
 def prepare_cjk_routing(data: dict, jobs: list, stage: Path, outputs: Path, *, writer=None) -> tuple:
@@ -570,6 +870,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
+    borrowed = {}
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
@@ -579,7 +880,11 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             raise ValueError('字体暂存槽位指向隔离目录之外')
         if staged_fonts.is_dir():
             for alias in staged_fonts.iterdir():
-                if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
+                # Any staged alias of a mapper family that the physical policy
+                # rejects (italic Roboto written by older mappers, script or
+                # symbol faces) exposes the untouched ROM font instead. It was
+                # previously kept with the donor's own line metrics.
+                if (alias.name.startswith(MAPPER_FAMILY_PREFIXES)
                         and alias.suffix in ('.ttf', '.otf')
                         and not safe_physical_font_name(alias.name)):
                     excluded_aliases.append(alias)
@@ -597,8 +902,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 preserved_aliases.append(stage / part / 'fonts' / name)
                 continue
             if (root / name).exists():
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
-                             contract_for_slot(data, logical)))
+                contract, reference = resolve_slot_contract(data, logical)
+                if reference:
+                    borrowed[logical] = reference
+                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name, contract))
     # Filename discovery serves known boot-repair aliases. Trusted inventory
     # also contains XML UI faces and verified upright text with other OEM names.
     seen = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in jobs}
@@ -653,6 +960,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             fallback += contract[-1] == 'fallback'
             slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
                                 'metricsSource': contract[-1],
+                                **({'metricsReferencePath': borrowed[logical]}
+                                   if logical in borrowed else {}),
                                 'slotSource': 'stock-inventory' if logical in completed_slots else 'physical-mapper',
                                 'referenceUpem': contract[0],
                                 'hhea': list(contract[1:4]),

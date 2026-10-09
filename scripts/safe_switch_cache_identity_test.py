@@ -11,7 +11,7 @@ import unittest
 ROOT = Path(os.environ.get('LUOSHU_TEST_ROOT', str(Path(__file__).resolve().parents[1])))
 FUNCTIONS = ('read_state_value', 'safe_hash_stream', 'safe_source_identity',
              'safe_inventory_identity', 'safe_code_identity', 'safe_mapper_identity',
-             'safe_validator_identity', 'safe_family_identity', 'safe_rom_identity',
+             'safe_validator_identity', 'safe_family_files', 'safe_family_identity', 'safe_rom_identity',
              'safe_partition_list', 'safe_validation_key', 'safe_validation_restore',
              'safe_validation_store', 'safe_switch_cache_key', 'safe_switch_cache_matches', 'safe_switch_cache_ready',
              'safe_switch_cache_restore', 'safe_switch_cache_dir_kb', 'safe_switch_cache_prune',

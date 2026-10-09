@@ -66,7 +66,7 @@ def prepare(source, cache, boot, temporary):
     if source.is_symlink() or not source.is_dir() or cache.is_symlink():
         raise ValueError("unsafe payload root")
     cache.mkdir(parents=True, exist_ok=True)
-    current_boot_generation = False
+    current_boot_bytes = set()
     for old in cache.glob("generation-*"):
         record = old / ".generation.json"
         if not re.fullmatch(r"generation-[0-9a-f]{64}", old.name):
@@ -83,7 +83,7 @@ def prepare(source, cache, boot, temporary):
             if saved["bootId"] != boot:
                 shutil.rmtree(old)
             else:
-                current_boot_generation = True
+                current_boot_bytes.add(saved.get("bytes"))
     entries, sizes, needed = [], {}, 0
     for current, directories, files in os.walk(source, followlinks=False):
         if any((Path(current) / name).is_symlink() for name in directories):
@@ -102,10 +102,13 @@ def prepare(source, cache, boot, temporary):
                 sizes[identity] = info.st_size
                 needed += info.st_size
             entries.append((path, relative, identity, info))
-    # With no recorded generation of this boot, fuse the full SHA and independent
-    # copy. Existing generations are still verified below. Keep the warm path
-    # free of staging writes whenever this boot already has a reusable candidate.
-    stream_copy = not current_boot_generation
+    # Fuse the full SHA and the independent copy unless this boot already holds
+    # a generation of exactly this byte size: only such a generation can match
+    # the digest, so only then is the hash-first warm path (no staging writes)
+    # worth a second full read. A switch to a different font in the same boot
+    # used to read and hash every payload byte twice. Existing generations are
+    # still verified below either way.
+    stream_copy = needed not in current_boot_bytes
     created = False
     inodes, copied, digest = {}, {}, hashlib.sha256()
     try:

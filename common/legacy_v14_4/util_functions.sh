@@ -337,7 +337,7 @@ scan_family_weights() {
     weights=""
     for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$f" ] || continue
-        name=$(basename "$f")
+        name=${f##*/}
         fam=$(detect_font_family "$name")
         [ "$fam" = "$family" ] || continue
         w=$(detect_font_weight "$name")
@@ -361,7 +361,7 @@ get_weight_file() {
     fallback_file=""
     for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$f" ] || continue
-        name=$(basename "$f")
+        name=${f##*/}
         fam=$(detect_font_family "$name")
         [ "$fam" = "$family" ] || continue
         [ -z "$fallback_file" ] && fallback_file="$f"
@@ -644,7 +644,7 @@ get_current_font_id() {
         if [ -d "$MODULE_DIR/system/fonts" ]; then
             for f in "$MODULE_DIR/system/fonts"/*.ttf "$MODULE_DIR/system/fonts"/*.otf "$MODULE_DIR/system/fonts"/*.ttc; do
                 [ -f "$f" ] || continue
-                name=$(basename "$f")
+                name=${f##*/}
                 case "$name" in
                     NotoColorEmoji*|NotoColorEmojiFlags*|NotoSansSymbols*) continue ;;
                 esac

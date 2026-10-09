@@ -21,6 +21,7 @@ from font_inventory import (FONT_EXTENSIONS, FontRoot, _heuristic_candidate,
                             _pick_actual_root, _stock_font_path)
 from font_inventory_scan import _is_ui_family
 from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_copy,
+                                  resolve_slot_contract,
                                   read_inventory, write_metrics, compact_routed_source,
                                   _cjk_routing, prepare_cjk_routing, cjk_routing_report,
                                   inventory_font_roots as font_roots,
@@ -37,6 +38,22 @@ def eligible_slot(slot: object, logical: str) -> bool:
     return _heuristic_candidate(name) or (
         isinstance(families, list) and any(isinstance(family, str) and _is_ui_family(family) for family in families)
     )
+
+
+def sibling_eligible_name(path: Path) -> bool:
+    """A staged single-face upright UI alias that may borrow a sibling contract."""
+    name = path.name
+    if path.suffix.lower() not in {'.ttf', '.otf'} or not _heuristic_candidate(name):
+        return False
+    lowered = name.lower()
+    if any(token in lowered for token in ('italic', 'oblique', 'emoji', 'symbol', 'icon',
+                                          'math', 'music', 'serif', 'mono')):
+        return False
+    try:
+        with path.open('rb') as stream:
+            return stream.read(4) in (b'\x00\x01\x00\x00', b'OTTO', b'true')
+    except OSError:
+        return False
 
 
 def write_report(stage: Path, slots: list[dict]) -> None:
@@ -188,16 +205,29 @@ def build(module: Path, stage: Path) -> dict:
             report = {'slot': logical, 'metricsSource': 'preserved'}
             reports.append(report)
             slot = indexed.get(logical)
+            if slot is None and sibling_eligible_name(source):
+                # A real staged alias the stock inventory does not describe yet
+                # (new OTA/legacy-mapper name, partition copy recorded once).
+                # Keeping it raw shipped the donor's own hhea/OS2 line box.
+                contract, reference = resolve_slot_contract(inventory, logical)
+                if contract[-1] == 'stock-sibling':
+                    report['metricsReferencePath'] = reference
+                    jobs.append((source, source, contract, report))
+                else:
+                    report['reason'] = 'missing-or-ineligible-stock-slot'
+                continue
             if not eligible_slot(slot, logical):
                 report['reason'] = 'missing-or-ineligible-stock-slot'
                 continue
             face_index = slot.get('faceIndex', 0)
             stock_collection = (slot.get('format') in {'TTC', 'OTC'} or
                                 type(face_index) is not int or face_index != 0)
-            contract = contract_for_slot(inventory, logical)
+            contract, reference = resolve_slot_contract(inventory, logical)
             if contract[-1] != 'stock' and not stock_collection:
-                report['reason'] = 'invalid-stock-metrics'
-                continue
+                if contract[-1] != 'stock-sibling':
+                    report['reason'] = 'invalid-stock-metrics'
+                    continue
+                report['metricsReferencePath'] = reference
             with source.open('rb') as stream:
                 signature = stream.read(4)
             if signature == b'ttcf' or stock_collection:
@@ -271,7 +301,7 @@ def build(module: Path, stage: Path) -> dict:
                 cached_reports[key]['removedCjkMappings'] += compact_removed
                 cache[key] = output
             prepared.append((cache[key], destination))
-            report.update({'metricsSource': 'stock', 'referenceUpem': contract[0],
+            report.update({'metricsSource': contract[-1], 'referenceUpem': contract[0],
                            'hhea': list(contract[1:4]), 'typo': list(contract[4:7]),
                            'win': list(contract[7:9]), 'useTypoMetrics': contract[9],
                            'cjkRoutingSource': 'stock-fallback' if routing else 'source',
