@@ -279,9 +279,7 @@ internal fun FontLibraryScreenMiuix(
                 onRestore = actions.restoreDefault,
             )
         }
-        // With a read error and no fonts, the error card above is the truthful state;
-        // "start with your first font" would wrongly suggest the library is empty.
-        if (!state.loading && state.fonts.isEmpty() && (filtered || state.error.isBlank())) {
+        if (!state.loading && state.fonts.isEmpty()) {
             item(key = "empty") {
                 Card(
                     modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
