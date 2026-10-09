@@ -17,6 +17,13 @@ HTF_ROUTER="${LUOSHU_THEME_FONT_ROUTER:-/data/system/fonts/theme_webview/Roboto-
 _htf_active() {
     [ "$(_gfp_active_font)" != default ] || return 1
     [ -L "$HTF_ALIAS" ] || return 1
+    # The early-boot route bind already serves the active payload on this
+    # router; stacking a second per-namespace view adds nothing.
+    if [ -f "$MODDIR/common/hyperos_webview_route.sh" ] && \
+       MODDIR="$MODDIR" LUOSHU_WEBVIEW_ROUTE_ROUTER="$HTF_ROUTER" \
+       sh "$MODDIR/common/hyperos_webview_route.sh" owned >/dev/null 2>&1; then
+        return 1
+    fi
     # HyperOS can rebuild theme_webview as a regular font or use relative links.
     # Compare resolved routes, not the spelling of readlink's immediate hop.
     # Only the two known framework paths are accepted; never follow arbitrary
