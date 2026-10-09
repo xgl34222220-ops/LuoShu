@@ -127,6 +127,43 @@ print('{"status":"ok","slotCount":1}')
         self.assertTrue(receipt['elapsedSeconds'].isdigit())
         self.assertEqual(receipt['bootId'], Path('/proc/sys/kernel/random/boot_id').read_text().strip())
 
+    def test_unchanged_stock_inputs_reuse_verified_inventory(self):
+        result, _elapsed = self.call_scan()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        key = self.module / 'config/device_font_inventory.stock-key'
+        self.assertTrue(key.read_text().strip())
+        published = self.inventory.read_bytes()
+        self.pending.write_text('retry-required\n')
+        result, _elapsed = self.call_scan()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('"reused":true', result.stdout)
+        self.assertEqual(len(self.scan_records()), 1)
+        self.assertFalse(self.pending.exists())
+        self.assertEqual(self.inventory.read_bytes(), published)
+        receipt = dict(line.split('=', 1) for line in (self.module / 'config/boot-stock-scan.state').read_text().splitlines())
+        self.assertEqual(receipt['result'], 'reused')
+
+    def test_changed_stock_inputs_or_late_view_force_real_scan(self):
+        result, _elapsed = self.call_scan()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # Scanner code changed (module update): the old inventory is not reusable.
+        (self.common / 'stock_inventory_scan.py').write_text('# changed\n')
+        self.pending.write_text('retry-required\n')
+        result, _elapsed = self.call_scan()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('"reused":true', result.stdout)
+        self.assertEqual(len(self.scan_records()), 2)
+        # A mismatched key on disk never allows reuse either.
+        (self.module / 'config/device_font_inventory.stock-key').write_text('other\n')
+        self.pending.write_text('retry-required\n')
+        result, _elapsed = self.call_scan()
+        self.assertNotIn('"reused":true', result.stdout)
+        self.assertEqual(len(self.scan_records()), 3)
+        # After boot completion the reuse shortcut is never taken.
+        self.pending.write_text('retry-required\n')
+        result, _elapsed = self.call_scan(extra={'FIXTURE_BOOT_COMPLETE': '1'})
+        self.assertNotIn('"reused":true', result.stdout)
+
     def test_early_success_publishes_after_clean_scope(self):
         result, elapsed = self.call_scan()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

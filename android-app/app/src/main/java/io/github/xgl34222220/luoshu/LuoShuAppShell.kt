@@ -218,7 +218,13 @@ internal fun LuoShuAppShell(
     }
     val libraryActions = remember(viewModel) {
         FontLibraryActions(
-            refresh = { viewModel.refreshFonts(force = true) },
+            refresh = {
+                // Without a usable module/Root state a font re-read is a silent no-op;
+                // re-check the module first so "重试" always does something visible.
+                val status = viewModel.snapshot
+                if (!status.loading && (!status.installed || !status.rootGranted)) viewModel.refresh()
+                else viewModel.refreshFonts(force = true)
+            },
             setQuery = viewModel::setSearchQuery,
             apply = {
                 pendingApply = it

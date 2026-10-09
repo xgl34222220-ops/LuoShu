@@ -261,6 +261,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     timeoutMs = 20_000L,
                 )
                 if (requestedRevision != fontStateRevision || fontTaskJob?.isActive == true) return@launch
+                if (result.code == 124 && statusReceived) {
+                    // A slow backend is not a lost Root grant. Keep the last real status
+                    // and say what happened instead of switching the UI to "no Root".
+                    snapshot = snapshot.copy(loading = false, error = "读取模块状态超时，已保留上次状态；请稍后下拉刷新")
+                    return@launch
+                }
                 if (result.code != 0) {
                     statusReceived = true
                     snapshot = ModuleSnapshot(
@@ -278,6 +284,11 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 resumePendingTask(parsed)
                 persistModuleDisplay()
             } finally {
+                // Early exits (superseded revision, pending cleanup, cancellation) must not
+                // leave the status card spinning forever.
+                if (snapshot.loading && fontTaskJob?.isActive != true) {
+                    snapshot = snapshot.copy(loading = false)
+                }
                 initialStatusReady.value = true
             }
         }

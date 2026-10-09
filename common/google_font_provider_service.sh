@@ -67,6 +67,12 @@ case "${1:-boot}" in
 esac
 
 [ -d "$MODDIR" ] || exit 0
+# Boot reconciliation is maintenance that coincides with the post-boot app
+# start-up burst; keep it off the foreground CPU/I/O budget.
+if [ "${1:-boot}" = boot ]; then
+    renice -n 10 -p "$$" >/dev/null 2>&1 || true
+    ionice -c 2 -n 7 -p "$$" >/dev/null 2>&1 || true
+fi
 _provider_active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 if [ -z "$_provider_active" ] || [ "$_provider_active" = default ] || \
    [ -f "$MODDIR/disable" ] || [ -f "$MODDIR/remove" ]; then

@@ -99,6 +99,15 @@ fi
             ;;
     esac
 
+    # Everything below is maintenance, not mount confirmation. The verification
+    # record above is already final. Let the device finish its own boot burst,
+    # then continue at low CPU/I/O priority and skip work whose inputs are unchanged.
+    _housekeeping="$MODDIR/common/boot_housekeeping.sh"
+    [ -f "$_housekeeping" ] && . "$_housekeeping"
+    _deferred_start=$(date +%s 2>/dev/null || echo 0)
+    type luoshu_boot_settle >/dev/null 2>&1 && luoshu_boot_settle
+    type luoshu_boot_lower_priority >/dev/null 2>&1 && luoshu_boot_lower_priority
+
     if [ -f "$MODDIR/config/app_install_pending" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
         MODDIR="$MODDIR" sh "$MODDIR/common/app_installer.sh" service-retry >> "$LOG" 2>&1 || true
     fi
@@ -111,11 +120,27 @@ fi
             printf '[%s] deferred stock inventory: %s\n' \
                 "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_stock_scan" >> "$LOG" 2>/dev/null || true
         fi
-        MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list --native-index >/dev/null 2>&1 || true
+        # native_font_index.json only depends on the module version, the active
+        # selection and the public font folder. When none changed since the last
+        # successful prewarm, the router/task-scope/v4 start-up is pure cost.
+        _index_key=''
+        type luoshu_native_index_boot_key >/dev/null 2>&1 && \
+            _index_key=$(luoshu_native_index_boot_key "$MODDIR" "$_active" 2>/dev/null)
+        if type luoshu_native_index_boot_fresh >/dev/null 2>&1 && \
+           luoshu_native_index_boot_fresh "$MODDIR" "$_index_key"; then
+            printf '[%s] native font index unchanged; prewarm skipped\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG" 2>/dev/null || true
+        elif MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list --native-index >/dev/null 2>&1; then
+            type luoshu_native_index_boot_record >/dev/null 2>&1 && \
+                luoshu_native_index_boot_record "$MODDIR" "$_index_key"
+        fi
     fi
+    type luoshu_boot_housekeep >/dev/null 2>&1 && luoshu_boot_housekeep "$MODDIR"
 
-    printf '[%s] physical compatibility service complete: %s (%s)\n' \
-        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_verify_state" >> "$LOG" 2>/dev/null
+    _deferred_end=$(date +%s 2>/dev/null || echo 0)
+    printf '[%s] physical compatibility service complete: %s (%s) deferredSeconds=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_verify_state" \
+        "$((_deferred_end - _deferred_start))" >> "$LOG" 2>/dev/null
 ) &
 
 exit 0

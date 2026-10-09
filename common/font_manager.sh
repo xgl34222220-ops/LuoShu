@@ -50,6 +50,62 @@ if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan ] && \
         unset LUOSHU_STOCK_VIEW_VERIFIED
     fi
 fi
+# Cheap identity of every input the stock inventory is derived from: the ROM
+# build, the scanner code, the dynamic partition manifest and name/size/mtime of
+# the stock font files and font XMLs as seen from the pre-mount boot view.
+stock_boot_input_key() {
+    _sbk_parts="system system_ext product vendor odm my_product my_region my_stock my_heytap my_bigball my_engineering my_manifest mi_ext oem"
+    _sbk_dyn=$(cat "$MODDIR/config/device_font_partitions.conf" 2>/dev/null)
+    _sbk_out=$({
+        printf 'stock-boot-key-v1\n'
+        for _sbk_prop in ro.build.fingerprint ro.build.version.incremental ro.build.date.utc ro.system.build.fingerprint ro.product.build.fingerprint; do
+            printf '%s=%s\n' "$_sbk_prop" "$(getprop "$_sbk_prop" 2>/dev/null)"
+        done
+        cksum "$MODDIR/common/stock_inventory_scan.py" "$MODDIR/common/font_inventory.py" \
+            "$MODDIR/common/font_inventory_scan.py" "$MODDIR/common/font_check.sh" 2>/dev/null
+        printf 'partitions=%s\n' "$_sbk_dyn"
+        for _sbk_part in $_sbk_parts $_sbk_dyn; do
+            case "$_sbk_part" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+            [ -d "/$_sbk_part/fonts" ] && ls -lnAL --full-time "/$_sbk_part/fonts" 2>/dev/null
+            ls -lnL --full-time "/$_sbk_part/etc"/font*.xml "/$_sbk_part/etc"/fonts*.xml 2>/dev/null
+        done
+    } 2>/dev/null)
+    [ -n "$_sbk_out" ] || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s\n' "$_sbk_out" | sha256sum 2>/dev/null | awk '{print $1}'
+    else
+        printf '%s\n' "$_sbk_out" | cksum 2>/dev/null | awk '{print $1 "-" $2}'
+    fi
+}
+
+STOCK_BOOT_KEY_FILE="$MODDIR/config/device_font_inventory.stock-key"
+
+# A pending boot rescan whose inputs are byte-for-byte the inputs of the last
+# verified boot scan reproduces the same inventory. Reuse it instead of paying
+# the Python scan (seconds on 200+ stock files) right before the font mount.
+if [ "$_manager_boot_stock_scan" -eq 1 ] && [ -z "${LUOSHU_BOOT_STOCK_SCAN_STAGE:-}" ] && \
+   [ "${_manager_view_early:-0}" -eq 1 ] && [ "${LUOSHU_STOCK_SCAN_NO_REUSE:-0}" != 1 ] && \
+   [ -f "$MODDIR/config/stock_inventory_scan_pending" ] && \
+   [ -s "$MODDIR/config/device_font_inventory.json" ] && \
+   [ -s "$MODDIR/config/device_font_candidates.json" ] && \
+   [ -s "$STOCK_BOOT_KEY_FILE" ]; then
+    _manager_reuse_key=$(stock_boot_input_key)
+    if [ -n "$_manager_reuse_key" ] && [ "$(cat "$STOCK_BOOT_KEY_FILE" 2>/dev/null)" = "$_manager_reuse_key" ]; then
+        rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+        {
+            printf 'schema=luoshu-boot-stock-scan-v1\n'
+            printf 'result=reused\n'
+            printf 'budgetSeconds=%s\n' "$_manager_scope_timeout"
+            printf 'elapsedSeconds=0\n'
+            printf 'inventoryPublished=no\n'
+            printf 'bootId=%s\n' "$(head -n1 /proc/sys/kernel/random/boot_id 2>/dev/null)"
+        } > "$MODDIR/config/boot-stock-scan.state.tmp.$$" 2>/dev/null && \
+            mv -f "$MODDIR/config/boot-stock-scan.state.tmp.$$" "$MODDIR/config/boot-stock-scan.state" 2>/dev/null || true
+        printf '{"status":"ok","data":{"reused":true,"message":"stock inputs unchanged; verified inventory reused"}}\n'
+        exit 0
+    fi
+fi
+
 if [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ] && \
    { [ "$_manager_boot_stock_scan" -ne 1 ] || [ -n "${LUOSHU_BOOT_STOCK_SCAN_STAGE:-}" ]; }; then
     # The supervisor only returns timeout after collecting descendant cleanup
@@ -377,6 +433,13 @@ boot_stock_scan_json() {
         fi
         _manager_stage_preserve=0
         rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+        # Record the inputs of this verified pre-mount scan for later reuse.
+        _manager_stock_key=$(stock_boot_input_key)
+        if [ -n "$_manager_stock_key" ]; then
+            printf '%s\n' "$_manager_stock_key" > "$STOCK_BOOT_KEY_FILE.tmp.$$" 2>/dev/null && \
+                mv -f "$STOCK_BOOT_KEY_FILE.tmp.$$" "$STOCK_BOOT_KEY_FILE" 2>/dev/null || \
+                rm -f "$STOCK_BOOT_KEY_FILE.tmp.$$" 2>/dev/null || true
+        fi
         boot_stock_scan_receipt success yes
         printf '%s\n' "$_manager_scan_response"
     else

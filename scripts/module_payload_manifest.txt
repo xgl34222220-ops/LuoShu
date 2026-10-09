@@ -4,6 +4,7 @@
 common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
+common/boot_housekeeping.sh
 common/task_scope.py
 common/task_scope.sh
 common/runtime_paths.sh

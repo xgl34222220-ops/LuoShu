@@ -11,19 +11,33 @@ font_library_fingerprint_value() {
     _count=0
     _bytes=0
 
-    for _font_file in "$_font_dir"/*.ttf "$_font_dir"/*.otf "$_font_dir"/*.ttc \
-        "$_font_dir"/*.TTF "$_font_dir"/*.OTF "$_font_dir"/*.TTC; do
+    # One stat for the whole folder instead of two per file: with a few hundred
+    # fonts the per-file forks dominated every App list refresh and boot prewarm.
+    # Output rows stay byte-identical to the previous name|size|%Y:%y format.
+    set -- "$_font_dir"/*.ttf "$_font_dir"/*.otf "$_font_dir"/*.ttc \
+        "$_font_dir"/*.TTF "$_font_dir"/*.OTF "$_font_dir"/*.TTC
+    for _font_file in "$@"; do
+        shift
         [ -f "$_font_file" ] || continue
-        _name=$(basename "$_font_file" 2>/dev/null)
-        case "$_name" in SysFont*|SysSans*) continue ;; esac
-        _size=$(stat -c %s "$_font_file" 2>/dev/null)
-        _mtime=$(stat -c '%Y:%y' "$_font_file" 2>/dev/null)
-        case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        [ -n "$_mtime" ] || _mtime=0
-        printf '%s|%s|%s\n' "$_name" "$_size" "$_mtime" >> "$_tmp"
-        _count=$((_count + 1))
-        _bytes=$((_bytes + _size))
+        case "${_font_file##*/}" in SysFont*|SysSans*) continue ;; esac
+        set -- "$@" "$_font_file"
     done
+    if [ "$#" -gt 0 ]; then
+        stat -c '%s|%Y:%y|%n' "$@" > "$_tmp.raw" 2>/dev/null
+        awk -F'|' '{
+                size=$1; mtime=$2; path=$0
+                sub(/^[^|]*\|[^|]*\|/, "", path)
+                name=path; sub(/^.*\//, "", name)
+                if (size !~ /^[0-9]+$/) size=0
+                if (mtime == "") mtime=0
+                print name "|" size "|" mtime
+            }' "$_tmp.raw" >> "$_tmp" 2>/dev/null
+        _count=$(grep -c . "$_tmp" 2>/dev/null)
+        _bytes=$(awk -F'|' '$1 ~ /^[0-9]+$/ {t += $1} END {printf "%.0f", t + 0}' "$_tmp.raw" 2>/dev/null)
+        rm -f "$_tmp.raw" 2>/dev/null || true
+        case "$_count" in ''|*[!0-9]*) _count=0 ;; esac
+        case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
+    fi
 
     LC_ALL=C sort -o "$_tmp" "$_tmp" 2>/dev/null || true
     if command -v sha256sum >/dev/null 2>&1; then
