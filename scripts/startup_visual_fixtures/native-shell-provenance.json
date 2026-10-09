@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "textBounds360x780": [
+    [
+      10,
+      53,
+      63,
+      84
+    ],
+    [
+      10,
+      97,
+      92,
+      118
+    ]
+  ],
+  "references": [
+    {
+      "theme": "light",
+      "fixture": "native-shell-light.png",
+      "sha256": "ee3010bf3e43c5e8ffa2993f1cf0b7ede569f547f5df30138dd024a7ecb16047",
+      "video": "light-cold-start.mp4",
+      "videoSha256": "718312a3d2fd4848761485e5411d610786b647243db5541b01903a977a8574c4",
+      "frameIndex": 26,
+      "ptsSeconds": 4.392256,
+      "artifactId": 11601660278,
+      "runId": 37896812363,
+      "commit": "3ef9306dff2feff90972d23c5b8f7e957a146bd2",
+      "derivation": "Original video frame decoded with ffmpeg scale=360:780, original timestamps and RGB24, same normalization as classifier; no drawn or removed content",
+      "scope": "Noninteractive native preparation UI, not home; display between recorded frames remains unobserved"
+    },
+    {
+      "theme": "dark",
+      "fixture": "native-shell-dark.png",
+      "sha256": "75b965cdce2c4142e5ed91d093eafc0ee6d4b32859ec36355917f857e152650b",
+      "video": "dark-cold-start.mp4",
+      "videoSha256": "091e4b73d20fe1da84edbe53bbc9a44ee176c5ffefe19abba8b480b329457469",
+      "frameIndex": 17,
+      "ptsSeconds": 3.114589,
+      "artifactId": 11601261883,
+      "runId": 37896812363,
+      "commit": "3ef9306dff2feff90972d23c5b8f7e957a146bd2",
+      "derivation": "Original video frame decoded with ffmpeg scale=360:780, original timestamps and RGB24, same normalization as classifier; no drawn or removed content",
+      "scope": "Noninteractive native preparation UI, not home; display between recorded frames remains unobserved"
+    }
+  ]
+}

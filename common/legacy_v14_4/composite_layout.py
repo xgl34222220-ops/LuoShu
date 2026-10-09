@@ -17,6 +17,60 @@ def _bounds_for_codepoint(font: TTFont, glyph_set, codepoint: int) -> tuple[floa
     return None if pen.bounds is None else tuple(float(value) for value in pen.bounds)
 
 
+def validate_required_ink(font: TTFont, latin, digits, cjk_probes) -> dict:
+    """Check bounded, visible text probes, rather than treating cmap as ink.
+
+    Spaces, controls, combining marks and other optional glyphs may be empty.
+    The inherited CJK cmap stays intact: only mapped CJK probes are drawn, with
+    the existing mandatory U+4E2D check retained. This is not a full Han audit.
+    """
+    cmap = font.getBestCmap() or {}
+    mandatory = set(latin) | set(digits) | {ord("中")}
+    missing = sorted(cp for cp in mandatory if not cmap.get(cp) or cmap[cp] == ".notdef")
+    if missing:
+        raise ValueError(f"复合字体缺少必要字符 U+{missing[0]:04X}")
+    points = mandatory | (set(cjk_probes) & cmap.keys())
+    names = {cmap[cp] for cp in points}
+
+    # Do not decode SVG documents or bitmap images just to validate ordinary
+    # text. The composite engine copies outlines, not those drawing programs.
+    unsupported = [tag for tag in ("CBDT", "CBLC", "EBDT", "EBLC", "sbix", "SVG ") if tag in font]
+    if unsupported:
+        raise ValueError("复合输出不支持 SVG 或位图文字绘制：" + ", ".join(unsupported))
+    if "COLR" in font:
+        colr = font["COLR"]
+        color_names = set(getattr(colr, "ColorLayers", {}) or {})
+        table = getattr(colr, "table", None)
+        for attribute in ("BaseGlyphRecordArray", "BaseGlyphList"):
+            records = getattr(table, attribute, None)
+            records = (getattr(records, "BaseGlyphRecord", None)
+                       or getattr(records, "BaseGlyphPaintRecord", None) or [])
+            color_names.update(record.BaseGlyph for record in records)
+        if names & color_names:
+            raise ValueError("复合输出不支持必要文字依赖 COLR 彩色绘制")
+
+    glyph_set = font.getGlyphSet()
+    bounds_by_name = {}
+    for cp in sorted(points):
+        name = cmap[cp]
+        if name not in bounds_by_name:
+            if name == ".notdef" or name not in glyph_set:
+                raise ValueError(f"复合字体的必要字符 U+{cp:04X} 没有可用字形")
+            pen = BoundsPen(glyph_set)
+            glyph_set[name].draw(pen)
+            bounds_by_name[name] = pen.bounds
+        bounds = bounds_by_name[name]
+        if (bounds is None or not all(math.isfinite(value) for value in bounds)
+                or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]):
+            raise ValueError(f"复合字体的必要字符 U+{cp:04X} 字形为空或没有可见面积")
+    return {
+        "bounds": {role: list(bounds_by_name[cmap[cp]])
+                   for role, cp in (("cjk", ord("中")), ("latin", ord("A")), ("digit", ord("1")))},
+        "inkValidation": {"method": "bounded-monochrome-outlines-v1",
+                          "codepoints": len(points), "glyphsDrawn": len(bounds_by_name)},
+    }
+
+
 # Translation probes deliberately use flat-bottom glyphs. Rounded glyphs such as O/0/8/9
 # overshoot the baseline and introduce a systematic upward bias.
 FLAT_BOTTOM_PROBES = {"latin": "HIEX", "digit": "147"}

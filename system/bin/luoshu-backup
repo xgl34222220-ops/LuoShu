@@ -32,7 +32,7 @@ export_root() {
         _bytes=$((_bytes + _size)); _count=$((_count + 1))
     done
     # Portable preference/config only. Runtime state, locks, payload snapshots and logs are intentionally excluded.
-    for _name in font_mix.conf axes_mix.conf font_weight.conf font_weight_original.conf; do
+    for _name in font_mix.conf axes_mix.conf; do
         safe_copy_file "$CONFIG_DIR/$_name" "$_dest/root/config/$_name" || true
     done
     chmod -R a+rX "$_dest/root" 2>/dev/null || true
@@ -52,7 +52,7 @@ restore_root() {
         chmod 0644 "$FONT_ROOT/$_name" 2>/dev/null || true
         _count=$((_count + 1))
     done
-    for _name in font_mix.conf axes_mix.conf font_weight.conf font_weight_original.conf; do
+    for _name in font_mix.conf axes_mix.conf; do
         safe_copy_file "$_src/root/config/$_name" "$CONFIG_DIR/$_name" || true
         [ ! -f "$CONFIG_DIR/$_name" ] || chmod 0644 "$CONFIG_DIR/$_name" 2>/dev/null || true
     done

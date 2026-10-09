@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
+from datetime import datetime
 import fcntl
 import json
 import os
@@ -33,6 +34,25 @@ SCHEMA = 'luoshu-google-font-fallback-v1'
 
 class FallbackError(RuntimeError):
     pass
+
+
+def validated_update_time(value: Any) -> str | None:
+    """dumpsys uses this sortable format; unknown metadata is not evidence."""
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', value):
+        return None
+    try:
+        datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return None
+    return value
+
+
+def validated_code_path(value: Any) -> str | None:
+    if (not isinstance(value, str) or not value.startswith(('/data/app/', '/mnt/expand/'))
+            or any(char.isspace() or ord(char) < 32 for char in value)
+            or any(part in ('.', '..', '') for part in value.split('/')[1:])):
+        return None
+    return value
 
 
 def parse_snapshot(text: str, user: int) -> dict[str, Any]:
@@ -71,6 +91,14 @@ def parse_snapshot(text: str, user: int) -> dict[str, Any]:
         first = re.search(r'^\s+firstInstallTime=([^\n]+)', package[:users[0].start()], re.M)
     if first is None:
         raise FallbackError('当前用户的 GMS 安装身份不完整；未修改组件。')
+    # Package revision is separate from versionCode: a replacement of the same
+    # version can still reset component overrides. Never borrow a user's nested
+    # metadata or the Hidden system packages copy. Old/unknown ROM output keeps
+    # version-only behavior rather than inventing a newer package revision.
+    updates = re.findall(r'(?m)^    lastUpdateTime=([^\n]+)$', package[:users[0].start()])
+    updated = validated_update_time(updates[0]) if len(updates) == 1 else None
+    paths = re.findall(r'(?m)^    codePath=([^\n]+)$', package[:users[0].start()])
+    code_path = validated_code_path(paths[0]) if len(paths) == 1 else None
     # Nested user components have greater indentation than the User header.
     user_indent = len(entry[1])
     state_value = 0
@@ -112,6 +140,8 @@ def parse_snapshot(text: str, user: int) -> dict[str, Any]:
                               + re.escape(PROVIDER) + r'|\.fonts\.provider\.FontsProvider)'
                               + r'(?=[\s}\]])', prefix))
     return {'user': user, 'appId': int(appid[1]), 'versionCode': int(version[1]),
+            'lastUpdateTime': updated,
+            'codePath': code_path,
             'firstInstallTime': first[1].strip(), 'packageState': int(app_enabled[1]),
             'component': COMPONENT, 'componentState': state_value, 'declared': declared}
 
@@ -264,9 +294,49 @@ def _legacy_link_matches(legacy: Path, directory: Path) -> bool:
 
 def _secure_store_parent(parent: Path) -> None:
     info = parent.lstat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
-            or info.st_mode & 0o022):
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
         raise FallbackError('洛书恢复根目录所有者或权限不安全。')
+    if not info.st_mode & 0o022:
+        return
+    # Frozen mount helpers also use this shared root. mkdir -p inherits the
+    # Root manager's umask (000/002 can leave 0777/0775), and mkdir(exist_ok)
+    # does not correct it. Remove only group/other write; preserve mount read
+    # and traversal bits and every child inode. Never repair foreign owners,
+    # links, journals, or a root beneath an untrusted writable ancestor.
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    ancestor_fd = os.open(parent.parent, flags)
+    try:
+        ancestor = os.fstat(ancestor_fd)
+        named_ancestor = parent.parent.lstat()
+        if (not stat.S_ISDIR(ancestor.st_mode) or ancestor.st_uid != os.geteuid()
+                or ancestor.st_mode & 0o022
+                or (ancestor.st_dev, ancestor.st_ino) !=
+                   (named_ancestor.st_dev, named_ancestor.st_ino)):
+            raise FallbackError('洛书恢复根目录所有者或权限不安全。')
+        fd = os.open(parent.name, flags, dir_fd=ancestor_fd)
+        try:
+            opened = os.fstat(fd)
+            if (not stat.S_ISDIR(opened.st_mode) or opened.st_uid != os.geteuid()
+                    or (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino)):
+                raise FallbackError('洛书恢复根目录已变化；未修复权限。')
+            os.fchmod(fd, stat.S_IMODE(opened.st_mode) & ~0o022)
+            os.fsync(fd)
+            secured = os.fstat(fd)
+            named = parent.lstat()
+            ancestor = os.fstat(ancestor_fd)
+            named_ancestor = parent.parent.lstat()
+            if (secured.st_uid != os.geteuid() or secured.st_mode & 0o022
+                    or not stat.S_ISDIR(named.st_mode) or named.st_mode & 0o022
+                    or (secured.st_dev, secured.st_ino) != (named.st_dev, named.st_ino)
+                    or ancestor.st_uid != os.geteuid() or ancestor.st_mode & 0o022
+                    or not stat.S_ISDIR(named_ancestor.st_mode)
+                    or (ancestor.st_dev, ancestor.st_ino) !=
+                       (named_ancestor.st_dev, named_ancestor.st_ino)):
+                raise FallbackError('洛书恢复根目录权限修复未核验通过。')
+        finally:
+            os.close(fd)
+    finally:
+        os.close(ancestor_fd)
 
 
 def prepare_store(directory: Path = STORE, legacy: Path = LEGACY_STORE) -> Path:

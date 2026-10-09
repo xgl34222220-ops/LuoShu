@@ -32,6 +32,7 @@ expected_effective, expected_state, expected_reason = sys.argv[1:]
 assert data["effectiveActive"] == expected_effective, data
 assert data["fontEffectState"] == expected_state, data
 assert data["verificationReason"] == expected_reason, data
+assert data["installed"] is True and data["enabled"] is True, data
 ' "$_expected_effective" "$_expected_state" "$_expected_reason"
 }
 
@@ -108,6 +109,35 @@ done
 MODDIR="$MODULE" sh "$MODULE/common/app_bridge.sh" status >/dev/null 2>>"$TMP/request-cleanup.stderr"
 [ ! -e "$TMP/controller-called" ]
 
+# A fresh status must distinguish installed files from an enabled module.
+assert_enabled() {
+    _output=$(MODDIR="$MODULE" sh "$MODULE/common/app_bridge.sh" status 2>>"$TMP/request-cleanup.stderr")
+    printf '%s' "$_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)["data"]
+assert data["installed"] is (sys.argv[1] == "true"), data
+assert data["enabled"] is (sys.argv[2] == "true"), data
+' "$1" "$2"
+}
+touch "$MODULE/disable"
+assert_enabled true false
+rm "$MODULE/disable"
+assert_enabled true true
+touch "$MODULE/remove"
+assert_enabled true false
+rm "$MODULE/remove"
+assert_enabled true true
+mkdir "$MODULE/disable"
+assert_enabled true false
+rmdir "$MODULE/disable"
+ln -s "$TMP/missing-marker" "$MODULE/disable"
+assert_enabled true false
+rm "$MODULE/disable"
+mv "$MODULE/module.prop" "$MODULE/kept-module.prop"
+assert_enabled false false
+mv "$MODULE/kept-module.prop" "$MODULE/module.prop"
+assert_enabled true true
+
 [ "$(readlink "$CONFIG")" = '.luoshu-state/config' ]
 "$HOST_PYTHON" - "$MODULE/.luoshu-state/tasks" <<'PY'
 import json
@@ -116,7 +146,7 @@ import sys
 
 tasks = Path(sys.argv[1])
 proofs = list(tasks.glob('request-*.pid.cleanup.json'))
-assert len(proofs) == 17, proofs
+assert len(proofs) == 25, proofs
 for path in proofs:
     proof = json.loads(path.read_text())
     assert proof['cleaned'] and not proof['leftoverPids'] and proof['result'] == 0, proof

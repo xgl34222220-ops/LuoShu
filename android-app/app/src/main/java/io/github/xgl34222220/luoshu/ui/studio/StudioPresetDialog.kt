@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -37,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -44,6 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -142,12 +147,19 @@ internal fun StudioPresetDialog(
 
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        containerColor = LocalMiuixTokens.current.glassDialogColor,
+        tonalElevation = 0.dp,
+        modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(34.dp))
+            .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(34.dp))
+            .border(
+                BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(34.dp),
+            ),
+        shape = LuoShuSmoothShape(34.dp),
         icon = {
             if (busy) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
             else Icon(Icons.Rounded.Save, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         },
-        title = { Text("本地字体方案库", fontWeight = FontWeight.Black) },
+        title = { Text("本地字体方案库", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -182,9 +194,11 @@ internal fun StudioPresetDialog(
                     }
                     presets.isEmpty() -> {
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
+                            shape = LuoShuSmoothShape(18.dp),
+                            color = LocalMiuixTokens.current.glassCardColor,
+                            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                         ) {
                             Text(
                                 "还没有本地方案。保存后可在这里一键载入。",
@@ -195,7 +209,7 @@ internal fun StudioPresetDialog(
                         }
                     }
                     else -> {
-                        Text("我的方案 · ${presets.size}", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                        Text("我的方案 · ${presets.size}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         LazyColumn(
                             modifier = Modifier.fillMaxWidth().heightIn(max = 330.dp),
                             verticalArrangement = Arrangement.spacedBy(7.dp),
@@ -218,12 +232,12 @@ internal fun StudioPresetDialog(
                 }
 
                 if (status.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                         Text(status, modifier = Modifier.fillMaxWidth().padding(10.dp), fontSize = 10.sp)
                     }
                 }
                 if (errorMessage.isNotBlank()) {
-                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
+                    Surface(shape = LuoShuSmoothShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
                         Text(
                             errorMessage,
                             modifier = Modifier.fillMaxWidth().padding(10.dp),
@@ -240,9 +254,16 @@ internal fun StudioPresetDialog(
     renaming?.let { preset ->
         AlertDialog(
             onDismissRequest = { renaming = null },
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 32.dp else 26.dp),
+            containerColor = LocalMiuixTokens.current.glassDialogColor,
+            tonalElevation = 0.dp,
+            modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(32.dp))
+                .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(32.dp))
+                .border(
+                    BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(32.dp),
+                ),
+            shape = LuoShuSmoothShape(32.dp),
             icon = { Icon(Icons.Rounded.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("重命名方案", fontWeight = FontWeight.Black) },
+            title = { Text("重命名方案", fontWeight = FontWeight.SemiBold) },
             text = {
                 OutlinedTextField(
                     value = renameText,
@@ -282,9 +303,11 @@ private fun PresetRow(
     onDelete: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
+        shape = LuoShuSmoothShape(20.dp),
+        color = LocalMiuixTokens.current.elevatedCardBackground,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 11.dp, top = 9.dp, end = 6.dp, bottom = 9.dp),
@@ -300,7 +323,7 @@ private fun PresetRow(
             }
             Spacer(Modifier.width(5.dp))
             Column(Modifier.weight(1f)) {
-                Text(preset.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                Text(preset.name, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     when {
                         preset.lastUsedAt > 0L -> "最近使用 ${formatPresetTime(preset.lastUsedAt)}"

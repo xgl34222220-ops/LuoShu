@@ -6,3 +6,6 @@ import androidx.compose.ui.unit.dp
 
 /** Extra scroll range used only while the floating glass dock overlays page content. */
 internal val LocalDockContentPadding = staticCompositionLocalOf<Dp> { 0.dp }
+
+/** Explicit page navigation may restore the dock without changing scroll intent. */
+internal val LocalShowDock = staticCompositionLocalOf<() -> Unit> { {} }

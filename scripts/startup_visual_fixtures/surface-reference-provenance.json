@@ -1,0 +1,209 @@
+{
+  "workflow_run": 37673679437,
+  "commit": "6af650c388d966f3bb242f4c7241c9012bdd79bb",
+  "artifact": "LuoShu-Startup-Visual-API-36",
+  "artifact_id": 11507365772,
+  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes.",
+  "references": [
+    {
+      "file": "native-dark-enter-008.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
+      "frame": 8,
+      "time_seconds": 0.685956,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "3c076d67f80ccdb512066f432c7906d7146f6f0325cec33d3d013bf60be87369",
+      "theme": "dark",
+      "expected_state": "logo-transition"
+    },
+    {
+      "file": "native-dark-enter-009.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
+      "frame": 9,
+      "time_seconds": 0.752944,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "cdcbb1492937dba2234713e5cfa6a8fe7b7330e6da61fd18fdc1369fefade601",
+      "theme": "dark",
+      "expected_state": "logo-transition"
+    },
+    {
+      "file": "native-light-enter-000.png",
+      "source": "light-cold-start.mp4",
+      "source_sha256": "cc40d8490a83e0a9ac276c0a30dfe013677d18af0b7eb8a74eaf6330e730728e",
+      "frame": 0,
+      "time_seconds": 0.0,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "6c67e3403b53f947de2ce12bfd8300230bb6de85311c229c46ee7538f580af59",
+      "theme": "light",
+      "expected_state": "logo-transition"
+    },
+    {
+      "file": "home-light-resume-001.png",
+      "source": "light-warm-start.mp4",
+      "source_sha256": "463aa4835d7d646b6eb35e06e35384a08c68882888b1c55a6db4e1f0c7209130",
+      "frame": 1,
+      "time_seconds": 0.0639,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "4c009ee36c1fb0e0390911b0aafe42d6f2736024418c0c0a775e77c71e8bf1b1",
+      "theme": "light",
+      "expected_state": "home-transition"
+    },
+    {
+      "file": "home-light-resume-002.png",
+      "source": "light-warm-start.mp4",
+      "source_sha256": "463aa4835d7d646b6eb35e06e35384a08c68882888b1c55a6db4e1f0c7209130",
+      "frame": 2,
+      "time_seconds": 0.1058,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "02446972a1d1d4039ccf79f97d2de613deeb819aa4b91b876629f97b219304d0",
+      "theme": "light",
+      "expected_state": "home-transition"
+    },
+    {
+      "file": "home-light-resume-003.png",
+      "source": "light-warm-start.mp4",
+      "source_sha256": "463aa4835d7d646b6eb35e06e35384a08c68882888b1c55a6db4e1f0c7209130",
+      "frame": 3,
+      "time_seconds": 0.176878,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "518f3ff4ef2a2ace9fa02b9ecd3ffdd64baf192a2066af3bc9f73b4bd18175d8",
+      "theme": "light",
+      "expected_state": "home-transition"
+    },
+    {
+      "file": "home-dark-resume-007.png",
+      "source": "dark-warm-start.mp4",
+      "source_sha256": "8ba3ccc14b371d0815a09a754a3626e6f6711c53ff61460eaa8b7cba57eade9c",
+      "frame": 7,
+      "time_seconds": 0.610733,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "6c105fe23b3545a01ba0a5360d9c42cf43db193221f12b1cfb71a8c97b248feb",
+      "theme": "dark",
+      "expected_state": "home-transition"
+    },
+    {
+      "file": "negative-dark-blank-022.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
+      "frame": 22,
+      "time_seconds": 2.977867,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "70d68b53a097c2d5a5bcff6f6e033ab374fb9288d8dd7eb7393ecfb46e52f405",
+      "theme": "dark",
+      "expected_state": "unclassified"
+    },
+    {
+      "file": "negative-dark-black-023.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
+      "frame": 23,
+      "time_seconds": 3.072333,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "51a1bdd69d94c1cd067db3fc6056297b230db6fec79349c8589ae55448a6b4bb",
+      "theme": "dark",
+      "expected_state": "black-blank"
+    },
+    {
+      "file": "negative-light-launcher-000.png",
+      "source": "light-warm-start.mp4",
+      "source_sha256": "463aa4835d7d646b6eb35e06e35384a08c68882888b1c55a6db4e1f0c7209130",
+      "frame": 0,
+      "time_seconds": 0.0,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "e0a84c00764a2a1c9867c7e7ff6efc7565c24035f8dd7886857b1a3655ae7148",
+      "theme": "light",
+      "expected_state": "unclassified"
+    }
+  ],
+  "home_references": [
+    {
+      "file": "reference-home-light.png",
+      "artifact_source": "light-warm-start-home.png",
+      "source_sha256": "bb8297fbfd8a56b82b044f1cf34281e45cc7df10d3cdc907e96899bfe6b2f271",
+      "file_sha256": "bb8297fbfd8a56b82b044f1cf34281e45cc7df10d3cdc907e96899bfe6b2f271",
+      "pixel_transform": "Unmodified screenshot or hierarchy from this real CI run"
+    },
+    {
+      "file": "reference-home-light.xml",
+      "artifact_source": "light-warm-start-home.xml",
+      "source_sha256": "6ca260e6378987ebb327135a0e0e3e2443d4bb695a5a5502673026a8fd5bec1c",
+      "file_sha256": "6ca260e6378987ebb327135a0e0e3e2443d4bb695a5a5502673026a8fd5bec1c",
+      "pixel_transform": "Unmodified screenshot or hierarchy from this real CI run"
+    },
+    {
+      "file": "reference-home-dark.png",
+      "artifact_source": "dark-warm-start-home.png",
+      "source_sha256": "db13daf54515913c5e1d2844f79dd4d6621c75b8a95e8ff1c35570be96ac3ae5",
+      "file_sha256": "db13daf54515913c5e1d2844f79dd4d6621c75b8a95e8ff1c35570be96ac3ae5",
+      "pixel_transform": "Unmodified screenshot or hierarchy from this real CI run"
+    },
+    {
+      "file": "reference-home-dark.xml",
+      "artifact_source": "dark-warm-start-home.xml",
+      "source_sha256": "6ca260e6378987ebb327135a0e0e3e2443d4bb695a5a5502673026a8fd5bec1c",
+      "file_sha256": "6ca260e6378987ebb327135a0e0e3e2443d4bb695a5a5502673026a8fd5bec1c",
+      "pixel_transform": "Unmodified screenshot or hierarchy from this real CI run"
+    }
+  ]
+}

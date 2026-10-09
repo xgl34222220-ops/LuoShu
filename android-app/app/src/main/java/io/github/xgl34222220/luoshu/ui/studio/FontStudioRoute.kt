@@ -109,10 +109,7 @@ internal fun FontStudioRoute(
             scaleY = pageScale
         },
     ) {
-        when (style) {
-            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
-            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
-        }
+        FontStudioScreenMiuix(state, stableActions, studioTools)
     }
 
     if (showCompositePreview) {

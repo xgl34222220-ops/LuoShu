@@ -7,6 +7,40 @@ import org.junit.Test
 
 class TaskCenterModelTest {
     @Test
+    fun serviceTemplateErrorDoesNotInventAUserApplyFailure() {
+        val task = parseTaskLogItems(
+            "[2026-10-07 20:49:13] [SERVICE] [ERROR] 原厂字体槽位模板刷新失败；明确应用会保持旧负载并返回错误",
+        ).single()
+        assertEquals(TaskKind.TEMPLATE, task.kind)
+        assertEquals(TaskPhase.FAILED, task.phase)
+        assertEquals("原厂槽位检查失败", task.title)
+        assertFalse(task.completed)
+    }
+
+    @Test
+    fun awaitingMountConfirmationIsNotACompletedReboot() {
+        val task = parseTaskLogItems(
+            "[1970-10-07 13:05:33] [INFO] 当前文字=mix | 等待主命名空间挂载确认后完成重启事务",
+        ).single()
+        assertEquals(TaskKind.REBOOT, task.kind)
+        assertEquals(TaskPhase.WAITING_CONFIRMATION, task.phase)
+        assertEquals("设备重启等待挂载确认", task.title)
+        assertEquals("开机早期，时间未同步", task.timeLabel)
+        assertFalse(task.completed)
+        assertFalse(task.active)
+    }
+
+    @Test
+    fun actualApplyFailuresAndConfirmedRebootsKeepTheirOutcome() {
+        assertEquals(TaskKind.APPLY, taskKindFor("字体应用失败：负载校验错误"))
+        assertEquals(TaskKind.APPLY, taskKindFor("字体应用失败：原厂模板不可用"))
+        assertEquals(TaskKind.APPLY, taskKindFor("原厂模板不可用", "switch"))
+        assertEquals(TaskKind.MIX, taskKindFor("原厂模板不可用", "mix"))
+        assertEquals(TaskPhase.FAILED, taskPhaseFor("ERROR", "字体应用失败：负载校验错误"))
+        assertEquals(TaskPhase.SUCCESS, taskPhaseFor("INFO", "设备重启已完成，主命名空间挂载确认成功"))
+    }
+
+    @Test
     fun structuredLogsBecomeNewestFirstTaskTimeline() {
         val tasks = parseTaskLogItems(
             """

@@ -1,15 +1,35 @@
 #!/usr/bin/env python3
 """Real v1 journal migration + built-in state/actions; no device render claims."""
+import contextlib
+import io
 import json
 import os
 import shutil
+import stat
+import subprocess
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 from google_font_fallback_test import m, FakeAndroid
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class RecoveryAndroid(FakeAndroid):
+    version = 123456
+    package_state = 0
+    updated_at = '2026-01-02 12:00:00'
+    code_path = '/data/app/gms-install-a'
+
+    def snapshot(self, user):
+        current = super().snapshot(user)
+        current['versionCode'] = self.version
+        current['packageState'] = self.package_state
+        current['lastUpdateTime'] = self.updated_at
+        current['codePath'] = self.code_path
+        return current
 
 class IntegrationTest(unittest.TestCase):
     def setUp(self):
@@ -129,6 +149,601 @@ class IntegrationTest(unittest.TestCase):
         self.assertNotIn('model.enable()', page.split('confirmButton')[0])
         uninstall = (ROOT / 'uninstall.sh').read_text()
         self.assertLess(uninstall.index('restore-owned --json'), uninstall.index('. "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"'))
+
+
+class LateModuleGuardTest(unittest.TestCase):
+    setUp = IntegrationTest.setUp
+
+    def clear_flags(self):
+        for name in ('disable', 'remove'):
+            flag = self.module / name
+            if flag.is_symlink() or flag.is_file():
+                flag.unlink()
+            elif flag.is_dir():
+                flag.rmdir()
+
+    def place_flag(self, marker, shape):
+        flag = self.module / marker
+        if shape == 'file':
+            flag.touch()
+        elif shape == 'directory':
+            flag.mkdir()
+        else:
+            flag.symlink_to(self.module / 'missing-marker-target')
+
+    def backend_with_late_flag(self, marker, shape, original=0):
+        self.clear_flags()
+        self.journal.clear()
+        test = self
+
+        class LateAndroid(RecoveryAndroid):
+            trigger = None
+            reads_after_armed = 0
+
+            def snapshot(self, user):
+                current = super().snapshot(user)
+                if self.trigger is not None:
+                    self.reads_after_armed += 1
+                    if self.reads_after_armed == self.trigger:
+                        test.place_flag(marker, shape)
+                return current
+
+        self.backend = LateAndroid()
+        self.backend.states[0] = original
+
+    def cli(self, action):
+        output = io.StringIO()
+        with patch.object(m, 'os', SimpleNamespace(geteuid=lambda: 0)), \
+                patch.object(m, 'Android', return_value=self.backend), \
+                patch.object(m, 'STORE', self.store), \
+                patch.object(m, 'LEGACY_STORE', self.root / 'legacy'), \
+                patch.object(m, 'MODULE', self.module), \
+                patch('sys.argv', ['google_font_fallback.py', action, '--user', '0', '--json']), \
+                contextlib.redirect_stdout(output):
+            code = m.main()
+        return code, json.loads(output.getvalue())
+
+    def test_module_ready_rejects_all_manager_marker_shapes_and_invalid_identity(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                with self.subTest(marker=marker, shape=shape):
+                    self.clear_flags()
+                    self.place_flag(marker, shape)
+                    self.assertFalse(m.module_ready(self.module))
+        self.clear_flags()
+        (self.module / 'module.prop').write_text('id=OtherModule\n')
+        self.assertFalse(m.module_ready(self.module))
+
+    def test_enable_rechecks_late_marker_before_actual_disable(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for original in (0, 1):
+                    with self.subTest(marker=marker, shape=shape, original=original):
+                        self.backend_with_late_flag(marker, shape, original)
+                        self.backend.trigger = 2
+                        code, result = self.cli('enable')
+                        self.assertEqual(code, 1, result)
+                        self.assertEqual(result['status'], 'error')
+                        self.assertEqual(self.backend.calls, [])
+                        self.assertEqual(self.backend.states[0], original)
+                        # The original core verifies the unchanged original state
+                        # before clearing this new write-ahead record.
+                        self.assertIsNone(self.journal.read())
+
+    def test_owned_upgrade_reset_rechecks_late_marker_and_retains_original_undo(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                with self.subTest(marker=marker, shape=shape):
+                    self.backend_with_late_flag(marker, shape)
+                    m.enable(self.backend, self.journal)
+                    original = self.journal.path.read_bytes()
+                    self.backend.calls.clear()
+                    self.backend.version += 1
+                    self.backend.states[0] = 0
+                    self.backend.trigger = 2
+                    code, result = self.cli('reconcile-owned')
+                    self.assertEqual(code, 1, result)
+                    self.assertEqual(result['status'], 'error')
+                    self.assertEqual(self.backend.calls, [])
+                    self.assertEqual(self.backend.states[0], 0)
+                    self.assertEqual(self.journal.path.read_bytes(), original)
+
+    def test_late_disable_after_explicit_restore_never_reasserts_disable_or_claims_success(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for original in (0, 1):
+                    with self.subTest(marker=marker, shape=shape, original=original):
+                        self.backend_with_late_flag(marker, shape, original)
+                        m.enable(self.backend, self.journal)
+                        saved = self.journal.path.read_bytes()
+                        self.backend.calls.clear()
+                        self.backend.trigger = 3
+                        code, result = self.cli('reapply-owned')
+                        self.assertEqual(code, 1, result)
+                        self.assertIn('回滚待确认', result['message'])
+                        self.assertEqual(self.backend.calls, [(0, original)])
+                        self.assertEqual(self.backend.states[0], original)
+                        self.assertEqual(self.journal.path.read_bytes(), saved)
+                        code, result = self.cli('restore')
+                        self.assertEqual(code, 0, result)
+                        self.assertEqual(self.backend.calls, [(0, original)])
+                        self.assertIsNone(self.journal.read())
+
+    def test_disabled_or_removing_restore_keeps_original_state_writes_available(self):
+        for marker in ('disable', 'remove'):
+            for shape in ('file', 'directory', 'dangling-symlink'):
+                for original in (0, 1):
+                    for action in ('restore', 'restore-owned'):
+                        with self.subTest(marker=marker, shape=shape, original=original, action=action):
+                            self.backend_with_late_flag(marker, shape, original)
+                            m.enable(self.backend, self.journal)
+                            self.backend.calls.clear()
+                            self.place_flag(marker, shape)
+                            code, result = self.cli(action)
+                            self.assertEqual(code, 0, result)
+                            self.assertEqual(self.backend.calls, [(0, original)])
+                            self.assertEqual(self.backend.states[0], original)
+                            self.assertIsNone(self.journal.read())
+
+
+class OwnedRecoveryTest(unittest.TestCase):
+    setUp = IntegrationTest.setUp
+    status = IntegrationTest.status
+
+    def enable(self, original=0):
+        self.backend = RecoveryAndroid()
+        self.backend.states[0] = original
+        m.enable(self.backend, self.journal)
+        self.backend.calls.clear()
+
+    def upgrade_reset(self):
+        self.backend.version += 1
+        self.backend.states[0] = self.journal.read()['original']
+
+    def reconcile(self):
+        with m.locked_store(self.store):
+            return m.reconcile_owned(self.backend, self.journal, self.module)
+
+    def reapply(self):
+        with m.locked_store(self.store):
+            return m.reapply_owned(self.backend, self.journal, self.module)
+
+    def test_missing_journal_does_not_claim_or_modify_external_settings(self):
+        self.backend.states[0] = 2
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.reads, 0)
+        self.assertEqual(self.backend.calls, [])
+        self.assertFalse(self.status()['canReapply'])
+        with self.assertRaises(m.FallbackError):
+            self.reapply()
+
+    def test_status_stays_read_only_for_a_verified_upgrade_reset(self):
+        self.enable()
+        self.upgrade_reset()
+        before = self.journal.path.read_bytes()
+        result = self.status()
+        self.assertEqual(result['state'], 'changed')
+        self.assertTrue(result['canReapply'])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_upgrade_reset_reapplies_once_and_preserves_original_undo(self):
+        self.enable()
+        before = self.journal.read()
+        self.upgrade_reset()
+        result = self.reconcile()
+        self.assertTrue(result['recoveredAfterUpgrade'])
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        saved = self.journal.read()
+        for key, value in before.items():
+            self.assertEqual(saved[key], value)
+        self.assertEqual(saved['lastVerifiedVersionCode'], self.backend.version)
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertIsNone(self.journal.read())
+
+    def test_still_disabled_upgrade_only_checkpoints_metadata_not_android(self):
+        self.enable()
+        self.backend.version += 1
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.read()['lastVerifiedVersionCode'], self.backend.version)
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [], 'a previous upgrade must not justify a later edit')
+
+    def test_same_version_package_replacement_reset_recovers_once(self):
+        self.enable()
+        original = self.journal.read()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        result = self.reconcile()
+        self.assertEqual(result['status'], 'component-disabled')
+        self.assertEqual(result['recoveryReason'], 'same-version-package-update')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        saved = self.journal.read()
+        for key, value in original.items():
+            self.assertEqual(saved[key], value)
+        self.assertEqual(saved['lastVerifiedUpdateTime'], self.backend.updated_at)
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_same_version_replacement_explicit_external_enable_remains_untouched(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 1
+        before = self.journal.path.read_bytes()
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_same_revision_default_edit_and_unknown_update_evidence_remain_untouched(self):
+        for update in ('2026-01-02 12:00:00', '2026-01-01 12:00:00', None,
+                       'unknown', '2026-02-30 12:00:00'):
+            with self.subTest(update=update):
+                self.journal.clear()
+                self.enable()
+                self.backend.updated_at = update
+                self.backend.states[0] = 0
+                before = self.journal.path.read_bytes()
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_legacy_record_without_update_time_does_not_guess_same_version_recovery(self):
+        self.enable()
+        saved = self.journal.read()
+        saved.pop('lastUpdateTime')
+        self.journal.save(saved)
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_disabled_same_version_update_checkpoints_without_restart_or_later_override(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.journal.read()['lastVerifiedUpdateTime'], self.backend.updated_at)
+        self.assertEqual(self.backend.calls, [])
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_same_version_replacement_race_is_rejected_before_any_write(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        snapshot, count = self.backend.snapshot, 0
+        def raced(user):
+            nonlocal count
+            count += 1
+            if count == 2:
+                self.backend.updated_at = '2026-01-04 12:00:00'
+                self.backend.code_path = '/data/app/gms-install-c'
+            return snapshot(user)
+        self.backend.snapshot = raced
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_timezone_or_clock_format_change_without_apk_replacement_never_authorizes_write(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-02 20:00:00'
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_missing_or_untrusted_apk_path_never_authorizes_same_version_write(self):
+        for path in (None, '/data/app/../foreign', '/data/app/new\npath', '/system/app/GmsCore'):
+            with self.subTest(path=path):
+                self.journal.clear()
+                self.enable()
+                self.backend.updated_at = '2026-01-03 12:00:00'
+                self.backend.code_path = path
+                self.backend.states[0] = 0
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+
+    def test_revision_changed_after_disable_never_rolls_back_a_new_package_override(self):
+        self.enable()
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        before = self.journal.path.read_bytes()
+        change = self.backend.change
+        def replaced_after_change(user, state):
+            change(user, state)
+            self.backend.updated_at = '2026-01-04 12:00:00'
+            self.backend.code_path = '/data/app/gms-install-c'
+            self.backend.states[user] = 1  # A new revision/external explicit enable.
+        self.backend.change = replaced_after_change
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        self.assertEqual(self.backend.states[0], 1)
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_package_enable_race_before_recovery_never_writes(self):
+        self.enable()
+        self.upgrade_reset()
+        before = self.journal.path.read_bytes()
+        snapshot, count = self.backend.snapshot, 0
+        def raced(user):
+            nonlocal count
+            count += 1
+            if count == 2:
+                self.backend.package_state = 1
+            return snapshot(user)
+        self.backend.snapshot = raced
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_package_disable_after_failed_open_never_rolls_back(self):
+        self.enable()
+        before = self.journal.path.read_bytes()
+        change = self.backend.change
+        def failed_open(user, state):
+            change(user, state)
+            self.backend.package_state = 2
+            raise m.FallbackError('failed open with external package disable')
+        self.backend.change = failed_open
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [(0, 0)])
+        self.assertEqual(self.backend.package_state, 2)
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_revision_changed_during_rollback_does_not_claim_verified_success(self):
+        self.enable()
+        before = self.journal.path.read_bytes()
+        change, attempts = self.backend.change, 0
+        def fault(user, state):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                self.backend.calls.append((user, state))
+                raise m.FallbackError('failed final disable')
+            change(user, state)
+            if attempts == 3:
+                self.backend.updated_at = '2026-01-04 12:00:00'
+                self.backend.code_path = '/data/app/gms-install-c'
+        self.backend.change = fault
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [(0, 0), (0, 2), (0, 2)])
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_lost_revision_metadata_is_cleared_without_losing_original_snapshot(self):
+        self.enable()
+        original = self.journal.read()
+        self.backend.updated_at, self.backend.code_path = None, None
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        saved = self.journal.read()
+        self.assertIsNone(saved['lastVerifiedUpdateTime'])
+        self.assertIsNone(saved['lastVerifiedCodePath'])
+        for key, value in original.items():
+            self.assertEqual(saved[key], value)
+        self.backend.updated_at = '2026-01-03 12:00:00'
+        self.backend.code_path = '/data/app/gms-install-b'
+        self.backend.states[0] = 0
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_unchanged_or_older_version_never_overwrites_an_external_reset(self):
+        for delta in (0, -1):
+            with self.subTest(delta=delta):
+                self.journal.clear()
+                self.enable()
+                before = self.journal.path.read_bytes()
+                self.backend.version += delta
+                self.backend.states[0] = 0
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_explicit_external_enable_is_not_overwritten_even_after_upgrade(self):
+        self.enable()
+        self.backend.version += 1
+        self.backend.states[0] = 1
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertFalse(self.status()['canReapply'])
+        with self.assertRaises(m.FallbackError):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [])
+
+    def test_explicit_original_enable_requires_an_explicit_reapply(self):
+        self.enable(original=1)
+        self.upgrade_reset()
+        self.assertEqual(self.reconcile()['status'], 'unchanged')
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.reapply()['status'], 'component-disabled')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        self.assertEqual(self.journal.read()['original'], 1)
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 1)
+
+    def test_explicit_reapply_cycles_only_the_owned_component_and_retains_undo(self):
+        self.enable()
+        result = self.reapply()
+        self.assertEqual(result['status'], 'component-disabled')
+        self.assertEqual(self.backend.calls, [(0, 0), (0, 2)])
+        self.assertEqual(self.backend.states[10], 2)
+        self.assertEqual(self.journal.read()['original'], 0)
+        m.restore(self.backend, self.journal)
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_explicit_reapply_from_original_state_uses_one_disable_without_losing_undo(self):
+        self.enable()
+        self.backend.states[0] = 0
+        self.assertEqual(self.reapply()['status'], 'component-disabled')
+        self.assertEqual(self.backend.calls, [(0, 2)])
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_new_install_or_absent_provider_is_never_repaired(self):
+        for change in ('appId', 'declared', 'packageState'):
+            with self.subTest(change=change):
+                self.journal.clear()
+                self.enable()
+                self.upgrade_reset()
+                if change == 'appId':
+                    self.backend.appid += 1
+                elif change == 'declared':
+                    self.backend.declared = False
+                else:
+                    self.backend.package_state = 2
+                before = self.journal.path.read_bytes()
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                with self.assertRaises(m.FallbackError):
+                    self.reapply()
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_inactive_module_preserves_undo_without_reapplying(self):
+        self.enable()
+        self.upgrade_reset()
+        for marker in ('default', 'disable', 'remove'):
+            with self.subTest(marker=marker):
+                if marker == 'default':
+                    (self.module / 'config/active_font.conf').write_text('default\n')
+                else:
+                    (self.module / marker).touch()
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                with self.assertRaises(m.FallbackError):
+                    self.reapply()
+                self.assertEqual(self.backend.calls, [])
+                self.assertEqual(self.journal.read()['original'], 0)
+                (self.module / 'config/active_font.conf').write_text('custom\n')
+                if marker != 'default':
+                    (self.module / marker).unlink()
+
+    def test_recovery_obeys_recorded_user_without_touching_user_zero(self):
+        self.backend = RecoveryAndroid({0: 0, 10: 0})
+        self.journal = m.Journal(self.store, 10)
+        m.enable(self.backend, self.journal)
+        self.backend.calls.clear()
+        self.upgrade_reset()
+        self.backend.states[10], self.backend.states[0] = 0, 0
+        self.assertTrue(self.reconcile()['recoveredAfterUpgrade'])
+        self.assertEqual(self.backend.calls, [(10, 2)])
+        self.assertEqual(self.backend.states[0], 0)
+
+    def test_snapshot_race_is_rejected_before_any_component_write(self):
+        self.enable()
+        self.upgrade_reset()
+        snapshot, count = self.backend.snapshot, 0
+        def raced(user):
+            nonlocal count
+            count += 1
+            if count == 2:
+                self.backend.states[user] = 1
+            return snapshot(user)
+        self.backend.snapshot = raced
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_intermediate_failure_rolls_back_to_pre_reapply_disabled_state(self):
+        self.enable()
+        before = self.journal.path.read_bytes()
+        self.backend.fail, self.backend.mutate_then_fail = 0, True
+        with self.assertRaisesRegex(m.FallbackError, '已回到本次操作前状态'):
+            self.reapply()
+        self.assertEqual(self.backend.calls, [(0, 0), (0, 2)])
+        self.assertEqual(self.backend.states[0], 2)
+        self.assertEqual(self.journal.path.read_bytes(), before)
+
+    def test_final_disable_error_after_real_mutation_retains_the_original_record(self):
+        self.enable()
+        self.backend.fail, self.backend.mutate_then_fail = 2, True
+        with self.assertRaisesRegex(m.FallbackError, '已回到本次操作前状态'):
+            self.reapply()
+        self.assertEqual(self.backend.states[0], 2)
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_failed_final_disable_and_failed_rollback_keep_undo_for_restore(self):
+        self.enable()
+        self.backend.fail = 2
+        with self.assertRaisesRegex(m.FallbackError, '回滚待确认'):
+            self.reapply()
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertEqual(self.journal.read()['original'], 0)
+        self.assertTrue(self.status()['canRestore'])
+        self.backend.fail = None
+        m.restore(self.backend, self.journal)
+        self.assertIsNone(self.journal.read())
+
+    def test_false_success_during_upgrade_repair_returns_original_state_and_keeps_undo(self):
+        self.enable()
+        self.upgrade_reset()
+        self.backend.fake_success = True
+        with self.assertRaises(m.FallbackError):
+            self.reconcile()
+        self.assertEqual(self.backend.states[0], 0)
+        self.assertEqual(self.journal.read()['original'], 0)
+
+    def test_corrupt_version_checkpoint_cannot_authorize_automatic_repair(self):
+        for value in (None, True, '1', -1):
+            with self.subTest(value=value):
+                self.journal.clear()
+                self.enable()
+                self.upgrade_reset()
+                self.journal.save({**self.journal.read(), 'lastVerifiedVersionCode': value})
+                self.assertEqual(self.reconcile()['status'], 'unchanged')
+                self.assertEqual(self.backend.calls, [])
+
+    def test_actual_cli_recovery_routes_under_lock_and_returns_fresh_diagnostic(self):
+        self.enable()
+        self.upgrade_reset()
+        output = io.StringIO()
+        # Mock only the CLI's privileged-caller boundary. Replacing its os
+        # reference keeps the standalone core's real getuid/file-owner/lock
+        # checks intact on both root containers and non-root CI runners.
+        with patch.object(m, 'os', SimpleNamespace(geteuid=lambda: 0)), \
+                patch.object(m, 'Android', return_value=self.backend), \
+                patch.object(m, 'STORE', self.store), \
+                patch.object(m, 'LEGACY_STORE', self.root / 'legacy'), \
+                patch.object(m, 'MODULE', self.module), \
+                patch('sys.argv', ['google_font_fallback.py', 'reconcile-owned', '--user', '0', '--json']), \
+                contextlib.redirect_stdout(output):
+            self.assertIs(m.locked_store.__wrapped__.__globals__['os'], os)
+            self.assertEqual(m.main(), 0, output.getvalue())
+        result = json.loads(output.getvalue())
+        self.assertTrue(result['recoveredAfterUpgrade'])
+        self.assertEqual(result['current']['state'], 'enabled')
+        self.assertTrue(result['current']['canReapply'])
+        self.assertEqual(self.backend.calls, [(0, 2)])
+
+    def test_non_root_cli_recovery_refuses_before_any_backend_or_journal_mutation(self):
+        self.enable()
+        self.upgrade_reset()
+        before = self.journal.path.read_bytes()
+        output = io.StringIO()
+        with patch.object(m, 'os', SimpleNamespace(geteuid=lambda: 1001)), \
+                patch.object(m, 'Android') as backend, \
+                patch('sys.argv', ['google_font_fallback.py', 'reconcile-owned', '--user', '0', '--json']), \
+                contextlib.redirect_stdout(output):
+            self.assertEqual(m.main(), 1, output.getvalue())
+            backend.assert_not_called()
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('需要 Root', result['message'])
+        self.assertEqual(self.backend.calls, [])
+        self.assertEqual(self.journal.path.read_bytes(), before)
 
 
 class JournalMigrationTest(unittest.TestCase):
@@ -275,6 +890,304 @@ class JournalMigrationTest(unittest.TestCase):
         self.assertIsNotNone(m.Journal(self.canonical, 0).read())
         self.backend.fail = None
         self.assertEqual(m.restore_owned(self.backend, self.canonical)['status'], 'restored')
+
+
+class SharedStoreParentTest(unittest.TestCase):
+    """Reproduce the module helper's shared root, keeping its payload untouched."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='fallback-shared-parent-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.backend = FakeAndroid()
+        self.saved = {**self.backend.snapshot(0), 'schema': m.SCHEMA, 'original': 0}
+
+    def fixture(self, name='case', umask=None, mode=0o755):
+        ancestor = self.root / name
+        ancestor.mkdir(mode=0o700)
+        parent = ancestor / 'luoshu'
+        module = ancestor / 'module'
+        (module / '.luoshu-payload').mkdir(mode=0o700, parents=True)
+        if umask is None:
+            parent.mkdir(mode=mode)
+            parent.chmod(mode)
+        else:
+            env = {**os.environ, 'MODULE_DIR': str(module),
+                   'LUOSHU_PRIVATE_STATE_ROOT': str(parent / 'private-payload')}
+            # The empty payload makes the real mount helper create only its
+            # state files, so this fixture never attempts any host mount.
+            result = subprocess.run(
+                ['sh', '-c', 'umask "$1"; . "$2"; luoshu_private_mount_module_view "$3"',
+                 'private-payload-fixture', f'{umask:03o}',
+                 str(ROOT / 'common/private_payload.sh'), str(module)],
+                env=env, text=True, capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o777 & ~umask)
+            state = parent / 'private-payload'
+            (state / 'module-view.mounts').write_bytes(b'/module/system\n')
+            (state / 'module-view.symlinks').write_bytes(b'/module/product|/private/product\n')
+            retained = parent / 'self-mount'
+            retained.mkdir()
+            (retained / 'mount.ids').write_bytes(b'12 48\n')
+            (retained / 'payload-alias').symlink_to(module / '.luoshu-payload')
+        return ancestor, parent, parent / 'google-font-fallback', ancestor / 'luoshu-google-font-fallback'
+
+    def snapshot(self, directory):
+        result = {}
+        for path in (directory, *sorted(directory.rglob('*'))):
+            info = path.lstat()
+            value = (os.readlink(path) if stat.S_ISLNK(info.st_mode)
+                     else path.read_bytes() if stat.S_ISREG(info.st_mode) else None)
+            result[str(path.relative_to(directory))] = (
+                info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid, value)
+        return result
+
+    def save(self, directory):
+        directory.mkdir(mode=0o700)
+        journal = m.Journal(directory, 0)
+        journal.save(self.saved)
+        return journal
+
+    def assert_record(self, journal, inode, contents):
+        self.assertEqual(journal.path.stat().st_ino, inode)
+        self.assertEqual(journal.path.read_bytes(), contents)
+        self.assertEqual(journal.read(), self.saved)
+
+    def test_real_private_payload_umasks_repair_shared_root_without_touching_payload(self):
+        for mask in (0o000, 0o002):
+            with self.subTest(umask=f'{mask:03o}'):
+                _, parent, canonical, legacy = self.fixture(f'helper-{mask:03o}', umask=mask)
+                before = {name: self.snapshot(parent / name)
+                          for name in ('private-payload', 'self-mount')}
+                self.assertEqual(m.prepare_store(canonical, legacy), canonical)
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o755)
+                self.assertEqual(stat.S_IMODE(canonical.stat().st_mode), 0o700)
+                self.assertEqual({name: self.snapshot(parent / name) for name in before}, before)
+                self.assertEqual(self.backend.calls, [])
+
+    def test_existing_v1_record_survives_helper_root_repair_and_remains_restorable(self):
+        for mask in (0o000, 0o002):
+            with self.subTest(umask=f'{mask:03o}'):
+                _, parent, canonical, legacy = self.fixture(f'existing-{mask:03o}', umask=mask)
+                journal = self.save(canonical)
+                inode, contents = journal.path.stat().st_ino, journal.path.read_bytes()
+                before = self.snapshot(parent / 'private-payload')
+                m.prepare_store(canonical, legacy)
+                self.assert_record(journal, inode, contents)
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o755)
+                self.assertEqual(self.snapshot(parent / 'private-payload'), before)
+                self.backend.states[0] = 2
+                m.restore(self.backend, journal)
+                self.assertEqual(self.backend.states, {0: 0, 10: 2})
+                self.assertIsNone(journal.read())
+
+    def test_legacy_v1_record_migrates_by_inode_after_shared_root_repair(self):
+        for mask in (0o000, 0o002):
+            with self.subTest(umask=f'{mask:03o}'):
+                _, parent, canonical, legacy = self.fixture(f'legacy-{mask:03o}', umask=mask)
+                journal = self.save(legacy)
+                inode, contents = journal.path.stat().st_ino, journal.path.read_bytes()
+                before = self.snapshot(parent / 'private-payload')
+                m.prepare_store(canonical, legacy)
+                migrated = m.Journal(canonical, 0)
+                self.assert_record(migrated, inode, contents)
+                self.assertTrue(legacy.is_symlink())
+                self.assertEqual(legacy.resolve(), canonical)
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), 0o755)
+                self.assertEqual(self.snapshot(parent / 'private-payload'), before)
+                self.backend.states[0] = 2
+                m.restore(self.backend, migrated)
+                self.assertEqual(self.backend.states, {0: 0, 10: 2})
+
+    def test_repair_preserves_existing_read_and_execute_bits(self):
+        for original in (0o777, 0o775, 0o771, 0o773, 0o770, 0o733):
+            with self.subTest(mode=f'{original:04o}'):
+                _, parent, canonical, legacy = self.fixture(f'bits-{original:04o}', mode=original)
+                inode = parent.stat().st_ino
+                m.prepare_store(canonical, legacy)
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), original & ~0o022)
+                self.assertEqual(parent.stat().st_ino, inode)
+
+    def test_safe_shared_root_modes_remain_unchanged_without_chmod(self):
+        for mode in (0o700, 0o711, 0o750, 0o755):
+            with self.subTest(mode=f'{mode:04o}'):
+                _, parent, canonical, legacy = self.fixture(f'safe-{mode:04o}', mode=mode)
+                inode = parent.stat().st_ino
+                with patch.object(m.os, 'fchmod', side_effect=AssertionError('safe parent chmod')):
+                    m.prepare_store(canonical, legacy)
+                self.assertEqual(stat.S_IMODE(parent.stat().st_mode), mode)
+                self.assertEqual(parent.stat().st_ino, inode)
+
+    def test_parent_symlink_is_rejected_without_following_it(self):
+        ancestor, parent, canonical, legacy = self.fixture(mode=0o777)
+        outsider = ancestor / 'outsider'
+        parent.rename(outsider)
+        sentinel = outsider / 'unrelated'
+        sentinel.write_bytes(b'unrelated data')
+        before = self.snapshot(outsider)
+        parent.symlink_to(outsider, target_is_directory=True)
+        with self.assertRaises((m.FallbackError, OSError)):
+            m.prepare_store(canonical, legacy)
+        self.assertEqual(self.snapshot(outsider), before)
+        self.assertTrue(parent.is_symlink())
+
+    def test_parent_regular_file_is_rejected_without_mutating_it(self):
+        _, parent, canonical, legacy = self.fixture()
+        parent.rmdir()
+        parent.write_bytes(b'unrelated regular file')
+        before = self.snapshot(parent)
+        with self.assertRaises((m.FallbackError, OSError)):
+            m.prepare_store(canonical, legacy)
+        self.assertEqual(self.snapshot(parent), before)
+
+    def test_foreign_parent_uid_metadata_is_rejected_without_repair(self):
+        _, parent, canonical, legacy = self.fixture(mode=0o777)
+        self.save(canonical)
+        before = self.snapshot(parent)
+        real_lstat = Path.lstat
+
+        def foreign_lstat(path, *args, **kwargs):
+            info = real_lstat(path, *args, **kwargs)
+            if path == parent:
+                fields = list(info)
+                fields[4] = os.geteuid() + 1
+                return os.stat_result(fields)
+            return info
+
+        # Synthetic UID metadata: the managed host maps only UID 0 and cannot
+        # chown a fixture to another UID. No device ownership claim is made.
+        with patch.object(Path, 'lstat', foreign_lstat):
+            with self.assertRaises(m.FallbackError):
+                m.prepare_store(canonical, legacy)
+        self.assertEqual(self.snapshot(parent), before)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(self.backend.calls, [])
+
+    def test_group_or_world_writable_ancestor_blocks_repair_and_preserves_records(self):
+        for ancestor_mode in (0o777, 0o775):
+            with self.subTest(mode=f'{ancestor_mode:04o}'):
+                ancestor, parent, canonical, legacy = self.fixture(
+                    f'unsafe-ancestor-{ancestor_mode:04o}', mode=0o777)
+                self.save(legacy)
+                before = self.snapshot(parent), self.snapshot(legacy)
+                ancestor.chmod(ancestor_mode)
+                with self.assertRaises(m.FallbackError):
+                    m.prepare_store(canonical, legacy)
+                self.assertEqual((self.snapshot(parent), self.snapshot(legacy)), before)
+                self.assertFalse(canonical.exists())
+
+    def test_symlink_ancestor_blocks_repair_without_following_to_shared_root(self):
+        ancestor, parent, canonical, legacy = self.fixture(mode=0o777)
+        self.save(legacy)
+        before = self.snapshot(parent), self.snapshot(legacy)
+        actual = self.root / 'actual-ancestor'
+        ancestor.rename(actual)
+        ancestor.symlink_to(actual, target_is_directory=True)
+        with self.assertRaises((m.FallbackError, OSError)):
+            m.prepare_store(canonical, legacy)
+        self.assertEqual((self.snapshot(parent), self.snapshot(legacy)), before)
+        self.assertFalse(canonical.exists())
+
+    def test_foreign_ancestor_uid_metadata_blocks_repair(self):
+        ancestor, parent, canonical, legacy = self.fixture(mode=0o777)
+        self.save(legacy)
+        before = self.snapshot(parent), self.snapshot(legacy)
+        real_fstat = os.fstat
+        identity = ancestor.stat().st_dev, ancestor.stat().st_ino
+
+        def foreign_fstat(fd):
+            info = real_fstat(fd)
+            if (info.st_dev, info.st_ino) == identity:
+                fields = list(info)
+                fields[4] = os.geteuid() + 1
+                return os.stat_result(fields)
+            return info
+
+        with patch.object(m.os, 'fstat', foreign_fstat):
+            with self.assertRaises(m.FallbackError):
+                m.prepare_store(canonical, legacy)
+        self.assertEqual((self.snapshot(parent), self.snapshot(legacy)), before)
+        self.assertFalse(canonical.exists())
+
+    def test_chmod_error_keeps_both_v1_record_trees_and_payload_unchanged(self):
+        _, parent, canonical, legacy = self.fixture(umask=0o000)
+        self.save(canonical)
+        self.save(legacy)
+        before = self.snapshot(parent), self.snapshot(legacy)
+        with patch.object(m.os, 'fchmod', side_effect=PermissionError('fixture chmod denied')) as chmod:
+            with self.assertRaises((m.FallbackError, OSError)):
+                m.prepare_store(canonical, legacy)
+        chmod.assert_called_once()
+        self.assertEqual((self.snapshot(parent), self.snapshot(legacy)), before)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_parent_replaced_during_chmod_never_mutates_new_target_or_moves_records(self):
+        ancestor, parent, canonical, legacy = self.fixture(umask=0o000)
+        self.save(legacy)
+        legacy_before = self.snapshot(legacy)
+        original = ancestor / 'original-luoshu'
+        outsider = ancestor / 'unrelated'
+        outsider.mkdir(mode=0o777)
+        outsider.chmod(0o777)
+        (outsider / 'sentinel').write_bytes(b'unrelated data')
+        outsider_before = self.snapshot(outsider)
+        original_payload = self.snapshot(parent / 'private-payload')
+        real_fchmod = os.fchmod
+
+        def replace_parent(fd, mode):
+            real_fchmod(fd, mode)
+            parent.rename(original)
+            parent.symlink_to(outsider, target_is_directory=True)
+
+        with patch.object(m.os, 'fchmod', side_effect=replace_parent) as chmod:
+            with self.assertRaises((m.FallbackError, OSError)):
+                m.prepare_store(canonical, legacy)
+        chmod.assert_called_once()
+        self.assertEqual(self.snapshot(outsider), outsider_before)
+        self.assertEqual(self.snapshot(legacy), legacy_before)
+        self.assertEqual(self.snapshot(original / 'private-payload'), original_payload)
+        self.assertEqual(stat.S_IMODE(original.stat().st_mode), 0o755)
+        self.assertEqual(self.backend.calls, [])
+
+    def test_ancestor_replaced_during_chmod_blocks_migration(self):
+        ancestor, parent, canonical, legacy = self.fixture(umask=0o000)
+        self.save(legacy)
+        records_before = self.snapshot(legacy)
+        payload_before = self.snapshot(parent / 'private-payload')
+        actual = self.root / 'actual-ancestor'
+        real_fchmod = os.fchmod
+
+        def replace_ancestor(fd, mode):
+            real_fchmod(fd, mode)
+            ancestor.rename(actual)
+            ancestor.symlink_to(actual, target_is_directory=True)
+
+        with patch.object(m.os, 'fchmod', side_effect=replace_ancestor) as chmod:
+            with self.assertRaises((m.FallbackError, OSError)):
+                m.prepare_store(canonical, legacy)
+        chmod.assert_called_once()
+        self.assertEqual(self.snapshot(legacy), records_before)
+        self.assertEqual(self.snapshot(parent / 'private-payload'), payload_before)
+        self.assertFalse(canonical.exists())
+
+    def test_ancestor_widened_during_chmod_blocks_migration(self):
+        ancestor, parent, canonical, legacy = self.fixture(umask=0o000)
+        self.save(legacy)
+        records_before = self.snapshot(legacy)
+        payload_before = self.snapshot(parent / 'private-payload')
+        real_fchmod = os.fchmod
+
+        def widen_ancestor(fd, mode):
+            real_fchmod(fd, mode)
+            ancestor.chmod(0o777)
+
+        with patch.object(m.os, 'fchmod', side_effect=widen_ancestor) as chmod:
+            with self.assertRaises((m.FallbackError, OSError)):
+                m.prepare_store(canonical, legacy)
+        chmod.assert_called_once()
+        self.assertEqual(self.snapshot(legacy), records_before)
+        self.assertEqual(self.snapshot(parent / 'private-payload'), payload_before)
+        self.assertFalse(canonical.exists())
 
 
 if __name__ == '__main__':

@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.library
 import androidx.compose.runtime.Immutable
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.LuoShuViewModel
+import io.github.xgl34222220.luoshu.ModuleSnapshot
 
 internal enum class FontLibraryFilter(val label: String) {
     ALL("全部"),
@@ -24,6 +25,7 @@ internal enum class FontLibrarySort(val label: String) {
 internal data class FontLibraryUiState(
     val loading: Boolean = false,
     val operationBusy: Boolean = false,
+    val operationRunning: Boolean = false,
     val query: String = "",
     val error: String = "",
     val operationMessage: String = "",
@@ -38,6 +40,31 @@ internal data class FontLibraryUiState(
     val filter: FontLibraryFilter = FontLibraryFilter.ALL,
     val sort: FontLibrarySort = FontLibrarySort.ACTIVE_FIRST,
 )
+
+/** A blocked Root action is not evidence that a font operation is running. */
+internal data class FontLibraryAccessState(
+    val actionsBlocked: Boolean,
+    val operationRunning: Boolean,
+    val error: String,
+)
+
+internal fun fontLibraryAccessState(
+    snapshot: ModuleSnapshot,
+    operationBusy: Boolean,
+    mixBusy: Boolean,
+): FontLibraryAccessState {
+    val checking = snapshot.loading || snapshot.statusCached
+    val unavailable = !snapshot.installed || !snapshot.rootGranted
+    val running = operationBusy || mixBusy
+    return FontLibraryAccessState(
+        actionsBlocked = running || checking || unavailable,
+        operationRunning = running,
+        error = if (!checking && unavailable) snapshot.error.ifBlank {
+            if (!snapshot.rootGranted) "请为洛书授予 Root 权限，并确认配套模块已启用。"
+            else "请先刷入配套的洛书模块，并完整重启手机。"
+        } else "",
+    )
+}
 
 @Immutable
 internal data class FontLibraryActions(
@@ -105,12 +132,13 @@ internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
     val failedSwitchMessage = snapshot.taskMessage.takeIf {
         snapshot.taskType == "switch" && snapshot.taskState == "failed" && it.isNotBlank()
     }.orEmpty()
+    val access = fontLibraryAccessState(snapshot, operationBusy, mixState.busy)
     return FontLibraryUiState(
         loading = fontLoading || fontRefreshing,
-        operationBusy = operationBusy || mixState.busy || snapshot.loading || snapshot.statusCached ||
-            !snapshot.installed || !snapshot.rootGranted,
+        operationBusy = access.actionsBlocked,
+        operationRunning = access.operationRunning,
         query = searchQuery,
-        error = fontError.ifBlank { failedSwitchMessage },
+        error = access.error.ifBlank { fontError.ifBlank { failedSwitchMessage } },
         operationMessage = if (failedSwitchMessage.isBlank()) operationMessage else "",
         activeFontId = snapshot.activeFont,
         fonts = visibleFonts,

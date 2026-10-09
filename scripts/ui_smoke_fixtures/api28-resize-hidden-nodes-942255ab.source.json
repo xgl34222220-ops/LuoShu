@@ -1,0 +1,13 @@
+{
+  "scope": "original failed API28 hierarchy; host fixture only, not a successful emulator/phone result",
+  "sourceCommit": "942255abbcb92f712dc85a4ae49b9ac43a63dcb5",
+  "sourceWorkflowRun": 37698733087,
+  "sourceJob": 113058809153,
+  "sourceArtifactId": 11517257816,
+  "sourceArtifactSha256": "b903d7630358856e5c453d235f303c01a352b06c58edb9a6f0a857b594d3279e",
+  "sourceMember": "hierarchy-0040.xml",
+  "fixtureFile": "api28-resize-hidden-nodes-942255ab.xml",
+  "fixtureSha256": "3217891af93db5db5a10affab3dcade2e7fad58f61413a7ff169e7713684428b",
+  "fixtureBytes": 15570,
+  "failure": "Quick Return candidate rectangle comprehension calls bounds on unrelated zero-area offscreen nodes before any gesture"
+}

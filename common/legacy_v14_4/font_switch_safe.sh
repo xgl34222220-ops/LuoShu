@@ -4,6 +4,11 @@
 # current Android boot. It builds .luoshu-payload-next off-line; post-fs-data activates
 # that tree before LuoShu mounts fonts on the following complete boot.
 set +e
+# Keep the worker entry time before runtime-path and helper initialization. A
+# shell read avoids starting a clock process; wall-clock changes cannot affect
+# the phase durations recorded below.
+_SAFE_SWITCH_ENTRY_UPTIME=''
+IFS=' ' read -r _SAFE_SWITCH_ENTRY_UPTIME _safe_entry_unused < /proc/uptime 2>/dev/null || true
 
 # Composite compatibility workers execute inside .legacy-v14-runtime and pass that
 # directory as MODDIR. Their actual module is exported as LUOSHU_REAL_MODDIR. Always
@@ -55,7 +60,7 @@ SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 SWITCH_CACHE_ROOT="$LUOSHU_CACHE_DIR/safe-switch-cache"
 SWITCH_VALIDATION_CACHE_ROOT="$LUOSHU_CACHE_DIR/safe-switch-validation"
-SWITCH_CACHE_SCHEMA="safe-switch-metrics-v1"
+SWITCH_CACHE_SCHEMA="safe-switch-metrics-v2"
 SWITCH_CACHE_MAX_ENTRIES="${LUOSHU_SWITCH_CACHE_MAX_ENTRIES:-3}"
 SWITCH_CACHE_MAX_KB="${LUOSHU_SWITCH_CACHE_MAX_KB:-786432}"
 case "$SWITCH_CACHE_MAX_ENTRIES" in ''|*[!0-9]*) SWITCH_CACHE_MAX_ENTRIES=3 ;; esac
@@ -65,6 +70,73 @@ case "$SWITCH_CACHE_MAX_KB" in ''|*[!0-9]*) SWITCH_CACHE_MAX_KB=786432 ;; esac
 PREWARM_LOCK="$LUOSHU_TASKS_DIR/safe-switch-prewarm.lock"
 LOCK_HELD=false
 PREWARM_LOCK_HELD=false
+
+# These records measure this switch worker, including its EXIT cleanup. The
+# supervisor's .cleanup.json remains the proof of descendant reaping; synthesis,
+# supervisor cleanup and a complete phone reboot are separate measurements.
+SAFE_TIMING_ENABLED=false
+SAFE_TIMING_PHASE=''
+SAFE_CLEANUP_DONE=false
+safe_timing_clock() {
+    _stc_raw="${1:-}"
+    if [ -z "$_stc_raw" ]; then
+        IFS=' ' read -r _stc_raw _stc_unused < /proc/uptime 2>/dev/null || return 1
+    fi
+    case "$_stc_raw" in *.*) ;; *) return 1 ;; esac
+    _stc_s=${_stc_raw%%.*}; _stc_fraction=${_stc_raw#*.}
+    case "$_stc_s:$_stc_fraction" in :*|*:|*[!0-9:]*) return 1 ;; esac
+    _stc_fraction="${_stc_fraction}000"
+    _stc_fraction=${_stc_fraction%"${_stc_fraction#???}"}
+    SAFE_TIMING_NOW_S=$_stc_s
+    SAFE_TIMING_NOW_MS=$((1$_stc_fraction - 1000))
+    SAFE_TIMING_NOW_UPTIME=$_stc_raw
+}
+
+safe_timing_elapsed() {
+    # Subtract seconds before multiplying: mksh uses 32-bit arithmetic, so an
+    # absolute uptime in milliseconds can overflow on a long-running phone.
+    SAFE_TIMING_ELAPSED_MS=$(((SAFE_TIMING_NOW_S - $1) * 1000 + SAFE_TIMING_NOW_MS - $2))
+    [ "$SAFE_TIMING_ELAPSED_MS" -ge 0 ] 2>/dev/null || SAFE_TIMING_ELAPSED_MS=0
+}
+
+safe_timing_record() {
+    # Android mksh has builtin print, while printf can be an external command.
+    # Keep each phase transition free of clock/logging subprocesses.
+    if [ -n "${KSH_VERSION:-}" ]; then print -r -- "$1"
+    else printf '%s\n' "$1"; fi >> "$LOG_FILE" 2>/dev/null || true
+}
+
+safe_timing_phase_end() {
+    [ "$SAFE_TIMING_ENABLED" = true ] && [ -n "$SAFE_TIMING_PHASE" ] || return 0
+    safe_timing_clock || return 0
+    safe_timing_elapsed "$SAFE_TIMING_PHASE_S" "$SAFE_TIMING_PHASE_MS"
+    safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=end phase=$SAFE_TIMING_PHASE status=${1:-completed} uptime=$SAFE_TIMING_NOW_UPTIME elapsedMs=$SAFE_TIMING_ELAPSED_MS"
+    SAFE_TIMING_PHASE=''
+}
+
+safe_timing_phase() {
+    [ "$SAFE_TIMING_ENABLED" = true ] || return 0
+    safe_timing_phase_end completed
+    safe_timing_clock || return 0
+    SAFE_TIMING_PHASE="$1"
+    SAFE_TIMING_PHASE_S=$SAFE_TIMING_NOW_S
+    SAFE_TIMING_PHASE_MS=$SAFE_TIMING_NOW_MS
+    safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=begin phase=$SAFE_TIMING_PHASE uptime=$SAFE_TIMING_NOW_UPTIME"
+}
+
+safe_timing_start() {
+    safe_timing_clock "$_SAFE_SWITCH_ENTRY_UPTIME" || return 0
+    SAFE_TIMING_ENABLED=true
+    SAFE_TIMING_TASK="${LUOSHU_TASK_SCOPE_TASK:-unscoped}"
+    SAFE_TIMING_START_S=$SAFE_TIMING_NOW_S
+    SAFE_TIMING_START_MS=$SAFE_TIMING_NOW_MS
+    SAFE_TIMING_PHASE=initialization
+    SAFE_TIMING_PHASE_S=$SAFE_TIMING_NOW_S
+    SAFE_TIMING_PHASE_MS=$SAFE_TIMING_NOW_MS
+    safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=begin phase=initialization scope=safe-switch-worker clock=proc-uptime uptime=$SAFE_TIMING_NOW_UPTIME"
+}
+
+case "${1:-}:${2:-}" in action:switch) safe_timing_start ;; esac
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/util_functions.sh" ] && . "$LEGACY_DIR/util_functions.sh"
@@ -92,52 +164,140 @@ read_state_value() {
 
 safe_hash_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum | awk '{print $1}'
+        _shs_output=$(sha256sum) || return 1
+        _shs_hash=${_shs_output%% *}
     elif command -v busybox >/dev/null 2>&1; then
-        busybox sha256sum | awk '{print $1}'
+        _shs_output=$(busybox sha256sum) || return 1
+        _shs_hash=${_shs_output%% *}
     else
-        cksum | awk '{print $1 "-" $2}'
+        _shs_output=$(cksum) || return 1
+        _shs_crc=${_shs_output%% *}
+        _shs_output=${_shs_output#* }
+        _shs_size=${_shs_output%% *}
+        case "$_shs_crc:$_shs_size" in :*|*:|*[!0-9:]*) return 1 ;; esac
+        printf '%s-%s\n' "$_shs_crc" "$_shs_size"
+        return 0
     fi
+    # The checksum commands emit one token followed by their stdin marker.
+    # Parse it with shell builtins instead of launching awk for every nested
+    # family/inventory/mapper/key hash in a foreground cache lookup.
+    [ "${#_shs_hash}" -eq 64 ] || return 1
+    case "$_shs_hash" in *[!0-9a-f]*) return 1 ;; esac
+    printf '%s\n' "$_shs_hash"
 }
 
 safe_source_identity() {
     _ssi_file="$1"
     if command -v stat >/dev/null 2>&1; then
-        stat -c '%d:%i:%s:%Y:%Z' "$_ssi_file" 2>/dev/null && return 0
+        stat -c '%d:%i:%s:%Y:%Z:%y:%z' "$_ssi_file" 2>/dev/null && return 0
     fi
     if command -v toybox >/dev/null 2>&1; then
-        toybox stat -c '%d:%i:%s:%Y:%Z' "$_ssi_file" 2>/dev/null && return 0
+        toybox stat -c '%d:%i:%s:%Y:%Z:%y:%z' "$_ssi_file" 2>/dev/null && return 0
     fi
     return 1
 }
 
 safe_inventory_identity() {
-    _sii_file="$CONFIG_DIR/device_font_inventory.json"
-    [ -s "$_sii_file" ] || { printf 'no-inventory\n'; return 0; }
-    if command -v cksum >/dev/null 2>&1; then
-        cksum "$_sii_file" 2>/dev/null | awk '{print $1 ":" $2}'
-    elif command -v busybox >/dev/null 2>&1; then
-        busybox cksum "$_sii_file" 2>/dev/null | awk '{print $1 ":" $2}'
-    else
-        safe_source_identity "$_sii_file"
+    _sii_build="${LUOSHU_BUILD_KEY:-}"
+    if [ -z "$_sii_build" ] && command -v getprop >/dev/null 2>&1; then
+        _sii_build=$(getprop ro.build.fingerprint 2>/dev/null)
+        [ -n "$_sii_build" ] || _sii_build=$(getprop ro.build.display.id 2>/dev/null)
     fi
+    _sii_inventory=no-inventory
+    _sii_partitions=no-partition-manifest
+    if [ -e "$CONFIG_DIR/device_font_inventory.json" ]; then
+        _sii_inventory=$(safe_code_identity "$CONFIG_DIR/device_font_inventory.json") || return 1
+    fi
+    if [ -e "$CONFIG_DIR/device_font_partitions.conf" ]; then
+        _sii_partitions=$(safe_code_identity "$CONFIG_DIR/device_font_partitions.conf") || return 1
+    fi
+    case "$_sii_build" in *'
+'*) return 1 ;; esac
+    # Keep the complete canonical snapshot in the final cache key/manifest.
+    # Hashing these already bounded records again adds a subprocess without
+    # adding input evidence; the final key still hashes the whole snapshot.
+    printf 'build:%s:%s;inventory:%s:%s;partitions:%s:%s\n' \
+        "${#_sii_build}" "$_sii_build" "${#_sii_inventory}" "$_sii_inventory" \
+        "${#_sii_partitions}" "$_sii_partitions"
+}
+
+safe_code_identity() {
+    for _sci_file in "$@"; do
+        [ -f "$_sci_file" ] && [ -r "$_sci_file" ] || return 1
+    done
+    # Both Android cksum and BusyBox accept multiple paths. Hash the exact
+    # output in one process instead of spawning cksum+awk for every helper.
+    if command -v cksum >/dev/null 2>&1; then
+        _sci_input=$(cksum "$@" 2>/dev/null) || return 1
+        _sci_verify_cksum=1
+    elif command -v busybox >/dev/null 2>&1; then
+        _sci_input=$(busybox cksum "$@" 2>/dev/null) || return 1
+        _sci_verify_cksum=1
+    else
+        _sci_verify_cksum=0
+        _sci_input=''
+        for _sci_file in "$@"; do
+            _sci_identity=$(safe_source_identity "$_sci_file") || return 1
+            _sci_input="$_sci_input
+$_sci_file|$_sci_identity"
+        done
+    fi
+    [ -n "$_sci_input" ] || return 1
+    if [ "$_sci_verify_cksum" -eq 1 ]; then
+        _sci_records=''
+        # A successful exit with truncated/malformed output is not evidence.
+        # Each requested helper must have one checksum/size/path record.
+        while IFS=' ' read -r _sci_crc _sci_size _sci_path; do
+            [ "$#" -gt 0 ] || return 1
+            case "$_sci_crc:$_sci_size" in :*|*:|*[!0-9:]*) return 1 ;; esac
+            [ "$_sci_crc" -le 4294967295 ] 2>/dev/null || return 1
+            [ "$_sci_path" = "$1" ] || return 1
+            case "$_sci_path" in *'
+'*) return 1 ;; esac
+            _sci_records="$_sci_records${#_sci_path}:$_sci_path|$_sci_crc:$_sci_size;"
+            shift
+        done <<EOF_SAFE_CHECKSUMS
+$_sci_input
+EOF_SAFE_CHECKSUMS
+        [ "$#" -eq 0 ] || return 1
+        printf 'code-cksum-v1:%s\n' "$_sci_records"
+        return 0
+    fi
+    printf '%s\n' "$_sci_input" | safe_hash_stream
 }
 
 safe_mapper_identity() {
-    {
-        for _smi_file in "$LEGACY_DIR/rom_adapters.sh" \
-                         "$MODDIR/common/hyperos_stage_complete.sh" \
-                         "$MODDIR/common/coloros_stage_complete.sh"; do
-            [ -f "$_smi_file" ] || continue
-            if command -v cksum >/dev/null 2>&1; then
-                cksum "$_smi_file" 2>/dev/null | awk -v p="$_smi_file" '{print p "|" $1 "|" $2}'
-            elif command -v busybox >/dev/null 2>&1; then
-                busybox cksum "$_smi_file" 2>/dev/null | awk -v p="$_smi_file" '{print p "|" $1 "|" $2}'
-            else
-                printf '%s|%s\n' "$_smi_file" "$(safe_source_identity "$_smi_file" 2>/dev/null)"
-            fi
-        done
-    } | safe_hash_stream
+    # The shell wrappers do not change when a Python slot policy is fixed. All
+    # code that selects donors, targets, routing or metrics belongs to the key.
+    safe_code_identity "$LEGACY_DIR/rom_adapters.sh" "$LEGACY_DIR/util_functions.sh" \
+        "$LEGACY_DIR/font_switch_safe.sh" "$LEGACY_DIR/hyperos_full_coverage.sh" \
+        "$MODDIR/common/hyperos_stage_complete.sh" "$MODDIR/common/coloros_stage_complete.sh" \
+        "$MODDIR/common/hyperos_metrics_batch.py" "$MODDIR/common/coloros_metrics_batch.py" \
+        "$MODDIR/common/font_metrics_normalize.py" "$MODDIR/common/font_slot_coverage.py" \
+        "$MODDIR/common/font_inventory.py" "$MODDIR/common/font_inventory_scan.py" \
+        "$MODDIR/common/hyperos_physical_policy.py" "$MODDIR/common/hyperos_global.sh" \
+        "$MODDIR/common/util_functions.sh" "$MODDIR/common/rom_adapters.sh"
+}
+
+safe_validator_identity() {
+    safe_code_identity "$LEGACY_DIR/font_check.sh" "$LEGACY_DIR/font_coverage.py"
+}
+
+safe_family_identity() {
+    _sfi_family="$1"
+    # The mapper can select any weight in this family. A primary Regular file
+    # staying unchanged must not hide an edited/added/removed Bold donor.
+    type detect_font_family >/dev/null 2>&1 || return 1
+    _sfi_input=''
+    for _sfi_file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+                     "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$_sfi_file" ] || continue
+        [ "$(detect_font_family "${_sfi_file##*/}")" = "$_sfi_family" ] || continue
+        _sfi_identity=$(safe_source_identity "$_sfi_file") || return 1
+        _sfi_input="$_sfi_input
+$_sfi_file|$_sfi_identity"
+    done
+    printf '%s\n' "$_sfi_input" | safe_hash_stream
 }
 
 safe_rom_identity() {
@@ -167,10 +327,12 @@ safe_partition_list() {
 safe_validation_key() {
     _svk_file="$1"
     _svk_identity=$(safe_source_identity "$_svk_file") || return 1
+    _svk_validator=$(safe_validator_identity) || return 1
     {
-        printf 'safe-validation-v1\n'
+        printf 'safe-validation-v2\n'
         printf '%s\n' "$_svk_file"
         printf '%s\n' "$_svk_identity"
+        printf '%s\n' "$_svk_validator"
     } | safe_hash_stream
 }
 
@@ -180,9 +342,19 @@ safe_validation_restore() {
     _svr_conf="$SWITCH_VALIDATION_CACHE_ROOT/$_svr_key.conf"
     [ -s "$_svr_conf" ] || return 1
     _svr_identity=$(safe_source_identity "$_svr_file") || return 1
-    [ "$(read_state_value "$_svr_conf" valid)" = true ] || return 1
-    [ "$(read_state_value "$_svr_conf" identity)" = "$_svr_identity" ] || return 1
-    return 0
+    _svr_seen=' '
+    while IFS='=' read -r _svr_name _svr_value; do
+        case "$_svr_name" in
+            valid) _svr_wanted=true ;;
+            identity) _svr_wanted="$_svr_identity" ;;
+            *) continue ;;
+        esac
+        case "$_svr_seen" in *" $_svr_name "*) return 1 ;; esac
+        [ "$_svr_value" = "$_svr_wanted" ] || return 1
+        _svr_seen="$_svr_seen$_svr_name "
+    done < "$_svr_conf"
+    case "$_svr_seen" in *" valid "*) ;; *) return 1 ;; esac
+    case "$_svr_seen" in *" identity "*) ;; *) return 1 ;; esac
 }
 
 safe_validation_store() {
@@ -203,18 +375,50 @@ safe_validation_store() {
 safe_switch_cache_key() {
     _sck_file="$1"; _sck_font="$2"
     _sck_identity=$(safe_source_identity "$_sck_file") || return 1
-    _sck_inventory=$(safe_inventory_identity)
+    _sck_inventory=$(safe_inventory_identity) || return 1
     _sck_rom=$(safe_rom_identity)
-    _sck_mapper=$(safe_mapper_identity)
+    _sck_mapper=$(safe_mapper_identity) || return 1
+    _sck_family=$(safe_family_identity "$_sck_font") || return 1
     {
         printf '%s\n' "$SWITCH_CACHE_SCHEMA"
         printf '%s\n' "$_sck_font"
         printf '%s\n' "$_sck_file"
         printf '%s\n' "$_sck_identity"
+        printf '%s\n' "$_sck_family"
         printf '%s\n' "$_sck_inventory"
         printf '%s\n' "$_sck_rom"
         printf '%s\n' "$_sck_mapper"
     } | safe_hash_stream
+}
+
+safe_switch_cache_matches() {
+    _scm_conf="$1"; _scm_file="$2"; _scm_font="$3"
+    _scm_source=$(safe_source_identity "$_scm_file") || return 1
+    _scm_family=$(safe_family_identity "$_scm_font") || return 1
+    _scm_inventory=$(safe_inventory_identity) || return 1
+    _scm_rom=$(safe_rom_identity) || return 1
+    _scm_mapper=$(safe_mapper_identity) || return 1
+    _scm_seen=' '
+    # One shell read replaces six sed/head/tr pipelines. Recompute identities
+    # after selecting the key as before, so an intervening policy edit is a miss.
+    while IFS='=' read -r _scm_name _scm_value; do
+        case "$_scm_name" in
+            schema) _scm_wanted="$SWITCH_CACHE_SCHEMA" ;;
+            font) _scm_wanted="$_scm_font" ;;
+            sourceIdentity) _scm_wanted="$_scm_source" ;;
+            familyIdentity) _scm_wanted="$_scm_family" ;;
+            inventoryIdentity) _scm_wanted="$_scm_inventory" ;;
+            rom) _scm_wanted="$_scm_rom" ;;
+            mapperIdentity) _scm_wanted="$_scm_mapper" ;;
+            *) continue ;;
+        esac
+        case "$_scm_seen" in *" $_scm_name "*) return 1 ;; esac
+        [ "$_scm_value" = "$_scm_wanted" ] || return 1
+        _scm_seen="$_scm_seen$_scm_name "
+    done < "$_scm_conf"
+    for _scm_name in schema font sourceIdentity familyIdentity inventoryIdentity rom mapperIdentity; do
+        case "$_scm_seen" in *" $_scm_name "*) ;; *) return 1 ;; esac
+    done
 }
 
 safe_switch_cache_restore() {
@@ -223,12 +427,7 @@ safe_switch_cache_restore() {
     _scr_root="$SWITCH_CACHE_ROOT/$_scr_key"
     _scr_conf="$_scr_root/cache.conf"
     [ -s "$_scr_conf" ] && [ -d "$_scr_root/tree" ] || return 1
-    [ "$(read_state_value "$_scr_conf" schema)" = "$SWITCH_CACHE_SCHEMA" ] || return 1
-    [ "$(read_state_value "$_scr_conf" font)" = "$_scr_font" ] || return 1
-    [ "$(read_state_value "$_scr_conf" sourceIdentity)" = "$(safe_source_identity "$_scr_file")" ] || return 1
-    [ "$(read_state_value "$_scr_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
-    [ "$(read_state_value "$_scr_conf" rom)" = "$(safe_rom_identity)" ] || return 1
-    [ "$(read_state_value "$_scr_conf" mapperIdentity)" = "$(safe_mapper_identity)" ] || return 1
+    safe_switch_cache_matches "$_scr_conf" "$_scr_file" "$_scr_font" || return 1
 
     _scr_restored=0
     for _scr_part in $(safe_partition_list); do
@@ -286,7 +485,10 @@ safe_switch_cache_prune() {
 
 safe_switch_cache_store() {
     _scs_file="$1"; _scs_font="$2"
+    _scs_expected="${3:-}"
+    [ -n "$_scs_expected" ] || return 1
     _scs_key=$(safe_switch_cache_key "$_scs_file" "$_scs_font") || return 1
+    [ "$_scs_key" = "$_scs_expected" ] || return 1
     _scs_root="$SWITCH_CACHE_ROOT/$_scs_key"
     _scs_stage="$LUOSHU_TASK_SCOPE_TMPDIR/switch-cache-$_scs_key"
     rm -rf "$_scs_stage" 2>/dev/null || true
@@ -306,15 +508,23 @@ safe_switch_cache_store() {
     [ "$_scs_saved" -gt 0 ] || { rm -rf "$_scs_stage" 2>/dev/null || true; return 1; }
     [ ! -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" ] ||         cp -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" "$_scs_stage/tree/.luoshu-metrics-report.json" 2>/dev/null || true
     _scs_identity=$(safe_source_identity "$_scs_file") || { rm -rf "$_scs_stage"; return 1; }
+    _scs_family=$(safe_family_identity "$_scs_font") || { rm -rf "$_scs_stage"; return 1; }
+    _scs_inventory=$(safe_inventory_identity) || { rm -rf "$_scs_stage"; return 1; }
+    _scs_mapper=$(safe_mapper_identity) || { rm -rf "$_scs_stage"; return 1; }
     {
         printf 'schema=%s\n' "$SWITCH_CACHE_SCHEMA"
         printf 'font=%s\n' "$_scs_font"
         printf 'sourceIdentity=%s\n' "$_scs_identity"
-        printf 'inventoryIdentity=%s\n' "$(safe_inventory_identity)"
+        printf 'familyIdentity=%s\n' "$_scs_family"
+        printf 'inventoryIdentity=%s\n' "$_scs_inventory"
         printf 'rom=%s\n' "$(safe_rom_identity)"
-        printf 'mapperIdentity=%s\n' "$(safe_mapper_identity)"
+        printf 'mapperIdentity=%s\n' "$_scs_mapper"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_scs_stage/cache.conf" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+    # The generated tree belongs to the inputs captured before mapping. Never
+    # label it with newer donors or policy observed only after the work finished.
+    _scs_current=$(safe_switch_cache_key "$_scs_file" "$_scs_font") || { rm -rf "$_scs_stage"; return 1; }
+    [ "$_scs_current" = "$_scs_expected" ] || { rm -rf "$_scs_stage"; return 1; }
     mkdir -p "$SWITCH_CACHE_ROOT" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
     rm -rf "$_scs_root" 2>/dev/null || true
     mv -f "$_scs_stage" "$_scs_root" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
@@ -337,6 +547,7 @@ progress() {
 }
 
 safe_error() {
+    safe_timing_phase_end failed
     progress 100 "$1"
     printf '{"status":"error","message":"%s","pipeline":"next-boot-stage"}\n' "$(json_escape "$1")"
     return 1
@@ -383,21 +594,19 @@ safe_switch_cache_ready() {
     _scrd_root="$SWITCH_CACHE_ROOT/$_scrd_key"
     _scrd_conf="$_scrd_root/cache.conf"
     [ -s "$_scrd_conf" ] && [ -d "$_scrd_root/tree" ] || return 1
-    [ "$(read_state_value "$_scrd_conf" schema)" = "$SWITCH_CACHE_SCHEMA" ] || return 1
-    [ "$(read_state_value "$_scrd_conf" font)" = "$_scrd_font" ] || return 1
-    [ "$(read_state_value "$_scrd_conf" sourceIdentity)" = "$(safe_source_identity "$_scrd_file")" ] || return 1
-    [ "$(read_state_value "$_scrd_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
-    [ "$(read_state_value "$_scrd_conf" rom)" = "$(safe_rom_identity)" ] || return 1
-    [ "$(read_state_value "$_scrd_conf" mapperIdentity)" = "$(safe_mapper_identity)" ] || return 1
+    safe_switch_cache_matches "$_scrd_conf" "$_scrd_file" "$_scrd_font" || return 1
     find "$_scrd_root/tree" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
         -print -quit 2>/dev/null | grep -q .
 }
 
 wait_for_prewarm_cache() {
     _wfpc_file="$1"; _wfpc_font="$2"
-    safe_switch_cache_ready "$_wfpc_file" "$_wfpc_font" && return 0
+    # Without an active producer there is nothing to wait for. Foreground
+    # restore proves readiness after taking the switch lock; duplicating that
+    # full donor/policy proof here only slows an ordinary warm switch.
     type luoshu_font_lock_active >/dev/null 2>&1 || return 1
     luoshu_font_lock_active "$PREWARM_LOCK" >/dev/null 2>&1 || return 1
+    safe_switch_cache_ready "$_wfpc_file" "$_wfpc_font" && return 0
     _wfpc_steps=0
     while [ "$_wfpc_steps" -lt 16 ]; do
         sleep 0.25 2>/dev/null || sleep 1
@@ -431,10 +640,25 @@ cleanup_stale_stages() {
     done
 }
 
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup' EXIT
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 129' HUP
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 130' INT
-trap 'luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true; cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 143' TERM
+safe_exit_cleanup() {
+    _sec_result="$1"; _sec_status="$2"
+    [ "$SAFE_CLEANUP_DONE" != true ] || return 0
+    SAFE_CLEANUP_DONE=true
+    safe_timing_phase_end "$_sec_status"
+    safe_timing_phase worker_cleanup
+    luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true
+    cleanup_stage; prewarm_lock_cleanup; lock_cleanup
+    safe_timing_phase_end finished
+    if [ "$SAFE_TIMING_ENABLED" = true ] && safe_timing_clock; then
+        safe_timing_elapsed "$SAFE_TIMING_START_S" "$SAFE_TIMING_START_MS"
+        safe_timing_record "[SAFE-TIMING] task=$SAFE_TIMING_TASK event=total scope=safe-switch-worker status=$_sec_status result=$_sec_result uptime=$SAFE_TIMING_NOW_UPTIME elapsedMs=$SAFE_TIMING_ELAPSED_MS"
+    fi
+}
+
+trap '_safe_exit_rc=$?; if [ "$_safe_exit_rc" -eq 0 ]; then safe_exit_cleanup "$_safe_exit_rc" completed; else safe_exit_cleanup "$_safe_exit_rc" failed; fi' EXIT
+trap 'safe_exit_cleanup 129 interrupted; exit 129' HUP
+trap 'safe_exit_cleanup 130 interrupted; exit 130' INT
+trap 'safe_exit_cleanup 143 interrupted; exit 143' TERM
 
 find_text_font_file() {
     _wanted="$1"
@@ -719,6 +943,7 @@ prewarm_font() {
     SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
     export PAYLOAD_ROOT SYSTEM_FONTS_DIR
     type apply_font_by_rom >/dev/null 2>&1 || return 0
+    _prewarm_cache_key=$(safe_switch_cache_key "$_source" "$_font") || _prewarm_cache_key=''
     apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1 || return 0
     mirror_existing_targets
     switch_busy && return 0
@@ -729,7 +954,7 @@ prewarm_font() {
         stage_coloros_complete || return 0
     fi
     stage_verify "$_font" || return 0
-    safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || return 0
+    safe_switch_cache_store "$_source" "$_font" "$_prewarm_cache_key" >/dev/null 2>&1 || return 0
     printf '[%s] [SAFE-SWITCH] prewarm ready font=%s\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_font" >> "$LOG_FILE" 2>/dev/null || true
     return 0
@@ -743,6 +968,7 @@ switch_font() {
 
     _source=''
     if [ "$_font" != default ]; then
+        safe_timing_phase source_lookup_validation
         progress 6 '正在查找并校验字体文件'
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
@@ -750,18 +976,22 @@ switch_font() {
             safe_error "${FONT_CHECK_ERROR:-字体校验失败}"
             return 1
         fi
+        safe_timing_phase prewarm_wait
         progress 14 '正在检查本机字体预热缓存'
         wait_for_prewarm_cache "$_source" "$_font" >/dev/null 2>&1 || true
     fi
 
+    safe_timing_phase lock_recovery
     progress 20 '正在获取字体切换锁'
     lock_acquire || return 1
     luoshu_next_transaction_recover "$MODDIR" || { safe_error '上一字体事务尚未完成清理，请稍后重试'; return 1; }
     cleanup_stale_stages
     resolve_previous_state
 
+    safe_timing_phase clone_payload
     progress 28 '正在保留非字体负载并建立安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
+    safe_timing_phase clear_text_payload
     progress 36 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
 
@@ -769,42 +999,52 @@ switch_font() {
         PAYLOAD_ROOT="$STAGE_PAYLOAD"
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
+        safe_timing_phase cache_restore
         if safe_switch_cache_restore "$_source" "$_font"; then
             progress 80 '已复用本机字体对齐缓存'
         else
+            safe_timing_phase map_rom
             progress 48 '正在生成 ROM 核心字体映射'
             type apply_font_by_rom >/dev/null 2>&1 || { safe_error '缺少 ROM 字体映射器'; return 1; }
+            _switch_cache_key=$(safe_switch_cache_key "$_source" "$_font") || _switch_cache_key=''
             if ! apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1; then
                 safe_error 'ROM 字体映射失败，当前启动字体未被改动'
                 return 1
             fi
+            safe_timing_phase mirror_targets
             progress 66 '正在补齐系统分区同名字体槽位'
             mirror_existing_targets
             if [ "${IS_HYPEROS:-false}" = true ]; then
+                safe_timing_phase complete_hyperos
                 progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
                 stage_hyperos_complete || {
                     safe_error 'HyperOS 字体槽位或度量处理失败，请查看字体切换日志'
                     return 1
                 }
             elif [ "${IS_COLOROS:-false}" = true ]; then
+                safe_timing_phase complete_coloros
                 progress 76 '正在按原厂槽位对齐 ColorOS 字体度量'
                 stage_coloros_complete || {
                     safe_error 'ColorOS 字体度量处理失败，请查看字体切换日志'
                     return 1
                 }
             fi
+            safe_timing_phase cache_store
             progress 82 '正在保存本机字体对齐缓存'
-            safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || true
+            safe_switch_cache_store "$_source" "$_font" "$_switch_cache_key" >/dev/null 2>&1 || true
         fi
+        safe_timing_phase verify_payload
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
     fi
 
+    safe_timing_phase prepare_next_payload
     progress 94 '正在提交下一启动字体负载'
     prepare_next_payload "$_active_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
         safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
         return 1
     }
+    safe_timing_phase write_state
     progress 98 '正在保存字体选择状态'
     if ! write_runtime_state "$_active_label"; then
         cancel_next_payload
@@ -812,11 +1052,13 @@ switch_font() {
         return 1
     fi
 
+    safe_timing_phase commit_transaction
     if ! luoshu_next_transaction_mix_receipt "$MODDIR" || ! luoshu_next_transaction_commit "$MODDIR"; then
         cancel_next_payload
         safe_error '字体事务提交失败，已恢复上次字体选择'
         return 1
     fi
+    safe_timing_phase live_mount
     progress 99 '正在挂载当前启动字体；已有字体缓存将在重启后完整更新'
     _live_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_live_switch.sh" 2>> "$LOG_FILE")
     _live_applied=false
@@ -826,6 +1068,7 @@ switch_font() {
         _activation=live-mounted
     fi
     printf '[LIVE-SWITCH] %s\n' "$_live_result" >> "$LOG_FILE" 2>/dev/null || true
+    safe_timing_phase finalize
     printf '%s\n' "$_active_label" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
     if [ "$_live_applied" = true ]; then

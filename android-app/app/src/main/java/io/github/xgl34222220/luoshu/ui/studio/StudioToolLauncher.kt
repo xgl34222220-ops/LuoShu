@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.studio
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,8 +40,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -72,11 +75,7 @@ internal fun StudioToolLauncher(
         animationSpec = spring(dampingRatio = .90f, stiffness = Spring.StiffnessMedium),
         label = "studioToolParentAlpha",
     )
-    val background = when {
-        style == UiStyle.MIUIX -> tokens.elevatedCardBackground
-        enabled -> scheme.surfaceContainerHigh
-        else -> scheme.surfaceVariant
-    }
+    val background = tokens.elevatedCardBackground
 
     LuoShuHeaderAction(
         icon = Icons.Rounded.AutoAwesome,
@@ -94,14 +93,15 @@ internal fun StudioToolLauncher(
             onDismissRequest = { if (!childLayerActive) menuVisible = false },
             sheetState = sheetState,
             sheetGesturesEnabled = !childLayerActive,
+            modifier = Modifier.luoShuGlassHighlight(RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)),
             shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
-            containerColor = if (style == UiStyle.MIUIX) tokens.cardBackground else scheme.surface,
+            containerColor = tokens.glassDialogColor,
             tonalElevation = 0.dp,
             scrimColor = scheme.scrim.copy(alpha = .20f),
             dragHandle = {
                 Surface(
                     modifier = Modifier.padding(top = 10.dp).width(36.dp).height(4.dp),
-                    shape = RoundedCornerShape(999.dp),
+                    shape = LuoShuSmoothShape(999.dp),
                     color = scheme.onSurfaceVariant.copy(alpha = .26f),
                 ) {}
             },
@@ -123,7 +123,7 @@ internal fun StudioToolLauncher(
                 ) {
                     Surface(
                         modifier = Modifier.size(44.dp),
-                        shape = RoundedCornerShape(15.dp),
+                        shape = LuoShuSmoothShape(15.dp),
                         color = scheme.primary.copy(alpha = .10f),
                         contentColor = scheme.primary,
                     ) {
@@ -173,10 +173,12 @@ private fun StudioToolMenuItem(
     val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        color = scheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
+        shape = LuoShuSmoothShape(18.dp),
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
@@ -184,7 +186,7 @@ private fun StudioToolMenuItem(
         ) {
             Surface(
                 modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = LuoShuSmoothShape(14.dp),
                 color = scheme.primary.copy(alpha = .09f),
                 contentColor = scheme.primary,
             ) {

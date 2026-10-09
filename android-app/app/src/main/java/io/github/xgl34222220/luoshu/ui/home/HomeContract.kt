@@ -40,7 +40,7 @@ internal fun ModuleSnapshot.toHomeUiState(): HomeUiState {
     return HomeUiState(
         loading = loading || statusCached,
         statusCached = statusCached,
-        version = version,
+        version = if (verifiedConnection && (!installed || !rootGranted)) "未连接" else version,
         currentFont = if (statusCached) "$activeLabel（上次记录，正在核实）" else effectiveLabel,
         rootGranted = verifiedConnection && rootGranted,
         rootManager = if (verifiedConnection) rootManager else "核实中…",

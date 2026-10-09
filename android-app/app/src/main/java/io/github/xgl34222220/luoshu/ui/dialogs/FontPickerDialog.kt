@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.dialogs
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,27 +14,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import android.view.Gravity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +50,8 @@ import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.resolveAndCacheFontDefaultAxes
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
@@ -58,131 +65,28 @@ internal fun FontPickerDialogRoute(
 ) {
     val scope = rememberCoroutineScope()
     var resolvingId by remember(slot) { mutableStateOf<String?>(null) }
+    var errorMessage by remember(slot) { mutableStateOf<String?>(null) }
     val choose: (FontItem) -> Unit = { font ->
         if (resolvingId == null) {
             resolvingId = font.id
+            errorMessage = null
             scope.launch {
-                resolveAndCacheFontDefaultAxes(font)
-                resolvingId = null
-                onChoose(font)
+                val resolved = try {
+                    resolveAndCacheFontDefaultAxes(font)
+                    true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    errorMessage = "读取字体信息失败，请重试。"
+                    false
+                } finally {
+                    resolvingId = null
+                }
+                if (resolved) onChoose(font)
             }
         }
     }
-    when (style) {
-        UiStyle.MATERIAL -> MaterialFontPickerDialog(slot, fonts, selected, onDismiss, choose)
-        UiStyle.MIUIX -> MiuixFontPickerDialog(slot, fonts, selected, onDismiss, choose)
-    }
-}
-
-@Composable
-private fun MaterialFontPickerDialog(
-    slot: MixSlot,
-    fonts: List<FontItem>,
-    selected: String,
-    onDismiss: () -> Unit,
-    onChoose: (FontItem) -> Unit,
-) {
-    var query by remember(slot) { mutableStateOf("") }
-    val filtered = remember(fonts, query) { filterFonts(fonts, query) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Column {
-                Text("选择${slotLabel(slot)}字体", fontWeight = FontWeight.Black)
-                Text(
-                    "${filtered.size} 个可用字体",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp,
-                )
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.large,
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    placeholder = { Text("搜索名称、格式或字重") },
-                )
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 420.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(filtered, key = { it.id }) { font ->
-                        MaterialFontPickerItem(font, font.id == selected) { onChoose(font) }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-        shape = MaterialTheme.shapes.extraLarge,
-    )
-}
-
-@Composable
-private fun MaterialFontPickerItem(
-    font: FontItem,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.large,
-        color = if (selected) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Surface(
-                modifier = Modifier.size(44.dp),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.primaryContainer,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    if (font.valid) {
-                        NativeFontPreview(
-                            font = font,
-                            text = "Aa",
-                            axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                            modifier = Modifier.size(44.dp).padding(5.dp),
-                            textSizeSp = 15f,
-                            gravity = Gravity.CENTER,
-                            maxLines = 1,
-                        )
-                    } else {
-                        Text("Aa", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(font.name, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    listOf(font.format, font.weightLabel).filter { it.isNotBlank() }.joinToString(" · "),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (selected) {
-                Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            }
-        }
-    }
+    MiuixFontPickerDialog(slot, fonts, selected, resolvingId, errorMessage, onDismiss, choose)
 }
 
 @Composable
@@ -190,18 +94,21 @@ private fun MiuixFontPickerDialog(
     slot: MixSlot,
     fonts: List<FontItem>,
     selected: String,
+    resolvingId: String?,
+    errorMessage: String?,
     onDismiss: () -> Unit,
     onChoose: (FontItem) -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
-    var query by remember(slot) { mutableStateOf("") }
+    var query by rememberSaveable(slot) { mutableStateOf("") }
     val filtered = remember(fonts, query) { filterFonts(fonts, query) }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(38.dp),
-            color = tokens.elevatedCardBackground,
-            shadowElevation = 20.dp,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp).luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
+            shape = LuoShuSmoothShape(32.dp),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(
                 modifier = Modifier.padding(18.dp),
@@ -210,55 +117,77 @@ private fun MiuixFontPickerDialog(
                 Row(verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "FONT SOURCE",
-                            color = MaterialTheme.colorScheme.primary,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 2.sp,
-                        )
-                        Text(
                             "选择${slotLabel(slot)}字体",
                             color = tokens.textPrimary,
-                            fontSize = 26.sp,
+                            fontSize = 22.sp,
                             lineHeight = 30.sp,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                     Text(
                         "${filtered.size} 个",
                         color = tokens.textSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                     )
                 }
 
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
                     singleLine = true,
-                    shape = RoundedCornerShape(20.dp),
+                    shape = LuoShuSmoothShape(20.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = tokens.glassCardColor,
+                        unfocusedContainerColor = tokens.glassCardColor,
+                        unfocusedBorderColor = tokens.cardOutline,
+                    ),
                     leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    placeholder = { Text("搜索字体") },
+                    placeholder = { Text("搜索名称、格式或字重") },
                 )
+
+                errorMessage?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp, lineHeight = 18.sp)
+                }
 
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 430.dp),
+                        .weight(1f, fill = false)
+                        .heightIn(min = 72.dp),
                     verticalArrangement = Arrangement.spacedBy(7.dp),
                 ) {
+                    if (filtered.isEmpty()) {
+                        item {
+                            Text(
+                                if (query.isBlank()) "暂无可选字体，请先导入字体。" else "没有找到匹配的字体。",
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                                color = tokens.textSecondary,
+                                fontSize = 14.sp,
+                            )
+                        }
+                    }
                     items(filtered, key = { it.id }) { font ->
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(24.dp))
-                                .clickable { onChoose(font) },
-                            shape = RoundedCornerShape(24.dp),
+                                .clip(LuoShuSmoothShape(22.dp))
+                                .selectable(
+                                    selected = font.id == selected,
+                                    enabled = resolvingId == null,
+                                    role = Role.RadioButton,
+                                    onClick = { onChoose(font) },
+                                )
+                                .luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
+                            shape = LuoShuSmoothShape(22.dp),
                             color = if (font.id == selected) {
-                                MaterialTheme.colorScheme.primary.copy(alpha = .14f)
+                                lerp(tokens.glassCardColor, MaterialTheme.colorScheme.primaryContainer, .26f)
                             } else {
-                                tokens.cardBackground
+                                tokens.glassCardColor
                             },
+                            border = if (font.id == selected) {
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .28f))
+                            } else BorderStroke(1.dp, tokens.glassOutlineBrush),
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
@@ -266,7 +195,7 @@ private fun MiuixFontPickerDialog(
                             ) {
                                 Surface(
                                     modifier = Modifier.size(46.dp),
-                                    shape = RoundedCornerShape(16.dp),
+                                    shape = LuoShuSmoothShape(16.dp),
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
@@ -300,19 +229,25 @@ private fun MiuixFontPickerDialog(
                                     Text(
                                         font.name,
                                         color = tokens.textPrimary,
-                                        fontWeight = FontWeight.Black,
+                                        fontWeight = FontWeight.SemiBold,
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
                                         listOf(font.format, font.weightLabel).filter { it.isNotBlank() }.joinToString(" · "),
                                         color = tokens.textSecondary,
-                                        fontSize = 10.sp,
+                                        fontSize = 12.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 }
-                                if (font.id == selected) {
+                                if (font.id == resolvingId) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                } else if (font.id == selected) {
                                     Icon(
                                         Icons.Rounded.CheckCircle,
                                         contentDescription = null,
@@ -324,11 +259,12 @@ private fun MiuixFontPickerDialog(
                     }
                 }
 
-                TextButton(
+                OutlinedButton(
                     onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.End),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    shape = LuoShuSmoothShape(18.dp),
                 ) {
-                    Text("关闭", fontWeight = FontWeight.Bold)
+                    Text("关闭", fontWeight = FontWeight.SemiBold)
                 }
             }
         }

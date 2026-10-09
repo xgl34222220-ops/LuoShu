@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -27,7 +26,6 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
-import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.logs.LogsActions
 import io.github.xgl34222220.luoshu.ui.logs.LogsRoute
 import io.github.xgl34222220.luoshu.ui.logs.toLogsUiState
@@ -51,11 +49,7 @@ internal fun TaskCenterHost() {
     LaunchedEffect(Unit) { model.refreshLogs() }
 
     LuoShuTheme(appearance) {
-        val pageBackground = if (appearance.uiStyle == UiStyle.MIUIX) {
-            LocalMiuixTokens.current.pageBackground
-        } else {
-            MaterialTheme.colorScheme.background
-        }
+        val pageBackground = LocalMiuixTokens.current.pageBackground
         val useDarkSystemBars = pageBackground.luminance() < .5f
         val context = LocalContext.current
         val view = LocalView.current

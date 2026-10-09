@@ -198,6 +198,16 @@ exec "$TEST_REAL_CP" "$@"
         legacy.mkdir()
         for name in ('font_switch_safe.sh', 'payload_clone.sh'):
             shutil.copyfile(ROOT / 'common/legacy_v14_4' / name, legacy / name)
+        # The real cache key requires every mapper policy input, even when the
+        # fixture keeps the legacy utility and mapping operations deterministic.
+        for name in ('legacy_v14_4/hyperos_full_coverage.sh',
+                     'hyperos_stage_complete.sh', 'coloros_stage_complete.sh',
+                     'hyperos_metrics_batch.py', 'coloros_metrics_batch.py',
+                     'font_metrics_normalize.py', 'font_slot_coverage.py',
+                     'font_inventory.py', 'font_inventory_scan.py',
+                     'hyperos_physical_policy.py', 'hyperos_global.sh',
+                     'util_functions.sh', 'rom_adapters.sh'):
+            shutil.copyfile(ROOT / 'common' / name, self.module / 'common' / name)
         shutil.copyfile(ROOT / 'common/font_switch_lock.sh', self.module / 'common/font_switch_lock.sh')
         shutil.copyfile(ROOT / 'common/font_next_transaction.sh', self.module / 'common/font_next_transaction.sh')
         (legacy / 'util_functions.sh').write_text('''

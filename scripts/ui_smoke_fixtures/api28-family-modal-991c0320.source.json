@@ -1,0 +1,27 @@
+{
+  "scope": "Original failed API28 snapshots; host regression fixtures only, not successful device validation",
+  "sourceCommit": "991c0320e2575d551127a1ab5c2067fb8963ed1b",
+  "sourceWorkflowRun": 37702305934,
+  "sourceArtifactFile": "LuoShu-API28-Failed-991c0320.zip",
+  "sourceArtifactBytes": 17539419,
+  "sourceArtifactSha256": "96701f4954174cbae35a635782ec32a685d8806dfe125924ca9222079a47cfef",
+  "sourceMembers": [
+    {
+      "sourceMember": "hierarchy-0057.xml",
+      "fixtureFile": "api28-library-return-991c0320.xml",
+      "fixtureSha256": "bc6a50f6a3cd0ea36225d887581e15bdf11ada1433d262f733c43f65ba41c08d",
+      "fixtureBytes": 21165
+    },
+    {
+      "sourceMember": "hierarchy-0058.xml",
+      "fixtureFile": "api28-family-modal-991c0320.xml",
+      "fixtureSha256": "aa38f8fd75aa029220aea464e2b7588b7c0df811f4b129e9137d3c9d42f5a8d1",
+      "fixtureBytes": 8060
+    }
+  ],
+  "wmSizeSource": "scroll-search-0001.json wm_size: Physical size1440x3120; Override size1080x1920",
+  "rotationSource": "hierarchy-0058.xml hierarchy rotation0; window.txt DisplayFrames w1080 h1920 r0",
+  "callPath": "verify_library_preservation: after library-scroll-across-tabs -> old restore top8x scroll(root,down) -> hierarchy-0058 Family modal -> logical_input_size inferred landscape from modal shape -> erroneous1920x1080 bounds rejection; rotation test stage not reached",
+  "failure": "App hierarchy window (120,622,960,1234) exceeds logical input display1920x1080",
+  "inference": "A short gesture being interpreted as a click is unproven; the retained XML proves the modal and wrong geometry, not how it opened."
+}

@@ -39,6 +39,7 @@ PAYLOAD_COMMIT_MARKER="$CONFIG_DIR/legacy-mix-payload-commit.ok"
 COMPOSITE_RESULT=""
 COMPOSITE_REPORT=""
 COMPOSITE_CACHE_HIT=false
+COMPOSITE_RUNNER="$MODDIR/common/luoshu_composite.sh"
 COMPOSITE_CJK_HASH=""
 COMPOSITE_LATIN_HASH=""
 COMPOSITE_DIGIT_HASH=""
@@ -49,6 +50,16 @@ LAST_MIX_ERROR=""
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/rom_adapters.sh" ] && . "$MODDIR/common/rom_adapters.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+
+# Timing is optional and cannot replace a business operation.
+_mix_phase_helper="$MODDIR/common/mix_phase_timing.sh"
+[ -f "$_mix_phase_helper" ] || _mix_phase_helper="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/legacy_v14_4/mix_phase_timing.sh"
+if [ -f "$_mix_phase_helper" ]; then . "$_mix_phase_helper"
+else
+    luoshu_mix_phase_begin() { return 0; }
+    luoshu_mix_phase_end() { return 0; }
+    luoshu_mix_phase_run() { shift 4; "$@"; }
+fi
 
 type check_coloros >/dev/null 2>&1 && check_coloros
 type check_hyperos >/dev/null 2>&1 && check_hyperos
@@ -310,12 +321,26 @@ sync_secondary_coloros_dirs() {
 }
 
 composite_hash_file() {
-    _hf="$1"
-    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$_hf" | awk '{print $1}'
-    elif command -v toybox >/dev/null 2>&1; then toybox sha256sum "$_hf" | awk '{print $1}'
-    else cksum "$_hf" | awk '{print $1 "-" $2}'
+    if command -v sha256sum >/dev/null 2>&1; then
+        _hf_result=$(sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_hf_result%% *}"
+    elif command -v toybox >/dev/null 2>&1; then
+        _hf_result=$(toybox sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_hf_result%% *}"
+    else cksum "$1" | awk '{print $1 "-" $2}'
     fi
 }
+
+hash_file() { composite_hash_file "$1"; }
+hash_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | { IFS=' ' read -r _ht_digest _ht_rest && printf '%s\n' "$_ht_digest"; }
+    elif command -v toybox >/dev/null 2>&1; then
+        toybox sha256sum | { IFS=' ' read -r _ht_digest _ht_rest && printf '%s\n' "$_ht_digest"; }
+    else cksum | awk '{print $1 "-" $2}'
+    fi
+}
+. "$MODDIR/common/composite_cache_proof.sh" || exit 126
 
 set_mix_error() {
     LAST_MIX_ERROR="$1"
@@ -382,80 +407,149 @@ prune_composite_cache() {
         _total_kb=$((_total_kb + _size_kb))
         [ "$_count" -le "$_keep" ] && [ "$_total_kb" -le "$_max_kb" ] && continue
         _base=${_old%.otf}
-        rm -f "$_old" "${_base}.json" 2>/dev/null || true
+        rm -f "$_old" "${_base}.json" "${_old}.receipt" 2>/dev/null || true
     done
-    rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
+}
+
+composite_build_identity_matches() (
+    [ "$(composite_cache_identity)" = "$_fc_engine_identity" ] &&
+    [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_fc_validator_identity" ] &&
+    [ "$(hash_file "$_fc_cjk_src")" = "$COMPOSITE_CJK_HASH" ] &&
+    [ "$(hash_file "$_fc_latin_src")" = "$COMPOSITE_LATIN_HASH" ] &&
+    [ "$(hash_file "$_fc_digit_src")" = "$COMPOSITE_DIGIT_HASH" ]
+)
+
+composite_build_temp_cleanup() {
+    [ -z "${_fc_build_tmp:-}" ] || rm -rf "$_fc_build_tmp" 2>/dev/null || true
+    _fc_build_tmp=''
 }
 
 build_composite_file() {
-    _cjk_src="$1"; _latin_src="$2"; _digit_src="$3"
+    luoshu_mix_phase_begin composite cache_lookup fixed probe
+    _mix_build_composite_file "$@"
+    _luompt_build_rc=$?
+    luoshu_mix_phase_end "$_luompt_build_rc"
+    return "$_luompt_build_rc"
+}
+
+_mix_build_composite_file() {
+    _fc_cjk_src="$1"; _fc_latin_src="$2"; _fc_digit_src="$3"
     COMPOSITE_RESULT=""; COMPOSITE_REPORT=""; COMPOSITE_CACHE_HIT=false; LAST_MIX_ERROR=""
-    _runner="$MODDIR/common/luoshu_composite.sh"
-    [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
+    _fc_build_tmp=''
+    _fc_engine_identity=$(composite_cache_identity) || { set_mix_error '完整复合字体引擎缺失'; return 1; }
+    _fc_validator_identity=$(hash_file "$MODDIR/common/font_check.sh")
+    [ -n "$_fc_validator_identity" ] && type font_validate >/dev/null 2>&1 || { set_mix_error '复合字体验证器缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
-    _cache="$LUOSHU_CACHE_DIR/full-composite-v7"
-    mkdir -p "$_cache" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
-    _cjk_hash=$(composite_hash_file "$_cjk_src")
-    _latin_hash=$(composite_hash_file "$_latin_src")
-    _digit_hash=$(composite_hash_file "$_digit_src")
-    COMPOSITE_CJK_HASH="$_cjk_hash"
-    COMPOSITE_LATIN_HASH="$_latin_hash"
-    COMPOSITE_DIGIT_HASH="$_digit_hash"
-    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v7-metrics"
-    _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
-    _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
-    rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
-    if [ -s "$_cached" ]; then
+    _fc_cache="$LUOSHU_CACHE_DIR/full-composite-v7"
+    mkdir -p "$_fc_cache" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
+    COMPOSITE_CJK_HASH=$(hash_file "$_fc_cjk_src")
+    COMPOSITE_LATIN_HASH=$(hash_file "$_fc_latin_src")
+    COMPOSITE_DIGIT_HASH=$(hash_file "$_fc_digit_src")
+    [ -n "$COMPOSITE_CJK_HASH" ] && [ -n "$COMPOSITE_LATIN_HASH" ] && [ -n "$COMPOSITE_DIGIT_HASH" ] || {
+        set_mix_error '无法读取复合字体源文件身份'; return 1;
+    }
+    _fc_key=$(printf '%s\000%s\000%s\000%s\000full-composite-v8-content-identity' \
+        "$COMPOSITE_CJK_HASH" "$COMPOSITE_LATIN_HASH" "$COMPOSITE_DIGIT_HASH" "$_fc_engine_identity" | hash_text)
+    [ -n "$_fc_key" ] || { set_mix_error '无法计算复合字体缓存身份'; return 1; }
+    _fc_cached="$_fc_cache/${_fc_key}.otf"; _fc_report="$_fc_cache/${_fc_key}.json"
+    _fc_receipt="${_fc_cached}.receipt"; _fc_schema=fixed-composite-receipt-v1
+    _fc_payload_digest=''
+    if [ -s "$_fc_cached" ] && [ ! -L "$_fc_cached" ]; then
+        _fc_payload_digest=$(hash_file "$_fc_cached")
+    fi
+    if [ -n "$_fc_payload_digest" ] && composite_receipt_matches "$_fc_receipt" \
+        "$_fc_payload_digest" "$_fc_engine_identity" "$_fc_validator_identity" "$_fc_schema"; then
+        composite_build_identity_matches && [ "$(hash_file "$_fc_cached")" = "$_fc_payload_digest" ] || {
+            set_mix_error '复合字体缓存校验期间来源发生变化'; return 1;
+        }
         COMPOSITE_CACHE_HIT=true
-        touch "$_cached" "$_report" 2>/dev/null || true
+        touch "$_fc_cached" "$_fc_report" 2>/dev/null || true
         write_progress cache '已验证并使用现有复合字体缓存' 100
-    elif [ -n "$_cjk_hash" ] && [ "$_cjk_hash" = "$_latin_hash" ] && [ "$_cjk_hash" = "$_digit_hash" ]; then
+        COMPOSITE_RESULT="$_fc_cached"; COMPOSITE_REPORT="$_fc_report"
+        COMPOSITE_OUTPUT_HASH="$_fc_payload_digest"
+        luoshu_mix_phase_end 0 receipt-hit
+        return 0
+    fi
+    luoshu_mix_phase_end 0 miss
+    # Unknown/old entries are rebuilt through the real generator, rather than
+    # giving an unproven file a receipt after a shallow SFNT header check.
+    rm -f "$_fc_cached" "$_fc_report" "$_fc_receipt" 2>/dev/null || { set_mix_error '无法退役未验证缓存'; return 1; }
+    [ -n "${LUOSHU_TASK_SCOPE_TMPDIR:-}" ] && [ -d "$LUOSHU_TASK_SCOPE_TMPDIR" ] || { set_mix_error '复合字体任务暂存区缺失'; return 1; }
+    _fc_build_tmp=$(mktemp -d "$LUOSHU_TASK_SCOPE_TMPDIR/fixed-composite.XXXXXX") || { set_mix_error '无法创建复合字体任务暂存区'; return 1; }
+    _fc_tmp="$_fc_build_tmp/composite.otf"; _fc_tmp_report="$_fc_build_tmp/composite.json"
+    _fc_tmp_error="$_fc_build_tmp/composite.err"; _fc_tmp_receipt="$_fc_build_tmp/receipt"
+    _fc_progress="$CONFIG_DIR/composite_progress.json"
+    luoshu_mix_phase_begin composite cold_composite_runner fixed cold
+    if [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_LATIN_HASH" ] && [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_DIGIT_HASH" ] &&
+       [ "$(font_detect_format "$_fc_cjk_src")" != TTC ]; then
         # Selecting one complete font for all three roles needs no glyph rewrite.
-        # Reuse the validated source directly instead of serializing the entire CJK
-        # font through embedded Python.
-        ln "$_cjk_src" "$_cached" 2>/dev/null || cp -f "$_cjk_src" "$_cached" 2>/dev/null || {
+        # Reuse a validated single face instead of rewriting the CJK font. A TTC
+        # still needs the real generator's role-aware face selection; copying a
+        # collection cannot be proved by validating an arbitrary face zero.
+        ln "$_fc_cjk_src" "$_fc_tmp" 2>/dev/null || cp -f "$_fc_cjk_src" "$_fc_tmp" 2>/dev/null || {
+            composite_build_temp_cleanup
             set_mix_error '无法保存同源复合字体缓存'
             return 1
         }
-        chmod 0644 "$_cached" 2>/dev/null || true
-        printf '{"status":"ok","fastPath":"same-source"}\n' >"$_report" 2>/dev/null || true
-        write_progress cache '三项字体来源相同，已跳过重复合成' 100
-    else
-        _tmp="$LUOSHU_TASK_SCOPE_TMPDIR/composite.otf"; _tmp_report="$LUOSHU_TASK_SCOPE_TMPDIR/composite.json"; _tmp_error="$LUOSHU_TASK_SCOPE_TMPDIR/composite.err"
-        rm -f "$_tmp" "$_tmp_report" "$_tmp_error" "$_progress" 2>/dev/null || true
-        if command -v timeout >/dev/null 2>&1; then
-            MODDIR="$MODDIR" timeout 480 sh "$_runner" --cjk "$_cjk_src" --latin "$_latin_src" --digit "$_digit_src" --output "$_tmp" --progress "$_progress" > "$_tmp_report" 2> "$_tmp_error"
-            _run_rc=$?
-        elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-            MODDIR="$MODDIR" toybox timeout 480 sh "$_runner" --cjk "$_cjk_src" --latin "$_latin_src" --digit "$_digit_src" --output "$_tmp" --progress "$_progress" > "$_tmp_report" 2> "$_tmp_error"
-            _run_rc=$?
-        else
-            MODDIR="$MODDIR" sh "$_runner" --cjk "$_cjk_src" --latin "$_latin_src" --digit "$_digit_src" --output "$_tmp" --progress "$_progress" > "$_tmp_report" 2> "$_tmp_error"
-            _run_rc=$?
-        fi
-        [ ! -s "$_tmp_error" ] || cat "$_tmp_error" >> "$LOG_FILE" 2>/dev/null || true
-        if [ "$_run_rc" -ne 0 ]; then
-            _detail=$(extract_composite_error "$_tmp_error" "$_run_rc")
-            rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
+        if ! composite_validate_output "$_fc_tmp" >"$_fc_tmp_report" 2>"$_fc_tmp_error"; then
+            [ ! -s "$_fc_tmp_error" ] || cat "$_fc_tmp_error" >> "$LOG_FILE" 2>/dev/null || true
+            _detail=$(extract_composite_error "$_fc_tmp_error" 1)
+            luoshu_mix_phase_end 1 same-source
+            composite_build_temp_cleanup
             set_mix_error "$_detail"
             return 1
         fi
-        [ -s "$_tmp" ] || { rm -f "$_tmp" "$_tmp_report" "$_tmp_error"; set_mix_error '复合字体输出为空'; return 1; }
-        if type font_validate >/dev/null 2>&1 && ! font_validate "$_tmp" text; then
-            rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
-            set_mix_error "复合字体验证失败：$FONT_CHECK_ERROR"
+        luoshu_mix_phase_end 0 same-source
+        printf '{"status":"ok","fastPath":"same-source","validatedInk":true}\n' >"$_fc_tmp_report" 2>/dev/null || true
+    else
+        rm -f "$_fc_progress" 2>/dev/null || true
+        if command -v timeout >/dev/null 2>&1; then
+            MODDIR="$MODDIR" timeout 480 sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
+            _run_rc=$?
+        elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
+            MODDIR="$MODDIR" toybox timeout 480 sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
+            _run_rc=$?
+        else
+            MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
+            _run_rc=$?
+        fi
+        luoshu_mix_phase_end "$_run_rc"
+        [ ! -s "$_fc_tmp_error" ] || cat "$_fc_tmp_error" >> "$LOG_FILE" 2>/dev/null || true
+        if [ "$_run_rc" -ne 0 ]; then
+            _detail=$(extract_composite_error "$_fc_tmp_error" "$_run_rc")
+            composite_build_temp_cleanup
+            set_mix_error "$_detail"
             return 1
         fi
-        chmod 0644 "$_tmp" "$_tmp_report" 2>/dev/null || true
-        mv -f "$_tmp" "$_cached" || { set_mix_error '无法保存复合字体缓存'; return 1; }
-        mv -f "$_tmp_report" "$_report" 2>/dev/null || true
-        rm -f "$_tmp_error" 2>/dev/null || true
-        write_progress done '复合字体已生成并通过验证' 100
     fi
-    prune_composite_cache "$_cache"
-    COMPOSITE_RESULT="$_cached"; COMPOSITE_REPORT="$_report"
-    COMPOSITE_OUTPUT_HASH=$(composite_hash_file "$_cached")
+    [ -s "$_fc_tmp" ] && luoshu_mix_phase_run composite validate fixed cold font_validate "$_fc_tmp" text || {
+        composite_build_temp_cleanup; set_mix_error "复合字体验证失败：${FONT_CHECK_ERROR:-输出为空}"; return 1;
+    }
+    luoshu_mix_phase_begin composite cache_publish fixed cold
+    _fc_payload_digest=$(hash_file "$_fc_tmp")
+    [ -n "$_fc_payload_digest" ] && composite_build_identity_matches || {
+        composite_build_temp_cleanup; set_mix_error '复合字体生成期间来源发生变化'; return 1;
+    }
+    chmod 0644 "$_fc_tmp" "$_fc_tmp_report" 2>/dev/null || true
+    if ! mv -f "$_fc_tmp" "$_fc_cached" || ! write_composite_receipt "$_fc_receipt" "$_fc_tmp_receipt" \
+        "$_fc_payload_digest" "$_fc_engine_identity" "$_fc_validator_identity" "$_fc_schema"; then
+        rm -f "$_fc_cached" "$_fc_report" "$_fc_receipt" 2>/dev/null || true
+        composite_build_temp_cleanup; set_mix_error '无法保存复合字体验证缓存'; return 1
+    fi
+    # Recheck publication too: replaced policy/input bytes cannot be proven by
+    # the identity captured before the generator or receipt rename.
+    if ! composite_build_identity_matches || [ "$(hash_file "$_fc_cached")" != "$_fc_payload_digest" ]; then
+        rm -f "$_fc_cached" "$_fc_report" "$_fc_receipt" 2>/dev/null || true
+        composite_build_temp_cleanup; set_mix_error '复合字体发布期间来源发生变化'; return 1
+    fi
+    luoshu_mix_phase_end 0
+    mv -f "$_fc_tmp_report" "$_fc_report" 2>/dev/null || true
+    composite_build_temp_cleanup
+    write_progress done '复合字体已生成并通过验证' 100
+    prune_composite_cache "$_fc_cache"
+    COMPOSITE_RESULT="$_fc_cached"; COMPOSITE_REPORT="$_fc_report"
+    COMPOSITE_OUTPUT_HASH="$_fc_payload_digest"
     return 0
 }
 
@@ -514,6 +608,13 @@ commit_mix_config() {
 }
 
 apply_mix() {
+    _mix_apply "$@"
+    _luompt_apply_rc=$?
+    luoshu_mix_phase_end "$_luompt_apply_rc"
+    return "$_luompt_apply_rc"
+}
+
+_mix_apply() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
     [ "${LUOSHU_CONTINUOUS_SWITCH:-0}" = 1 ] || [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
@@ -533,20 +634,21 @@ apply_mix() {
     _cjk_src=$(find_family_file "$_cjk")
     _latin_src=$(find_family_file "$_latin")
     _digit_src=$(find_family_file "$_digit")
-    validate_source "$_cjk_src" 中文 || { set_mix_error "中文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
-    validate_source "$_latin_src" 英文 || { set_mix_error "英文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
-    validate_source "$_digit_src" 数字 || { set_mix_error "数字字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
+    luoshu_mix_phase_run fixed-apply source_validate cjk apply validate_source "$_cjk_src" 中文 || { set_mix_error "中文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
+    luoshu_mix_phase_run fixed-apply source_validate latin apply validate_source "$_latin_src" 英文 || { set_mix_error "英文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
+    luoshu_mix_phase_run fixed-apply source_validate digit apply validate_source "$_digit_src" 数字 || { set_mix_error "数字字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
 
     mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || { set_mix_error '无法创建模块工作目录'; return 4; }
     build_composite_file "$_cjk_src" "$_latin_src" "$_digit_src" || return 5
     payload_stage_begin || { set_mix_error '无法创建字体负载暂存区'; return 5; }
     if [ "$IS_HYPEROS" = "true" ]; then
-        populate_hyperos_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 HyperOS 字体负载失败'; return 5; }
+        luoshu_mix_phase_run fixed-apply map_payload fixed apply populate_hyperos_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 HyperOS 字体负载失败'; return 5; }
     elif [ "$IS_COLOROS" = "true" ]; then
-        populate_coloros_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 ColorOS 字体负载失败'; return 5; }
+        luoshu_mix_phase_run fixed-apply map_payload fixed apply populate_coloros_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 ColorOS 字体负载失败'; return 5; }
     else
-        populate_generic_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成通用 Android 字体负载失败'; return 5; }
+        luoshu_mix_phase_run fixed-apply map_payload fixed apply populate_generic_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成通用 Android 字体负载失败'; return 5; }
     fi
+    luoshu_mix_phase_begin fixed-apply local_commit fixed apply
     write_mix_generation_manifest "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法写入本次组合字体校验清单'; return 6; }
     prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
     payload_stage_activate || { set_mix_error '无法原子替换字体负载'; return 6; }

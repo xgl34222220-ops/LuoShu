@@ -6,6 +6,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.util
+from unittest.mock import patch
 
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.boundsPen import BoundsPen
@@ -23,8 +25,8 @@ LEGACY = ROOT / 'common/legacy_v14_4'
 CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789中永国À'
 
 
-def fixture(path, bottom=0, height=700, accent=800, cff=False, upem=1000):
-    cmap = {ord(char): f'u{ord(char):04X}' for char in CHARS}
+def fixture(path, bottom=0, height=700, accent=800, cff=False, upem=1000, empty_chars='', extra_chars=''):
+    cmap = {ord(char): f'u{ord(char):04X}' for char in CHARS + extra_chars}
     order = ['.notdef', *cmap.values()]
     glyphs = {}
     for name in order:
@@ -34,8 +36,9 @@ def fixture(path, bottom=0, height=700, accent=800, cff=False, upem=1000):
         elif name == cmap[ord('À')]:
             lo, hi = bottom, accent
         pen = T2CharStringPen(620, None) if cff else TTGlyphPen(None)
-        pen.moveTo((50, lo)); pen.lineTo((550, lo))
-        pen.lineTo((550, hi)); pen.lineTo((50, hi)); pen.closePath()
+        if name not in {cmap[ord(char)] for char in empty_chars}:
+            pen.moveTo((50, lo)); pen.lineTo((550, lo))
+            pen.lineTo((550, hi)); pen.lineTo((50, hi)); pen.closePath()
         glyphs[name] = pen.getCharString() if cff else pen.glyph()
     fb = FontBuilder(upem, isTTF=not cff)
     fb.setupGlyphOrder(order); fb.setupCharacterMap(cmap)
@@ -205,6 +208,103 @@ class LegacyCompositeLayoutTest(unittest.TestCase):
 
     def test_current_composite_engine_keeps_the_same_metric_isolation(self):
         self.assert_static_imports_keep_cjk_variations(explicit=False, current=True)
+
+    def test_blank_required_letters_digits_and_mapped_cjk_never_replace_published_output(self):
+        for current in (False, True):
+            for source, char in ((self.latin, 'B'), (self.digit, '2'), (self.base, '国')):
+                with self.subTest(current=current, char=char):
+                    fixture(self.base); fixture(self.latin); fixture(self.digit)
+                    fixture(source, empty_chars=char)
+                    original = b'previously-published-output'
+                    self.output.write_bytes(original)
+                    engine = (ROOT / 'common' if current else LEGACY) / 'composite_font.py'
+                    result = subprocess.run([sys.executable, str(engine), '--cjk', str(self.base),
+                        '--latin', str(self.latin), '--digit', str(self.digit), '--output', str(self.output)],
+                        capture_output=True, text=True)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn(f'U+{ord(char):04X}', result.stderr)
+                    self.assertEqual(self.output.read_bytes(), original)
+                    self.assertFalse(list(self.root.glob('output.ttf.*.tmp')))
+
+    def test_legitimate_empty_spaces_are_preserved(self):
+        for path in (self.base, self.latin, self.digit):
+            fixture(path, extra_chars=' \u00A0', empty_chars=' \u00A0')
+        font = self.build()
+        self.assertIsNone(bounds(font, ' '))
+        self.assertIsNone(bounds(font, '\u00A0'))
+        self.assertIsNotNone(bounds(font, 'B'))
+
+    def test_required_composite_glyph_is_valid(self):
+        with TTFont(self.latin) as font:
+            pen = TTGlyphPen(font.getGlyphSet())
+            pen.addComponent(font.getBestCmap()[ord('A')], (1, 0, 0, 1, 0, 0))
+            font['glyf'][font.getBestCmap()[ord('B')]] = pen.glyph()
+            font.save(self.latin)
+        font = self.build()
+        self.assertIsNotNone(bounds(font, 'B'))
+
+    def test_cff_blank_required_glyph_is_rejected(self):
+        fixture(self.base, cff=True); fixture(self.latin, cff=True, empty_chars='B')
+        result = subprocess.run([sys.executable, str(LEGACY / 'composite_font.py'),
+            '--cjk', str(self.base), '--latin', str(self.latin), '--digit', str(self.digit),
+            '--output', str(self.output)], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('U+0042', result.stderr)
+        self.assertFalse(self.output.exists())
+
+    def validate_only(self, path):
+        return subprocess.run([sys.executable, str(LEGACY / 'composite_font.py'),
+            '--validate-output', str(path)], capture_output=True, text=True)
+
+    def test_cff2_outlines_validate(self):
+        from fontTools.cffLib.CFFToCFF2 import convertCFFToCFF2
+        fixture(self.base, cff=True)
+        with TTFont(self.base) as font:
+            convertCFFToCFF2(font)
+            font.save(self.base)
+        result = self.validate_only(self.base)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_optional_colr_is_allowed_but_required_colr_is_explicitly_unsupported(self):
+        from fontTools.colorLib.builder import buildCOLR, buildCPAL
+        for char, expected in (('À', 0), ('B', 1)):
+            with self.subTest(char=char):
+                fixture(self.base)
+                with TTFont(self.base) as font:
+                    cmap = font.getBestCmap()
+                    font['COLR'] = buildCOLR({cmap[ord(char)]: [(cmap[ord('A')], 0)]}, version=0)
+                    font['CPAL'] = buildCPAL([[(1, 0, 0, 1)]])
+                    font.save(self.base)
+                result = self.validate_only(self.base)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected:
+                    self.assertIn('不支持', result.stderr)
+                    self.assertIn('COLR', result.stderr)
+
+    def test_bitmap_output_is_unsupported_without_decoding_its_images(self):
+        from fontTools.ttLib.tables.DefaultTable import DefaultTable
+        with TTFont(self.base) as font:
+            font['CBDT'] = DefaultTable('CBDT')
+            font['CBDT'].data = b'invalid-to-decode-bitmap-images'
+            font.save(self.base)
+        result = self.validate_only(self.base)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('不支持 SVG 或位图', result.stderr)
+
+    def test_bounded_validation_opens_no_second_font_and_draws_shared_glyph_once(self):
+        spec = importlib.util.spec_from_file_location('layout_ink_test', LEGACY / 'composite_layout.py')
+        layout = importlib.util.module_from_spec(spec); spec.loader.exec_module(layout)
+        with TTFont(self.base) as font:
+            for table in font['cmap'].tables:
+                if table.isUnicode():
+                    table.cmap[ord('B')] = table.cmap[ord('A')]
+            with patch.object(font, 'getGlyphSet', wraps=font.getGlyphSet) as glyph_set, \
+                    patch.object(layout, 'BoundsPen', wraps=BoundsPen) as pens:
+                result = layout.validate_required_ink(font, map(ord, CHARS[:52]), map(ord, '0123456789'), map(ord, '中国'))
+            self.assertEqual(glyph_set.call_count, 1)
+            self.assertEqual(pens.call_count, 63)
+            self.assertEqual(result['inkValidation']['glyphsDrawn'], 63)
+            self.assertEqual(result['inkValidation']['codepoints'], 64)
 
     def test_freetype_uses_static_donor_advances_at_variable_weights(self):
         from hyperos_layout_freetype_test import C, Face, FreeType

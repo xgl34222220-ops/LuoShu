@@ -90,6 +90,12 @@ luoshu_font_lock_release() {
 # 创建公开目录并兼容迁移旧版 /sdcard/Fonts。迁移采用复制而不是移动，
 # 避免用户仍使用旧版模块时找不到原文件。
 ensure_public_storage() {
+    # Frozen early routers keep this basename when they exec/source their core.
+    # Shared storage is initialized by the existing App/installer callers later;
+    # early hooks must not mkdir, chmod or copy fonts through /sdcard.
+    case "${0##*/}" in
+        post-fs-data.sh|post-mount.sh) return 0 ;;
+    esac
     mkdir -p "$USER_FONTS_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
     chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
     if [ -d "$LEGACY_FONTS_DIR" ]; then

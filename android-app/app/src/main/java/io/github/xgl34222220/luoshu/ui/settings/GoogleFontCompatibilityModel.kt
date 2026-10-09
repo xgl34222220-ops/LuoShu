@@ -1,12 +1,14 @@
 package io.github.xgl34222220.luoshu.ui.settings
 
 import android.os.Process
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.xgl34222220.luoshu.RootShell
+import io.github.xgl34222220.luoshu.GoogleFontDiagnosticEvidence
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -20,6 +22,7 @@ internal data class GoogleFontCompatibilityState(
     val user: Int? = null,
     val canEnable: Boolean = false,
     val canRestore: Boolean = false,
+    val canReapply: Boolean = false,
     val managed: Boolean = false,
     val componentDisabled: Boolean = false,
     val resultMessage: String = "",
@@ -47,6 +50,7 @@ internal fun parseGoogleFontCompatibility(raw: String, expectedUser: Int): Googl
         componentDisabled = disabled,
         canEnable = state == "off" && !managed && !disabled && json.optBoolean("canEnable", false),
         canRestore = state in setOf("enabled", "changed", "unavailable") && managed && json.optBoolean("canRestore", false),
+        canReapply = state in setOf("enabled", "changed") && managed && json.optBoolean("canReapply", false),
     )
 }
 
@@ -55,11 +59,14 @@ internal fun googleFontActionMessage(action: String, status: String): String = w
     action == "enable" && status == "externally-disabled" -> "组件已被其他方式停用，洛书没有接管或修改它。"
     action == "restore" && status == "restored" -> "已恢复开启前的组件设置。请完整重启手机。"
     action == "restore" && status == "unchanged" -> "没有洛书的修改记录；未擅自启用组件。"
+    action == "reapply-owned" && status == "component-disabled" -> "已重新应用兼容，保留原恢复记录。请重新打开谷歌应用检查；仍异常时完整重启。"
+    action == "reconcile-owned" && status == "component-disabled" -> "已维护 GMS 更新后的兼容设置。请重新打开谷歌应用检查字体。"
+    action == "reconcile-owned" && status == "unchanged" -> "已核验兼容设置，未切换组件。"
     else -> throw IllegalArgumentException("操作结果未核验成功，请重新检测当前状态。")
 }
 
 internal fun googleFontCommand(action: String, user: Int): String {
-    require(action in setOf("status", "enable", "restore"))
+    require(action in setOf("status", "enable", "restore", "reapply-owned", "reconcile-owned"))
     require(user in 0..21474)
     val path = "/data/adb/modules/LuoShu/common/google_font_fallback.sh"
     return "if [ -f ${RootShell.quote(path)} ]; then /system/bin/sh ${RootShell.quote(path)} " +
@@ -74,10 +81,46 @@ internal class GoogleFontCompatibilityModel : ViewModel() {
     var ui by mutableStateOf(GoogleFontCompatibilityState())
         private set
     private var running = false
+    private var refreshPending = false
+    var diagnosticBusy by mutableStateOf(false)
+        private set
+    var diagnosticPath by mutableStateOf("")
+        private set
+    var diagnosticError by mutableStateOf("")
+        private set
 
-    fun refresh() = request("status")
+    fun exportDiagnostic(context: Context) {
+        if (running) return
+        running = true
+        diagnosticBusy = true
+        diagnosticPath = ""
+        diagnosticError = ""
+        viewModelScope.launch {
+            try {
+                diagnosticPath = GoogleFontDiagnosticEvidence(context).export(appUser)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnosticError = error.message ?: "复发诊断生成失败，请重试。"
+            } finally {
+                diagnosticBusy = false
+                running = false
+                if (refreshPending) {
+                    refreshPending = false
+                    request("status")
+                }
+            }
+        }
+    }
+
+    fun refresh() {
+        // A maintenance completion may arrive while an older read still owns
+        // the request. Read once more afterward instead of leaving stale UI.
+        if (running) refreshPending = true else request("status")
+    }
     fun enable() { if (ui.canEnable) request("enable") }
     fun restore() { if (ui.canRestore) request("restore") }
+    fun reapply() { if (ui.canReapply) request("reapply-owned") }
 
     private fun request(action: String) {
         if (running) return
@@ -85,12 +128,12 @@ internal class GoogleFontCompatibilityModel : ViewModel() {
         ui = ui.copy(loading = action == "status", busy = action != "status", error = "")
         viewModelScope.launch {
             try {
-                val result = RootShell.exec(googleFontCommand(action, appUser), timeoutMs = 100_000L)
+                val result = RootShell.exec(googleFontCommand(action, appUser), timeoutMs = 180_000L)
                 val json = runCatching { JSONObject(result.stdout.trim()) }.getOrNull()
                 if (result.code != 0 || json?.optString("status") == "error") {
                     val message = json?.optString("message")?.takeIf { it.isNotBlank() }
                         ?: "无法完成操作。请确认已授予洛书 Root 权限、配套模块已启用，并在重启后重新检测。"
-                    ui = ui.copy(loading = false, busy = false, title = "暂时无法读取状态", canEnable = false, canRestore = false, error = message)
+                    ui = ui.copy(loading = false, busy = false, title = "暂时无法读取状态", canEnable = false, canRestore = false, canReapply = false, error = message)
                 } else if (action == "status") {
                     val last = ui.resultMessage
                     ui = parseGoogleFontCompatibility(result.stdout, appUser).copy(resultMessage = last)
@@ -107,11 +150,15 @@ internal class GoogleFontCompatibilityModel : ViewModel() {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                ui = ui.copy(loading = false, busy = false, title = "暂时无法读取状态", canEnable = false, canRestore = false,
+                ui = ui.copy(loading = false, busy = false, title = "暂时无法读取状态", canEnable = false, canRestore = false, canReapply = false,
                     error = "状态读取或结果核验失败，请重新检测。")
             } finally {
                 running = false
                 ui = ui.copy(loading = false, busy = false)
+                if (refreshPending) {
+                    refreshPending = false
+                    request("status")
+                }
             }
         }
     }

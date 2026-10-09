@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.FileDownload
@@ -37,12 +38,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -308,6 +313,8 @@ internal fun DeviceTestMatrixDialog(
     checks: List<DeviceAcceptanceCheck>,
     onDismiss: () -> Unit,
 ) {
+    val tokens = LocalMiuixTokens.current
+    val shape = LuoShuSmoothShape(34.dp)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val store = remember(context.applicationContext) { DeviceTestMatrixStore(context.applicationContext) }
@@ -336,7 +343,11 @@ internal fun DeviceTestMatrixDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        modifier = Modifier.shadow(tokens.cardShadowElevation, shape)
+            .luoShuGlassHighlight(shape).border(1.dp, tokens.glassOutlineBrush, shape),
+        shape = shape,
+        containerColor = tokens.glassDialogColor,
+        tonalElevation = 0.dp,
         icon = {
             Icon(
                 if (report.ready) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
@@ -360,8 +371,10 @@ internal fun DeviceTestMatrixDialog(
                 item {
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        color = if (report.ready) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer,
+                        shape = LuoShuSmoothShape(18.dp),
+                        color = (if (report.ready) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer)
+                            .copy(alpha = if (tokens.glassEnabled) .32f else 1f),
+                        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
                     ) {
                         Column(Modifier.padding(11.dp)) {
                             Text(
@@ -436,14 +449,14 @@ internal fun DeviceTestMatrixDialog(
                 }
                 if (status.isNotBlank()) {
                     item {
-                        Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), MaterialTheme.colorScheme.primaryContainer) {
+                        Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), MaterialTheme.colorScheme.primaryContainer) {
                             Text(status, modifier = Modifier.padding(10.dp), fontSize = 10.sp)
                         }
                     }
                 }
                 if (errorMessage.isNotBlank()) {
                     item {
-                        Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), MaterialTheme.colorScheme.errorContainer) {
+                        Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), MaterialTheme.colorScheme.errorContainer) {
                             Text(errorMessage, modifier = Modifier.padding(10.dp), fontSize = 10.sp, color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
@@ -461,7 +474,7 @@ private fun PreReleaseGateRow(check: PreReleaseGateCheck) {
         PreReleaseGateSeverity.WARNING -> MaterialTheme.colorScheme.tertiary
         PreReleaseGateSeverity.BLOCKER -> MaterialTheme.colorScheme.error
     }
-    Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), color.copy(alpha = .10f)) {
+    Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(16.dp), color.copy(alpha = .10f)) {
         Row(Modifier.padding(9.dp), verticalAlignment = Alignment.Top) {
             Icon(
                 if (check.severity == PreReleaseGateSeverity.READY) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
@@ -482,7 +495,7 @@ private fun PreReleaseGateRow(check: PreReleaseGateCheck) {
 private fun DeviceTestRecordRow(record: DeviceTestMatrixRecord) {
     val pass = record.result == DeviceTestResult.PASS
     val color = if (pass) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-    Surface(Modifier.fillMaxWidth(), RoundedCornerShape(17.dp), color.copy(alpha = .09f)) {
+    Surface(Modifier.fillMaxWidth(), LuoShuSmoothShape(17.dp), color.copy(alpha = .09f)) {
         Row(Modifier.padding(10.dp), verticalAlignment = Alignment.Top) {
             Icon(
                 if (pass) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,

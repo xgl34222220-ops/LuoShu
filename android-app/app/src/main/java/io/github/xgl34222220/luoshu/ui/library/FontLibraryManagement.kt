@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -48,6 +47,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -229,12 +231,12 @@ internal fun FontLibraryManagementButton(
     Surface(
         onClick = onClick,
         enabled = !loading,
-        modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = scheme.surfaceContainerLow,
+        modifier = modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
+        shape = LuoShuSmoothShape(22.dp),
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
-        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
-        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
@@ -252,7 +254,7 @@ internal fun FontLibraryManagementButton(
             }
             Spacer(Modifier.width(8.dp))
             Column {
-                Text("管理字体库", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("管理字体库", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text("收藏 $favoriteCount · 提示 $issueCount", fontSize = 9.sp, color = scheme.onSurfaceVariant)
             }
         }
@@ -276,17 +278,18 @@ internal fun FontLibraryManagementDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 760.dp),
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 12.dp,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 760.dp).luoShuGlassHighlight(LuoShuSmoothShape(34.dp)),
+            shape = LuoShuSmoothShape(34.dp),
+            color = LocalMiuixTokens.current.glassDialogColor,
+            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = LuoShuSmoothShape(16.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             LuoShuGlyph(
@@ -300,7 +303,7 @@ internal fun FontLibraryManagementDialog(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Family 与收藏管理", fontSize = 19.sp, fontWeight = FontWeight.Black)
+                        Text("Family 与收藏管理", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                         Text(
                             "${fonts.size} 个 Family · ${collections.favoriteIds.size} 个收藏 · ${conflicts.issueIds.size} 个提示",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -335,7 +338,7 @@ internal fun FontLibraryManagementDialog(
                     sections.forEach { section ->
                         item(key = "header-${section.bucket.name}") {
                             Column(Modifier.padding(top = 5.dp, bottom = 2.dp)) {
-                                Text(section.bucket.label, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                                Text(section.bucket.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                                 Text(section.bucket.description, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
                             }
                         }
@@ -380,14 +383,16 @@ private fun ManagementBatchPanel(
     onToggleTag: (String) -> Unit,
 ) {
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
+        shape = LuoShuSmoothShape(22.dp),
+        color = LocalMiuixTokens.current.glassCardColor,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("批量整理", fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    Text("批量整理", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         if (selectedIds.isEmpty()) "选择 Family 后可批量收藏或添加标签" else "已选择 ${selectedIds.size} 个 Family",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -437,8 +442,8 @@ private fun ManagementActionPill(
 ) {
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(999.dp),
-        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = LuoShuSmoothShape(999.dp),
+        color = if (active) MaterialTheme.colorScheme.primary else LocalMiuixTokens.current.elevatedCardBackground,
         contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
@@ -467,25 +472,26 @@ private fun ManagementFamilyRow(
 ) {
     val warning = conflictMessage.isNotBlank()
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
+        shape = LuoShuSmoothShape(22.dp),
         color = when {
             !font.valid -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .52f)
             selected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .62f)
-            else -> MaterialTheme.colorScheme.surfaceContainerLow
+            else -> LocalMiuixTokens.current.glassCardColor
         },
-        shadowElevation = if (selected) 3.dp else 0.dp,
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
     ) {
         Column(Modifier.padding(11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = selected, onCheckedChange = { onSelect() })
                 Surface(
                     modifier = Modifier.size(42.dp).clickable(onClick = onDetails),
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = LuoShuSmoothShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                        Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 Spacer(Modifier.width(10.dp))
@@ -495,7 +501,7 @@ private fun ManagementFamilyRow(
                             font.name,
                             modifier = Modifier.weight(1f),
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -563,7 +569,7 @@ private fun ManagementStatusPill(
     color: Color,
     warning: Boolean = false,
 ) {
-    Surface(shape = RoundedCornerShape(999.dp), color = color.copy(alpha = .12f), contentColor = color) {
+    Surface(shape = LuoShuSmoothShape(999.dp), color = color.copy(alpha = .12f), contentColor = color) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -575,7 +581,7 @@ private fun ManagementStatusPill(
                 Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(4.dp))
             }
-            Text(text, fontSize = 9.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(text, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }

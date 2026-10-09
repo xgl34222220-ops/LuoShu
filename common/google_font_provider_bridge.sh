@@ -669,6 +669,9 @@ _gfp_refresh_internal() {
     [ "$(_gfp_active_font)" != default ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || {
         rm -f "$REFRESH_QUEUE" "${REFRESH_QUEUE}.boot"; return 0;
     }
+    # Boot/service passes forbid consumer restarts. Keep their recovery data for
+    # an explicit font-switch pass; unknown policy values must never authorize AM.
+    case "${LUOSHU_GOOGLE_FONT_ALLOW_RESTART-1}" in 1) ;; *) return 0 ;; esac
     _gfp_r_proc="${LUOSHU_PROC_ROOT:-/proc}"
     _gfp_r_groups="${REFRESH_QUEUE}.groups.$$"
     _gfp_r_open="${REFRESH_QUEUE}.open.$$"
@@ -694,6 +697,15 @@ _gfp_refresh_internal() {
             'FILENAME == ARGV[1] {opened[$0]=1; next} $1 == pid && $2 == start && (opened[$5] || opened["map|" $7])' \
             "$_gfp_r_open" "$REFRESH_QUEUE" > "$_gfp_r_keep"
         [ -s "$_gfp_r_keep" ] || continue
+        # Recheck live ownership after the FD/map probe, immediately before a
+        # package-level AM request. A stale user or non-app UID cannot authorize it.
+        _gfp_r_uid=$(awk '/^Uid:/ {print $2; exit}' "$_gfp_r_proc/$_gfp_r_pid/status" 2>/dev/null)
+        case "$_gfp_r_uid" in ''|*[!0-9]*) continue ;; esac
+        [ "$_gfp_r_uid" -ge 10000 ] && [ "$_gfp_r_uid" -le 2147483647 ] && \
+            [ $((_gfp_r_uid % 100000)) -ge 10000 ] && \
+            [ "$((_gfp_r_uid / 100000))" = "$_gfp_r_user" ] || continue
+        [ "$(_gfp_process_start "$_gfp_r_pid")" = "$_gfp_r_start" ] || continue
+        [ "$(_gfp_consumer_package "$_gfp_r_pid")" = "$_gfp_r_pkg" ] || continue
         if [ "$_gfp_r_calls" -lt 4 ] && [ $((_gfp_r_now - _gfp_r_last)) -ge 60 ] && command -v timeout >/dev/null 2>&1; then
             # ActivityManager killBackgroundProcesses skips foreground/visible
             # processes. Never force-stop an app, GMS, zygote or system_server.

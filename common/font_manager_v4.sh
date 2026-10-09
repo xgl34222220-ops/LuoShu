@@ -1,6 +1,15 @@
 #!/system/bin/sh
-# 洛书原生 App 字体管理后端：字体索引、校验、切换、删除和系统字重。
+# 洛书原生 App 字体管理后端：字体索引、校验、切换和删除。
 set +e
+
+# Retired global-weight actions must be inert even for older direct callers.
+# Reject before loading helpers or migrating public storage.
+case "${1:-}:${2:-}" in
+    action:font_weight_status|action:font_weight_set|action:font_weight_reset)
+        printf '{"status":"error","message":"全局字重控制已移除"}\n'
+        exit 0
+        ;;
+esac
 
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
@@ -19,10 +28,7 @@ USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
 LEGACY_FONTS_DIR="/sdcard/Fonts"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
-FONT_WEIGHT_REBOOT_REQUIRED="$CONFIG_DIR/font_weight_reboot_required.conf"
 SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
-FONT_WEIGHT_CONF="$CONFIG_DIR/font_weight.conf"
-FONT_WEIGHT_ORIGINAL_CONF="$CONFIG_DIR/font_weight_original.conf"
 FONT_INDEX_JSON="$CONFIG_DIR/native_font_index.json"
 FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 
@@ -37,15 +43,10 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_boot_state.sh" ] && . "$MODULE_DIR/common/font_boot_state.sh"
 [ -f "$MODULE_DIR/common/font_active_state.sh" ] && . "$MODULE_DIR/common/font_active_state.sh"
 
-case "${1:-}:${2:-}" in
-    action:font_weight_status) ;; # A settings read must never migrate /sdcard/Fonts.
-    *)
-        type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
-        type check_coloros >/dev/null 2>&1 && check_coloros
-        type check_hyperos >/dev/null 2>&1 && check_hyperos
-        mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
-        ;;
-esac
+type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
+type check_coloros >/dev/null 2>&1 && check_coloros
+type check_hyperos >/dev/null 2>&1 && check_hyperos
+mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -436,96 +437,6 @@ notify_user() {
         cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1
 }
 
-font_weight_normalize_int() {
-    case "$1" in ''|null|undefined|2147483647|-2147483648|*[!0-9-]*) printf '0\n' ;; *) printf '%s\n' "$1" ;; esac
-}
-
-font_weight_get_system() {
-    if command -v settings >/dev/null 2>&1; then
-        font_weight_normalize_int "$(settings get secure font_weight_adjustment 2>/dev/null)"
-    else
-        printf '0\n'
-    fi
-}
-
-font_weight_get_saved() {
-    if [ -f "$FONT_WEIGHT_CONF" ]; then
-        font_weight_normalize_int "$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_CONF" 2>/dev/null | head -n1)"
-    else
-        font_weight_get_system
-    fi
-}
-
-font_weight_get_desired() {
-    if [ -f "$FONT_WEIGHT_CONF" ]; then
-        _weight="$(sed -n 's/^weight=//p' "$FONT_WEIGHT_CONF" 2>/dev/null | head -n1)"
-    else
-        _weight=$((400 + $(font_weight_get_system)))
-    fi
-    case "$_weight" in ''|*[!0-9]*) _weight=400 ;; esac
-    [ "$_weight" -lt 300 ] 2>/dev/null && _weight=300
-    [ "$_weight" -gt 700 ] 2>/dev/null && _weight=700
-    printf '%s\n' "$_weight"
-}
-
-font_weight_backup_original() {
-    [ -s "$FONT_WEIGHT_ORIGINAL_CONF" ] && return 0
-    printf 'adjustment=%s\n' "$(font_weight_get_system)" > "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null
-}
-
-font_weight_set() {
-    _weight="$1"
-    case "$_weight" in ''|*[!0-9]*) return 2 ;; esac
-    [ "$_weight" -ge 300 ] 2>/dev/null && [ "$_weight" -le 700 ] 2>/dev/null || return 2
-    command -v settings >/dev/null 2>&1 || return 5
-    _adjustment=$((_weight - 400))
-    font_weight_backup_original || return 1
-    settings put secure font_weight_adjustment "$_adjustment" >/dev/null 2>&1 || return 4
-    {
-        printf 'weight=%s\n' "$_weight"
-        printf 'adjustment=%s\n' "$_adjustment"
-        printf 'time=%s\n' "$(date +%s)"
-    } > "$FONT_WEIGHT_CONF" 2>/dev/null || return 1
-    chmod 0644 "$FONT_WEIGHT_CONF" 2>/dev/null || true
-    rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-    cmd font system --update >/dev/null 2>&1 || true
-    am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
-    return 0
-}
-
-font_weight_reset() {
-    command -v settings >/dev/null 2>&1 || return 5
-    _restore=0
-    [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _restore="$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)"
-    _restore="$(font_weight_normalize_int "$_restore")"
-    settings put secure font_weight_adjustment "$_restore" >/dev/null 2>&1 || return 4
-    rm -f "$FONT_WEIGHT_CONF" "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-    cmd font system --update >/dev/null 2>&1 || true
-    am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
-    return 0
-}
-
-font_weight_status_json() {
-    _supported=false
-    command -v settings >/dev/null 2>&1 && _supported=true
-    _system="$(font_weight_get_system)"
-    # One Binder query per refresh; missing saved configuration formerly queried
-    # Settings three times, multiplying slow/system-busy responses.
-    _saved="$_system"
-    _desired=$((400 + _system))
-    if [ -f "$FONT_WEIGHT_CONF" ]; then
-        _saved="$(font_weight_get_saved)"
-        _desired="$(font_weight_get_desired)"
-    fi
-    [ "$_desired" -ge 300 ] || _desired=300
-    [ "$_desired" -le 700 ] || _desired=700
-    _original=0
-    [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _original="$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)"
-    _original="$(font_weight_normalize_int "$_original")"
-    printf '{"status":"ok","data":{"supported":%s,"weight":%s,"adjustment":%s,"systemAdjustment":%s,"originalAdjustment":%s,"min":300,"max":700,"step":10}}\n' \
-        "$_supported" "$_desired" "$_saved" "$_system" "$_original"
-}
-
 font_index_fingerprint() {
     if type font_library_fingerprint_value >/dev/null 2>&1; then
         font_library_fingerprint_value
@@ -824,23 +735,6 @@ handle_action() {
         switch_async) start_switch_task "$_param" ;;
         switch_status) switch_task_status_json "$_param" ;;
         delete) delete_font_json "$_param" ;;
-        font_weight_status) font_weight_status_json ;;
-        font_weight_set)
-            if font_weight_set "$_param"; then
-                printf '{"status":"ok","data":{"weight":%s,"adjustment":%s,"message":"系统粗细已更新；未刷新的应用请重新打开"}}\n' "$(font_weight_get_desired)" "$(font_weight_get_saved)"
-            else
-                _code=$?
-                case "$_code" in 2) _message='字重超出安全范围（仅支持 300–700）' ;; 5) _message='当前系统不支持字体粗细调节' ;; *) _message='无法写入系统字体粗细设置' ;; esac
-                printf '{"status":"error","message":"%s"}\n' "$(json_escape "$_message")"
-            fi
-            ;;
-        font_weight_reset)
-            if font_weight_reset; then
-                printf '{"status":"ok","data":{"weight":%s,"adjustment":%s,"message":"已恢复系统原始字体粗细"}}\n' "$(font_weight_get_desired)" "$(font_weight_get_system)"
-            else
-                printf '{"status":"error","message":"无法恢复系统字体粗细"}\n'
-            fi
-            ;;
         reboot_required)
             _required=false
             [ -f "$TEXT_REBOOT_REQUIRED" ] && _required=true

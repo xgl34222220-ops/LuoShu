@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Restore
@@ -31,12 +32,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import java.text.SimpleDateFormat
@@ -124,9 +129,16 @@ internal fun SwitchHistoryDialog(
 
     AlertDialog(
         onDismissRequest = { if (busyId.isBlank()) onDismiss() },
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        containerColor = LocalMiuixTokens.current.glassDialogColor,
+        tonalElevation = 0.dp,
+        modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(34.dp))
+            .shadow(LocalMiuixTokens.current.cardShadowElevation, LuoShuSmoothShape(34.dp))
+            .border(
+                BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush), LuoShuSmoothShape(34.dp),
+            ),
+        shape = LuoShuSmoothShape(34.dp),
         icon = { Icon(Icons.Rounded.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-        title = { Text("最近成功切换", fontWeight = FontWeight.Black) },
+        title = { Text("最近成功切换", fontWeight = FontWeight.SemiBold) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
@@ -145,16 +157,18 @@ internal fun SwitchHistoryDialog(
                     ) {
                         items(entries, key = { it.id }) { entry ->
                             Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
+                                shape = LuoShuSmoothShape(18.dp),
+                                color = LocalMiuixTokens.current.glassCardColor,
+                                border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                                shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                             ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column(Modifier.weight(1f)) {
-                                        Text(entry.title, fontSize = 12.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(entry.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         Text(entry.description, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     }
                                     Spacer(Modifier.width(8.dp))

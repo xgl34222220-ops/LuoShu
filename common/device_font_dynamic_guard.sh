@@ -41,6 +41,13 @@ _dfpr_launch_pending_cache() {
 
 _dfpr_template_ensure_after_release() {
     _dfpr_module_dir="$(_dfpr_module)"
+    # The frozen service already owns template ensure and late-boot verification
+    # immediately after release. Do not perform that work twice from its release
+    # callback, including the ordinary no-dynamic-view case. Standalone callers
+    # keep their historical post-release maintenance contract.
+    if [ "$0" = "${_dfpr_module_dir%/}/.luoshu-runtime/core/service.sh" ]; then
+        return 0
+    fi
     _dfpr_template="$_dfpr_module_dir/common/device_font_template.sh"
     _dfpr_template_rc=2
     if [ -f "$_dfpr_template" ]; then

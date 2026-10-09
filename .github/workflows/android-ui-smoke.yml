@@ -1,28 +1,40 @@
 name: Android UI smoke
 
 on:
+  push:
+    branches: [claude/laughing-hypatia-ogd2oz]
+    paths:
+      - android-app/**
+      - common/**
+      - module.prop
+      - scripts/**
+      - .github/workflows/android-ui-smoke.yml
+      - .github/workflows/test-candidate.yml
   pull_request:
     branches: [main]
     paths:
       - android-app/**
+      - common/**
       - module.prop
-      - scripts/android_ui_smoke*.py
-      - scripts/google_font_compat_smoke.py
+      - scripts/**
       - .github/workflows/android-ui-smoke.yml
+      - .github/workflows/test-candidate.yml
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: android-ui-smoke-${{ github.ref }}
-  cancel-in-progress: true
+  group: android-ui-smoke-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   build:
     name: Build UI smoke APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 55
+    outputs:
+      apk_built: ${{ steps.apk-build.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -35,41 +47,104 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
+      - name: Prepare real screenshot baseline regression dependencies
+        run: |
+          # Host-only Android-shell compatibility gate; never bundled in APK/module.
+          # Missing the real shell must fail rather than skip the pipeline checks.
+          timeout 120s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq
+          timeout 120s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends mksh
+          mksh -c 'printf "%s\n" "$KSH_VERSION"'
+          python3 -m venv "$RUNNER_TEMP/luoshu-ui-host-tests"
+          "$RUNNER_TEMP/luoshu-ui-host-tests/bin/pip" install Pillow==12.3.0
+          echo "$RUNNER_TEMP/luoshu-ui-host-tests/bin" >> "$GITHUB_PATH"
       - name: Verify UI navigation and crash detection helpers
-        run: python3 scripts/android_ui_smoke_test.py
+        run: |
+          python3 scripts/android_ui_smoke_test.py
+          python3 scripts/ui_snapshot_session_test.py
+          python3 scripts/ui_snapshot_java_test.py
+      - name: Run current debug unit tests
+        if: ${{ !cancelled() }}
+        working-directory: android-app
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-unit-tests.log"
+      - name: Run Android lint
+        if: ${{ !cancelled() }}
+        working-directory: android-app
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:lintDebug 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-lint.log"
       - name: Build production-optimized debug APK
+        id: apk-build
+        if: ${{ !cancelled() }}
         working-directory: android-app
         shell: bash
         run: |
           set -o pipefail
           gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-build.log"
       - name: Upload emulator APK
+        # A failed helper gate still fails this job. Preserve a successfully
+        # built exact-SHA APK for independent emulator evidence, not delivery.
+        if: ${{ !cancelled() && steps.apk-build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: LuoShu-UI-Smoke-APK
           path: android-app/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 7
-      - name: Upload build log
+      - name: Build independent real accessibility snapshot test helper
+        id: snapshot-build
+        if: ${{ !cancelled() && steps.apk-build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -o pipefail
+          sh scripts/build_ui_snapshot_helper.sh ui-snapshot-apk/luoshu-ui-snapshot.apk 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-snapshot-build.log"
+      - name: Upload independent snapshot test helper
+        if: ${{ !cancelled() && steps.snapshot-build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-UI-Snapshot-Test-Helper
+          path: ui-snapshot-apk/*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload build, current unit test and lint evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-UI-Smoke-Build-Log
-          path: ${{ runner.temp }}/luoshu-ui-build.log
+          name: LuoShu-UI-Smoke-Build-Evidence
+          path: |
+            ${{ runner.temp }}/luoshu-ui-build.log
+            ${{ runner.temp }}/luoshu-ui-unit-tests.log
+            ${{ runner.temp }}/luoshu-ui-lint.log
+            ${{ runner.temp }}/luoshu-ui-snapshot-build.log
+            android-app/app/build/test-results/testDebugUnitTest/
+            android-app/app/build/reports/tests/testDebugUnitTest/
+            android-app/app/build/reports/lint-results-debug.*
           if-no-files-found: warn
           retention-days: 7
 
   smoke:
-    name: UI smoke API 36
+    name: UI smoke API ${{ matrix.api }}
     needs: build
+    if: ${{ !cancelled() && needs.build.outputs.apk_built == 'true' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [28, 36]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: LuoShu-UI-Smoke-APK
           path: ui-smoke-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Snapshot-Test-Helper
+          path: ui-snapshot-apk
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -80,26 +155,202 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          # udev trigger queues work; wait for the existing permission rule before
+          # asserting readiness. Keep KVM mandatory and expose the actual device
+          # state on failure instead of silently skipping the emulator.
+          sudo udevadm settle --timeout=15
+          for attempt in 1 2 3 4 5; do
+            if test -r /dev/kvm && test -w /dev/kvm; then break; fi
+            sleep 1
+          done
+          ls -l /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
       - name: Capture and verify real App and Google compatibility screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 4096M
+          heap-size: 512M
+          emulator-boot-timeout: 600
+          disable-animations: false
+          disable-linux-hw-accel: false
+          # swiftshader_indirect is deprecated since emulator 36.4.9. Use the
+          # supported software backend, retaining animations and all ANR gates.
+          emulator-options: -no-window -gpu software -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # Functional acceptance has no video encoder load. Startup recordings
+          # run on their own emulator below and never substitute for these checks.
+          script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output ui-smoke-output --serial emulator-5554
+      - name: Upload screenshots, hierarchy and crash evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-API-${{ matrix.api }}
+          path: ui-smoke-output/
+          if-no-files-found: warn
+          retention-days: 14
+
+  launch-visual:
+    name: Startup visual acceptance API 36 (${{ matrix.theme }})
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
+    needs: build
+    if: ${{ !cancelled() && needs.build.outputs.apk_built == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-APK
+          path: ui-smoke-apk
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Snapshot-Test-Helper
+          path: ui-snapshot-apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare every-frame visual acceptance and regression tests
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          set -o pipefail
+          # Preserve the exact stalled command instead of a silent ten-minute
+          # preparation timeout; this step contains no signing credentials.
+          set -x
+          mkdir -p launch-visual-output
+          # Bound mirror stalls and retain preparation errors alongside footage.
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee launch-visual-output/decoder-apt-update.log
+            # Keep the original 180s cap and apt signature verification, but
+            # retain acquisition/dpkg progress: the 59cd6627 timeout produced
+            # an empty -qq log and cannot establish which phase stalled.
+            set +e
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
+            decoder_pipeline_status=("${PIPESTATUS[@]}")
+            decoder_install_status=${decoder_pipeline_status[0]}
+            decoder_log_status=${decoder_pipeline_status[1]}
+            set -e
+            if test "$decoder_install_status" -ne 0 || test "$decoder_log_status" -ne 0; then
+              # Read-only package/process state; command arguments and secrets
+              # are excluded. Do not stop package managers or clear caches.
+              dpkg-query -W -f='${Package}\t${Status}\t${Version}\n' ffmpeg libavcodec60 libavformat60 libavutil58 > launch-visual-output/decoder-package-state.txt 2>&1 || true
+              ps -eo pid,ppid,etimes,stat,comm > launch-visual-output/decoder-package-processes.txt 2>&1 || true
+              if test "$decoder_install_status" -ne 0; then exit "$decoder_install_status"; fi
+              exit "$decoder_log_status"
+            fi
+          fi
+          python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
+          timeout 180s "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install --timeout 30 --retries 2 numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0
+          echo "$RUNNER_TEMP/luoshu-startup-visual/bin" >> "$GITHUB_PATH"
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -version > launch-visual-output/ffmpeg-version.txt
+          ffprobe -version > launch-visual-output/ffprobe-version.txt
+          "$RUNNER_TEMP/luoshu-startup-visual/bin/python" scripts/android_startup_visual_test.py
+          python3 scripts/emulator_system_ready_test.py
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          # udev trigger queues work; wait for the existing permission rule before
+          # asserting readiness. Keep KVM mandatory and expose the actual device
+          # state on failure instead of silently skipping the emulator.
+          sudo udevadm settle --timeout=15
+          for attempt in 1 2 3 4 5; do
+            if test -r /dev/kvm && test -w /dev/kvm; then break; fi
+            sleep 1
+          done
+          ls -l /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      # Each theme gets its own runner and fresh AVD with identical parameters.
+      # This adds one AVD job, not more preparation time on either emulator.
+      - name: Verify real ${{ matrix.theme }} cold and warm launch frames
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
           target: google_apis
           arch: x86_64
           profile: pixel_7_pro
-          ram-size: 2048M
+          ram-size: 4096M
           heap-size: 512M
           emulator-boot-timeout: 600
           disable-animations: false
           disable-linux-hw-accel: false
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --output ui-smoke-output --serial emulator-5554
-      - name: Upload screenshots, hierarchy and crash evidence
+          # Exact741's Launcher ANR blocked hardware-bitmap creation under the
+          # auto software choice (GLES swangle/SwiftShader, Vulkan lavapipe).
+          # Pin one supported backend for a controlled compatibility trial;
+          # retain animations, viewport, deadlines and every-frame rejection.
+          # This is not proof of Vulkan causality or a passed startup handoff.
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
+          # Two bounded recordings per theme retain every original frame/timestamp.
+          # Re-covering home, black blanks and unknown frames fail acceptance.
+          # Boot completion alone can precede SystemUI readiness and a resumed HOME.
+          # The hook runs immediately before emulator launch, not before SDK/AVD setup.
+          # No fresh 600s budget is granted after boot; target App remains unlaunched.
+          pre-emulator-launch-script: python3 scripts/emulator_system_ready.py begin --output launch-visual-output/system-ready
+          script: |
+            python3 scripts/emulator_system_ready.py wait --output launch-visual-output/system-ready --serial emulator-5554
+            python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --diagnostic-video-after-baseline-failure --visual-theme ${{ matrix.theme }}
+      - name: Preserve complete snapshot transport diagnostics in job log
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          from pathlib import Path
+          import uuid
+          root = Path('launch-visual-output').resolve()
+          names = {
+              'ui-snapshot-session.json', 'ui-snapshot-commands.json',
+              'ui-snapshot-session-ready.json', 'ui-snapshot-session-closed.json',
+              'ui-snapshot-session-instrumentation-stdout.bin',
+              'ui-snapshot-session-instrumentation-stderr.bin',
+          }
+          paths = sorted(path for path in root.rglob('*')
+                         if path.name in names or path.name.endswith((
+                             '-baseline-readiness.json', '-session-request.json', '-session-response.json')))
+          boundary = uuid.uuid4().hex
+          # Treat emulator output as data, including any workflow-like strings.
+          print(f'::stop-commands::{boundary}', flush=True)
+          try:
+              if not paths:
+                  print('Snapshot transport evidence was not produced; no timing or visual pass is inferred.')
+              for path in paths:
+                  if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
+                      raise RuntimeError(f'Invalid snapshot diagnostic path: {path}')
+                  data = path.read_bytes()
+                  print(f'FILE {path.relative_to(root)} bytes={len(data)} sha256={hashlib.sha256(data).hexdigest()}')
+                  print(data.decode('utf-8', errors='backslashreplace'))
+                  # Bounded lines also retain exact binary/long JSON bytes when
+                  # a log viewer abbreviates an individual human-readable line.
+                  for offset in range(0, len(data), 3072):
+                      print(f'BASE64 offset={offset} {base64.b64encode(data[offset:offset + 3072]).decode("ascii")}')
+          finally:
+              print(f'::{boundary}::', flush=True)
+          PY
+      - name: Preserve original startup media bytes in job log
+        if: always()
+        shell: bash
+        run: |
+          # Original bytes only; missing/diagnostic footage cannot pass primary acceptance.
+          python3 scripts/dump_ui_original_media.py
+      - name: Upload separate startup recordings and logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-UI-Smoke-API-36
-          path: ui-smoke-output/
+          name: LuoShu-Startup-Visual-API-36-${{ matrix.theme }}
+          path: launch-visual-output/
           if-no-files-found: warn
           retention-days: 14
+
+

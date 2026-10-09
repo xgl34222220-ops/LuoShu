@@ -5,8 +5,10 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+from google_font_provider_lifecycle_test import install_support
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +70,7 @@ done
             "TEST_ROOT": str(self.root),
             "PATH": f"{self.bin}:{os.environ['PATH']}",
         }
+        self.env.pop("LUOSHU_GOOGLE_FONT_ALLOW_RESTART", None)
 
     def command(self, name, body):
         path = self.bin / name
@@ -173,6 +176,96 @@ _gfp_refresh_consumers
         self.assertEqual(self.calls(), ["kill --user 2 com.android.chrome"])
         self.assertEqual(self.timeout_log.read_text(), "3 am kill --user 2 com.android.chrome\n")
         self.assertEqual(len(self.queued()), 1, "foreground consumer must remain pending")
+
+    def test_restart_policy_accepts_only_explicit_one_and_keeps_pending(self):
+        self.process()
+        self.enqueue(101)
+        original = self.queue.read_bytes()
+        for value in ("0", "", "true", "01", "-1"):
+            with self.subTest(value=value):
+                self.queue.write_bytes(original)
+                self.am_log.unlink(missing_ok=True)
+                self.timeout_log.unlink(missing_ok=True)
+                self.refresh(LUOSHU_GOOGLE_FONT_ALLOW_RESTART=value)
+                self.assertEqual(self.calls(), [])
+                self.assertFalse(self.timeout_log.exists())
+                self.assertEqual(self.queue.read_bytes(), original)
+        self.queue.write_bytes(original)
+        self.am_log.unlink(missing_ok=True)
+        self.timeout_log.unlink(missing_ok=True)
+        self.refresh(LUOSHU_GOOGLE_FONT_ALLOW_RESTART="1")
+        self.assertEqual(self.calls(), ["kill --user 2 com.android.chrome"])
+
+    def test_current_uid_must_still_belong_to_the_queued_application_user(self):
+        directory = self.process()
+        for uid in ("310123", "201000", "1000", "not-a-uid", None):
+            with self.subTest(uid=uid):
+                self.queue.unlink(missing_ok=True)
+                self.am_log.unlink(missing_ok=True)
+                (directory / "status").write_text("Uid:\t210123\t210123\t210123\t210123\n")
+                self.enqueue(101)
+                if uid is None:
+                    (directory / "status").unlink()
+                else:
+                    (directory / "status").write_text(f"Uid:\t{uid}\t{uid}\t{uid}\t{uid}\n")
+                self.refresh()
+                self.assertEqual(self.calls(), [])
+                self.assertEqual(self.queued(), [])
+
+    def test_uid_is_rechecked_after_the_old_descriptor_probe(self):
+        self.process()
+        self.enqueue(101)
+        real_stat = shlex.quote(shutil.which("stat"))
+        self.command("stat", '''
+printf 'Uid:\\t310123\\t310123\\t310123\\t310123\\n' > "$LUOSHU_PROC_ROOT/101/status"
+exec ''' + real_stat + ''' "$@"
+''')
+        self.refresh()
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.queued(), [])
+
+    def test_pid_start_and_package_are_rechecked_after_the_old_descriptor_probe(self):
+        real_stat = shlex.quote(shutil.which("stat"))
+        for changed in ("start", "package"):
+            with self.subTest(changed=changed):
+                directory = self.proc / "101"
+                if directory.exists():
+                    shutil.rmtree(directory)
+                self.queue.unlink(missing_ok=True)
+                self.process()
+                self.enqueue(101)
+                if changed == "start":
+                    content = (directory / "stat").read_text().replace("8765", "8766")
+                    change = f"printf %s {shlex.quote(content)} > \"$LUOSHU_PROC_ROOT/101/stat\"\n"
+                else:
+                    change = "printf 'com.google.android.youtube\\000' > \"$LUOSHU_PROC_ROOT/101/cmdline\"\n"
+                self.command("stat", change + "exec " + real_stat + ' "$@"\n')
+                self.refresh()
+                self.assertEqual(self.calls(), [])
+                self.assertEqual(self.queued(), [])
+
+    def test_boot_service_real_bridge_keeps_old_fd_pending_without_restart(self):
+        self.process(package="com.android.vending")
+        self.enqueue(101)
+        original = self.queue.read_bytes()
+        install_support(self.module)
+        shutil.copyfile(ROOT / "common/google_font_provider_bridge.sh",
+                        self.module / "common/google_font_provider_bridge.sh")
+        self.command("getprop", "echo 1\n")
+        result = subprocess.run(
+            ["sh", str(ROOT / "common/google_font_provider_service.sh"), "boot"],
+            env={**self.env, "LUOSHU_TASK_SCOPE_PYTHON": sys.executable,
+                 "LUOSHU_RUNTIME_PATHS_PYTHON": sys.executable,
+                 "LUOSHU_GOOGLE_FONT_TARGETS": " ",
+                 "LUOSHU_GOOGLE_FONT_ALLOW_RESTART": "1"},
+            capture_output=True, text=True, timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.queue.read_bytes(), original)
+        tasks = self.module / ".luoshu-state/tasks"
+        self.assertFalse((tasks / "font-provider-service.pid").exists())
+        self.assertFalse((tasks / "google-font-provider.lock").exists())
 
     def test_core_services_and_unrelated_apps_are_never_enqueued(self):
         names = ["com.google.android.gms", "com.google.android.gms.persistent",

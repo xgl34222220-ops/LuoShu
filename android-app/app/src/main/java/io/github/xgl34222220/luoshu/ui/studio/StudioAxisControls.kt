@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -43,12 +43,16 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.rememberWeightAxisInfo
 import io.github.xgl34222220.luoshu.ui.font.fontAxisDisplayName
@@ -56,106 +60,9 @@ import io.github.xgl34222220.luoshu.ui.font.fontAxisValueLabel
 import io.github.xgl34222220.luoshu.ui.font.fontFixedWeight
 import io.github.xgl34222220.luoshu.ui.font.fontStaticWeights
 import io.github.xgl34222220.luoshu.ui.font.fontWeightName
-import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import kotlin.math.abs
 import kotlin.math.roundToInt
-
-@Composable
-internal fun MaterialStudioAxisControls(
-    font: FontItem,
-    weight: Int,
-    axes: Map<String, Float>,
-    enabled: Boolean,
-    onWeight: (Int) -> Unit,
-    onAxis: (String, Float) -> Unit,
-) {
-    val axisInfo = rememberWeightAxisInfo(font)
-    when {
-        font.variable && axisInfo.loading -> AxisLoadingRow()
-        font.variable && axisInfo.axes.isNotEmpty() -> {
-            Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
-                axisInfo.axes.forEach { axis ->
-                    val minimum = axis.min
-                    val maximum = axis.max.coerceAtLeast(minimum)
-                    val isWeight = axis.tag == "wght"
-                    val current = (axes[axis.tag] ?: if (isWeight) weight.toFloat() else axis.default)
-                        .coerceIn(minimum, maximum)
-                    val sliderInteraction = remember(font.id, axis.tag) { MutableInteractionSource() }
-                    val dragging by sliderInteraction.collectIsDraggedAsState()
-                    val badgeScale by animateFloatAsState(
-                        targetValue = if (dragging) 1.05f else 1f,
-                        animationSpec = spring(dampingRatio = .72f, stiffness = Spring.StiffnessMedium),
-                        label = "axisValueBadge",
-                    )
-                    Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(fontAxisDisplayName(axis.tag), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text(axis.tag, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                            }
-                            Surface(
-                                modifier = Modifier.graphicsLayer {
-                                    scaleX = badgeScale
-                                    scaleY = badgeScale
-                                    translationY = if (dragging) -2.dp.toPx() else 0f
-                                },
-                                shape = RoundedCornerShape(999.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                            ) {
-                                Text(
-                                    fontAxisValueLabel(current),
-                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                        }
-                        InteractiveAxisSlider(
-                            key = "${font.id}:${axis.tag}",
-                            current = current,
-                            minimum = minimum,
-                            maximum = maximum,
-                            isWeight = isWeight,
-                            enabled = enabled,
-                            interactionSource = sliderInteraction,
-                            dragging = dragging,
-                            onValueChange = { onAxis(axis.tag, it) },
-                        )
-                        Text(
-                            "${fontAxisValueLabel(minimum)} · 默认 ${fontAxisValueLabel(axis.default)} · ${fontAxisValueLabel(maximum)}",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 12.sp,
-                        )
-                    }
-                }
-            }
-        }
-        fontStaticWeights(font).size >= 2 -> {
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                fontStaticWeights(font).forEach { option ->
-                    MaterialWeightChip(
-                        text = fontWeightName(option),
-                        selected = option == weight,
-                        enabled = enabled,
-                        onClick = { onWeight(option) },
-                    )
-                }
-            }
-        }
-        else -> {
-            Text(
-                "字重：${fontWeightName(fontFixedWeight(font))}，此字体不支持调节。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-            )
-        }
-    }
-}
 
 @Composable
 internal fun MiuixStudioAxisControls(
@@ -186,8 +93,11 @@ internal fun MiuixStudioAxisControls(
                         label = "axisValueBadge",
                     )
                     Surface(
-                        shape = RoundedCornerShape(22.dp),
-                        color = tokens.textPrimary.copy(alpha = .035f),
+                        modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
+                        shape = LuoShuSmoothShape(22.dp),
+                        color = tokens.glassCardColor,
+                        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                        shadowElevation = tokens.cardShadowElevation,
                     ) {
                         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -206,7 +116,7 @@ internal fun MiuixStudioAxisControls(
                                         scaleY = badgeScale
                                         translationY = if (dragging) -2.dp.toPx() else 0f
                                     },
-                                    shape = RoundedCornerShape(999.dp),
+                                    shape = LuoShuSmoothShape(999.dp),
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
                                 ) {
                                     Text(
@@ -258,8 +168,11 @@ internal fun MiuixStudioAxisControls(
         }
         else -> {
             Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = tokens.textPrimary.copy(alpha = .035f),
+                modifier = Modifier.luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
+                shape = LuoShuSmoothShape(18.dp),
+                color = tokens.glassCardColor,
+                border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                shadowElevation = tokens.cardShadowElevation,
             ) {
                 Text(
                     "字重：${fontWeightName(fontFixedWeight(font))} · 无需调节",
@@ -343,10 +256,11 @@ private fun InteractiveAxisSlider(
         ) {
             Surface(
                 modifier = Modifier.width(bubbleWidth),
-                shape = RoundedCornerShape(14.dp),
+                shape = LuoShuSmoothShape(14.dp),
                 color = scheme.primary,
                 contentColor = scheme.onPrimary,
-                shadowElevation = 5.dp,
+                shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+                border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
             ) {
                 Text(
                     fontAxisValueLabel(current),
@@ -366,7 +280,7 @@ private fun AxisLoadingRow() {
         LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.36f).height(14.dp))
         LuoShuLoadingSkeleton(
             Modifier.fillMaxWidth().height(42.dp),
-            shape = RoundedCornerShape(18.dp),
+            shape = LuoShuSmoothShape(18.dp),
         )
     }
 }
@@ -377,13 +291,8 @@ private fun standardWeightSnap(raw: Float, minimum: Float, maximum: Float): Int?
     }
 
 @Composable
-private fun MaterialWeightChip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    WeightChoiceChip(text, selected, enabled, RoundedCornerShape(999.dp), onClick)
-}
-
-@Composable
 private fun MiuixWeightChip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    WeightChoiceChip(text, selected, enabled, RoundedCornerShape(16.dp), onClick)
+    WeightChoiceChip(text, selected, enabled, LuoShuSmoothShape(16.dp), onClick)
 }
 
 @Composable
@@ -391,7 +300,7 @@ private fun WeightChoiceChip(
     text: String,
     selected: Boolean,
     enabled: Boolean,
-    shape: RoundedCornerShape,
+    shape: Shape,
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -403,7 +312,7 @@ private fun WeightChoiceChip(
             onClick = onClick,
         ),
         shape = shape,
-        color = if (selected) scheme.primary else scheme.surfaceContainerHigh,
+        color = if (selected) scheme.primary else LocalMiuixTokens.current.elevatedCardBackground,
         contentColor = (if (selected) scheme.onPrimary else scheme.onSurface)
             .copy(alpha = if (enabled) 1f else .45f),
     ) {

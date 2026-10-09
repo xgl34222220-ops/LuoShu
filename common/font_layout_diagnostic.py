@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -45,6 +47,171 @@ METRIC_FIELDS = {
 COVERAGE_FIELDS = ("hasHan", "hasLatin", "hanCount", "latinCount", "unicodeCount", "cjkPunctuation")
 CJK_ROUTING_REASONS = {"stock-coverage-refresh-pending", "specialized-slot", "stock-han-slot",
                        "not-latin-ui-slot", "no-staged-cjk-fallback", "stock-latin-primary"}
+
+MIX_LOG_BYTES = 256 * 1024
+MIX_EVENT_LIMIT = 256
+MIX_REQUEST = re.compile(r"mix-request-[0-9]{1,12}-[0-9]{1,12}")
+MIX_OUTER = re.compile(r"(?:auto-mix|axes)-[0-9]{1,12}-[0-9]{1,12}")
+MIX_TASK = re.compile(r"(?:auto-mix|axes|mix)-[0-9]{1,12}-[0-9]{1,12}(?:\.(?:apply|monitor))?")
+MIX_BOOT = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
+MIX_COMPONENTS = {"prepare", "composite", "fixed-apply", "finalize", "worker"}
+MIX_PHASES = {"prepare", "cache_lookup", "cold_composite_runner", "validate", "cache_publish",
+              "reuse_output", "source_validate", "map_payload", "local_commit", "child_start",
+              "wait_child_cleanup", "worker_finalize", "safe_apply", "finalize_lock", "complete_hyperos",
+              "complete_coloros", "next_commit", "live_mount", "finalize_release"}
+MIX_UNITS = {"cjk", "latin", "digit", "fixed", *(f"w{n}" for n in range(100, 901, 100))}
+MIX_WEIGHTS = {"fixed", *(str(n) for n in range(100, 901, 100))}
+MIX_METHODS = {"probe", "miss", "cold", "receipt-hit", "legacy-validated-hit", "same-source",
+               "copy", "prepare", "apply", "wait", "finalize", "skipped"}
+MIX_FIELDS = {"schema", "request", "outer", "task", "boot", "start", "component", "phase",
+              "unit", "weight", "clock", "event", "method", "uptimeSeconds"}
+
+
+def _mix_object(pairs: list[tuple[str, object]]) -> dict:
+    if len({name for name, _ in pairs}) != len(pairs):
+        raise ValueError("duplicate record fields")
+    return dict(pairs)
+
+
+def _mix_read(path: Path, limit: int, module: Path | None = None, tail: bool = False) -> tuple[bytes, bool]:
+    """One regular, bounded file. Never read FIFOs or outside module aliases."""
+    if module is not None and module.resolve() not in path.resolve().parents:
+        raise ValueError("outside diagnostic scope")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("regular file required")
+        truncated = info.st_size > limit
+        if truncated and not tail:
+            raise ValueError("oversize record")
+        if truncated:
+            stream.seek(info.st_size - limit)
+        data = stream.read(limit)
+        if truncated:
+            data = data.partition(b"\n")[2]
+        return data, truncated
+
+
+def _mix_uptime(value: str) -> int:
+    if re.fullmatch(r"[0-9]{1,10}\.[0-9]{1,3}", value) is None:
+        raise ValueError("invalid clock")
+    seconds, fraction = value.split(".")
+    return int(seconds) * 1000 + int((fraction + "000")[:3])
+
+
+def _mix_event(line: str, boot: str) -> dict:
+    if len(line) > 600 or not line.startswith("[MIX-PHASE] "):
+        raise ValueError("invalid event")
+    pairs = [word.split("=", 1) for word in line.split()[1:]]
+    if any(len(pair) != 2 for pair in pairs) or len({pair[0] for pair in pairs}) != len(pairs):
+        raise ValueError("invalid fields")
+    event = dict(pairs)
+    expected = MIX_FIELDS | ({"elapsedMs", "result"} if event.get("event") == "end" else set())
+    if (set(event) != expected or event.get("event") not in {"begin", "end"}
+            or event.get("schema") != "1" or event.get("clock") != "proc-uptime"
+            or event.get("boot") != boot or MIX_BOOT.fullmatch(boot) is None
+            or MIX_REQUEST.fullmatch(event.get("request", "")) is None
+            or MIX_OUTER.fullmatch(event.get("outer", "")) is None
+            or MIX_TASK.fullmatch(event.get("task", "")) is None
+            or re.fullmatch(r"[0-9]{1,20}|unknown", event.get("start", "")) is None
+            or event.get("component") not in MIX_COMPONENTS or event.get("phase") not in MIX_PHASES
+            or event.get("unit") not in MIX_UNITS or event.get("weight") not in MIX_WEIGHTS
+            or event.get("method") not in MIX_METHODS):
+        raise ValueError("untrusted event")
+    event["clockMs"] = _mix_uptime(event["uptimeSeconds"])
+    if event["event"] == "end":
+        if (re.fullmatch(r"[0-9]{1,8}", event["elapsedMs"]) is None
+                or int(event["elapsedMs"]) > 86400000 or event["result"] not in {"ok", "failed"}):
+            raise ValueError("invalid result")
+    return event
+
+
+def _mix_total(module: Path, outer: str, starts: set[str], boot: str) -> dict:
+    result = {"status": "unavailable", "scope": "backend-task-including-cleanup", "clock": "python-monotonic"}
+    if len(starts) != 1 or "unknown" in starts:
+        return result
+    name = "auto_multiweight_worker.pid" if outer.startswith("auto-mix-") else "axes_worker.pid"
+    try:
+        payload, _ = _mix_read(module / ".luoshu-state/tasks" / (name + ".cleanup.json"), 16384, module)
+        receipt = json.loads(payload, object_pairs_hook=_mix_object)
+        duration = receipt.get("durationSeconds")
+        code = receipt.get("result")
+        if (receipt.get("schema") != "task-cleanup-v2" or receipt.get("task") != outer
+                or receipt.get("boot") != boot or receipt.get("start") not in starts
+                or type(duration) not in {int, float} or not 0 <= duration <= 86400 or not math.isfinite(duration)
+                or type(code) is not int or not 0 <= code <= 255 or type(receipt.get("cleaned")) is not bool):
+            return result
+        if receipt["cleaned"] and (receipt.get("leftoverPids") != [] or receipt.get("cleanupErrors", []) != []):
+            return result
+        reasons = {"completed", "cancelled", "timeout", "parent-exited", "launch-failed", "parent-cleanup"}
+        result.update(status="available", durationSeconds=duration, result=code, cleaned=receipt["cleaned"],
+                      reason=allowed_label(receipt.get("reason"), reasons))
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return result
+
+
+def collect_mix_timings(module: Path, fs_root: Path = Path("/")) -> dict:
+    """No raw task, boot, absolute clock, source path or cleanup JSON escapes."""
+    report = {"schema": "luoshu-mix-phase-diagnostic-v1", "status": "unavailable", "requests": [],
+              "phaseClock": "proc-uptime", "phaseResolutionMs": 10, "phaseClockIncludesSuspend": True,
+              "backendTotalExcludes": ["router-preflight", "app-observation", "phone-reboot"],
+              "overlappingScopesAreNotAdditive": True, "maxLogBytes": MIX_LOG_BYTES,
+              "maxEvents": MIX_EVENT_LIMIT, "maxRequests": 3, "truncated": False}
+    try:
+        boot_bytes, _ = _mix_read(fs_root / "proc/sys/kernel/random/boot_id", 64)
+        boot = boot_bytes.decode("ascii").strip()
+        data, truncated = _mix_read(module / "logs/fontswitch.log", MIX_LOG_BYTES, module, tail=True)
+        records = []
+        rejected = 0
+        lines = data.decode("utf-8", errors="replace").splitlines()
+        for line in lines:
+            if not line.startswith("[MIX-PHASE] "):
+                continue
+            try:
+                records.append(_mix_event(line, boot))
+            except ValueError:
+                rejected += 1
+        report["rejectedEvents"] = rejected
+        report["truncated"] = truncated or len(records) > MIX_EVENT_LIMIT
+        records = records[-MIX_EVENT_LIMIT:]
+        requests = list(dict.fromkeys(item["request"] for item in reversed(records)))[:3][::-1]
+        for ordinal, request in enumerate(requests, 1):
+            group = [item for item in records if item["request"] == request]
+            outers = {item["outer"] for item in group}
+            if len(outers) != 1:
+                continue
+            outer = next(iter(outers))
+            phases = []
+            pending = {}
+            starts = {item["start"] for item in group if item["task"] == outer}
+            for event in group:
+                key = tuple(event[name] for name in ("task", "start", "component", "phase", "unit", "weight"))
+                if event["event"] == "begin":
+                    if key in pending:
+                        phases[pending[key][0]]["status"] = "unavailable"
+                    item = {name: event[name] for name in ("component", "phase", "unit", "weight", "method")}
+                    item["status"] = "incomplete"
+                    pending[key] = (len(phases), event["clockMs"])
+                    phases.append(item)
+                elif key in pending:
+                    index, started = pending.pop(key)
+                    elapsed = event["clockMs"] - started
+                    if elapsed < 0 or elapsed != int(event["elapsedMs"]):
+                        phases[index]["status"] = "unavailable"
+                    else:
+                        phases[index].update(status="complete" if event["result"] == "ok" else "failed",
+                                             elapsedMs=elapsed, method=event["method"])
+            backend = _mix_total(module, outer, starts, boot)
+            report["requests"].append({"request": ordinal, "phases": phases, "backendTotal": backend,
+                                       "safeSwitch": {"status": "unavailable", "scope": "safe-switch-worker",
+                                                      "clock": "proc-uptime", "reason": "identity-not-associated"}})
+        if report["requests"]:
+            report["status"] = "available"
+    except (OSError, ValueError, UnicodeError):
+        pass
+    return report
 
 
 class BudgetExpired(BaseException):
@@ -387,6 +554,8 @@ class Collector:
         signal.signal(signal.SIGALRM, expire)
         signal.setitimer(signal.ITIMER_REAL, max(0.001, self.deadline - time.monotonic()))
         try:
+            self.check_budget()
+            self.report["mixTimings"] = collect_mix_timings(self.module, self.fs_root)
             self.inventory()
             processing = self.processing_report()
             selected = self.selected_slots()

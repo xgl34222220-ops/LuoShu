@@ -240,5 +240,174 @@ class LayoutDiagnosticTest(unittest.TestCase):
         self.assertEqual(report["profileCount"], 1)
 
 
+class MixTimingDiagnosticTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="luoshu-mix-diagnostic-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.module = self.root / "module"
+        self.log = self.module / "logs/fontswitch.log"
+        self.log.parent.mkdir(parents=True)
+        self.boot = "12345678-1234-1234-1234-123456789abc"
+        bootfile = self.root / "proc/sys/kernel/random/boot_id"
+        bootfile.parent.mkdir(parents=True)
+        bootfile.write_text(self.boot + "\n")
+        self.request = "mix-request-1800000000-123"
+        self.outer = "axes-1800000000-123"
+        self.receipt = self.module / ".luoshu-state/tasks/axes_worker.pid.cleanup.json"
+        self.receipt.parent.mkdir(parents=True)
+        self.proof = dict(schema="task-cleanup-v2", task=self.outer, boot=self.boot, start="56789",
+                          durationSeconds=1.25, result=0, cleaned=True, leftoverPids=[], cleanupErrors=[],
+                          reason="completed", private="/private/source/path")
+        self.receipt.write_text(json.dumps(self.proof))
+
+    def event(self, kind="begin", **changes):
+        fields = dict(schema="1", request=self.request, outer=self.outer, task=self.outer,
+                      boot=self.boot, start="56789", component="worker", phase="worker_finalize",
+                      unit="fixed", weight="fixed", clock="proc-uptime", event=kind,
+                      method="finalize", uptimeSeconds="100.00" if kind == "begin" else "200.00")
+        if kind == "end":
+            fields.update(elapsedMs="100000", result="ok")
+        fields.update(changes)
+        return "[MIX-PHASE] " + " ".join(f"{name}={value}" for name, value in fields.items())
+
+    def collect(self, lines=None):
+        if lines is not None:
+            self.log.write_text("\n".join(lines) + "\n")
+        return diag.collect_mix_timings(self.module, self.root)
+
+    def pair(self):
+        return [self.event(), self.event("end")]
+
+    def safe(self, **changes):
+        fields = dict(task=self.outer, event="begin", phase="initialization", scope="safe-switch-worker",
+                      clock="proc-uptime", uptime="110.00")
+        fields.update(changes)
+        return "[SAFE-TIMING] " + " ".join(f"{key}={value}" for key, value in fields.items())
+
+    def safe_lines(self):
+        return [self.safe(),
+                f"[SAFE-TIMING] task={self.outer} event=end phase=initialization status=completed uptime=111.00 elapsedMs=1000",
+                f"[SAFE-TIMING] task={self.outer} event=begin phase=map_rom uptime=111.00",
+                f"[SAFE-TIMING] task={self.outer} event=end phase=map_rom status=completed uptime=112.00 elapsedMs=1000",
+                f"[SAFE-TIMING] task={self.outer} event=total scope=safe-switch-worker status=completed result=0 uptime=112.00 elapsedMs=2000"]
+
+    def test_exact_boot_start_task_proof_exports_anonymous_separate_scopes(self):
+        report = self.collect(self.pair())
+        latest = report["requests"][0]
+        self.assertEqual(latest["phases"][0]["elapsedMs"], 100000)
+        self.assertEqual(latest["backendTotal"]["durationSeconds"], 1.25)
+        self.assertEqual(latest["backendTotal"]["clock"], "python-monotonic")
+        self.assertEqual(report["phaseClock"], "proc-uptime")
+        self.assertTrue(report["overlappingScopesAreNotAdditive"])
+        for secret in (self.outer, self.request, self.boot, "56789", "/private/", str(self.root), "100.00"):
+            self.assertNotIn(secret, json.dumps(report))
+
+    def test_stale_receipt_task_boot_start_and_nonfinite_duration_never_match(self):
+        for name, value in (("task", "axes-1800000000-999"), ("start", "999"),
+                            ("boot", "00000000-0000-0000-0000-000000000000"),
+                            ("durationSeconds", float("nan")), ("durationSeconds", float("inf")),
+                            ("durationSeconds", 10 ** 400),
+                            ("durationSeconds", True), ("result", True), ("durationSeconds", -1),
+                            ("leftoverPids", [999]), ("cleanupErrors", ["private-error"])):
+            with self.subTest(field=name, value=value):
+                self.receipt.write_text(json.dumps({**self.proof, name: value}))
+                report = self.collect(self.pair())
+                self.assertEqual(report["requests"][0]["backendTotal"]["status"], "unavailable")
+                self.assertNotIn("private-error", json.dumps(report))
+
+    def test_missing_duration_parent_cleanup_duplicate_or_oversize_proof_unavailable(self):
+        proof = {**self.proof, "reason": "parent-cleanup"}; del proof["durationSeconds"]
+        for text in (json.dumps(proof), json.dumps(self.proof)[:-1] + ', "task": "axes-1800000000-123"}',
+                     json.dumps({**self.proof, "padding": "x" * 16384})):
+            with self.subTest(bytes=len(text)):
+                self.receipt.write_text(text)
+                self.assertEqual(self.collect(self.pair())["requests"][0]["backendTotal"]["status"], "unavailable")
+
+    def test_cross_boot_events_unknown_start_and_conflicting_outer_are_not_totals(self):
+        report = self.collect([self.event(boot="00000000-0000-0000-0000-000000000000")])
+        self.assertEqual(report["status"], "unavailable")
+        self.assertEqual(report["rejectedEvents"], 1)
+        report = self.collect([self.event(start="unknown"), self.event("end", start="unknown")])
+        self.assertEqual(report["requests"][0]["phases"][0]["status"], "complete")
+        self.assertEqual(report["requests"][0]["backendTotal"]["status"], "unavailable")
+        report = self.collect([self.event(), self.event("end", outer="axes-1800000000-456")])
+        self.assertEqual(report["requests"], [])
+
+    def test_cancelled_begin_is_incomplete_and_bad_end_is_unavailable(self):
+        self.receipt.write_text(json.dumps({**self.proof, "result": 143, "reason": "cancelled"}))
+        report = self.collect([self.event()])
+        latest = report["requests"][0]
+        self.assertEqual(latest["phases"][0]["status"], "incomplete")
+        self.assertNotIn("elapsedMs", latest["phases"][0])
+        self.assertEqual(latest["backendTotal"]["reason"], "cancelled")
+        for end in (self.event("end", elapsedMs="1"), self.event("end", uptimeSeconds="99.00", elapsedMs="0")):
+            self.assertEqual(self.collect([self.event(), end])["requests"][0]["phases"][0]["status"], "unavailable")
+        report = self.collect([self.event(), self.event("end", start="999")])
+        self.assertEqual(report["requests"][0]["phases"][0]["status"], "incomplete")
+
+    def test_duplicate_unknown_private_fields_and_values_are_rejected(self):
+        malformed = [self.event() + " task=" + self.outer, self.event(private="/private/font.ttf"),
+                     self.event(phase="/private/name"), self.event(method="secret"),
+                     self.event(task="/private/source"), self.event(clock="wall-clock"),
+                     self.event("end", elapsedMs="86400001"), self.event(weight="630"),
+                     self.event(uptimeSeconds="NaN")]
+        report = self.collect(malformed)
+        self.assertEqual(report["requests"], [])
+        self.assertEqual(report["rejectedEvents"], len(malformed))
+        self.assertNotIn("private", json.dumps(report))
+
+    def test_safe_clock_and_total_do_not_prove_mix_scope_identity(self):
+        lines = [self.event(), *self.safe_lines(), self.event("end")]
+        latest = self.collect(lines)["requests"][0]
+        safe = latest["safeSwitch"]
+        self.assertEqual(safe["status"], "unavailable")
+        self.assertEqual(safe["reason"], "identity-not-associated")
+        self.assertNotIn("elapsedMs", safe)
+        self.assertEqual(latest["backendTotal"]["durationSeconds"], 1.25)
+        self.assertNotIn(self.outer, json.dumps(safe))
+        # An old SAFE line before the current MIX group can share clock/task
+        # text after reboot. Physical proximity cannot establish ownership.
+        old = self.collect([*self.safe_lines(), *self.pair()])["requests"][0]["safeSwitch"]
+        self.assertEqual(old, safe)
+
+    def test_safe_wrong_task_window_clock_or_missing_proof_cannot_be_associated(self):
+        lines = self.safe_lines()
+        mutations = [[line.replace(self.outer, "axes-1800000000-999") for line in lines],
+                     [line.replace("110.00", "99.00") for line in lines],
+                     [line.replace("clock=proc-uptime", "clock=wall") for line in lines],
+                     [line.replace("elapsedMs=2000", "elapsedMs=1") for line in lines]]
+        for changed in mutations:
+            self.assertEqual(self.collect([self.event(), *changed, self.event("end")])["requests"][0]["safeSwitch"]["status"], "unavailable")
+        self.receipt.unlink()
+        self.assertEqual(self.collect([self.event(), *lines, self.event("end")])["requests"][0]["safeSwitch"]["status"], "unavailable")
+
+    def test_log_event_and_request_bounds_are_explicit(self):
+        lines = []
+        for index in range(4):
+            for _ in range(40):
+                lines += [self.event(request=f"mix-request-1800000000-{index}"),
+                          self.event("end", request=f"mix-request-1800000000-{index}")]
+        report = self.collect(lines)
+        self.assertTrue(report["truncated"])
+        self.assertEqual(len(report["requests"]), 3)
+        self.assertLessEqual(sum(len(req["phases"]) for req in report["requests"]), diag.MIX_EVENT_LIMIT)
+        report = self.collect(["x" * diag.MIX_LOG_BYTES, *self.pair()])
+        self.assertTrue(report["truncated"])
+        self.assertEqual(report["requests"][0]["phases"][0]["status"], "complete")
+
+    def test_nonregular_symlink_and_outside_alias_are_never_read(self):
+        outside = self.root / "private-outside"; outside.write_text("\n".join(self.pair()))
+        self.log.symlink_to(outside)
+        self.assertEqual(self.collect()["status"], "unavailable")
+        self.log.unlink(); os.mkfifo(self.log)
+        started = time.monotonic()
+        self.assertEqual(self.collect()["status"], "unavailable")
+        self.assertLess(time.monotonic() - started, .3)
+        self.log.unlink(); self.collect(self.pair())
+        self.receipt.unlink(); self.receipt.symlink_to(outside)
+        self.assertEqual(self.collect()["requests"][0]["backendTotal"]["status"], "unavailable")
+
+
 if __name__ == "__main__":
     unittest.main()

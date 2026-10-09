@@ -33,44 +33,33 @@ class CompatibilitySmokeRun(base.SmokeRun):
             time.sleep(.3)
         else:
             raise RuntimeError('Google 字体兼容页面未加载')
-        details_expanded = False
-        for _ in range(8):
-            root = self.hierarchy()
-            texts = {text for node in root.iter('node') for text in base.labels(node)}
-            if any('停用或卸载洛书前' in text for text in texts):
-                self.capture('google-font-chinese-help', root)
-                return
-            if not details_expanded:
-                toggles = [
-                    node for node in root.iter('node')
-                    if node.get('package') == self.package
-                    and '详细原理与影响范围' in base.labels(node)
-                ]
-                if toggles:
-                    x, y = base.center(toggles[0])
-                    self.adb('shell', 'input', 'tap', str(x), str(y))
-                    details_expanded = True
-                    time.sleep(.7)
-                    continue
-            self.scroll(root)
-        raise RuntimeError('中文影响与恢复说明不可见或折叠说明无法展开')
-
-    def scroll(self, root):
-        rectangles = []
-        for node in root.iter('node'):
-            if node.get('package') != self.package:
-                continue
-            try:
-                rectangles.append(base.bounds(node))
-            except ValueError:
-                continue
-        if not rectangles:
-            raise RuntimeError('无法读取实际 App 页面边界')
-        height = max(r[3] for r in rectangles)
-        width = max(r[2] for r in rectangles)
-        self.adb('shell', 'input', 'swipe', str(width // 2), str(int(height * .72)),
-                 str(width // 2), str(int(height * .27)), '400')
-
+        # Keep the original real toggle/expanded-help assertion. All stages share
+        # one bounded time/gesture budget and retain each actual XML/anchor sample.
+        budget = base.ScrollBudget(timeout=90, max_gestures=8)
+        root = self.reach_content(
+            lambda current: base.visible_action(current, '导出复发诊断', self.package),
+            '只读复发诊断入口', budget=budget, root=root,
+        )
+        # Verify accessibility and enabled state without invoking Root collection.
+        self.capture('google-font-diagnostic-entry', root)
+        root = self.reach_content(
+            lambda current: base.visible_action(current, '详细原理与影响范围', self.package),
+            '中文影响与恢复折叠入口', budget=budget, root=root,
+        )
+        x, y = base.center(base.visible_action(root, '详细原理与影响范围', self.package))
+        self.adb('shell', 'input', 'tap', str(x), str(y))
+        remaining = budget.deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError('中文影响与恢复说明总时间预算已耗尽')
+        root = self.wait_ui(
+            lambda current: base.visible_text(current, '收起技术说明', self.package),
+            '中文技术说明实际展开', timeout=min(20, remaining),
+        )
+        root = self.reach_content(
+            lambda current: base.visible_text(current, '停用或卸载洛书前', self.package),
+            '中文影响与恢复原说明', budget=budget, root=root,
+        )
+        self.capture('google-font-chinese-help', root)
 
 if __name__ == '__main__':
     base.SmokeRun = CompatibilitySmokeRun

@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -50,24 +51,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
@@ -80,6 +83,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Velocity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeEffect
@@ -89,7 +96,7 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import dev.chrisbanes.haze.rememberHazeState
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
-import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.dialogs.FontActionDialogRoute
 import io.github.xgl34222220.luoshu.ui.dialogs.FontActionKind
 import io.github.xgl34222220.luoshu.ui.dialogs.FontPickerDialogRoute
@@ -102,6 +109,7 @@ import io.github.xgl34222220.luoshu.ui.home.toHomeUiState
 import io.github.xgl34222220.luoshu.ui.library.FontLibraryActions
 import io.github.xgl34222220.luoshu.ui.library.FontLibraryRoute
 import io.github.xgl34222220.luoshu.ui.library.toFontLibraryUiState
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuGlassBackdropDrawable
 import io.github.xgl34222220.luoshu.ui.logs.LogsActions
 import io.github.xgl34222220.luoshu.ui.logs.LogsRoute
 import io.github.xgl34222220.luoshu.ui.logs.toLogsUiState
@@ -111,10 +119,10 @@ import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioRoute
 import io.github.xgl34222220.luoshu.ui.studio.toFontStudioUiState
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LocalShowDock
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
-import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.colorControls
@@ -157,10 +165,12 @@ internal fun LuoShuAppShell(
     viewModel: LuoShuViewModel,
     features: Alpha15FeatureViewModel,
     appearanceViewModel: AppearanceViewModel,
+    firstFrameCommitted: Boolean,
 ) {
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(AppPage.Home) }
-    var previousPageForMotion by remember { mutableStateOf(AppPage.Home) }
+    val pageStateHolder = rememberSaveableStateHolder()
+    var previousPageForMotion by remember { mutableStateOf(page) }
     var settingsDetailVisible by rememberSaveable { mutableStateOf(false) }
     var logsReturnPage by rememberSaveable { mutableStateOf(AppPage.Home) }
     var pendingApply by remember { mutableStateOf<FontItem?>(null) }
@@ -179,7 +189,7 @@ internal fun LuoShuAppShell(
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
-                viewModel.refreshMixConfig()
+                viewModel.ensureMixConfig()
             }
             AppPage.Logs -> viewModel.refreshLogs()
             AppPage.Settings -> Unit
@@ -246,114 +256,132 @@ internal fun LuoShuAppShell(
     }
     val validFonts = remember(viewModel.fonts) { viewModel.fonts.filter { it.valid } }
 
-    LuoShuTheme(appearance) {
-        val dark = MaterialTheme.colorScheme.background.luminance() < .5f
-        val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
-        val quickReturnEnabled = appearance.floatingDock &&
-            showDock &&
-            page in listOf(AppPage.Library, AppPage.Studio, AppPage.Settings)
-        var dockHiddenByScroll by remember(page) { mutableStateOf(false) }
-        var dockScrollAccumulator by remember(page) { mutableFloatStateOf(0f) }
-        val density = LocalDensity.current
-        val dockHideThresholdPx = with(density) { 34.dp.toPx() }
-        val dockShowThresholdPx = with(density) { 20.dp.toPx() }
-        val dockScrollConnection = remember(page, quickReturnEnabled, dockHideThresholdPx, dockShowThresholdPx) {
-            object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                    if (!quickReturnEnabled) return Offset.Zero
-                    when {
-                        available.y < -1f -> {
-                            if (dockScrollAccumulator < 0f) dockScrollAccumulator = 0f
-                            dockScrollAccumulator += -available.y
-                            if (dockScrollAccumulator >= dockHideThresholdPx) {
-                                dockHiddenByScroll = true
-                                dockScrollAccumulator = 0f
-                            }
-                        }
-                        available.y > 1f -> {
-                            if (dockScrollAccumulator > 0f) dockScrollAccumulator = 0f
-                            dockScrollAccumulator -= available.y
-                            if (-dockScrollAccumulator >= dockShowThresholdPx) {
-                                dockHiddenByScroll = false
-                                dockScrollAccumulator = 0f
-                            }
-                        }
-                    }
-                    return Offset.Zero
-                }
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
+    val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
+    val quickReturnEnabled = appearance.floatingDock &&
+        showDock &&
+        page in listOf(AppPage.Library, AppPage.Studio, AppPage.Settings)
+    val density = LocalDensity.current
+    val dockHideThresholdPx = with(density) { 34.dp.toPx() }
+    val dockShowThresholdPx = with(density) { 6.dp.toPx() }
+    val dockScrollPolicy = remember(page, dockHideThresholdPx, dockShowThresholdPx) {
+        QuickReturnDockPolicy(dockHideThresholdPx, dockShowThresholdPx)
+    }
+    var dockHiddenByScroll by remember(dockScrollPolicy) { mutableStateOf(false) }
+    val dockScrollConnection = remember(dockScrollPolicy, quickReturnEnabled) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (!quickReturnEnabled) return Offset.Zero
+                // A short reverse drag restores navigation. The padding animation and
+                // residual fling are SideEffect scrolls and cannot immediately hide it again.
+                dockHiddenByScroll = dockScrollPolicy.onScroll(
+                    deltaY = available.y,
+                    userInput = source == NestedScrollSource.UserInput,
+                )
+                return Offset.Zero
             }
-        }
-        LaunchedEffect(quickReturnEnabled, showDock) {
-            if (!quickReturnEnabled || !showDock) {
-                dockHiddenByScroll = false
-                dockScrollAccumulator = 0f
-            }
-        }
-        val dockActuallyVisible = showDock && !dockHiddenByScroll
-        val blurActive = appearance.blurEnabled && appearance.glassEnabled && showDock
-        val hazeState = rememberHazeState(blurEnabled = blurActive)
-        val liquidBackdrop = rememberLayerBackdrop()
-        val liquidGlassSupported = blurActive &&
-            appearance.uiStyle == UiStyle.MIUIX &&
-            isRuntimeShaderSupported()
-        val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX &&
-            appearance.glassEnabled && appearance.floatingDock && showDock
-        // A floating glass dock overlays a full-height viewport. Lists own the trailing
-        // safe space so content can pass behind the glass yet still scroll fully clear.
-        val dockClearance = when {
-            !showDock -> 0.dp
-            edgeToEdgeGlass -> 0.dp
-            !appearance.floatingDock -> navigationBottom + 82.dp
-            else -> navigationBottom + 94.dp
-        }
-        val dockPaddingTarget = if (edgeToEdgeGlass) {
-            navigationBottom + if (dockHiddenByScroll) 28.dp else 108.dp
-        } else {
-            0.dp
-        }
-        val dockContentPadding by animateDpAsState(
-            targetValue = dockPaddingTarget,
-            animationSpec = tween(180, easing = FastOutSlowInEasing),
-            label = "dockContentPadding",
-        )
-        val contentModifier = Modifier
-            .fillMaxSize()
-            .then(if (quickReturnEnabled) Modifier.nestedScroll(dockScrollConnection) else Modifier)
-            .then(if (blurActive && !liquidGlassSupported) Modifier.hazeSource(state = hazeState) else Modifier)
-            .then(if (liquidGlassSupported) Modifier.layerBackdrop(liquidBackdrop) else Modifier)
 
-        Box(Modifier.fillMaxSize()) {
-            Box(modifier = contentModifier) {
-                AppBackdrop(appearance, dark)
-                // Only the destination page participates in the transition. AnimatedContent kept
-                // the outgoing page alive for 210–360 ms; the backdrop shader then refracted that
-                // stale layer through the dock, producing the one-frame/old-page flash in recordings.
-                key(page) {
-                    val pageDirection = remember(page) {
-                        val delta = page.motionIndex() - previousPageForMotion.motionIndex()
-                        when {
-                            delta > 0 -> 1f
-                            delta < 0 -> -1f
-                            else -> 0f
-                        }
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                dockScrollPolicy.finishGesture()
+                return Velocity.Zero
+            }
+        }
+    }
+    LaunchedEffect(dockScrollPolicy, quickReturnEnabled, showDock) {
+        if (!quickReturnEnabled || !showDock) {
+            dockScrollPolicy.reset()
+            dockHiddenByScroll = false
+        }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, dockScrollPolicy) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                dockScrollPolicy.reset()
+                dockHiddenByScroll = false
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val dockActuallyVisible = showDock && !dockHiddenByScroll
+    val dockVisibility = remember { MutableTransitionState(dockActuallyVisible) }
+        .apply { targetState = dockActuallyVisible }
+    val dockCaptureRequired = dockBackdropCaptureRequired(
+        currentVisible = dockVisibility.currentState,
+        targetVisible = dockVisibility.targetState,
+        transitionIdle = dockVisibility.isIdle,
+    )
+    // Submit the complete home before initializing offscreen captures and shader effects.
+    // Glass tint, borders, card sheen and the real page backdrop remain in the first frame.
+    val blurActive = firstFrameCommitted && appearance.blurEnabled &&
+        appearance.glassEnabled && dockCaptureRequired
+    val hazeState = rememberHazeState(blurEnabled = blurActive)
+    val liquidBackdrop = rememberLayerBackdrop()
+    val liquidGlassSupported = blurActive &&
+        isRuntimeShaderSupported()
+    // The Window already paints the system-theme glass backdrop. Avoid a second
+    // six-layer fullscreen shader pass before the first buffer is submitted.
+    // Explicit theme/AMOLED/solid choices keep their Compose-owned first backdrop.
+    val windowOwnsFirstBackdrop = !firstFrameCommitted && appearance.glassEnabled &&
+        appearance.themeMode == ThemeMode.SYSTEM && !appearance.amoledBlack
+    val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val edgeToEdgeGlass = appearance.glassEnabled && appearance.floatingDock && showDock
+    // A floating glass dock overlays a full-height viewport. Lists own the trailing
+    // safe space so content can pass behind the glass yet still scroll fully clear.
+    val dockClearance = when {
+        !showDock -> 0.dp
+        edgeToEdgeGlass -> 0.dp
+        !appearance.floatingDock -> navigationBottom + 82.dp
+        else -> navigationBottom + 94.dp
+    }
+    val dockPaddingTarget = if (edgeToEdgeGlass) {
+        navigationBottom + if (dockHiddenByScroll) 28.dp else 108.dp
+    } else {
+        0.dp
+    }
+    val dockContentPadding by animateDpAsState(
+        targetValue = dockPaddingTarget,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "dockContentPadding",
+    )
+    val contentModifier = Modifier
+        .fillMaxSize()
+        .then(if (quickReturnEnabled) Modifier.nestedScroll(dockScrollConnection) else Modifier)
+        .then(if (blurActive && !liquidGlassSupported) Modifier.hazeSource(state = hazeState) else Modifier)
+        .then(if (liquidGlassSupported) Modifier.layerBackdrop(liquidBackdrop) else Modifier)
+
+    Box(Modifier.fillMaxSize()) {
+        Box(modifier = contentModifier) {
+            if (!windowOwnsFirstBackdrop) AppBackdrop(appearance, dark)
+            // Only the destination page participates in the transition. AnimatedContent kept
+            // the outgoing page alive for 210–360 ms; the backdrop shader then refracted that
+            // stale layer through the dock, producing the one-frame/old-page flash in recordings.
+            pageStateHolder.SaveableStateProvider(page.name) {
+                val pageDirection = remember(page) {
+                    val delta = page.motionIndex() - previousPageForMotion.motionIndex()
+                    when {
+                        delta > 0 -> 1f
+                        delta < 0 -> -1f
+                        else -> 0f
                     }
-                    val pageEnter = remember { Animatable(0f) }
-                    LaunchedEffect(Unit) {
-                        pageEnter.animateTo(
-                            targetValue = 1f,
-                            animationSpec = tween(210, easing = FastOutSlowInEasing),
-                        )
-                        previousPageForMotion = page
-                    }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .graphicsLayer {
-                                alpha = .94f + (.06f * pageEnter.value)
-                                translationX = (1f - pageEnter.value) * 14.dp.toPx() * pageDirection
-                            },
-                    ) {
+                }
+                val pageEnter = remember { Animatable(if (page == AppPage.Home && pageDirection == 0f) 1f else 0f) }
+                LaunchedEffect(Unit) {
+                    previousPageForMotion = page
+                    pageEnter.animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(210, easing = FastOutSlowInEasing),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = .94f + (.06f * pageEnter.value)
+                            translationX = (1f - pageEnter.value) * 14.dp.toPx() * pageDirection
+                        },
+                ) {
                     when (page) {
                         AppPage.Home -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
@@ -369,7 +397,13 @@ internal fun LuoShuAppShell(
                         AppPage.Library -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
-                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                            CompositionLocalProvider(
+                                LocalDockContentPadding provides dockContentPadding,
+                                LocalShowDock provides {
+                                    dockScrollPolicy.reset()
+                                    dockHiddenByScroll = false
+                                },
+                            ) {
                                 FontLibraryRoute(
                                     style = appearance.uiStyle,
                                     state = viewModel.toFontLibraryUiState(),
@@ -397,23 +431,9 @@ internal fun LuoShuAppShell(
                             }
                         }
                         AppPage.Logs -> {
-                            val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(start = if (appearance.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
-                                    .then(
-                                        if (appearance.uiStyle == UiStyle.MIUIX) {
-                                            Modifier
-                                                .shadow(22.dp, detailShape, clip = false)
-                                                .clip(detailShape)
-                                                .background(LocalMiuixTokens.current.pageBackground)
-                                        } else {
-                                            Modifier
-                                        },
-                                    )
-                                    .padding(bottom = dockClearance),
-                            ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
+                        ) {
                                 CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
                                     LogsRoute(
                                         style = appearance.uiStyle,
@@ -435,207 +455,121 @@ internal fun LuoShuAppShell(
                                         logsReturnPage = AppPage.Settings
                                         page = AppPage.Logs
                                     },
-                                    onDetailChanged = { settingsDetailVisible = it },
+                                    onDetailChanged = {
+                                        settingsDetailVisible = it
+                                        dockScrollPolicy.reset()
+                                        dockHiddenByScroll = false
+                                    },
                                 )
                             }
                         }
                     }
-                    }
                 }
             }
-
-            val dockPage = if (page in dockPages) page else logsReturnPage
-            AnimatedVisibility(
-                visible = dockActuallyVisible,
-                modifier = Modifier.align(Alignment.BottomCenter),
-                enter = fadeIn(tween(180)) + slideInVertically(tween(210, easing = FastOutSlowInEasing)) { it / 2 },
-                exit = fadeOut(tween(150)) + slideOutVertically(tween(190, easing = FastOutSlowInEasing)) { it },
-            ) {
-                if (appearance.uiStyle == UiStyle.MATERIAL) {
-                    MaterialAppDock(
-                        current = dockPage,
-                        onSelect = { page = it },
-                        appearance = appearance,
-                        hazeState = hazeState,
-                    )
-                } else {
-                    MiuixAppDock(
-                        current = dockPage,
-                        onSelect = { page = it },
-                        appearance = appearance,
-                        hazeState = hazeState,
-                        backdrop = liquidBackdrop.takeIf { liquidGlassSupported },
-                    )
-                }
-            }
-
         }
 
-        pendingApply?.let { font ->
-            FontActionDialogRoute(
-                style = appearance.uiStyle,
-                kind = FontActionKind.APPLY,
-                message = if (font.supportsCjk) {
-                    "直接应用「${font.name}」。准备完成后需要完整重启手机。"
-                } else {
-                    "「${font.name}」不包含完整中文字形。直接应用后中文会继续使用系统默认字体，看起来可能没有变化；建议在组合页把它作为英文字体使用。"
-                },
-                onDismiss = { pendingApply = null },
-                onConfirm = {
-                    pendingApply = null
-                    viewModel.applyFont(font.id)
-                },
+        val dockPage = if (page in dockPages) page else logsReturnPage
+        AnimatedVisibility(
+            visibleState = dockVisibility,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(180)) + slideInVertically(tween(210, easing = FastOutSlowInEasing)) { it / 2 },
+            exit = fadeOut(tween(150)) + slideOutVertically(tween(190, easing = FastOutSlowInEasing)) { it },
+        ) {
+            MiuixAppDock(
+                current = dockPage,
+                onSelect = { page = it },
+                appearance = appearance,
+                hazeState = hazeState,
+                backdrop = liquidBackdrop.takeIf { liquidGlassSupported },
+                blurActive = blurActive,
             )
         }
 
-        pendingDelete?.let { font ->
-            FontActionDialogRoute(
-                style = appearance.uiStyle,
-                kind = FontActionKind.DELETE,
-                message = "确定删除「${font.name}」吗？字体文件和相关缓存将一并移除。",
-                onDismiss = { pendingDelete = null },
-                onConfirm = {
-                    pendingDelete = null
-                    viewModel.deleteFont(font.id)
-                },
-            )
-        }
-
-        if (restoreDefault) {
-            FontActionDialogRoute(
-                style = appearance.uiStyle,
-                kind = FontActionKind.RESTORE,
-                message = "恢复 ROM 自带字体映射。完成后需要完整重启手机。",
-                onDismiss = { restoreDefault = false },
-                onConfirm = {
-                    restoreDefault = false
-                    viewModel.applyFont("default")
-                },
-            )
-        }
-
-        pickerSlot?.let { slot ->
-            FontPickerDialogRoute(
-                style = appearance.uiStyle,
-                slot = slot,
-                fonts = validFonts,
-                selected = selectedFontId(viewModel.mixState, slot),
-                onDismiss = { pickerSlot = null },
-                onChoose = { font ->
-                    viewModel.updateMixFont(slot, font.id)
-                    viewModel.updateMixWeight(
-                        slot,
-                        fontNormalizedWeight(
-                            font,
-                            when (slot) {
-                                MixSlot.Cjk -> viewModel.mixState.cjkWeight
-                                MixSlot.Latin -> viewModel.mixState.latinWeight
-                                MixSlot.Digit -> viewModel.mixState.digitWeight
-                            },
-                        ),
-                    )
-                    pickerSlot = null
-                },
-            )
-        }
     }
+
+    pendingApply?.let { font ->
+        FontActionDialogRoute(
+            style = appearance.uiStyle,
+            kind = FontActionKind.APPLY,
+            message = if (font.supportsCjk) {
+                "直接应用「${font.name}」。准备完成后需要完整重启手机。"
+            } else {
+                "「${font.name}」不包含完整中文字形。直接应用后中文会继续使用系统默认字体，看起来可能没有变化；建议在组合页把它作为英文字体使用。"
+            },
+            onDismiss = { pendingApply = null },
+            onConfirm = {
+                pendingApply = null
+                viewModel.applyFont(font.id)
+            },
+        )
+    }
+
+    pendingDelete?.let { font ->
+        FontActionDialogRoute(
+            style = appearance.uiStyle,
+            kind = FontActionKind.DELETE,
+            message = "确定删除「${font.name}」吗？字体文件和相关缓存将一并移除。",
+            onDismiss = { pendingDelete = null },
+            onConfirm = {
+                pendingDelete = null
+                viewModel.deleteFont(font.id)
+            },
+        )
+    }
+
+    if (restoreDefault) {
+        FontActionDialogRoute(
+            style = appearance.uiStyle,
+            kind = FontActionKind.RESTORE,
+            message = "恢复 ROM 自带字体映射。完成后需要完整重启手机。",
+            onDismiss = { restoreDefault = false },
+            onConfirm = {
+                restoreDefault = false
+                viewModel.applyFont("default")
+            },
+        )
+    }
+
+    pickerSlot?.let { slot ->
+        FontPickerDialogRoute(
+            style = appearance.uiStyle,
+            slot = slot,
+            fonts = validFonts,
+            selected = selectedFontId(viewModel.mixState, slot),
+            onDismiss = { pickerSlot = null },
+            onChoose = { font ->
+                viewModel.updateMixFont(slot, font.id)
+                viewModel.updateMixWeight(
+                    slot,
+                    fontNormalizedWeight(
+                        font,
+                        when (slot) {
+                            MixSlot.Cjk -> viewModel.mixState.cjkWeight
+                            MixSlot.Latin -> viewModel.mixState.latinWeight
+                            MixSlot.Digit -> viewModel.mixState.digitWeight
+                        },
+                    ),
+                )
+                pickerSlot = null
+            },
+        )
+    }
+
 }
 
 @Composable
 private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
-    val scheme = MaterialTheme.colorScheme
-    val miuix = appearance.uiStyle == UiStyle.MIUIX
-    val base = when {
-        miuix -> listOf(LocalMiuixTokens.current.pageBackground, LocalMiuixTokens.current.pageBackground)
-        dark -> listOf(scheme.background, scheme.surfaceContainerLow, scheme.background)
-        else -> listOf(scheme.background, scheme.surfaceContainerLowest, scheme.background)
-    }
+    val pureBlack = appearance.amoledBlack && dark
+    val backdrop = remember(dark, pureBlack) { LuoShuGlassBackdropDrawable(dark, pureBlack) }
     Box(
-        Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(base))
+        Modifier.fillMaxSize()
+            .background(LocalMiuixTokens.current.pageBackground)
             .drawBehind {
-                if (miuix) {
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = if (dark) .09f else .10f), Color.Transparent),
-                            center = Offset(size.width * .92f, size.height * .02f),
-                            radius = size.width * .85f,
-                        ),
-                    )
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.secondary.copy(alpha = if (dark) .06f else .07f), Color.Transparent),
-                            center = Offset(size.width * .04f, size.height * .82f),
-                            radius = size.width,
-                        ),
-                    )
-                } else {
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.secondary.copy(alpha = if (dark) .13f else .20f), Color.Transparent),
-                            center = Offset(size.width * .9f, size.height * .06f),
-                            radius = size.width * .72f,
-                        ),
-                    )
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = if (dark) .10f else .16f), Color.Transparent),
-                            center = Offset(size.width * .02f, size.height * .54f),
-                            radius = size.width * .82f,
-                        ),
-                    )
+                if (appearance.glassEnabled) {
+                    backdrop.setBounds(0, 0, size.width.toInt(), size.height.toInt())
+                    drawIntoCanvas { backdrop.draw(it.nativeCanvas) }
                 }
             },
-    )
-}
-
-@OptIn(ExperimentalHazeMaterialsApi::class)
-@Composable
-private fun MaterialAppDock(
-    current: AppPage,
-    onSelect: (AppPage) -> Unit,
-    appearance: AppearanceSettings,
-    hazeState: HazeState,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MaterialTheme.colorScheme
-    val dark = scheme.background.luminance() < .5f
-    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(26.dp) else RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
-    val activeHaze = appearance.blurEnabled && appearance.glassEnabled
-    val hazeModifier = if (activeHaze) {
-        Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 26.dp
-            noiseFactor = .04f
-        }
-    } else Modifier
-
-    AppDockLayout(
-        pages = dockPages,
-        current = current,
-        onSelect = onSelect,
-        itemHeight = 56.dp,
-        modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 20.dp).padding(bottom = bottomInset + 12.dp) else Modifier)
-            .fillMaxWidth()
-            .shadow(if (floating) 14.dp else 6.dp, shape, clip = false)
-            .clip(shape)
-            .then(hazeModifier)
-            .background(
-                when {
-                    activeHaze && dark -> scheme.surface.copy(alpha = .34f)
-                    activeHaze -> Color.White.copy(alpha = .28f)
-                    else -> scheme.surface.copy(alpha = .98f)
-                },
-            )
-            .border(1.dp, if (dark) Color.White.copy(alpha = .12f) else Color.White.copy(alpha = .72f), shape)
-            .padding(start = 6.dp, top = 6.dp, end = 6.dp, bottom = if (floating) 6.dp else bottomInset + 6.dp),
-        indicatorColor = scheme.primaryContainer.copy(alpha = .64f),
-        selectedColor = scheme.primary,
-        unselectedColor = scheme.onSurfaceVariant,
-        label = "luoshuMaterialDockIndicator",
     )
 }
 
@@ -647,6 +581,7 @@ private fun MiuixAppDock(
     appearance: AppearanceSettings,
     hazeState: HazeState,
     backdrop: LayerBackdrop?,
+    blurActive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -656,8 +591,8 @@ private fun MiuixAppDock(
     val floating = appearance.floatingDock
     val shape = if (floating) RoundedCornerShape(31.dp) else RoundedCornerShape(topStart = 31.dp, topEnd = 31.dp)
     val activeGlass = appearance.glassEnabled
-    val runtimeLiquid = activeGlass && appearance.blurEnabled && backdrop != null && isRuntimeShaderSupported()
-    val activeHaze = activeGlass && appearance.blurEnabled && !runtimeLiquid
+    val runtimeLiquid = blurActive && backdrop != null && isRuntimeShaderSupported()
+    val activeHaze = blurActive && !runtimeLiquid
     val dockSurfaceBackdrop = rememberLayerBackdrop()
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
@@ -685,14 +620,14 @@ private fun MiuixAppDock(
                 colorControls(
                     brightness = if (dark) -.015f else .025f,
                     contrast = 1.05f,
-                    saturation = 1.40f,
+                    saturation = 1.10f,
                 )
                 blur(9.dp.toPx(), 9.dp.toPx())
                 liquidGlassLens(
                     refractionHeight = 17.dp.toPx(),
                     refractionAmount = 13.dp.toPx(),
                     depthEffect = true,
-                    chromaticAberration = .045f,
+                    chromaticAberration = .012f,
                 )
             },
             highlight = {
@@ -746,7 +681,7 @@ private fun MiuixAppDock(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .shadow(if (floating) 18.dp else 5.dp, shape, clip = false)
+
                 .squircleClip(31.dp)
                 .then(if (runtimeLiquid) Modifier.layerBackdrop(dockSurfaceBackdrop) else Modifier)
                 .then(liquidShellModifier)
@@ -769,7 +704,6 @@ private fun MiuixAppDock(
                 .padding(start = 6.dp, top = 6.dp, end = 6.dp, bottom = if (floating) 6.dp else bottomInset + 6.dp),
             indicatorColor = scheme.primary.copy(alpha = if (dark) .28f else .16f),
             indicatorBorderColor = Color.White.copy(alpha = if (dark) .18f else .46f),
-            indicatorShadow = 3.dp,
             selectedColor = scheme.primary,
             unselectedColor = scheme.onSurfaceVariant.copy(alpha = .90f),
             label = "luoshuMiuixDockIndicator",
@@ -789,7 +723,6 @@ private fun AppDockLayout(
     modifier: Modifier,
     indicatorColor: Color,
     indicatorBorderColor: Color = Color.Transparent,
-    indicatorShadow: androidx.compose.ui.unit.Dp = 0.dp,
     selectedColor: Color,
     unselectedColor: Color,
     label: String,
@@ -812,7 +745,7 @@ private fun AppDockLayout(
                 liquidStretch.animateTo(
                     targetValue = 0f,
                     animationSpec = spring(
-                        dampingRatio = .55f,
+                        dampingRatio = .82f,
                         stiffness = Spring.StiffnessMediumLow,
                     ),
                 )
@@ -821,7 +754,7 @@ private fun AppDockLayout(
         val indicatorX by animateDpAsState(
             targetValue = itemWidth * targetIndex.toFloat(),
             animationSpec = spring(
-                dampingRatio = if (liquidGlass) .68f else .84f,
+                dampingRatio = if (liquidGlass) .82f else .90f,
                 stiffness = if (liquidGlass) 310f else Spring.StiffnessMediumLow,
             ),
             label = label,
@@ -837,13 +770,13 @@ private fun AppDockLayout(
                 effects = {
                     val stretch = liquidStretch.value
                     padding = maxOf(padding, 22.dp.toPx())
-                    colorControls(brightness = .015f, contrast = 1.06f, saturation = 1.34f)
+                    colorControls(brightness = .015f, contrast = 1.06f, saturation = 1.08f)
                     blur(3.dp.toPx(), 3.dp.toPx())
                     liquidGlassLens(
                         refractionHeight = (13.dp + 4.dp * stretch).toPx(),
                         refractionAmount = (14.dp + 5.dp * stretch).toPx(),
                         depthEffect = true,
-                        chromaticAberration = .08f + .10f * stretch,
+                        chromaticAberration = .012f + .012f * stretch,
                     )
                 },
                 highlight = {
@@ -902,7 +835,7 @@ private fun AppDockLayout(
                 .offset(x = indicatorStart)
                 .width(itemWidth - (indicatorInset * 2) + liquidExtra)
                 .height(itemHeight)
-                .shadow(if (activeLens) 4.dp else indicatorShadow, indicatorShape, clip = false)
+
                 .squircleClip(23.dp)
                 .then(movingLensModifier)
                 .border(1.dp, indicatorBorderColor, indicatorShape),
@@ -920,11 +853,11 @@ private fun AppDockLayout(
                 )
                 val itemScale by animateFloatAsState(
                     targetValue = when {
-                        pressed -> .92f
-                        selected && liquidGlass -> 1.035f
+                        pressed -> .96f
+                        selected && liquidGlass -> 1.01f
                         else -> 1f
                     },
-                    animationSpec = spring(dampingRatio = .66f, stiffness = 520f),
+                    animationSpec = spring(dampingRatio = .86f, stiffness = 520f),
                     label = "${page.name}DockScale",
                 )
                 Column(

@@ -2,6 +2,8 @@ package io.github.xgl34222220.luoshu.ui.studio
 
 import android.view.Gravity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,7 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -42,7 +46,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +59,7 @@ import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 import kotlin.math.roundToInt
@@ -67,7 +71,9 @@ internal fun FontStudioScreenMiuix(
     topAction: @Composable () -> Unit,
 ) {
     val dockBottomPadding = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom)
+    val listState = rememberLazyListState()
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = LuoShuLayoutTokens.PageHorizontal,
@@ -127,12 +133,13 @@ private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction
 @Composable
 private fun MiuixCompositionMap(state: FontStudioUiState, actions: FontStudioActions) {
     val tokens = LocalMiuixTokens.current
-    val shape = RoundedCornerShape(24.dp)
+    val shape = LuoShuSmoothShape(24.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(
             modifier = Modifier
@@ -148,9 +155,11 @@ private fun MiuixCompositionMap(state: FontStudioUiState, actions: FontStudioAct
                 .padding(20.dp),
         ) {
             Text("组合你的专属字体", color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-            Text("中文、英文、数字，分别挑选喜欢的样子。", color = tokens.textSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("中文、英文、数字，分别挑选喜欢的样子。", color = tokens.textSecondary,
+                style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.slots.forEach { slot ->
                     MiuixSlotSummary(slot, Modifier.weight(1f), !state.busy && !state.operationBusy) { actions.pickSlot(slot.slot) }
                 }
@@ -165,12 +174,13 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enable
     Surface(
         onClick = onSelect,
         enabled = enabled,
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = if (slot.font == null) tokens.textPrimary.copy(alpha = .045f)
-        else MaterialTheme.colorScheme.primary.copy(alpha = .11f),
+        modifier = modifier.fillMaxHeight(),
+        shape = LuoShuSmoothShape(16.dp),
+        color = tokens.insetBackground,
+        border = BorderStroke(1.dp, if (slot.font != null) MaterialTheme.colorScheme.primary.copy(alpha = .24f)
+            else tokens.insetOutline),
     ) {
-        Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 when (slot.slot) {
                     MixSlot.Cjk -> "中"
@@ -179,14 +189,15 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enable
                 },
                 color = MaterialTheme.colorScheme.primary,
                 fontSize = 24.sp,
+                lineHeight = 30.sp,
                 fontWeight = FontWeight.Medium,
             )
-            Spacer(Modifier.height(5.dp))
-            Text(slot.title, color = tokens.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(slot.title, color = tokens.textPrimary, style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold)
             Text(
                 slot.font?.name ?: "未选择",
                 color = tokens.textSecondary,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -198,15 +209,17 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enable
 private fun MiuixStudioTask(state: FontStudioUiState) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(40.dp),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = LuoShuSmoothShape(14.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -242,18 +255,19 @@ private fun MiuixSlotCard(
 ) {
     val tokens = LocalMiuixTokens.current
     val font = slotState.font
-    val shape = RoundedCornerShape(24.dp)
+    val shape = LuoShuSmoothShape(24.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(15.dp),
+                    shape = LuoShuSmoothShape(15.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -285,7 +299,7 @@ private fun MiuixSlotCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable(enabled = !busy) { actions.pickSlot(slotState.slot) },
-                shape = RoundedCornerShape(16.dp),
+                shape = LuoShuSmoothShape(16.dp),
                 color = tokens.textPrimary.copy(alpha = .04f),
             ) {
                 Row(
@@ -312,7 +326,7 @@ private fun MiuixSlotCard(
                 Spacer(Modifier.height(9.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(17.dp),
+                    shape = LuoShuSmoothShape(17.dp),
                     color = tokens.textPrimary.copy(alpha = .035f),
                 ) {
                     NativeFontPreview(
@@ -347,9 +361,11 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
     val probe = state.coverage
     val metrics = probe.metrics.takeIf { probe.fontId == fontId }
     Card(
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -360,7 +376,7 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
                 OutlinedButton(
                     onClick = { actions.inspectCoverage(fontId) },
                     enabled = fontId.isNotBlank() && !probe.loading && !state.busy && !state.operationBusy,
-                    shape = RoundedCornerShape(17.dp),
+                    shape = LuoShuSmoothShape(17.dp),
                 ) {
                     if (probe.loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     else Text("检测")
@@ -378,7 +394,7 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
                 if (metrics.missingSample.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = LuoShuSmoothShape(18.dp),
                         color = tokens.textPrimary.copy(alpha = .035f),
                     ) {
                         Text(
@@ -416,18 +432,19 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
     val tokens = LocalMiuixTokens.current
     val direct = state.directApplyFontId
     val selectionReady = state.slots.size == MixSlot.entries.size && state.slots.all { it.font?.valid == true }
-    val shape = RoundedCornerShape(24.dp)
+    val shape = LuoShuSmoothShape(24.dp)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(44.dp),
-                    shape = RoundedCornerShape(15.dp),
+                    shape = LuoShuSmoothShape(15.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -459,7 +476,7 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
                 onClick = { if (direct != null) actions.applyDirect(direct) else actions.startMix() },
                 enabled = !state.loading && !state.busy && !state.operationBusy && selectionReady,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
-                shape = RoundedCornerShape(18.dp),
+                shape = LuoShuSmoothShape(18.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 Icon(
@@ -484,7 +501,7 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
 private fun MiuixStudioNotice(message: String, error: Boolean) {
     val tokens = LocalMiuixTokens.current
     Surface(
-        shape = RoundedCornerShape(24.dp),
+        shape = LuoShuSmoothShape(24.dp),
         color = if (error) MaterialTheme.colorScheme.errorContainer else tokens.cardBackground,
         shadowElevation = 0.dp,
     ) {
@@ -507,7 +524,7 @@ private fun MiuixStudioNotice(message: String, error: Boolean) {
 
 @Composable
 private fun MiuixStudioPill(text: String, color: Color) {
-    Surface(shape = RoundedCornerShape(999.dp), color = color.copy(alpha = .12f)) {
+    Surface(shape = LuoShuSmoothShape(999.dp), color = color.copy(alpha = .12f)) {
         Text(
             text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),

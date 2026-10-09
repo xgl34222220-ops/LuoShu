@@ -28,6 +28,7 @@ internal data class ModuleSnapshot(
     val statusCached: Boolean = false,
     val rootGranted: Boolean = false,
     val installed: Boolean = false,
+    val enabled: Boolean = false,
     val version: String = "检测中…",
     val versionCode: Int = 0,
     val activeFont: String = "default",
@@ -72,16 +73,16 @@ internal data class ModuleSnapshot(
 
     val effectFailureMessage: String
         get() = when {
-            mountFailure.isNotBlank() -> "自挂载失败（${mountFailure}），已安全回滚到系统字体"
+            mountFailure.isNotBlank() -> "自挂载失败（${mountFailure}），系统字体回退状态仍需核实"
             else -> when (verificationReason) {
-                "self-mount-not-visible" -> "开机挂载未完整生效，系统已安全使用默认字体"
-                "self-mount-failed" -> "本次启动的原子挂载事务失败，已完整回滚到系统字体"
+                "self-mount-not-visible" -> "开机挂载未完整生效，默认字体与挂载回退状态仍需核实"
+                "self-mount-failed" -> "本次启动的挂载事务失败，系统字体回退状态仍需核实"
                 "self-mount-invalid-backend" -> "检测到不受支持的挂载后端，洛书没有提交字体负载"
-                "self-mount-manifest-missing" -> "本次启动的字体与配置挂载清单缺失，已回滚到系统字体"
-                "aligned-manifest-missing" -> "字体负载清单缺失，系统已安全使用默认字体"
-                "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，已安全回到系统字体"
-                "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，已完整回滚到系统字体"
-                else -> "开机字体验证失败，系统已安全使用默认字体"
+                "self-mount-manifest-missing" -> "本次启动的字体与配置挂载清单缺失，系统字体状态仍需核实"
+                "aligned-manifest-missing" -> "字体负载清单缺失，系统字体状态仍需核实"
+                "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，系统字体状态仍需核实"
+                "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，系统字体回退状态仍需核实"
+                else -> "开机字体验证失败，默认字体与挂载回退状态仍需核实"
             }
         }
 }
@@ -155,12 +156,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var statusReceived = false
     private var fontStateRevision = 0L
     private var fontTaskTerminalConfirmed = false
+    private val fontTaskTimings = AppFontTaskTimings.registry
     private var watchedTaskId: String = ""
     private var cachedFingerprint: String = ""
     private var fontRequestJob: Job? = null
     private var refreshJob: Job? = null
     private var logsJob: Job? = null
     private var mixConfigJob: Job? = null
+    private val mixConfigLoadGuard = MixConfigLoadGuard()
     private var prewarmJob: Job? = null
     private var fontTaskJob: Job? = null
     private var pendingFontCleanup: Pair<String, String>? = null
@@ -305,14 +308,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     private fun launchFontWork(force: Boolean, showErrors: Boolean) {
         fontRequestJob = viewModelScope.launch {
-            cacheLoadJob.join()
-            initialStatusReady.first { it }
-            if (!snapshot.installed || !snapshot.rootGranted) return@launch
-            val hadFonts = fonts.isNotEmpty()
-            fontLoading = !hadFonts
-            fontRefreshing = hadFonts
-            if (showErrors) fontError = ""
             try {
+                cacheLoadJob.join()
+                initialStatusReady.first { it }
+                if (!snapshot.installed || !snapshot.rootGranted) return@launch
+                val hadFonts = fonts.isNotEmpty()
+                fontLoading = !hadFonts
+                fontRefreshing = hadFonts
+                if (showErrors) fontError = ""
                 when {
                     force -> rebuildFontIndex(showErrors = true)
                     fonts.isEmpty() -> rebuildFontIndex(showErrors = showErrors)
@@ -322,8 +325,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 fontLoading = false
                 fontRefreshing = false
                 fontRequestJob = null
-                if (pendingForceRefresh && currentCoroutineContext().isActive) {
-                    pendingForceRefresh = false
+                val runPendingRefresh = pendingForceRefresh
+                pendingForceRefresh = false
+                if (runPendingRefresh && currentCoroutineContext().isActive && snapshot.installed && snapshot.rootGranted) {
                     refreshFonts(force = true)
                 }
             }
@@ -433,16 +437,23 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         return true
     }
 
-    fun refreshMixConfig() {
-        if (mixState.loading || mixState.busy) return
+    fun ensureMixConfig() = loadMixConfig(force = false)
+
+    fun refreshMixConfig() = loadMixConfig(force = true)
+
+    private fun loadMixConfig(force: Boolean) {
+        if (mixState.busy || operationBusy) return
+        val request = mixConfigLoadGuard.begin(force) ?: return
+        val requestedFontRevision = fontStateRevision
         mixState = mixState.copy(loading = true, error = "")
-        mixConfigJob?.cancel()
         mixConfigJob = viewModelScope.launch {
-            val result = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} mix_config",
-                timeoutMs = 25_000L,
-            )
             try {
+                cacheLoadJob.join()
+                initialStatusReady.first { it }
+                val result = RootShell.exec(
+                    "sh ${RootShell.quote(bridge)} mix_config",
+                    timeoutMs = 25_000L,
+                )
                 if (result.code != 0) error(result.stderr.ifBlank { "组合配置读取失败" })
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "组合配置读取失败"))
@@ -450,7 +461,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 val cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000)
                 val latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000)
                 val digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000)
-                mixState = mixState.copy(
+                val loaded = mixState.copy(
                     loading = false,
                     enabled = data.optBoolean("enabled", false),
                     cjk = data.optString("cjk", mixState.cjk),
@@ -465,7 +476,15 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
                     error = "",
                 )
-                normalizeMixSelections()
+                if (mixConfigLoadGuard.complete(
+                        request,
+                        allowApply = requestedFontRevision == fontStateRevision && !mixState.busy && !operationBusy,
+                    )) {
+                    mixState = loaded
+                    normalizeMixSelections()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 val message = error.message.orEmpty()
                 mixState = if (message.contains("interrupted by close", ignoreCase = true)) {
@@ -473,16 +492,22 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 } else {
                     mixState.copy(loading = false, error = message.ifBlank { "组合配置读取失败" })
                 }
+            } finally {
+                mixConfigLoadGuard.failed(request)
+                mixState = mixState.copy(loading = false)
+                mixConfigJob = null
             }
         }
     }
 
     fun updateMixFont(slot: MixSlot, fontId: String) {
-        mixState = when (slot) {
+        val updated = when (slot) {
             MixSlot.Cjk -> mixState.copy(cjk = fontId, cjkAxes = mapOf("wght" to mixState.cjkWeight.toFloat()))
             MixSlot.Latin -> mixState.copy(latin = fontId, latinAxes = mapOf("wght" to mixState.latinWeight.toFloat()))
             MixSlot.Digit -> mixState.copy(digit = fontId, digitAxes = mapOf("wght" to mixState.digitWeight.toFloat()))
         }
+        if (updated != mixState) mixConfigLoadGuard.edited()
+        mixState = updated
     }
 
     fun updateMixWeight(slot: MixSlot, weight: Int) {
@@ -493,7 +518,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         val cleanTag = tag.trim()
         if (cleanTag.length != 4 || !value.isFinite()) return
         val safe = if (cleanTag == "wght") value.coerceIn(1f, 1000f) else value
-        mixState = when (slot) {
+        val updated = when (slot) {
             MixSlot.Cjk -> mixState.copy(
                 cjkWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.cjkWeight,
                 cjkAxes = mixState.cjkAxes + (cleanTag to safe),
@@ -507,6 +532,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 digitAxes = mixState.digitAxes + (cleanTag to safe),
             )
         }
+        if (updated != mixState) mixConfigLoadGuard.edited()
+        mixState = updated
     }
 
     fun startMix() {
@@ -525,6 +552,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             return
         }
 
+        val timing = fontTaskTimings.begin(FontTaskOperation.MIX)
         val cjkAxes = serializeAxes(mixState.cjkAxes, mixState.cjkWeight)
         val latinAxes = serializeAxes(mixState.latinAxes, mixState.latinWeight)
         val digitAxes = serializeAxes(mixState.digitAxes, mixState.digitWeight)
@@ -554,8 +582,10 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 if (root.optString("status") != "ok") error(root.optString("message", "无法启动复合字体任务"))
                 val taskId = root.optJSONObject("data")?.optString("task").orEmpty()
                 if (taskId.isBlank()) error("复合字体任务 ID 缺失")
-                watchMixTask(taskId)
+                fontTaskTimings.bind(timing, FontTaskOperation.MIX, taskId)
+                watchMixTask(taskId, requestTiming = timing)
             } catch (cancelled: CancellationException) {
+                fontTaskTimings.stopped(timing, cancelled = true, cleanupPending = cancelled.cleanupUnconfirmed())
                 if (cancelled.cleanupUnconfirmed()) {
                     mixState = mixState.copy(busy = true, taskState = "cleanup-pending", message = "字体任务清理尚未确认，请查看日志")
                 } else if (mixState.taskState != "cleanup-pending") {
@@ -563,11 +593,18 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 }
                 throw cancelled
             } catch (error: Throwable) {
+                fontTaskTimings.stopped(timing, cancelled = false, cleanupPending = error.cleanupUnconfirmed())
                 if (error.cleanupUnconfirmed()) {
                     mixState = mixState.copy(busy = true, taskState = "cleanup-pending", message = error.message ?: "字体任务清理尚未确认")
                 } else {
                     finishMixFailure(error.message ?: "复合字体生成失败")
                 }
+            }
+        }.also { job ->
+            // Includes cancellation before the launch body gets its first turn.
+            job.invokeOnCompletion { cause ->
+                fontTaskTimings.stopped(timing, cancelled = cause is CancellationException,
+                    cleanupPending = cause?.cleanupUnconfirmed() == true)
             }
         }
     }
@@ -625,6 +662,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             else { operationBusy = true; operationMessage = message }
             return false
         }
+        fontTaskTimings.cleanup(if (type == "mix") FontTaskOperation.MIX else FontTaskOperation.SWITCH, taskId, confirmed = true)
         if (pendingFontCleanup == pending) pendingFontCleanup = null
         if (type == "mix") mixState = mixState.copy(busy = false, taskState = "cancelled", message = "后台字体任务已清理", error = "")
         else operationBusy = false
@@ -632,6 +670,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private fun rememberCleanupResult(type: String, taskId: String, cleaned: Boolean) {
+        fontTaskTimings.cleanup(if (type == "mix") FontTaskOperation.MIX else FontTaskOperation.SWITCH, taskId, confirmed = cleaned)
         val identity = type to taskId
         if (!cleaned) pendingFontCleanup = identity
         else if (pendingFontCleanup == identity) pendingFontCleanup = null
@@ -640,6 +679,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     fun applyFont(fontId: String) {
         if (operationBusy || mixState.busy) return
         if (!moduleReadyForFontOperation()) return
+        val timing = fontTaskTimings.begin(FontTaskOperation.SWITCH)
         fontStateRevision += 1L
         fontTaskTerminalConfirmed = false
         operationBusy = true
@@ -678,8 +718,10 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 if (startJson.optString("status") != "ok") error(startJson.optString("message", "无法启动字体切换"))
                 val taskId = startJson.optJSONObject("data")?.optString("task").orEmpty()
                 if (taskId.isBlank()) error("字体任务 ID 缺失")
-                watchSwitchTask(taskId, fontId)
+                fontTaskTimings.bind(timing, FontTaskOperation.SWITCH, taskId)
+                watchSwitchTask(taskId, fontId, requestTiming = timing)
             } catch (cancelled: CancellationException) {
+                fontTaskTimings.stopped(timing, cancelled = true, cleanupPending = cancelled.cleanupUnconfirmed())
                 if (cancelled.cleanupUnconfirmed()) {
                     operationBusy = true
                     operationMessage = "字体任务清理尚未确认，请查看日志"
@@ -691,9 +733,16 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 }
                 throw cancelled
             } catch (error: Throwable) {
+                fontTaskTimings.stopped(timing, cancelled = false, cleanupPending = error.cleanupUnconfirmed())
                 operationMessage = error.message ?: "字体应用失败"
                 operationBusy = error.cleanupUnconfirmed()
                 snapshot = snapshot.copy(taskState = if (operationBusy) "cleanup-pending" else "failed", taskMessage = operationMessage)
+            }
+        }.also { job ->
+            // Includes cancellation before the launch body gets its first turn.
+            job.invokeOnCompletion { cause ->
+                fontTaskTimings.stopped(timing, cancelled = cause is CancellationException,
+                    cleanupPending = cause?.cleanupUnconfirmed() == true)
             }
         }
     }
@@ -758,6 +807,18 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     private fun resumePendingTask(state: ModuleSnapshot) {
         if (state.taskId.isBlank() || state.taskId == watchedTaskId) return
+        val timingOperation = when (state.taskType) {
+            "switch" -> FontTaskOperation.SWITCH
+            "mix" -> FontTaskOperation.MIX
+            else -> null
+        }
+        if (timingOperation != null) {
+            val timing = fontTaskTimings.attach(timingOperation, state.taskId)
+            fontTaskTimings.observe(timing, timingOperation, state.taskId, state.taskState)
+            if (state.taskState in setOf("cleanup-pending", "waiting-cleanup")) {
+                fontTaskTimings.cleanup(timingOperation, state.taskId, confirmed = false)
+            }
+        }
         if (state.taskType in setOf("switch", "mix") && state.taskState in setOf("cleanup-pending", "waiting-cleanup")) {
             pendingFontCleanup = state.taskType to state.taskId
             if (state.taskType == "mix") {
@@ -813,8 +874,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    private suspend fun watchSwitchTask(taskId: String, fontId: String) {
+    private suspend fun watchSwitchTask(taskId: String, fontId: String, requestTiming: FontTaskRequest? = null) {
         if (watchedTaskId == taskId) return
+        val timing = requestTiming ?: fontTaskTimings.attach(FontTaskOperation.SWITCH, taskId)
         watchedTaskId = taskId
         fontTaskTerminalConfirmed = false
         operationBusy = true
@@ -830,6 +892,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 },
             ) {
                 waitForTask("switch_status", taskId, timeoutSeconds = 390) { data ->
+                    fontTaskTimings.observe(timing, FontTaskOperation.SWITCH, data.optString("task"), data.optString("state"))
                     operationMessage = data.optString("message", "正在处理字体…")
                     snapshot = snapshot.copy(
                         taskType = "switch",
@@ -877,12 +940,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             persistFontIndex(currentFont = applied)
             persistModuleDisplay()
         } catch (cancelled: CancellationException) {
+            fontTaskTimings.stopped(timing, cancelled = true, cleanupPending = cleanupPending)
             if (!cleanupPending) {
                 operationMessage = "字体任务已取消，后台进程已清理"
                 snapshot = snapshot.copy(taskState = "cancelled", taskMessage = operationMessage)
             }
             throw cancelled
         } catch (error: Throwable) {
+            fontTaskTimings.stopped(timing, cancelled = false, cleanupPending = cleanupPending)
             if (!cleanupPending) operationMessage = error.message ?: "字体应用失败"
             snapshot = snapshot.copy(taskState = if (cleanupPending) "cleanup-pending" else "failed", taskMessage = operationMessage, taskProgress = 100)
         } finally {
@@ -892,8 +957,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    private suspend fun watchMixTask(taskId: String) {
+    private suspend fun watchMixTask(taskId: String, requestTiming: FontTaskRequest? = null) {
         if (watchedTaskId == taskId) return
+        val timing = requestTiming ?: fontTaskTimings.attach(FontTaskOperation.MIX, taskId)
         watchedTaskId = taskId
         fontTaskTerminalConfirmed = false
         mixState = mixState.copy(
@@ -917,6 +983,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 },
             ) {
                 waitForTask("mix_status", taskId, timeoutSeconds = 720) { data ->
+                    fontTaskTimings.observe(timing, FontTaskOperation.MIX, data.optString("task"), data.optString("state"))
                     val state = data.optString("state", "running")
                     val progress = data.optJSONObject("progress")
                         ?.optInt("percent", data.optInt("percent", 0))
@@ -967,9 +1034,11 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             persistFontIndex(currentFont = "mix")
             persistModuleDisplay()
         } catch (cancelled: CancellationException) {
+            fontTaskTimings.stopped(timing, cancelled = true, cleanupPending = cleanupPending)
             if (!cleanupPending) mixState = mixState.copy(busy = false, taskState = "cancelled", message = "字体任务已取消，后台进程已清理", error = "")
             throw cancelled
         } catch (error: Throwable) {
+            fontTaskTimings.stopped(timing, cancelled = false, cleanupPending = cleanupPending)
             if (!cleanupPending) finishMixFailure(error.message ?: "复合字体生成失败")
         } finally {
             if (cleanupPending) mixState = mixState.copy(busy = true, taskState = "cleanup-pending")
@@ -1066,6 +1135,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 loading = false,
                 rootGranted = data.optBoolean("root", true),
                 installed = data.optBoolean("installed", false),
+                enabled = data.optBoolean("enabled", false),
                 version = data.optString("version", "未知版本"),
                 versionCode = data.optInt("versionCode", 0),
                 activeFont = data.optString("active", "default"),

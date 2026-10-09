@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
@@ -46,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -170,6 +173,8 @@ internal fun DeviceAcceptanceGuideDialog(
     onReboot: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val tokens = LocalMiuixTokens.current
+    val dialogShape = LuoShuSmoothShape(36.dp)
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val store = remember(context) { DeviceAcceptanceStore(context) }
@@ -191,16 +196,18 @@ internal fun DeviceAcceptanceGuideDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 800.dp),
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 36.dp else 30.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 14.dp,
+            modifier = Modifier.fillMaxWidth().heightIn(max = 800.dp).luoShuGlassHighlight(dialogShape),
+            shape = dialogShape,
+            color = tokens.glassDialogColor,
+            contentColor = tokens.textPrimary,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(17.dp),
+                        shape = LuoShuSmoothShape(17.dp),
                         color = when {
                             complete -> MaterialTheme.colorScheme.primaryContainer
                             hasBlockingFailure -> MaterialTheme.colorScheme.errorContainer
@@ -328,7 +335,7 @@ private fun DeviceAcceptanceRow(
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = LuoShuSmoothShape(20.dp),
         color = when {
             check.passed -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .48f)
             check.blocking -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .38f)

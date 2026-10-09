@@ -65,6 +65,9 @@ fun HomeRoute(
 
     LaunchedEffect(
         state.moduleInstalled,
+        state.rootGranted,
+        state.loading,
+        state.statusCached,
         deviceDetailsExpanded,
         showTrustDetails,
         showAcceptanceGuide,
@@ -74,7 +77,15 @@ fun HomeRoute(
         trustRefreshGeneration,
     ) {
         if (!state.moduleInstalled || !state.rootGranted || state.loading || state.statusCached) {
-            trustState = DeviceTrustState(loading = false, error = "请先安装洛书模块")
+            trustState = DeviceTrustState(
+                loading = state.loading,
+                error = when {
+                    !state.moduleInstalled -> "请先安装洛书模块"
+                    !state.rootGranted -> "请先授予 Root 权限"
+                    state.loading -> "正在核实模块状态"
+                    else -> "等待读取设备当前状态"
+                },
+            )
             return@LaunchedEffect
         }
 
@@ -92,7 +103,7 @@ fun HomeRoute(
         }
     }
 
-    HomeScreenCompact(
+    HomeScreenMiuix(
         style = style,
         state = state,
         actions = actions,
@@ -123,7 +134,8 @@ fun HomeRoute(
                                 }
                             }
                         },
-                        enabled = !stockScanBusy && !state.taskRunning,
+                        enabled = !stockScanBusy && !state.taskRunning && state.rootGranted &&
+                            !state.loading && !state.statusCached,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
