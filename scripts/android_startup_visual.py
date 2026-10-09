@@ -26,6 +26,8 @@ MATCH_WIDTH = 360
 LOGO_MATCH = .92
 HOME_MATCH = .92
 TRANSITION_MATCH = .72
+SHELL_TEXT_MATCH = .92
+SHELL_TEXT_BOUNDS = ((10, 53, 63, 84), (10, 97, 92, 118))
 SURFACE_SCALES = tuple(index / 200 for index in range(130, 211))
 SURFACE_SHIFT = (20, 80)
 
@@ -93,6 +95,21 @@ class FrameClassifier:
             self.logo = edges(resized(artwork, (168, 168)))
             self.logo_transforms = [(scale, edges(resized(artwork, (round(168 * scale), round(168 * scale)))))
                                     for scale in SURFACE_SCALES if scale != 1]
+        # Separate preparation UI, never a home reference. Two independent
+        # visible text crops plus the opaque remainder prevent blank/title-only
+        # surfaces or a home screenshot from qualifying as this stage.
+        with Image.open(fixtures / f"native-shell-{theme}.png") as shell:
+            self.shell_reference = resized(shell, size)
+        self.shell_patches = []
+        shell_edges = edges(self.shell_reference)
+        self.shell_background_mask = np.zeros((size[1], size[0]), dtype=bool)
+        self.shell_background_mask[round(size[1] * .06):round(size[1] * .94), :] = True
+        for bounds in SHELL_TEXT_BOUNDS:
+            x1, y1, x2, y2 = (round(value * size[index % 2] / (360 if index % 2 == 0 else 780))
+                              for index, value in enumerate(bounds))
+            self.shell_patches.append(((x1, y1, x2, y2), shell_edges[y1:y2, x1:x2]))
+            self.shell_background_mask[y1-2:y2+2, x1-2:x2+2] = False
+        self.shell_background = self.shell_reference[size[1] // 2, size[0] // 2].astype(np.int16)
         self.home_transforms = []
         for scale in SURFACE_SCALES:
             scaled_size = tuple(round(value * scale) for value in size)
@@ -138,11 +155,34 @@ class FrameClassifier:
         y, x = np.unravel_index(scores.argmax(), scores.shape)
         return {"score": float(scores[y, x]), "scale": scale, "dx": int(x + dx1), "dy": int(y + dy1)}
 
+    def shell_match(self, frame: np.ndarray, edge_frame: np.ndarray) -> dict:
+        scores = [match_score(edge_frame[y1:y2, x1:x2], template)
+                  for (x1, y1, x2, y2), template in self.shell_patches]
+        # Normalized edge correlation is contrast invariant. Also require
+        # visible ink, or almost-erased words could pass as a nonblank shell.
+        contrast_ratios = []
+        ink_ratios = []
+        for (x1, y1, x2, y2), _ in self.shell_patches:
+            reference_contrast = np.max(np.abs(self.shell_reference[y1:y2,x1:x2].astype(np.int16) - self.shell_background), axis=2)
+            actual_contrast = np.max(np.abs(frame[y1:y2,x1:x2].astype(np.int16) - self.shell_background), axis=2)
+            reference_peak = float(np.percentile(reference_contrast, 95))
+            contrast_ratios.append(float(np.percentile(actual_contrast,95)) / max(reference_peak,1))
+            ink_threshold = max(12, reference_peak * .25)
+            reference_ink = int(np.sum(reference_contrast >= ink_threshold))
+            ink_ratios.append(int(np.sum(actual_contrast >= ink_threshold)) / max(reference_ink,1))
+        background_pixels = frame[self.shell_background_mask].astype(np.int16)
+        matching_background = float(np.mean(np.max(np.abs(background_pixels - self.shell_background), axis=1) <= 8))
+        return {"text_scores": scores, "text_contrast_ratios": contrast_ratios, "text_ink_ratios": ink_ratios,
+                "background_fraction": matching_background,
+                "matched": min(scores) >= SHELL_TEXT_MATCH and min(contrast_ratios) >= .75
+                    and min(ink_ratios) >= .75 and matching_background >= .999}
+
     def classify(self, frame: np.ndarray) -> dict:
         height, width, _ = frame.shape
         interior = frame[int(height * .06):int(height * .94), int(width * .04):int(width * .96)]
         black_fraction = float(np.mean(interior.max(axis=2) < 8))
         edge_frame = edges(frame)
+        shell = self.shell_match(frame, edge_frame)
         logo_score = match_score(edge_frame[int(height * .32):int(height * .69), int(width * .20):int(width * .80)], self.logo)
         home_match = self.home_transform_match(edge_frame, self.full_home_transform)
         logo_transform = {"score": logo_score, "scale": 1.0}
@@ -175,9 +215,11 @@ class FrameClassifier:
                     state = "home-transition"
                 elif baseline_score >= .95:
                     state = "prelaunch"
+                elif shell["matched"]:
+                    state = "startup-shell"
                 else:
                     state = "unclassified"
-        return {"state": state, "logo_score": round(logo_score, 5),
+        return {"state": state, "shell_match": shell, "logo_score": round(logo_score, 5),
                 "home_scores": {key: round(value, 5) for key, value in home_match["scores"].items()},
                 "home_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in home_match.items() if key != "scores"},
                 "logo_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in logo_transform.items()},
@@ -189,23 +231,34 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
     home_seen = False
     logo_seen = False
     native_logo_seen = False
+    shell_seen = False
     for frame in frames:
         state = frame["state"]
         stamp = f"frame {frame['frame']} at {frame['seconds']:.6f}s"
         if state in ("native-logo", "logo-transition"):
             if home_seen:
                 errors.append(f"Native logo returned after visible home: {stamp}")
+            if shell_seen:
+                errors.append(f"Native logo returned after preparation shell: {stamp}")
             if warm:
                 errors.append(f"Warm same-process resume displayed branded startup: {stamp}")
             logo_seen = True
             native_logo_seen |= state == "native-logo"
+        if state == "startup-shell":
+            if warm:
+                errors.append(f"Warm same-process resume displayed preparation shell: {stamp}")
+            if home_seen:
+                errors.append(f"Preparation shell returned after visible home: {stamp}")
+            if not native_logo_seen:
+                errors.append(f"Preparation shell lacked preceding native-logo coverage: {stamp}")
+            shell_seen = True
         if state in ("home", "home-transition"):
             home_seen = True
         if state == "black-blank":
             errors.append(f"Black blank screen: {stamp}")
         if state == "unclassified":
             errors.append(f"Unclassified visual evidence: {stamp}")
-        if state == "prelaunch" and (logo_seen or home_seen):
+        if state == "prelaunch" and (logo_seen or shell_seen or home_seen):
             errors.append(f"Launch returned to the previous surface: {stamp}")
     if not home_seen:
         errors.append("Recording never established visible real home content")
@@ -214,7 +267,7 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
     if not frames or frames[-1]["state"] != "home":
         errors.append("Recording did not finish with visible real home content")
     return {"passed": not errors, "errors": errors, "home_seen": home_seen,
-            "logo_seen": logo_seen, "native_logo_seen": native_logo_seen,
+            "logo_seen": logo_seen, "native_logo_seen": native_logo_seen, "shell_seen": shell_seen,
             "unclassified_frames": sum(frame["state"] == "unclassified" for frame in frames)}
 
 
@@ -240,7 +293,9 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
     result = {"video": video.name, "sha256": None,
               "scope": "Every original decoded frame and presentation timestamp; real semantic home and native artwork image matching",
               "theme": theme, "warm_same_process": warm,
-              "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH},
+              "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH, "shell_text": SHELL_TEXT_MATCH,
+                             "shell_min_text_contrast_ratio": .75, "shell_min_text_ink_ratio": .75,
+                             "shell_background_fraction": .999, "shell_background_rgb_tolerance": 8},
               "surface_transform_bounds": {"scale_min": min(SURFACE_SCALES), "scale_max": max(SURFACE_SCALES),
                                            "scale_step": .005, "shared_home_translation_pixels": list(SURFACE_SHIFT)}}
     try:
@@ -299,6 +354,12 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
         result["passed"] = False
         result["evidence_error"] = f"{type(error).__name__}: {error}"
         result["errors"].insert(0, f"Visual evidence inspection failed: {result['evidence_error']}")
+    gaps = [later["seconds"] - earlier["seconds"] for earlier, later in zip(frames, frames[1:])]
+    first_home = next((frame["seconds"] for frame in frames if frame["state"] == "home"), None)
+    result["sampling"] = {"max_original_frame_gap_seconds": max(gaps) if gaps else None,
+                          "first_recorded_full_home_pts_seconds": first_home,
+                          "continuous_display_between_frames": "unobserved",
+                          "scope": "All recorded frames checked; this does not establish absence of black frames between recorded timestamps or App-only startup time"}
     result.update(frames_decoded=len(frames), frames=frames)
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result

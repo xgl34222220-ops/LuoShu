@@ -299,7 +299,7 @@ jobs:
           pre-emulator-launch-script: python3 scripts/emulator_system_ready.py begin --output launch-visual-output/system-ready
           script: |
             python3 scripts/emulator_system_ready.py wait --output launch-visual-output/system-ready --serial emulator-5554
-            python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --visual-theme ${{ matrix.theme }} --diagnostic-video-after-baseline-failure
+            python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --diagnostic-video-after-baseline-failure --visual-theme ${{ matrix.theme }}
       - name: Preserve complete snapshot transport diagnostics in job log
         if: always()
         shell: bash

@@ -40,6 +40,75 @@ class StartupVisualTest(unittest.TestCase):
         return [{"frame": index, "seconds": index * .001,
                  **classifier.classify(np.asarray(image))} for index, image in enumerate(images)]
 
+    def test_shell_fixture_provenance_hashes_and_scope(self):
+        folder = Path(__file__).with_name("startup_visual_fixtures")
+        provenance = json.loads((folder / "native-shell-provenance.json").read_text())
+        self.assertEqual({"light", "dark"}, {x["theme"] for x in provenance["references"]})
+        for item in provenance["references"]:
+            self.assertEqual(item["sha256"],hashlib.sha256((folder/item["fixture"]).read_bytes()).hexdigest())
+            self.assertEqual(37896812363,item["runId"])
+            self.assertIn("not home",item["scope"])
+            self.assertGreater(item["ptsSeconds"],0)
+
+    def shell_reference(self, theme):
+        with Image.open(Path(__file__).with_name("startup_visual_fixtures") / f"native-shell-{theme}.png") as image:
+            return image.convert("RGB").copy()
+
+    def test_preparation_shell_is_distinct_from_home_and_requires_both_texts(self):
+        for theme in ("light", "dark"):
+            classifier, home, baseline, splash = self.reference(theme)
+            shell = self.shell_reference(theme)
+            frames = self.frames(classifier, (baseline, splash, shell, home))
+            self.assertEqual([f["state"] for f in frames], ["prelaunch", "native-logo", "startup-shell", "home"])
+            self.assertTrue(timeline_verdict(frames)["passed"])
+            self.assertFalse(timeline_verdict(frames[:-1])["passed"])
+            background = shell.getpixel((180,390))
+            for missing in ((10,53,63,84),(10,97,92,118)):
+                image = shell.copy()
+                ImageDraw.Draw(image).rectangle(missing, fill=background)
+                self.assertEqual("unclassified", classifier.classify(np.asarray(image))["state"])
+
+    def test_shell_cannot_accept_blank_wrong_background_shifted_title_or_extra_content(self):
+        for theme in ("light", "dark"):
+            classifier, home, baseline, splash = self.reference(theme)
+            shell = self.shell_reference(theme)
+            background = shell.getpixel((180,390))
+            variants = [Image.new("RGB", shell.size, background), Image.fromarray(np.roll(np.asarray(shell), 12, axis=1))]
+            wrong = shell.copy()
+            ImageDraw.Draw(wrong).rectangle((0,130,359,730),fill=(70,80,90))
+            variants.append(wrong)
+            content = shell.copy()
+            ImageDraw.Draw(content).rectangle((40,180,320,500),fill=(180,70,90))
+            variants.append(content)
+            for image in variants:
+                self.assertEqual("unclassified", classifier.classify(np.asarray(image))["state"])
+            self.assertEqual("black-blank",classifier.classify(np.zeros((780,360,3),dtype=np.uint8))["state"])
+
+    def test_nearly_erased_shell_text_cannot_pass_normalized_correlation(self):
+        for theme in ("light","dark"):
+            classifier, _, _, _ = self.reference(theme)
+            source = np.asarray(self.shell_reference(theme)).astype(np.float32)
+            background = source[390,180]
+            for fraction in (0,.025,.10,.50):
+                for bounds in (((10,53,63,84),),((10,97,92,118),),((10,53,63,84),(10,97,92,118))):
+                    faded = source.copy()
+                    for x1,y1,x2,y2 in bounds:
+                        faded[y1:y2,x1:x2] = background + (faded[y1:y2,x1:x2]-background)*fraction
+                    self.assertEqual("unclassified",classifier.classify(faded.astype(np.uint8))["state"])
+
+    def test_shell_is_forbidden_on_warm_before_logo_and_after_home(self):
+        classifier, home, baseline, splash = self.reference()
+        shell = self.shell_reference("light")
+        cases = [((baseline,splash,shell,home),True,"Warm same-process"),
+                 ((baseline,shell,home),False,"preceding native-logo"),
+                 ((baseline,splash,home,shell,home),False,"returned after visible home"),
+                 ((baseline,splash,shell,splash,home),False,"returned after preparation shell"),
+                 ((baseline,splash,shell,baseline,home),False,"previous surface")]
+        for images,warm,error in cases:
+            result = timeline_verdict(self.frames(classifier,images),warm=warm)
+            self.assertFalse(result["passed"])
+            self.assertIn(error," ".join(result["errors"]))
+
     def test_real_reference_matches_both_themes_and_single_handoff(self):
         for theme in ("light", "dark"):
             classifier, home, baseline, splash = self.reference(theme)
