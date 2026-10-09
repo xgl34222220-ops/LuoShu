@@ -53,6 +53,17 @@ printf 'umount %s\n' "$dst" >> "$TEST_ROOT/mount.log"
 '''
 
 
+def make_named_font(path, family, points):
+    """make_font with a real family name, as a theme Roboto or theme-store font."""
+    from fontTools.ttLib import TTFont
+    make_font(path, points=points)
+    font = TTFont(path)
+    for record in font['name'].names:
+        if record.nameID in (1, 4, 6, 16):
+            record.string = family
+    font.save(path)
+
+
 class WebViewRouteTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -75,6 +86,7 @@ class WebViewRouteTest(unittest.TestCase):
         self.router.write_bytes(self.stock.read_bytes())
         self.alias = self.fonts / 'MiSansVF_Overlay.ttf'
         self.alias.symlink_to(self.router)
+        self.theme_target = self.root / 'data/system/theme/fonts/Roboto-Regular.ttf'
         self.mountinfo = self.root / 'mountinfo'
         self.mountinfo.write_text('1 0 0:0 / / rw - rootfs rootfs rw\n')
         self.boot = self.root / 'boot_id'
@@ -90,6 +102,7 @@ class WebViewRouteTest(unittest.TestCase):
                     'LUOSHU_WEBVIEW_ROUTE_ALIAS': str(self.alias),
                     'LUOSHU_WEBVIEW_ROUTE_ROUTER': str(self.router),
                     'LUOSHU_WEBVIEW_ROUTE_STOCK': str(self.stock),
+                    'LUOSHU_WEBVIEW_ROUTE_THEME_TARGET': str(self.theme_target),
                     'LUOSHU_WEBVIEW_ROUTE_MOUNTINFO': str(self.mountinfo),
                     'LUOSHU_WEBVIEW_ROUTE_BOOT_ID': str(self.boot)}
         self.stock_bytes = self.stock.read_bytes()
@@ -222,6 +235,106 @@ luoshu_hyperos_full_payload_ensure
         result = subprocess.run(['sh', '-c', script], env=self.env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.router.read_bytes(), self.stock_bytes)
+
+    def link_router_to_theme(self, family='Roboto', points=None, relative=False):
+        """Device layout: theme_webview -> /data/system/theme/fonts/Roboto-Regular.ttf."""
+        self.theme_target.parent.mkdir(parents=True, exist_ok=True)
+        make_named_font(self.theme_target, family, points or (*range(32, 127), 0xA9))
+        self.router.unlink()
+        if relative:
+            self.router.symlink_to('../../theme/fonts/Roboto-Regular.ttf')
+        else:
+            self.router.symlink_to(self.theme_target)
+        return self.theme_target.read_bytes()
+
+    def log_text(self):
+        log = self.module / 'logs/fontswitch.log'
+        return log.read_text() if log.exists() else ''
+
+    def test_symlink_chain_to_theme_engine_roboto_binds_final_target(self):
+        original = self.link_router_to_theme()
+        self.assertNotEqual(original, self.stock_bytes, 'device file is not the ROM stock copy')
+        result = self.run_route('ensure')
+        self.assertEqual(result.returncode, 0, result.stderr + self.log_text())
+        clone = self.module / 'config/hyperos-webview-route/route.ttf'
+        self.assertTrue(self.router.is_symlink(), 'framework router link must stay a link')
+        self.assertEqual(os.readlink(self.router), str(self.theme_target))
+        self.assertEqual(os.stat(self.theme_target).st_ino, os.stat(clone).st_ino)
+        self.assertEqual(self.alias.read_bytes(), self.payload.read_bytes())
+        self.assertIn(f'ro {self.theme_target}', (self.root / 'ro.log').read_text())
+        self.assertTrue(self.journal().read_text().startswith(f'boot-a|{self.theme_target}|'))
+        self.assertIn('theme engine Roboto accepted', self.log_text())
+        self.assertNotIn('router-is-symlink', self.log_text())
+        self.assertEqual(self.run_route('owned').returncode, 0)
+        self.assertEqual(self.run_route('ensure').returncode, 0)
+        self.assertEqual(sum(1 for line in self.mounts() if line.startswith('--bind')), 1)
+        restored = self.run_route('restore')
+        self.assertEqual(restored.returncode, 0, restored.stderr)
+        self.assertEqual(self.theme_target.read_bytes(), original)
+        self.assertTrue(self.router.is_symlink())
+        self.assertFalse(self.journal().exists())
+
+    def test_relative_chain_to_theme_target_is_matched_by_inode(self):
+        self.link_router_to_theme(relative=True)
+        self.assertEqual(self.run_route('ensure').returncode, 0, self.log_text())
+        self.assertTrue(self.journal().read_text().startswith(f'boot-a|{self.theme_target}|'))
+        self.assertEqual(self.theme_target.read_bytes(), self.payload.read_bytes())
+        self.assertEqual(self.run_route('restore').returncode, 0)
+
+    def test_stock_copy_in_theme_dir_is_accepted(self):
+        self.link_router_to_theme()
+        self.theme_target.write_bytes(self.stock_bytes)
+        self.assertEqual(self.run_route('ensure').returncode, 0, self.log_text())
+        self.assertEqual(self.theme_target.read_bytes(), self.payload.read_bytes())
+
+    def test_user_theme_store_font_behind_chain_is_skipped_and_logged(self):
+        original = self.link_router_to_theme(family='FancyThemeSans', points=(*range(32, 127), HAN))
+        self.assertEqual(self.run_route('ensure').returncode, 2)
+        self.assertEqual(self.theme_target.read_bytes(), original)
+        self.assertEqual(self.mounts(), [])
+        self.assertIn('skip theme-font-is-user-theme', self.log_text())
+        self.assertFalse(self.journal().exists())
+
+    def test_oversized_roboto_named_theme_font_is_skipped(self):
+        original = self.link_router_to_theme()
+        result = self.run_route('ensure', LUOSHU_WEBVIEW_ROUTE_THEME_MAX_BYTES='100')
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.theme_target.read_bytes(), original)
+        self.assertEqual(self.mounts(), [])
+
+    def test_chain_to_other_file_loop_or_foreign_mount_is_skipped(self):
+        self.link_router_to_theme()
+        with self.mountinfo.open('a') as stream:
+            stream.write(f'9 1 0:0 / {self.theme_target} ro - bind none ro\n')
+        self.assertEqual(self.run_route('ensure').returncode, 2)
+        self.assertIn('skip target-already-mounted-by-other', self.log_text())
+        self.mountinfo.write_text('1 0 0:0 / / rw - rootfs rootfs rw\n')
+        # Any other final file (e.g. a user path) is never accepted.
+        other = self.root / 'data/other/Roboto-Regular.ttf'
+        other.parent.mkdir(parents=True)
+        make_named_font(other, 'Roboto', tuple(range(32, 127)))
+        self.router.unlink(); self.router.symlink_to(other)
+        self.assertEqual(self.run_route('ensure').returncode, 2)
+        self.assertIn('skip router-target-not-accepted', self.log_text())
+        # Loop / too deep chain.
+        a = self.root / 'data/loop-a'; b = self.root / 'data/loop-b'
+        a.symlink_to(b); b.symlink_to(a)
+        self.router.unlink(); self.router.symlink_to(a)
+        self.assertEqual(self.run_route('ensure').returncode, 2)
+        self.assertIn('skip router-chain-too-deep-or-broken', self.log_text())
+        self.assertEqual(self.mounts(), [])
+
+    def test_theme_bridge_does_not_stack_on_theme_target_bind(self):
+        self.link_router_to_theme()
+        self.assertEqual(self.run_route('ensure').returncode, 0)
+        env = {k: v for k, v in self.env.items() if k != 'LUOSHU_WEBVIEW_ROUTE_THEME_TARGET'}
+        theme = subprocess.run(
+            ['sh', '-c', '. "$MODDIR/common/hyperos_theme_font_bridge.sh"; _htf_active'],
+            env={**env, 'LUOSHU_THEME_FONT_ALIAS': str(self.alias),
+                 'LUOSHU_THEME_FONT_ROUTER': str(self.router),
+                 'LUOSHU_THEME_FONT_TARGET': str(self.theme_target)},
+            capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(theme.returncode, 0, 'theme bridge must not stack on the early theme bind')
 
     def test_theme_bridge_and_cleanup_entrypoints_know_the_route(self):
         self.assertEqual(self.run_route('ensure').returncode, 0)
