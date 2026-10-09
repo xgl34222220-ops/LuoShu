@@ -161,10 +161,10 @@ def record(apk,out):
         adb('shell','cmd','uimode','night','no');adb('shell','input','keyevent','KEYCODE_HOME')
         time.sleep(20);adb('shell','am','force-stop',PACKAGE)
         if adb('shell','pidof',PACKAGE,check=False).stdout.strip():raise RuntimeError('App PID exists before cold launch')
-        adb('push',str(out/'config.pbtxt'),'/data/local/tmp/luoshu-firstframe.pbtxt')
+        adb('push',str(out/'config.pbtxt'),'/data/misc/perfetto-configs/luoshu-firstframe.pbtxt')
         adb('logcat','-c')
         started=time.monotonic()
-        r=adb('shell','perfetto','--background-wait','--txt','-c','/data/local/tmp/luoshu-firstframe.pbtxt',
+        r=adb('shell','perfetto','--background-wait','--txt','-c','/data/misc/perfetto-configs/luoshu-firstframe.pbtxt',
             '-o','/data/misc/perfetto-traces/luoshu-firstframe.pftrace',timeout=20)
         result['trace_start_stdout']=r.stdout.decode(errors='replace')
         pid_text=result['trace_start_stdout'].strip()
