@@ -193,7 +193,11 @@ jobs:
           retention-days: 14
 
   launch-visual:
-    name: Startup visual acceptance API 36
+    name: Startup visual acceptance API 36 (${{ matrix.theme }})
+    strategy:
+      fail-fast: false
+      matrix:
+        theme: [light, dark]
     needs: build
     if: ${{ !cancelled() && needs.build.outputs.apk_built == 'true' }}
     runs-on: ubuntu-24.04
@@ -267,7 +271,9 @@ jobs:
           done
           ls -l /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
-      - name: Verify every real light and dark cold and warm launch frame
+      # Each theme gets its own runner and fresh AVD with identical parameters.
+      # This adds one AVD job, not more preparation time on either emulator.
+      - name: Verify real ${{ matrix.theme }} cold and warm launch frames
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -285,7 +291,7 @@ jobs:
           # retain animations, viewport, deadlines and every-frame rejection.
           # This is not proof of Vulkan causality or a passed startup handoff.
           emulator-options: -no-window -gpu swiftshader -no-snapshot -noaudio -no-boot-anim -camera-back none
-          # Four bounded recordings retain every original frame/timestamp.
+          # Two bounded recordings per theme retain every original frame/timestamp.
           # Re-covering home, black blanks and unknown frames fail acceptance.
           # Boot completion alone can precede SystemUI readiness and a resumed HOME.
           # The hook runs immediately before emulator launch, not before SDK/AVD setup.
@@ -293,7 +299,7 @@ jobs:
           pre-emulator-launch-script: python3 scripts/emulator_system_ready.py begin --output launch-visual-output/system-ready
           script: |
             python3 scripts/emulator_system_ready.py wait --output launch-visual-output/system-ready --serial emulator-5554
-            python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --diagnostic-video-after-baseline-failure
+            python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --snapshot-apk ui-snapshot-apk/luoshu-ui-snapshot.apk --output launch-visual-output --serial emulator-5554 --record-launch --visual-launch-only --snapshot-child-prefetch default --visual-theme ${{ matrix.theme }} --diagnostic-video-after-baseline-failure
       - name: Preserve complete snapshot transport diagnostics in job log
         if: always()
         shell: bash
@@ -342,8 +348,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Startup-Visual-API-36
+          name: LuoShu-Startup-Visual-API-36-${{ matrix.theme }}
           path: launch-visual-output/
           if-no-files-found: warn
           retention-days: 14
+
 

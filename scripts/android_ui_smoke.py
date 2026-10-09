@@ -755,11 +755,15 @@ def assert_single_stage_startup(log: str, pid: str, api_level: int) -> list[str]
 
 class SmokeRun:
     def __init__(self, apk: Path, output: Path, package: str, serial: str | None, snapshot_apk: Path | None = None,
-                 record_launch: bool = False, visual_launch_only: bool = False, snapshot_child_prefetch: str = "zero"):
+                 record_launch: bool = False, visual_launch_only: bool = False, snapshot_child_prefetch: str = "zero",
+                 visual_theme: str | None = None):
         if snapshot_child_prefetch not in ("zero", "default"):
             raise ValueError("Invalid child prefetch mode")
         if snapshot_child_prefetch == "default" and not visual_launch_only:
             raise ValueError("Default child prefetch experiment requires visual-launch-only")
+        if visual_theme not in (None, "light", "dark") or (visual_theme is not None and (not visual_launch_only or snapshot_apk is None)):
+            raise ValueError("An isolated visual theme requires visual-launch-only")
+        self.visual_theme = visual_theme
         self.apk = apk
         self.output = output
         self.package = package
@@ -1283,10 +1287,24 @@ class SmokeRun:
         self.checks.append({"check": name, "passed": True, **evidence})
         print(f"Verified {name}", flush=True)
 
+    def assert_cold_process_absent(self, name: str) -> None:
+        result = self.adb("shell", "pidof", self.package, check=False)
+        evidence = {"role": "cold-process-precondition", "returncode": result.returncode,
+                    "stdout": result.stdout.decode("utf-8", "replace"),
+                    "stderr": result.stderr.decode("utf-8", "replace")}
+        evidence["passed"] = result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip()
+        (self.output / f"{name}-cold-process.json").write_text(json.dumps(evidence, indent=2) + "\n")
+        if not evidence["passed"]:
+            raise RuntimeError("Cold launch requires verified absent target PID; query failure is not absence")
+
     def launch(self, name: str) -> ET.Element:
+        if self.visual_theme is not None and "cold" in name:
+            self.assert_cold_process_absent(name + "-before-baseline")
         if self.record_launch:
             baseline = self.wait_home_baseline(name) if self.visual_launch_only else self.adb("exec-out", "screencap", "-p").stdout
             (self.output / f"{name}-before.png").write_bytes(baseline)
+        if self.visual_theme is not None and "cold" in name:
+            self.assert_cold_process_absent(name + "-after-baseline")
         recording = self.begin_launch_recording(name) if self.record_launch else None
         root = None
         try:
@@ -1952,15 +1970,34 @@ class SmokeRun:
         self.adb("logcat", "-c")
         self.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         self.adb("shell", "wm", "dismiss-keyguard")
-        self.adb("shell", "cmd", "uimode", "night", "no")
+        self.adb("shell", "cmd", "uimode", "night", "yes" if self.visual_theme == "dark" else "no")
         if self.visual_launch_only:
+            if self.visual_theme is not None:
+                # Finish all cold setup BEFORE the only bounded preparation.
+                # Changing night mode recreates Launcher; HOME and force-stop can
+                # also invalidate its captured state. Never repeat these between
+                # a successful preparation and the first measured baseline.
+                self.adb("shell", "am", "force-stop", self.package)
+                self.assert_cold_process_absent("isolated-theme-before-preparation")
+                mode = self.text("shell", "cmd", "uimode", "night")
+                expected = "yes" if self.visual_theme == "dark" else "no"
+                if not re.search(rf"Night mode:\s*{expected}\b", mode, re.IGNORECASE):
+                    raise RuntimeError("Isolated visual theme was not applied: " + mode.strip())
+                config = {"theme": self.visual_theme, "system_night_mode": mode, "api": self.api_level,
+                          "scope": "one fresh AVD; cold then same-process warm; no App prewarm",
+                          "properties": self.text("shell", "getprop"),
+                          "size": self.text("shell", "wm", "size"),
+                          "density": self.text("shell", "wm", "density")}
+                (self.output / "isolated-theme-configuration.json").write_text(json.dumps(config, indent=2) + "\n")
             if self.snapshot_apk is not None:
                 self.prepare_visual_environment()
             errors = []
-            for theme, mode in (("light", "no"), ("dark", "yes")):
-                self.adb("shell", "cmd", "uimode", "night", mode)
-                self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
-                self.adb("shell", "am", "force-stop", self.package)
+            themes = ((self.visual_theme, "yes" if self.visual_theme == "dark" else "no"),) if self.visual_theme else (("light", "no"), ("dark", "yes"))
+            for theme, mode in themes:
+                if self.visual_theme is None:
+                    self.adb("shell", "cmd", "uimode", "night", mode)
+                    self.adb("shell", "input", "keyevent", "KEYCODE_HOME")
+                    self.adb("shell", "am", "force-stop", self.package)
                 for kind in ("cold", "warm"):
                     name = f"{theme}-{kind}-start"
                     previous_pid = None
@@ -2350,9 +2387,13 @@ def main() -> int:
                         help="Require every-frame light/dark cold and same-process warm launch evidence, separately from functional UI regression")
     parser.add_argument("--diagnostic-video-after-baseline-failure", action="store_true",
                         help="After freezing a failed visual run, collect one separate diagnostic-only 30s video; never changes acceptance")
+    parser.add_argument("--visual-theme", choices=("light", "dark"),
+                        help="One theme on a fresh AVD; cold setup precedes the single bounded preparation")
     parser.add_argument("--snapshot-child-prefetch", choices=("zero", "default"), default="zero",
                         help="Public child getter strategy; default is an explicit visual compatibility experiment")
     args = parser.parse_args()
+    if args.visual_theme and (not args.visual_launch_only or args.snapshot_apk is None):
+        parser.error("--visual-theme requires --visual-launch-only and --snapshot-apk")
     if args.visual_launch_only and not args.record_launch:
         parser.error("--visual-launch-only requires --record-launch")
     if args.diagnostic_video_after_baseline_failure and (not args.visual_launch_only or not args.record_launch):
@@ -2368,7 +2409,7 @@ def main() -> int:
     run = SmokeRun(args.apk.resolve(), args.output.resolve(), args.package, args.serial,
                    args.snapshot_apk.resolve() if args.snapshot_apk is not None else None,
                    record_launch=args.record_launch, visual_launch_only=args.visual_launch_only,
-                   snapshot_child_prefetch=args.snapshot_child_prefetch)
+                   snapshot_child_prefetch=args.snapshot_child_prefetch, visual_theme=args.visual_theme)
     error = None
     try:
         run.run()
@@ -2425,3 +2466,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

@@ -3740,5 +3740,87 @@ class DiagnosticVideoHarnessTest(unittest.TestCase):
             self.assertFalse(metadata["passed"]);self.assertEqual(10,metadata["timeout_seconds"])
 
 
+class IsolatedVisualThemeTest(unittest.TestCase):
+    def make_run(self, directory, theme):
+        return SmokeRun(Path("app.apk"), directory, PACKAGE, None, Path("helper.apk"),
+                        record_launch=True, visual_launch_only=True, visual_theme=theme)
+
+    def test_each_theme_setup_precedes_preparation_and_warm_keeps_pid(self):
+        for theme in ("light", "dark"):
+            with self.subTest(theme=theme), tempfile.TemporaryDirectory() as tmp:
+                run = self.make_run(Path(tmp), theme)
+                events = []
+                def adb(*args, **kwargs):
+                    events.append(args)
+                    return subprocess.CompletedProcess(args, 1 if "pidof" in args else 0, b"", b"")
+                run.adb = Mock(side_effect=adb)
+                def text(*args, **kwargs):
+                    if "ro.build.version.sdk" in args: return "36"
+                    if "pidof" in args: return "123"
+                    if "night" in args: return "Night mode: " + ("yes" if theme == "dark" else "no")
+                    return "configuration evidence"
+                run.text = Mock(side_effect=text)
+                run.prepare_visual_environment = Mock(side_effect=lambda: events.append(("prepared",)))
+                run.launch = Mock(side_effect=lambda name: events.append((name,)))
+                run.assert_running = Mock()
+                run.run()
+                prepared = events.index(("prepared",))
+                cold = events.index((theme + "-cold-start",))
+                warm = events.index((theme + "-warm-start",))
+                self.assertEqual([], events[prepared + 1:cold - 1])
+                self.assertEqual(("logcat", "-c"), events[cold - 1])
+                self.assertEqual(1, sum("force-stop" in event for event in events))
+                self.assertEqual(1, sum("night" in event for event in events))
+                self.assertTrue(all(events.index(event) < prepared for event in events if "force-stop" in event or "night" in event))
+                self.assertEqual(1, sum("KEYCODE_HOME" in event for event in events[cold + 1:warm]))
+                self.assertEqual([theme + "-cold-start", theme + "-warm-start"], [c.args[0] for c in run.launch.call_args_list])
+                self.assertTrue(any(c["check"] == theme + "-warm-start-same-process" for c in run.checks))
+                self.assertEqual(theme, json.loads((Path(tmp) / "isolated-theme-configuration.json").read_text())["theme"])
+
+    def test_cold_pid_query_fails_closed_for_live_pid_and_transport_error(self):
+        for rc, stdout, stderr in ((0,b"123",b""),(0,b"",b""),(1,b"",b"device offline"),(2,b"",b"")):
+            with self.subTest(rc=rc, stdout=stdout, stderr=stderr), tempfile.TemporaryDirectory() as tmp:
+                run = self.make_run(Path(tmp), "light")
+                run.adb = Mock(return_value=subprocess.CompletedProcess([],rc,stdout,stderr))
+                with self.assertRaisesRegex(RuntimeError, "verified absent"):
+                    run.assert_cold_process_absent("test")
+                self.assertFalse(json.loads((Path(tmp)/"test-cold-process.json").read_text())["passed"])
+
+    def test_cold_pid_rechecked_after_baseline_before_recording(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.make_run(Path(tmp), "light")
+            run.adb = Mock(side_effect=[subprocess.CompletedProcess([],1,b"",b""), subprocess.CompletedProcess([],0,b"123",b"")])
+            run.wait_home_baseline = Mock(return_value=b"baseline")
+            run.begin_launch_recording = Mock()
+            run.launch_and_capture = Mock()
+            with self.assertRaisesRegex(RuntimeError, "verified absent"):
+                run.launch("light-cold-start")
+            run.wait_home_baseline.assert_called_once_with("light-cold-start")
+            run.begin_launch_recording.assert_not_called()
+            run.launch_and_capture.assert_not_called()
+
+    def test_preparation_failure_never_starts_app(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.make_run(Path(tmp), "dark")
+            run.adb = Mock(return_value=subprocess.CompletedProcess([],1,b"",b""))
+            run.text = Mock(side_effect=["36", "Night mode: yes", "props", "size", "density"])
+            run.prepare_visual_environment = Mock(side_effect=RuntimeError("preparation failed"))
+            run.launch = Mock()
+            with self.assertRaisesRegex(RuntimeError, "preparation failed"): run.run()
+            run.launch.assert_not_called()
+
+    def test_wrong_system_theme_fails_before_preparation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.make_run(Path(tmp), "dark")
+            run.adb = Mock(return_value=subprocess.CompletedProcess([],1,b"",b""))
+            run.text = Mock(side_effect=["36", "Night mode: no"])
+            run.prepare_visual_environment = Mock()
+            run.launch = Mock()
+            with self.assertRaisesRegex(RuntimeError, "theme was not applied"): run.run()
+            run.prepare_visual_environment.assert_not_called()
+            run.launch.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
+
