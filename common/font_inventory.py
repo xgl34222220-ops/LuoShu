@@ -77,6 +77,13 @@ UI_FAMILY_PREFIXES = (
     "oplusosui",
     "oneplus-sans",
     "oneplussans",
+    # HyperOS/MIUI system families (hyper_fonts.xml / miui_fonts.xml).
+    "mipro",
+    "miui",
+    "milanpro",
+    "mi-lanpro",
+    "xiaomisans",
+    "xiaomi-sans",
 )
 DENY_FAMILY_TOKENS = ("serif", "mono", "emoji", "symbol", "icon", "math", "music")
 SANS_SERIF_UI_SUFFIX_TOKENS = {

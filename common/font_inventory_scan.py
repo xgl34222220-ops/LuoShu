@@ -88,6 +88,14 @@ XML_PATTERNS = (
     "fonts_customization.xml",
     "fonts*.xml",
     "font_fallback*.xml",
+    # HyperOS/MIUI keep their active system font configuration next to the AOSP
+    # files (system_ext/etc/hyper_fonts.xml, miui_font_fallback.xml, ...) and the
+    # framework switches between them. "fonts*.xml" never matched these names,
+    # so UI files referenced only there were not recorded as stock slots.
+    "hyper_fonts*.xml",
+    "hyper_font_fallback*.xml",
+    "miui_fonts*.xml",
+    "miui_font_fallback*.xml",
 )
 
 

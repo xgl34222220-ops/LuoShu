@@ -29,6 +29,10 @@ from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
+# Families the HyperOS physical mappers (legacy and full coverage) write aliases for.
+MAPPER_FAMILY_PREFIXES = ("MiSans", "XiaomiSans", "MiLanPro", "Mitype", "MiClock",
+                          "AndroidClock", "Roboto", "GoogleSans", "SourceSansPro",
+                          "NotoSans", "DroidSans")
 
 
 def weight_for_name(name: str) -> int:
@@ -212,6 +216,81 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         # compact fallback explicit in the report; never read the mounted overlay
         # as stock and never silently use an unnormalized raw font on errors.
         return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, None, 'fallback')
+
+
+# Weight/style tokens that may trail an OEM family filename ("OplusOSUI-Medium",
+# "SysSans-Hans-Bold", "GoogleSansText-SemiBold"). Every weight of one family
+# shares one vertical contract on the ROMs inspected; the stem before them is
+# the family a missing slot can borrow its stock line metrics from.
+_FAMILY_WEIGHT_TOKENS = frozenset({
+    'xthin', 'thin', 'hairline', 'extralight', 'ultralight', 'light', 'regular',
+    'normal', 'book', 'medium', 'semibold', 'demibold', 'bold', 'extrabold',
+    'ultrabold', 'black', 'heavy',
+})
+
+
+def family_stem(name: str) -> str:
+    """Filename family key used only to borrow a sibling's stock contract."""
+    stem = Path(name).stem.lower()
+    if stem.isdigit():
+        return '#numeric'  # 100.ttf..900.ttf form one weight family.
+    tokens = [token for token in stem.replace('_', '-').split('-') if token]
+    while len(tokens) > 1 and tokens[-1] in _FAMILY_WEIGHT_TOKENS:
+        tokens.pop()
+    return '-'.join(tokens)
+
+
+def _slot_weight(slot: dict, name: str) -> int:
+    weight = slot.get('weight') if isinstance(slot, dict) else None
+    if type(weight) is int and 1 <= weight <= 1000:
+        return weight
+    return weight_for_name(name)
+
+
+def resolve_slot_contract(data: dict, logical: str) -> tuple[tuple, str | None]:
+    """Stock contract for a slot, borrowing a verified sibling's when it has none.
+
+    A staged physical slot that the stock inventory does not describe (an OTA
+    rename, a partition copy recorded under one path only, a family member the
+    scanner has not refreshed yet) used to fall back to one fixed compact line
+    box (HyperOS) or keep the donor's own hhea/OS2 (ColorOS). Either one moves
+    the baseline and line box away from the ROM's real metrics. The same file
+    name on another partition, else the nearest weight of the same family, is
+    measured stock data for the same design and is used instead. Coverage,
+    routing and bitmap corrections are never borrowed: the result is labelled
+    'stock-sibling', not 'stock'. Without any inventory the old fallback stays.
+    """
+    contract = contract_for_slot(data, logical)
+    if contract[-1] == 'stock':
+        return contract, None
+    slots = (data or {}).get('slots') if isinstance(data, dict) else None
+    if not isinstance(slots, dict) or not slots:
+        return contract, None
+    name = Path(logical).name
+    own = slots.get(logical) if isinstance(slots.get(logical), dict) else {}
+    target_weight = _slot_weight(own, name)
+    stem = family_stem(name)
+    ranked = []
+    for other, entry in slots.items():
+        if (other == logical or not isinstance(other, str) or not isinstance(entry, dict)
+                or entry.get('style', 'normal') != 'normal' or entry.get('faceIndex', 0) != 0):
+            continue
+        other_name = Path(other).name
+        if other_name == name:
+            rank = 0
+        elif family_stem(other_name) == stem:
+            rank = 1
+        else:
+            continue
+        candidate = contract_for_slot(data, other)
+        if candidate[-1] != 'stock':
+            continue
+        distance = abs(_slot_weight(entry, other_name) - target_weight)
+        ranked.append(((rank, distance, not other.startswith('/system/'), other), candidate))
+    if not ranked:
+        return contract, None
+    (_rank, _distance, _system, reference), borrowed = min(ranked, key=lambda item: item[0])
+    return (*borrowed[:-1], 'stock-sibling'), reference
 
 
 def _latin_ink_bottom(font: TTFont) -> int | None:
@@ -791,6 +870,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
+    borrowed = {}
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
@@ -800,7 +880,11 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             raise ValueError('字体暂存槽位指向隔离目录之外')
         if staged_fonts.is_dir():
             for alias in staged_fonts.iterdir():
-                if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
+                # Any staged alias of a mapper family that the physical policy
+                # rejects (italic Roboto written by older mappers, script or
+                # symbol faces) exposes the untouched ROM font instead. It was
+                # previously kept with the donor's own line metrics.
+                if (alias.name.startswith(MAPPER_FAMILY_PREFIXES)
                         and alias.suffix in ('.ttf', '.otf')
                         and not safe_physical_font_name(alias.name)):
                     excluded_aliases.append(alias)
@@ -818,8 +902,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 preserved_aliases.append(stage / part / 'fonts' / name)
                 continue
             if (root / name).exists():
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
-                             contract_for_slot(data, logical)))
+                contract, reference = resolve_slot_contract(data, logical)
+                if reference:
+                    borrowed[logical] = reference
+                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name, contract))
     # Filename discovery serves known boot-repair aliases. Trusted inventory
     # also contains XML UI faces and verified upright text with other OEM names.
     seen = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in jobs}
@@ -874,6 +960,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             fallback += contract[-1] == 'fallback'
             slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
                                 'metricsSource': contract[-1],
+                                **({'metricsReferencePath': borrowed[logical]}
+                                   if logical in borrowed else {}),
                                 'slotSource': 'stock-inventory' if logical in completed_slots else 'physical-mapper',
                                 'referenceUpem': contract[0],
                                 'hhea': list(contract[1:4]),
