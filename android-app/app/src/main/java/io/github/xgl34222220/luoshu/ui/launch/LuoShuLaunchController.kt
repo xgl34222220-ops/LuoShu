@@ -20,12 +20,16 @@ internal class LuoShuLaunchController(private val activity: Activity) {
     private var appearance: Triple<Boolean, Boolean, Boolean>? = null
 
     /** Install before setContent: the first App-controlled frame already has its backdrop. */
-    fun install(startedAt: Long, onComplete: () -> Unit) {
+    fun install(startedAt: Long, onComplete: () -> Unit, nativeShell: Boolean = false) {
         this.startedAt = startedAt
         this.onComplete = onComplete
         val dark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES
-        applyAppearance(dark, pureBlack = false)
+        if (nativeShell) {
+            activity.window.setBackgroundDrawable(ColorDrawable(activity.getColor(io.github.xgl34222220.luoshu.R.color.launch_background)))
+        } else {
+            applyAppearance(dark, pureBlack = false)
+        }
         // Keep the default platform exit. Registering a custom exit listener asks
         // Android to copy its splash into this Activity's decor. A delayed transfer
         // can then cover an already visible home frame, even if removal is immediate.
@@ -75,3 +79,4 @@ internal class LuoShuLaunchController(private val activity: Activity) {
         Log.i("LuoShuStartup", "event=$name elapsedMs=${SystemClock.elapsedRealtime() - startedAt}$detail")
     }
 }
+

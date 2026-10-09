@@ -46,11 +46,65 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
 
     def test_window_gets_the_real_shared_backdrop_before_compose_content(self):
         create = method(self.activity, "override fun onCreate(")
-        self.assertLess(create.index("launchController.install("), create.index("setContent {"))
+        self.assertLess(create.index("launchController.install("), create.index("setContent(content = appContent)"))
         install = method(self.controller, "fun install(")
         self.assertIn("applyAppearance(dark, pureBlack = false)", install)
         appearance = method(self.controller, "fun applyAppearance(")
         self.assertIn("window.setBackgroundDrawable(LuoShuGlassBackdropDrawable(dark, pureBlack))", appearance)
+
+    def test_native_shell_submission_is_separate_from_real_content(self):
+        install = method(self.activity, "private fun installNativeShell(")
+        self.assertIn("policy.onShellSubmitted()", install)
+        for release in ("deliverFirstFrame(", "firstContentDrawn =", "firstFrameCommitted =",
+                        "onContentDrawn()", "requestImportNotificationPermissionWhenReady()"):
+            self.assertNotIn(release, install)
+        handoff = method(self.activity, "private fun scheduleNativeShellHandoff(")
+        self.assertIn("policy.beginContent(softwareFallback)", handoff)
+        self.assertIn("if (isFinishing || isDestroyed", handoff)
+        self.assertLess(handoff.index("root.addView(content"), handoff.index("observeFirstDraw(startedAt)"))
+        self.assertNotIn("SystemClock.elapsedRealtime()\n", handoff)
+        self.assertNotIn("setContentView(", handoff)
+        self.assertIn("setContent(appContent)", handoff)
+        self.assertEqual(self.activity.count("if (openTaskCenter) TaskCenterHost() else LuoShuHost(firstFrameCommitted)"), 1)
+        self.assertIn("private val appContent: @Composable () -> Unit", self.activity)
+        self.assertNotIn("postDelayed", handoff)
+        self.assertIn("nativeShellPolicy?.dispose()", method(self.activity, "override fun onDestroy("))
+        self.assertIn("removeNativeShellObservers()", method(self.activity, "override fun onDestroy("))
+
+    def test_shell_is_opaque_system_color_without_logo_or_glass_shader(self):
+        shell = (JAVA / "ui/launch/LuoShuNativeShellView.kt").read_text()
+        self.assertIn("setBackgroundColor(context.getColor(R.color.launch_background))", shell)
+        self.assertIn('text = "洛书"', shell)
+        self.assertIn('text = "正在准备界面"', shell)
+        for forbidden in ("ic_luoshu_launch", "LuoShuGlassBackdropDrawable", "Shader", "animate", "postDelayed"):
+            self.assertNotIn(forbidden, shell)
+        install = method(self.controller, "fun install(")
+        self.assertIn("if (nativeShell)", install)
+        self.assertIn("ColorDrawable(activity.getColor(", install)
+
+    def test_shell_appearance_is_buffered_and_seeded_into_same_activity_vm(self):
+        observer = method(self.activity, "private fun observeDisplayPreference(")
+        self.assertIn("Phase.SHELL_SUBMITTED", observer)
+        self.assertIn("pendingAppearance = settings", observer)
+        self.assertNotIn("setHighRefreshEnabled", observer)
+        self.assertIn("setHighRefreshEnabled(settings.highRefreshRate)",
+                      method(self.activity, "private fun applyWindowAppearance("))
+        handoff = method(self.activity, "private fun scheduleNativeShellHandoff(")
+        self.assertLess(handoff.index("InitialAppearanceFactory"), handoff.index("val content = ComposeView"))
+        self.assertLess(handoff.index("applyWindowAppearance("), handoff.index("root.addView(content"))
+        model = (JAVA / "ui/appearance/AppearanceViewModel.kt").read_text()
+        self.assertIn("@JvmOverloads constructor", model)
+        self.assertIn("initialValue = initialSettings", model)
+        self.assertIn("return AppearanceViewModel(application, settings) as T", model)
+        for method_name in ("override fun onResume(", "override fun onNewIntent("):
+            self.assertNotIn("installNativeShell", method(self.activity, method_name))
+
+    def test_software_does_not_submit_or_wait_for_preparation_frame(self):
+        install = method(self.activity, "private fun installNativeShell(")
+        self.assertIn("ViewTreeObserver.OnPreDrawListener", install)
+        self.assertIn("if (!decor.isHardwareAccelerated)", install)
+        self.assertIn("softwareFallback = true", install)
+        self.assertRegex(install, r"softwareFallback = true\)\s*false")
 
     def test_native_splash_keeps_default_platform_exit_without_client_transfer(self):
         # A synchronously removed exit callback still transfers a copied logo to
@@ -208,3 +262,4 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
