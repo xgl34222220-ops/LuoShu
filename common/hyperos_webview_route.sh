@@ -5,10 +5,18 @@
 # therefore every app's shared system font map) reads Latin/digits from stock
 # Roboto there and only falls back to the replaced MiSans for Han.
 #
+# When the theme engine has a font component applied, the framework instead
+# leaves theme_webview as a symlink to /data/system/theme/fonts/Roboto-Regular.ttf
+# (SymlinkUtils.doProcessSymlink, theme branch) and system_server maps that file.
+# The chain is resolved (bounded) and only that exact final file is accepted,
+# and only when it is still a Roboto-family Latin file (small, named Roboto);
+# a theme-store font with another name or CJK-sized file is skipped and logged.
+#
 # The later boot-completed theme bridge cannot fix this: system_server has
 # already loaded its font map. This helper runs before zygote, from the legacy
 # HyperOS payload hook, and only when the route file is byte-identical to the
-# visible ROM Roboto (never a user theme font). It binds a private copy of the
+# visible ROM Roboto, or is the theme engine's Roboto described above (never a
+# user-picked theme-store font). It binds a private copy of the
 # active payload's processed Roboto-Regular.ttf over the route, read-only, for
 # this boot only. Nothing on /data is rewritten; restore unmounts only the
 # inode recorded in this boot's journal.
@@ -23,6 +31,9 @@ _lwr_init() {
     LWR_ALIAS="${LUOSHU_WEBVIEW_ROUTE_ALIAS:-/system/fonts/MiSansVF_Overlay.ttf}"
     LWR_ROUTER="${LUOSHU_WEBVIEW_ROUTE_ROUTER:-/data/system/fonts/theme_webview/Roboto-Regular.ttf}"
     LWR_STOCK="${LUOSHU_WEBVIEW_ROUTE_STOCK:-/system/fonts/Roboto-Regular.ttf}"
+    LWR_THEME_TARGET="${LUOSHU_WEBVIEW_ROUTE_THEME_TARGET:-/data/system/theme/fonts/Roboto-Regular.ttf}"
+    # Roboto variants are ~1-2 MiB; theme-store CJK fonts are far larger.
+    LWR_THEME_MAX_BYTES="${LUOSHU_WEBVIEW_ROUTE_THEME_MAX_BYTES:-4194304}"
     LWR_MOUNTINFO="${LUOSHU_WEBVIEW_ROUTE_MOUNTINFO:-/proc/self/mountinfo}"
     LWR_BOOT_ID_FILE="${LUOSHU_WEBVIEW_ROUTE_BOOT_ID:-/proc/sys/kernel/random/boot_id}"
     LWR_PAYLOAD="${LUOSHU_WEBVIEW_ROUTE_PAYLOAD:-$LWR_MODULE/.luoshu-payload/system/fonts/Roboto-Regular.ttf}"
@@ -67,6 +78,36 @@ _lwr_is_mountpoint() {
     awk -v target="$1" '$5 == target {found=1} END {exit !found}' "$LWR_MOUNTINFO" 2>/dev/null
 }
 
+# Follow router symlinks (bounded, relative-aware) to the file actually read.
+_lwr_resolve_final() {
+    _lwr_res=$1
+    _lwr_res_depth=0
+    while [ -L "$_lwr_res" ]; do
+        [ "$_lwr_res_depth" -lt 4 ] || return 1
+        _lwr_res_next=$(readlink "$_lwr_res" 2>/dev/null) || return 1
+        [ -n "$_lwr_res_next" ] || return 1
+        case "$_lwr_res_next" in
+            /*) _lwr_res=$_lwr_res_next ;;
+            *) _lwr_res="${_lwr_res%/*}/$_lwr_res_next" ;;
+        esac
+        _lwr_res_depth=$((_lwr_res_depth + 1))
+    done
+    printf '%s\n' "$_lwr_res"
+}
+
+# The theme engine's Roboto (byte copy of ROM Roboto, or a Roboto-named Latin
+# file) may be covered while a LuoShu font is active; a user theme font not.
+_lwr_theme_is_roboto() {
+    cmp -s "$1" "$LWR_STOCK" 2>/dev/null && return 0
+    _lwr_t_size=$(stat -L -c '%s' "$1" 2>/dev/null)
+    [ -n "$_lwr_t_size" ] && [ "$_lwr_t_size" -le "$LWR_THEME_MAX_BYTES" ] || return 1
+    tr -d '\000' < "$1" 2>/dev/null | tr -c 'A-Za-z' '\n' 2>/dev/null | grep -q 'Roboto'
+}
+
+_lwr_sha() {
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+}
+
 _lwr_lock() {
     mkdir -p "$LWR_MODULE/config" 2>/dev/null || return 1
     _lwr_lock_round=0
@@ -88,15 +129,19 @@ _lwr_unlock() {
     rm -rf "$LWR_LOCK" 2>/dev/null || true
 }
 
-# Journal: boot_id|router|clone|clone-identity
+# Journal: boot_id|bound-target|clone|clone-identity. bound-target is the final
+# file of the router chain (the router itself, or the theme engine's Roboto).
 _lwr_owned_now() {
     [ -s "$LWR_JOURNAL" ] || return 1
-    IFS='|' read -r _lwr_j_boot _lwr_j_router _lwr_j_clone _lwr_j_id < "$LWR_JOURNAL" || return 1
+    IFS='|' read -r _lwr_j_boot _lwr_j_target _lwr_j_clone _lwr_j_id < "$LWR_JOURNAL" || return 1
     [ "$_lwr_j_boot" = "$(_lwr_boot_id)" ] || return 1
-    [ "$_lwr_j_router" = "$LWR_ROUTER" ] || return 1
+    case "$_lwr_j_target" in "$LWR_ROUTER"|"$LWR_THEME_TARGET") ;; *) return 1 ;; esac
+    _lwr_j_final=$(_lwr_resolve_final "$LWR_ROUTER") || return 1
+    [ "$_lwr_j_final" = "$_lwr_j_target" ] || \
+        [ "$(_lwr_identity "$_lwr_j_final")" = "$(_lwr_identity "$_lwr_j_target")" ] || return 1
     case "$_lwr_j_clone" in "$LWR_CACHE/"*.ttf) ;; *) return 1 ;; esac
-    [ -n "$_lwr_j_id" ] && [ "$(_lwr_identity "$LWR_ROUTER")" = "$_lwr_j_id" ] || return 1
-    _lwr_is_mountpoint "$LWR_ROUTER"
+    [ -n "$_lwr_j_id" ] && [ "$(_lwr_identity "$_lwr_j_target")" = "$_lwr_j_id" ] || return 1
+    _lwr_is_mountpoint "$_lwr_j_target"
 }
 
 _lwr_clear_stale() {
@@ -116,31 +161,55 @@ _lwr_ensure_internal() {
         return 2
     fi
     if _lwr_owned_now; then
-        _lwr_log "already bound router=$LWR_ROUTER"
+        _lwr_log "already bound target=$_lwr_j_target"
         return 0
     fi
     # Only the proven ROM route; any other link text is left to the framework.
     [ -L "$LWR_ALIAS" ] || return 2
     [ "$(readlink "$LWR_ALIAS" 2>/dev/null)" = "$LWR_EXPECTED_LINK" ] || return 2
-    if [ -L "$LWR_ROUTER" ]; then
-        _lwr_log "skip router-is-symlink target=$(readlink "$LWR_ROUTER" 2>/dev/null)"
+    _lwr_target=$(_lwr_resolve_final "$LWR_ROUTER") || {
+        _lwr_log 'skip router-chain-too-deep-or-broken'
         return 2
+    }
+    # A relative ROM link may spell the theme path differently; match by inode.
+    if [ "$_lwr_target" != "$LWR_ROUTER" ] && [ "$_lwr_target" != "$LWR_THEME_TARGET" ] && \
+       [ ! -L "$LWR_THEME_TARGET" ] && [ -n "$(_lwr_identity "$LWR_THEME_TARGET")" ] && \
+       [ "$(_lwr_identity "$_lwr_target")" = "$(_lwr_identity "$LWR_THEME_TARGET")" ]; then
+        _lwr_target=$LWR_THEME_TARGET
     fi
-    _lwr_single_font "$LWR_ROUTER" || { _lwr_log 'skip router-missing-or-not-font'; return 2; }
-    if _lwr_is_mountpoint "$LWR_ROUTER"; then
-        _lwr_log 'skip router-already-mounted-by-other'
-        return 2
-    fi
-    # Never cover a theme font: the route must be a byte copy of ROM Roboto.
     _lwr_single_font "$LWR_STOCK" || return 2
-    if ! cmp -s "$LWR_ROUTER" "$LWR_STOCK" 2>/dev/null; then
-        _lwr_log 'skip router-not-stock-copy (theme or other font kept)'
+    case "$_lwr_target" in
+        "$LWR_ROUTER")
+            _lwr_single_font "$LWR_ROUTER" || { _lwr_log 'skip router-missing-or-not-font'; return 2; }
+            # The plain router must be a byte copy of ROM Roboto.
+            if ! cmp -s "$LWR_ROUTER" "$LWR_STOCK" 2>/dev/null; then
+                _lwr_log 'skip router-not-stock-copy (theme or other font kept)'
+                return 2
+            fi
+            ;;
+        "$LWR_THEME_TARGET")
+            [ ! -L "$_lwr_target" ] || return 2
+            _lwr_single_font "$_lwr_target" || { _lwr_log "skip theme-target-missing-or-not-font target=$_lwr_target"; return 2; }
+            if ! _lwr_theme_is_roboto "$_lwr_target"; then
+                _lwr_log "skip theme-font-is-user-theme (not Roboto) target=$_lwr_target size=$(stat -L -c '%s' "$_lwr_target" 2>/dev/null) sha256=$(_lwr_sha "$_lwr_target")"
+                return 2
+            fi
+            ;;
+        *)
+            _lwr_log "skip router-target-not-accepted target=$_lwr_target"
+            return 2
+            ;;
+    esac
+    if _lwr_is_mountpoint "$_lwr_target"; then
+        _lwr_log "skip target-already-mounted-by-other target=$_lwr_target"
         return 2
     fi
     _lwr_single_font "$LWR_PAYLOAD" || { _lwr_log 'skip payload-roboto-missing'; return 2; }
-    if cmp -s "$LWR_PAYLOAD" "$LWR_ROUTER" 2>/dev/null; then
+    if cmp -s "$LWR_PAYLOAD" "$_lwr_target" 2>/dev/null; then
         return 2
     fi
+    [ "$_lwr_target" = "$LWR_ROUTER" ] || \
+        _lwr_log "theme engine Roboto accepted target=$_lwr_target sha256=$(_lwr_sha "$_lwr_target")"
     mkdir -p "$LWR_CACHE" 2>/dev/null || return 1
     _lwr_clone="$LWR_CACHE/route.ttf"
     _lwr_tmp="$LWR_CACHE/.route.$$.tmp"
@@ -149,35 +218,37 @@ _lwr_ensure_internal() {
     cmp -s "$LWR_PAYLOAD" "$_lwr_tmp" 2>/dev/null || { rm -f "$_lwr_tmp"; return 1; }
     chmod 0644 "$_lwr_tmp" 2>/dev/null || true
     if command -v chcon >/dev/null 2>&1; then
-        chcon --reference="$LWR_ROUTER" "$_lwr_tmp" 2>/dev/null || true
+        chcon --reference="$_lwr_target" "$_lwr_tmp" 2>/dev/null || true
     fi
     mv -f "$_lwr_tmp" "$_lwr_clone" || { rm -f "$_lwr_tmp"; return 1; }
     _lwr_clone_id=$(_lwr_identity "$_lwr_clone")
     [ -n "$_lwr_clone_id" ] || return 1
     # Journal before mounting so an interrupted run can still be undone.
-    printf '%s|%s|%s|%s\n' "$(_lwr_boot_id)" "$LWR_ROUTER" "$_lwr_clone" "$_lwr_clone_id" \
+    printf '%s|%s|%s|%s\n' "$(_lwr_boot_id)" "$_lwr_target" "$_lwr_clone" "$_lwr_clone_id" \
         > "$LWR_JOURNAL.tmp.$$" && mv -f "$LWR_JOURNAL.tmp.$$" "$LWR_JOURNAL" || return 1
     chmod 0600 "$LWR_JOURNAL" 2>/dev/null || true
-    if ! mount --bind "$_lwr_clone" "$LWR_ROUTER" 2>/dev/null && \
-       ! mount -o bind "$_lwr_clone" "$LWR_ROUTER" 2>/dev/null; then
+    if ! mount --bind "$_lwr_clone" "$_lwr_target" 2>/dev/null && \
+       ! mount -o bind "$_lwr_clone" "$_lwr_target" 2>/dev/null; then
         rm -f "$LWR_JOURNAL" 2>/dev/null || true
         _lwr_log 'bind failed; route left unchanged'
         return 1
     fi
     # Read-only so a later init/theme copy cannot write into LuoShu's clone.
-    mount -o remount,bind,ro "$LWR_ROUTER" 2>/dev/null || \
-        mount -o bind,remount,ro "$LWR_ROUTER" 2>/dev/null || true
-    if [ "$(_lwr_identity "$LWR_ROUTER")" != "$_lwr_clone_id" ]; then
+    mount -o remount,bind,ro "$_lwr_target" 2>/dev/null || \
+        mount -o bind,remount,ro "$_lwr_target" 2>/dev/null || true
+    if [ "$(_lwr_identity "$_lwr_target")" != "$_lwr_clone_id" ]; then
         _lwr_log 'bind verify failed'
         return 1
     fi
-    _lwr_log "bound payload Roboto over stock route router=$LWR_ROUTER"
+    _lwr_log "bound payload Roboto over route target=$_lwr_target router=$LWR_ROUTER"
     return 0
 }
 
 _lwr_restore_internal() {
     [ -s "$LWR_JOURNAL" ] || { rm -rf "$LWR_CACHE" 2>/dev/null || true; return 0; }
     IFS='|' read -r _lwr_r_boot _lwr_r_router _lwr_r_clone _lwr_r_id < "$LWR_JOURNAL"
+    # Only the two accepted route files are ever unmounted from a journal.
+    case "$_lwr_r_router" in "$LWR_ROUTER"|"$LWR_THEME_TARGET") ;; *) _lwr_r_router= ;; esac
     if [ "$_lwr_r_boot" = "$(_lwr_boot_id)" ] && [ -n "$_lwr_r_router" ] && [ -n "$_lwr_r_id" ]; then
         _lwr_r_round=0
         # Pop only layers whose visible inode is LuoShu's recorded clone.

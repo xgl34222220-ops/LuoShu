@@ -21,6 +21,7 @@ _htf_active() {
     # router; stacking a second per-namespace view adds nothing.
     if [ -f "$MODDIR/common/hyperos_webview_route.sh" ] && \
        MODDIR="$MODDIR" LUOSHU_WEBVIEW_ROUTE_ROUTER="$HTF_ROUTER" \
+       LUOSHU_WEBVIEW_ROUTE_THEME_TARGET="$HTF_THEME_TARGET" \
        sh "$MODDIR/common/hyperos_webview_route.sh" owned >/dev/null 2>&1; then
         return 1
     fi
