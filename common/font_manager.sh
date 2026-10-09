@@ -437,7 +437,11 @@ case "${1:-}:${2:-}" in
         if stock_scan_available; then
             _manager_out=$(sh "$CURRENT_MANAGER" "$@")
             _manager_rc=$?
-            printf '%s\n' "$_manager_out" | sed 's/"nativeAvailable":false/"nativeAvailable":true/g'
+            # Android mksh has no printf builtin: passing a 1000-row list as an argv
+            # to toybox printf can fail with E2BIG. Stream it through a here-doc.
+            sed 's/"nativeAvailable":false/"nativeAvailable":true/g' <<LUOSHU_MANAGER_OUTPUT
+$_manager_out
+LUOSHU_MANAGER_OUTPUT
             exit "$_manager_rc"
         fi
         ;;

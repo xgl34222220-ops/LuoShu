@@ -36,6 +36,7 @@ python3 "$ROOT/scripts/apk_packaging_metadata_test.py"
 python3 "$ROOT/scripts/android_launch_source_test.py"
 sh "$ROOT/scripts/font_next_transaction_test.sh"
 python3 "$ROOT/scripts/font_live_switch_test.py"
+python3 "$ROOT/scripts/inventory_output_contract_test.py" >/dev/null
 sh "$ROOT/scripts/runtime_paths_test.sh"
 sh "$ROOT/scripts/installer_bootstrap_test.sh"
 python3 "$ROOT/scripts/task_scope_legacy_test.py"
