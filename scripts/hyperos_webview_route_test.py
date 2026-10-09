@@ -236,10 +236,18 @@ luoshu_hyperos_full_payload_ensure
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.router.read_bytes(), self.stock_bytes)
 
-    def link_router_to_theme(self, family='Roboto', points=None, relative=False):
-        """Device layout: theme_webview -> /data/system/theme/fonts/Roboto-Regular.ttf."""
+    def link_router_to_theme(self, family='Roboto', points=None, relative=False, pad_to=0):
+        """Device layout: theme_webview -> /data/system/theme/fonts/Roboto-Regular.ttf.
+
+        pad_to grows the tiny fixture to a real font's size (trailing bytes keep
+        the sfnt header), so it is not mistaken for the DEFAULT-theme placeholder.
+        """
         self.theme_target.parent.mkdir(parents=True, exist_ok=True)
         make_named_font(self.theme_target, family, points or (*range(32, 127), 0xA9))
+        size = self.theme_target.stat().st_size
+        if pad_to > size:
+            with self.theme_target.open('ab') as stream:
+                stream.write(b'\0' * (pad_to - size))
         self.router.unlink()
         if relative:
             self.router.symlink_to('../../theme/fonts/Roboto-Regular.ttf')
@@ -288,15 +296,46 @@ luoshu_hyperos_full_payload_ensure
         self.assertEqual(self.theme_target.read_bytes(), self.payload.read_bytes())
 
     def test_user_theme_store_font_behind_chain_is_skipped_and_logged(self):
-        original = self.link_router_to_theme(family='FancyThemeSans', points=(*range(32, 127), HAN))
+        original = self.link_router_to_theme(family='FancyThemeSans', points=(*range(32, 127), HAN),
+                                             pad_to=200000)
         self.assertEqual(self.run_route('ensure').returncode, 2)
         self.assertEqual(self.theme_target.read_bytes(), original)
         self.assertEqual(self.mounts(), [])
         self.assertIn('skip theme-font-is-user-theme', self.log_text())
         self.assertFalse(self.journal().exists())
 
+    def make_placeholder(self, size=8936, magic=b'\x00\x01\x00\x00'):
+        """HyperOS DEFAULT-theme "empty font theme": tiny sfnt, nearly no glyphs."""
+        self.link_router_to_theme()
+        data = magic + bytes(range(256)) * ((size // 256) + 1)
+        self.theme_target.write_bytes(data[:size])
+        return self.theme_target.read_bytes()
+
+    def test_tiny_placeholder_theme_font_is_accepted_and_logged(self):
+        self.make_placeholder()
+        self.assertEqual(self.run_route('ensure').returncode, 0, self.log_text())
+        self.assertEqual(self.theme_target.read_bytes(), self.payload.read_bytes())
+        self.assertIn('theme engine placeholder accepted', self.log_text())
+        self.assertIn('size=8936', self.log_text())
+        self.assertTrue(self.journal().read_text().startswith(f'boot-a|{self.theme_target}|'))
+
+    def test_tiny_non_sfnt_theme_file_is_skipped(self):
+        original = self.make_placeholder(magic=b'PK\x03\x04')
+        self.assertEqual(self.run_route('ensure').returncode, 2)
+        self.assertEqual(self.theme_target.read_bytes(), original)
+        self.assertEqual(self.mounts(), [])
+        self.assertNotIn('placeholder accepted', self.log_text())
+
+    def test_large_non_roboto_theme_font_is_still_skipped(self):
+        original = self.make_placeholder(size=200000)
+        self.assertEqual(self.run_route('ensure').returncode, 2)
+        self.assertEqual(self.theme_target.read_bytes(), original)
+        self.assertEqual(self.mounts(), [])
+        self.assertIn('skip theme-font-is-user-theme', self.log_text())
+        self.assertNotIn('placeholder accepted', self.log_text())
+
     def test_oversized_roboto_named_theme_font_is_skipped(self):
-        original = self.link_router_to_theme()
+        original = self.link_router_to_theme(pad_to=70000)
         result = self.run_route('ensure', LUOSHU_WEBVIEW_ROUTE_THEME_MAX_BYTES='100')
         self.assertEqual(result.returncode, 2)
         self.assertEqual(self.theme_target.read_bytes(), original)
