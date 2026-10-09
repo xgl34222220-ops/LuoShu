@@ -18,6 +18,7 @@ fi
 
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/axes-mix"
+PREPARED_CACHE="$CACHE_ROOT/prepared-v1"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 BASE_ENGINE="$MODDIR/common/font_mix.sh"
 INSTANCE_PY="$MODDIR/common/font_instance.py"
@@ -72,13 +73,34 @@ clear_worker_pid() {
     fi
 }
 
+# Cheap liveness hint only: a positive kill -0 can mean "maybe still running"
+# (PID reuse), never "finished". Completion is always proved by the full
+# supervisor identity check below, which the loop also runs periodically.
+_wcc_pid_running() {
+    _wcc_pid=$(luoshu_pid_value "$1" 2>/dev/null)
+    case "$_wcc_pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_wcc_pid" 2>/dev/null
+}
+
 wait_child_cleanup() {
     _wcc_task="$1"
     _wcc_engine="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix_worker.pid"
     _wcc_monitor="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix-monitor-$_wcc_task.pid"
+    # The monitor commits the next-boot payload (HyperOS/ColorOS slot metrics,
+    # transaction, live mount) before it exits; that is real work and can take
+    # far longer than the old 300 x 0.1 s poll budget. Bound by wall time, and
+    # keep the expensive Python identity probe out of the 10 Hz loop so it does
+    # not compete for CPU with the commit being waited on.
+    _wcc_limit="${LUOSHU_MIX_CHILD_CLEANUP_TIMEOUT:-600}"
+    case "$_wcc_limit" in ''|*[!0-9]*) _wcc_limit=600 ;; esac
+    _wcc_started=$(date +%s 2>/dev/null)
+    case "$_wcc_started" in ''|*[!0-9]*) _wcc_started=0 ;; esac
     _wcc_tries=0
-    while [ "$_wcc_tries" -lt 300 ]; do
-        if ! luoshu_task_pid_alive "$_wcc_engine" "$_wcc_task" && \
+    while :; do
+        if [ $((_wcc_tries % 10)) -ne 0 ] && \
+           { _wcc_pid_running "$_wcc_engine" || _wcc_pid_running "$_wcc_monitor"; }; then
+            :
+        elif ! luoshu_task_pid_alive "$_wcc_engine" "$_wcc_task" && \
            ! luoshu_task_pid_alive "$_wcc_monitor" "$_wcc_task.monitor"; then
             sh "$(luoshu_scope_runner)" cleaned "$_wcc_engine" "$_wcc_task" || return 125
             if [ -f "$_wcc_monitor.cleanup.json" ] || [ -f "$_wcc_monitor.owner.json" ]; then
@@ -86,10 +108,12 @@ wait_child_cleanup() {
             fi
             return 0
         fi
-        sleep .1
+        _wcc_now=$(date +%s 2>/dev/null)
+        case "$_wcc_now" in ''|*[!0-9]*) _wcc_now=$((_wcc_started + _wcc_tries / 5)) ;; esac
+        [ $((_wcc_now - _wcc_started)) -lt "$_wcc_limit" ] || return 124
+        sleep .2 2>/dev/null || sleep 1
         _wcc_tries=$((_wcc_tries + 1))
     done
-    return 124
 }
 
 task_worker_alive() {
@@ -270,6 +294,99 @@ run_instance() {
     return 0
 }
 
+prepared_hash_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        _phf_result=$(sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_phf_result%% *}"
+    elif command -v toybox >/dev/null 2>&1; then
+        _phf_result=$(toybox sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_phf_result%% *}"
+    else
+        cksum "$1" 2>/dev/null | awk '{print $1 "-" $2}'
+    fi
+}
+
+prepared_hash_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | { IFS=' ' read -r _pht_digest _pht_rest && printf '%s\n' "$_pht_digest"; }
+    elif command -v toybox >/dev/null 2>&1; then
+        toybox sha256sum | { IFS=' ' read -r _pht_digest _pht_rest && printf '%s\n' "$_pht_digest"; }
+    else
+        cksum | awk '{print $1 "-" $2}'
+    fi
+}
+
+prune_prepared_cache() {
+    # A few recent instances cover back-and-forth switching; cap storage too.
+    _ppc_count=0; _ppc_total_kb=0
+    for _ppc_old in $(ls -1t "$PREPARED_CACHE"/*.font 2>/dev/null); do
+        _ppc_count=$((_ppc_count + 1))
+        _ppc_kb=$(du -k "$_ppc_old" 2>/dev/null | awk '{print $1}')
+        case "$_ppc_kb" in ''|*[!0-9]*) _ppc_kb=0 ;; esac
+        _ppc_total_kb=$((_ppc_total_kb + _ppc_kb))
+        [ "$_ppc_count" -le 6 ] && [ "$_ppc_total_kb" -le 393216 ] && continue
+        rm -f "$_ppc_old" "${_ppc_old}.sha256" 2>/dev/null || true
+    done
+}
+
+# Variable/TTC sources are materialized by font_instance.py, which takes about a
+# minute for a large CJK variable font on a phone. The result depends only on the
+# source bytes, the requested axes/weight, the generator and (for collections)
+# the role's face choice, so identical requests reuse one verified instance:
+# across roles of the same request and across repeated switches. Identical
+# instance bytes also keep the downstream composite cache key stable.
+prepare_instance_cached() {
+    _pic_source="$1"; _pic_destination="$2"; _pic_role="$3"; _pic_axes="$4"; _pic_format="$5"
+    _pic_digest=$(prepared_hash_file "$_pic_source")
+    _pic_generator=$(prepared_hash_file "$INSTANCE_PY")
+    _pic_face_role=''
+    [ "$_pic_format" != TTC ] || _pic_face_role="$_pic_role"
+    _pic_key=''
+    if [ -n "$_pic_digest" ] && [ -n "$_pic_generator" ]; then
+        _pic_key=$(printf 'luoshu-prepared-instance-v1\000%s\000%s\000%s\000%s\000%s' \
+            "$_pic_digest" "$_pic_face_role" "$(safe_weight "$_pic_axes")" "$_pic_axes" "$_pic_generator" | prepared_hash_text)
+    fi
+    if [ -n "$_pic_key" ]; then
+        _pic_cached="$PREPARED_CACHE/${_pic_key}.font"
+        _pic_receipt="${_pic_cached}.sha256"
+        if [ -s "$_pic_cached" ] && [ ! -L "$_pic_cached" ] && [ -s "$_pic_receipt" ]; then
+            _pic_expected=$(head -n1 "$_pic_receipt" 2>/dev/null | tr -d '\r\n')
+            if [ -n "$_pic_expected" ] && [ "$(prepared_hash_file "$_pic_cached")" = "$_pic_expected" ] &&
+               font_validate "$_pic_cached" text; then
+                rm -f "$_pic_destination" 2>/dev/null || true
+                if ln "$_pic_cached" "$_pic_destination" 2>/dev/null || cp -f "$_pic_cached" "$_pic_destination" 2>/dev/null; then
+                    touch "$_pic_cached" 2>/dev/null || true
+                    printf '[%s] [MIX-PREPARE] reused instance role=%s\n' \
+                        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_pic_role" >> "$LOG_FILE" 2>/dev/null || true
+                    return 0
+                fi
+            fi
+            # Unproven or damaged entries are rebuilt, never trusted by name.
+            rm -f "$_pic_cached" "$_pic_receipt" 2>/dev/null || true
+        fi
+    fi
+    run_instance "$_pic_source" "$_pic_destination" "$_pic_role" "$_pic_axes" || return 1
+    [ -n "$_pic_key" ] || return 0
+    # Publish only when the inputs did not change while Python was running.
+    [ "$(prepared_hash_file "$_pic_source")" = "$_pic_digest" ] || return 0
+    [ "$(prepared_hash_file "$INSTANCE_PY")" = "$_pic_generator" ] || return 0
+    font_validate "$_pic_destination" text || return 1
+    mkdir -p "$PREPARED_CACHE" 2>/dev/null || return 0
+    _pic_tmp="${_pic_cached}.tmp.$$"
+    rm -f "$_pic_tmp" "${_pic_tmp}.sha256" 2>/dev/null || true
+    cp -f "$_pic_destination" "$_pic_tmp" 2>/dev/null || { rm -f "$_pic_tmp"; return 0; }
+    _pic_output=$(prepared_hash_file "$_pic_tmp")
+    if [ -n "$_pic_output" ] && [ "$(prepared_hash_file "$_pic_destination")" = "$_pic_output" ] &&
+       printf '%s\n' "$_pic_output" > "${_pic_tmp}.sha256" 2>/dev/null; then
+        chmod 0644 "$_pic_tmp" "${_pic_tmp}.sha256" 2>/dev/null || true
+        mv -f "$_pic_tmp" "$_pic_cached" 2>/dev/null && mv -f "${_pic_tmp}.sha256" "$_pic_receipt" 2>/dev/null || \
+            rm -f "$_pic_cached" "$_pic_receipt" 2>/dev/null || true
+    fi
+    rm -f "$_pic_tmp" "${_pic_tmp}.sha256" 2>/dev/null || true
+    prune_prepared_cache
+    return 0
+}
+
 prepare_slot() {
     _role="$1"
     _family="$2"
@@ -283,7 +400,7 @@ prepare_slot() {
     _destination="$_root/fonts/${_internal}-Regular.ttf"
     mkdir -p "${_destination%/*}" 2>/dev/null || return 1
     if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_source" "$_destination" "$_role" "$_axes" || return 1
+        prepare_instance_cached "$_source" "$_destination" "$_role" "$_axes" "$FONT_CHECK_FORMAT" || return 1
     else
         cp -f "$_source" "$_destination" 2>/dev/null || return 1
         chmod 0644 "$_destination" 2>/dev/null || true

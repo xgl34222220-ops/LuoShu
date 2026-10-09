@@ -239,6 +239,46 @@ class LayoutDiagnosticTest(unittest.TestCase):
         self.assertGreater(report["selection"]["omittedCount"], 0)
         self.assertEqual(report["profileCount"], 1)
 
+    def test_selection_prefers_rom_latin_routes_over_payload_only_aliases(self):
+        # Uploaded HyperOS report: 11 of 24 extra slots went to 100..900.ttf /
+        # GoogleSans aliases absent from the ROM, omitting MiSansLatinVF/Roboto.
+        for n in range(30):
+            make_font(self.root / f"system/fonts/MiClock{n}.ttf")
+        for weight in range(100, 1000, 100):
+            os.link(self.active, self.active.with_name(f"{weight}.ttf"))
+        for name in ("MiSansLatinVF.ttf", "Roboto-Regular.ttf"):
+            make_font(self.root / "system/fonts" / name)
+            os.link(self.active, self.active.with_name(name))
+        report = self.collect()
+        chosen = [slot["slot"] for slot in report["slots"]]
+        self.assertEqual(chosen[0], self.logical)
+        self.assertIn("/system/fonts/MiSansLatinVF.ttf", chosen[1:3])
+        self.assertIn("/system/fonts/Roboto-Regular.ttf", chosen[1:3])
+        self.assertFalse([slot for slot in chosen if slot.endswith("00.ttf")])
+        self.assertEqual(report["selection"]["selectedCount"], 25)
+
+    def test_symlink_route_reports_only_system_font_target(self):
+        theme = self.root / "data/system/theme/fonts/Roboto-Regular.ttf"
+        make_font(theme, 640)
+        overlay = self.root / "system/fonts/MiSansVF_Overlay.ttf"
+        overlay.symlink_to(os.path.relpath(theme, overlay.parent))
+        private = self.root / "data/private/user-font.ttf"
+        make_font(private, 600)
+        other = self.root / "system/fonts/Roboto-Medium.ttf"
+        other.symlink_to(os.path.relpath(private, other.parent))
+        report = self.collect()
+        slots = {slot["slot"]: slot for slot in report["slots"]}
+        route = slots["/system/fonts/MiSansVF_Overlay.ttf"]["mountedRoute"]
+        self.assertEqual(route, {"status": "symlink", "target": "/data/system/theme/fonts/Roboto-Regular.ttf",
+                                 "targetIsRegularFile": True})
+        profile = slots["/system/fonts/MiSansVF_Overlay.ttf"]["mountedInCollector"]["profile"]
+        stock_like = next(p for p in report["profiles"] if p["id"] == profile)
+        self.assertEqual(stock_like["metrics"]["head"]["yMax"], 640)
+        self.assertEqual(slots["/system/fonts/Roboto-Medium.ttf"]["mountedRoute"]["target"], "other")
+        self.assertNotIn("mountedRoute", slots[self.logical])
+        self.assertNotIn("/data/private", json.dumps(report))
+        self.assertNotIn(str(self.root), json.dumps(report))
+
 
 class MixTimingDiagnosticTest(unittest.TestCase):
     def setUp(self):
