@@ -71,6 +71,12 @@ UI_FAMILY_PREFIXES = (
     "oppo-sans",
     "opposans",
     "coloros-sans",
+    # ColorOS 15/16 and OxygenOS ship their own UI/display families next to
+    # SysSans/SysFont (OplusOSUI for large numerals, OnePlus Sans on OxygenOS).
+    "oplus-osui",
+    "oplusosui",
+    "oneplus-sans",
+    "oneplussans",
 )
 DENY_FAMILY_TOKENS = ("serif", "mono", "emoji", "symbol", "icon", "math", "music")
 SANS_SERIF_UI_SUFFIX_TOKENS = {
@@ -97,7 +103,7 @@ HEURISTIC_PATTERNS = (
     re.compile(r"^(?:Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia)\.(?:ttf|otf|ttc|otc)$", re.I),
     re.compile(r"^(?:100|200|300|350|400|500|600|700|800|900)\.ttf$", re.I),
     re.compile(
-        r"^(?:Sys(?:Sans|Font)|OppoSans|Opposans|OPSans|OPlusSans|GoogleSans(?:Text|Flex)?|"
+        r"^(?:Sys(?:Sans|Font)|OppoSans|Opposans|OPSans|OPlusSans|OplusOSUI|OnePlusSans|GoogleSans(?:Text|Flex)?|"
         r"Roboto(?:Flex|Static)?|SourceSansPro|DIN(?:Pro|Condensed)?|OPPODIN(?:Condensed)?)[A-Za-z0-9_.-]*"
         r"\.(?:ttf|otf|ttc|otc)$",
         re.I,
@@ -715,6 +721,41 @@ def _generic_font_name_candidate(name: str) -> bool:
     return True
 
 
+# Digit/display faces may legitimately be named "clock" (lock screen, AOD,
+# widgets). Everything else denied for generic text slots stays denied.
+NUMERIC_DISPLAY_ALLOWED_TOKENS = ("clock",)
+# A numeric/display face carries the ASCII digits plus a small Latin/punctuation
+# repertoire. Script fallbacks carry hundreds of script code points and stay out.
+NUMERIC_DISPLAY_MAX_EXTENDED = 48
+
+
+def _numeric_display_name_candidate(name: str) -> bool:
+    lowered = name.lower()
+    if any(token in lowered for token in GENERIC_DENY_STYLE_TOKENS):
+        return False
+    return not any(token in lowered for token in GENERIC_DENY_FILE_TOKENS
+                   if token not in NUMERIC_DISPLAY_ALLOWED_TOKENS)
+
+
+def _numeric_display_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
+    """Accept an upright digit/display face (e.g. OEM lock-screen numerals).
+
+    These faces fail the full-alphabet gate below, so their digits used to stay
+    in the stock font after a switch. Admission is still by measured coverage:
+    all ten ASCII digits, no Han, and almost no script-specific code points.
+    Monospace, symbol, emoji, icon, serif and script faces remain excluded.
+    """
+    if not _numeric_display_name_candidate(name):
+        return False
+    coverage = metrics.get("coverage") if isinstance(metrics, dict) else None
+    if not valid_coverage(coverage):
+        return False
+    digits = coverage.get("digitCount")
+    extended = coverage.get("extendedCount")
+    return (type(digits) is int and digits == 10 and type(extended) is int
+            and extended <= NUMERIC_DISPLAY_MAX_EXTENDED and int(coverage.get("hanCount", 0)) == 0)
+
+
 def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
     """Accept an upright stock text face by measured coverage, not by OEM filename.
 
@@ -722,7 +763,7 @@ def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
     fonts.xml. Specialized/icon/emoji/mono/italic/script-fallback faces stay stock.
     """
     if not _generic_font_name_candidate(name):
-        return False
+        return _numeric_display_slot_candidate(name, metrics)
     coverage = metrics.get("coverage")
     if not valid_coverage(coverage):
         return False
@@ -731,7 +772,8 @@ def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
     total = int(coverage.get("unicodeCount", 0))
     # Measured coverage is the gate: substantial Han coverage or a complete
     # Latin alphabet. No OEM filename allow-list is required.
-    return han >= 512 or (latin >= 52 and total >= 96)
+    return (han >= 512 or (latin >= 52 and total >= 96)
+            or _numeric_display_slot_candidate(name, metrics))
 
 
 def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]) -> None:
@@ -755,7 +797,8 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
             # This is important on ROMs with hundreds of Noto script fallbacks:
             # they are recorded by the install path probe, but are never promoted
             # to replaceable global UI slots or read during a policy refresh.
-            if not _generic_font_name_candidate(actual.name):
+            if not (_generic_font_name_candidate(actual.name)
+                    or _numeric_display_name_candidate(actual.name)):
                 continue
             try:
                 stock_file = _stock_font_path(root, actual, roots)

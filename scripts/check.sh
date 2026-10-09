@@ -278,6 +278,8 @@ sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
 sh "$ROOT/scripts/module_layout_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
+python3 "$ROOT/scripts/font_coverage_speed_test.py"
+sh "$ROOT/scripts/coloros_legacy_coverage_test.sh"
 python3 "$ROOT/scripts/safe_switch_cache_identity_test.py"
 python3 "$ROOT/scripts/safe_switch_timing_test.py"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)

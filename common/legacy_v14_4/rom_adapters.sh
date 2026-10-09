@@ -112,74 +112,155 @@ _coloros_extra_names() {
     echo "SysSans-En-Bold SysSans-En-Light SysSans-En-Medium SysSans-En-Thin SysSans-En-Black SysFont-Bold SysFont-Light SysFont-Medium SysFont-Thin SysFont-Black SysFont-Hans-Bold SysFont-Hans-Light SysFont-Hans-Medium SysFont-Hans-Thin SysFont-Hant-Bold SysFont-Hant-Light SysFont-Hant-Medium SysFont-Hant-Thin SysSans-Hant-Bold SysSans-Hant-Light SysSans-Hant-Medium SysSans-Hans-Bold SysSans-Hans-Light SysSans-Hans-Medium SysFont-Static-Bold SysFont-Static-Light SysFont-Static-Medium DINCondensedBold DINPro-Bold DINPro-Medium DINPro-Regular OPPODIN-Bold OPPODIN-Medium OPPODIN-Regular OPPODINCondensed-Bold OPPODINCondensed-Medium OPPODINCondensed-Regular Opposans-En-Regular Opposans-Hans-Regular Opposans-En-Bold Opposans-Hans-Bold Opposans-En-Medium Opposans-Hans-Medium Opposans-En-Light Opposans-Hans-Light OPSans-En-Regular Roboto-Regular Roboto-Medium Roboto-Bold Roboto-Light Roboto-Thin RobotoFlex-Regular RobotoStatic-Regular GoogleSans-Regular GoogleSans-Medium GoogleSans-Bold GoogleSansText-Regular GoogleSansText-Medium GoogleSansText-Bold GoogleSansFlex-Regular SourceSansPro-Regular SourceSansPro-SemiBold SourceSansPro-Bold"
 }
 
+# ColorOS 15/16 与 OxygenOS 新增的 UI/数字显示槽位，以及 Google/Roboto 的完整字重。
+# 全部按真实存在过滤，列在这里不会为不存在的文件生成挂载节点。
+_legacy_coloros_oem_names() {
+    echo "OplusOSUI-XThin OplusOSUI-Thin OplusOSUI-ExtraLight OplusOSUI-Light OplusOSUI-Regular OplusOSUI-Medium OplusOSUI-SemiBold OplusOSUI-Bold OplusOSUI-ExtraBold OplusOSUI-Black OplusSans-Thin OplusSans-ExtraLight OplusSans-Light OplusSans-Regular OplusSans-Medium OplusSans-SemiBold OplusSans-Bold OplusSans-ExtraBold OplusSans-Black OppoSans-Thin OppoSans-Light OppoSans-Regular OppoSans-Medium OppoSans-SemiBold OppoSans-Bold OppoSans-ExtraBold OppoSans-Black OnePlusSans-Regular OnePlusSans-Medium OnePlusSans-Bold Roboto-ExtraLight Roboto-SemiBold Roboto-ExtraBold Roboto-Black GoogleSans-SemiBold GoogleSansText-SemiBold GoogleSans-VF GoogleSansText-VF GoogleSansTextVF"
+}
+
+# 旧映射器的目标目录与以前一致：system/system_ext/product/my_product/vendor（只计算
+# 一次，不 fork）。其余 OEM 分区（my_stock、oplus_* 等）的槽位由原厂清单补齐阶段
+# 直接写入对应分区，不在 system/fonts 下新建原厂不存在的节点。
+# LUOSHU_LEGACY_STOCK_ROOT 仅供测试把根目录指向夹具；设备上为空。
+_legacy_coloros_roots_init() {
+    [ "${_LEGACY_COLOROS_ROOTS_READY:-}" = 1 ] && return 0
+    _lcri_prefix="${LUOSHU_LEGACY_STOCK_ROOT:-}"
+    _LEGACY_COLOROS_ROOTS=''
+    for _lcri_part in system system_ext product my_product vendor; do
+        [ -d "$_lcri_prefix/$_lcri_part/fonts" ] || continue
+        _LEGACY_COLOROS_ROOTS="$_LEGACY_COLOROS_ROOTS $_lcri_prefix/$_lcri_part/fonts"
+    done
+    _LEGACY_COLOROS_ROOTS_READY=1
+}
+
+# 输出某个 stem 在上述真实目录里的单字体文件名（保留原厂扩展名 .ttf/.otf）。
+# 集合字体（.ttc/.otc）由单面用户字体替换会破坏 face 索引，保持原厂。
+_legacy_coloros_existing_file() {
+    _lcef_stem="$1"
+    for _lcef_root in $_LEGACY_COLOROS_ROOTS; do
+        for _lcef_ext in ttf otf; do
+            [ -e "$_lcef_root/$_lcef_stem.$_lcef_ext" ] && { LEGACY_COLOROS_FILE="$_lcef_stem.$_lcef_ext"; return 0; }
+        done
+    done
+    return 1
+}
+
+# 发现 OTA 新增或改名的正体 UI 槽位；斜体、衬线、等宽/代码、表情、符号、图标、
+# 时钟（由原厂清单按实测覆盖处理）与各文字专用回退字体一律保持原厂。
+_legacy_coloros_discover() {
+    for _lcd_root in $_LEGACY_COLOROS_ROOTS; do
+        for _lcd_path in "$_lcd_root"/*.ttf "$_lcd_root"/*.otf; do
+            [ -f "$_lcd_path" ] || continue
+            _lcd_name=${_lcd_path##*/}
+            case "$_lcd_name" in
+                *[Ii]talic*|*[Oo]blique*|*[Ss]erif*|*SERIF*|*[Mm]ono*|*MONO*|*[Cc]ode*|*[Ee]moji*|*[Ss]ymbol*|*[Ii]con*|*[Cc]lock*|\
+                *[Mm]yanmar*|*[Tt]hai*|*[Aa]rabic*|*[Hh]ebrew*|*[Kk]hmer*|*[Ll]ao*|*[Tt]ibetan*|*[Dd]evanagari*|*[Bb]engali*|*[Tt]amil*|\
+                *[Jj]apanese*|*[Kk]orean*|*[Hh]angul*|*[Mm]ath*|*[Mm]usic*) continue ;;
+            esac
+            case "$_lcd_name" in
+                SysFont*|SysSans*|OplusSans*|OPlusSans*|OplusOSUI*|OppoSans*|Opposans*|OPPOSans*|OPSans*|OnePlusSans*|\
+                GoogleSans*|Roboto*|SourceSansPro*|DIN*|OPPODIN*)
+                    printf '%s\n' "$_lcd_name" ;;
+            esac
+        done
+    done
+}
+
+_legacy_coloros_role() {
+    case "$1" in
+        *[Ee]xtra[Bb]old*|*[Ee]xtra-[Bb]old*|*[Uu]ltra[Bb]old*) LEGACY_COLOROS_ROLE=extrabold ;;
+        *[Ss]emi[Bb]old*|*[Ss]emi-[Bb]old*|*[Dd]emi[Bb]old*) LEGACY_COLOROS_ROLE=semibold ;;
+        *[Ee]xtra[Ll]ight*|*[Ee]xtra-[Ll]ight*|*[Uu]ltra[Ll]ight*) LEGACY_COLOROS_ROLE=extralight ;;
+        *[Mm]edium*) LEGACY_COLOROS_ROLE=medium ;;
+        *[Bb]lack*|*[Hh]eavy*) LEGACY_COLOROS_ROLE=black ;;
+        *[Bb]old*) LEGACY_COLOROS_ROLE=bold ;;
+        *[Ll]ight*) LEGACY_COLOROS_ROLE=light ;;
+        *[Tt]hin*) LEGACY_COLOROS_ROLE=thin ;;
+        *) LEGACY_COLOROS_ROLE=regular ;;
+    esac
+}
+
 # copy_as_coloros: 把用户字体覆盖为 ColorOS 认识的文件名
 #   src        用户选择的字体文件
-#   dest_dir   目标目录（安装时是 $MODPATH/system/fonts，切换时是模块已挂载的 system/fonts）
+#   dest_dir   目标目录（安装时是 $MODPATH/system/fonts，切换时是暂存区 system/fonts）
 #   mode       full（刷入/首次安装） | quick（切换字体）；两种模式都只生成目标别名，
 #              原厂 fallback 由 Overlay 下层保留
-#   font_family 可选，若提供且用户字体族有多个字重文件，会额外生成字重变体
+#   font_family 可选，若提供且用户字体族有多个字重文件，每个槽位按名称字重选对应字重
+#
+# 目标 = 固定 ColorOS 名单 ∪ 上述真实目录里发现的正体 UI 槽位，只保留真实存在的
+# 文件，并沿用原厂扩展名；其他分区的同名槽位由 mirror_existing_targets 补齐，
+# 原厂清单中的其余槽位（含按实测覆盖识别的数字/显示字体）由 ColorOS 度量阶段补齐。
 copy_as_coloros() {
     src="$1"
     dest_dir="$2"
     mode="${3:-full}"
     font_family="${4:-}"
-    sys_count=0
     coloros_count=0
     extra_count=0
     weight_count=0
+    bad_count=0
 
-    # Overlay 目录只需放真正要替换的文件；未出现的原厂 fallback 会自然从
-    # 下层 /system/fonts 保留。复制整套原厂字体既无必要，也会让模块暴涨。
+    _legacy_coloros_roots_init
     for cname in $(get_all_coloros_names); do
-        rm -f "$dest_dir/${cname}.ttf" 2>/dev/null
+        rm -f "$dest_dir/${cname}.ttf" "$dest_dir/${cname}.otf" 2>/dev/null
     done
     _font_store_reset "$dest_dir"
     regular_anchor=$(_font_anchor "$src" "$dest_dir" "regular") || return 1
 
     _log_step "  正在应用用户字体（ColorOS）..."
+    _lca_weights=''
+    if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
+        _lca_weights=$(scan_family_weights "$font_family")
+    fi
     base_names="SysSans-Hant-Regular SysSans-Hans-Regular SysFont-Static-Regular SysFont-Hant-Regular SysFont-Hans-Regular SysFont-Regular SysSans-En-Regular"
-    bad_count=0
-    for name in $base_names; do
-        _rom_font_target_exists "$name" || continue
-        if _font_alias "$regular_anchor" "$dest_dir/${name}.ttf"; then
-            if _verify_font_copy "$dest_dir/${name}.ttf"; then
-                coloros_count=$((coloros_count + 1))
-            else
-                bad_count=$((bad_count + 1))
-            fi
+    _lca_done=' '
+    _lca_targets=''
+    for name in $base_names $(_coloros_extra_names) $(_legacy_coloros_oem_names); do
+        _legacy_coloros_existing_file "$name" || continue
+        case "$_lca_done" in *" $LEGACY_COLOROS_FILE "*) continue ;; esac
+        _lca_done="$_lca_done$LEGACY_COLOROS_FILE "
+        _lca_targets="$_lca_targets $LEGACY_COLOROS_FILE"
+    done
+    for _lca_file in $(_legacy_coloros_discover); do
+        case "$_lca_done" in *" $_lca_file "*) continue ;; esac
+        _lca_done="$_lca_done$_lca_file "
+        _lca_targets="$_lca_targets $_lca_file"
+    done
+
+    for _lca_file in $_lca_targets; do
+        _lca_anchor="$regular_anchor"
+        _legacy_coloros_role "$_lca_file"
+        if [ "$LEGACY_COLOROS_ROLE" != regular ]; then
+            case ",$_lca_weights," in
+                *",$LEGACY_COLOROS_ROLE,"*)
+                    _lca_store="$dest_dir/.luoshu-font-store/${LEGACY_COLOROS_ROLE}.font"
+                    if [ -s "$_lca_store" ]; then
+                        _lca_anchor="$_lca_store"
+                    else
+                        _lca_wfile=$(get_weight_file "$font_family" "$LEGACY_COLOROS_ROLE")
+                        if [ -n "$_lca_wfile" ] && [ -f "$_lca_wfile" ]; then
+                            _lca_anchor=$(_font_anchor "$_lca_wfile" "$dest_dir" "$LEGACY_COLOROS_ROLE") || _lca_anchor="$regular_anchor"
+                        fi
+                    fi
+                    ;;
+            esac
+        fi
+        _font_alias "$_lca_anchor" "$dest_dir/$_lca_file" || continue
+        if _verify_font_copy "$dest_dir/$_lca_file"; then
+            case "$_lca_file" in
+                SysSans-Hant-Regular.*|SysSans-Hans-Regular.*|SysFont-Static-Regular.*|SysFont-Hant-Regular.*|SysFont-Hans-Regular.*|SysFont-Regular.*|SysSans-En-Regular.*)
+                    coloros_count=$((coloros_count + 1)) ;;
+                *) extra_count=$((extra_count + 1)) ;;
+            esac
+            [ "$_lca_anchor" = "$regular_anchor" ] || weight_count=$((weight_count + 1))
+        else
+            bad_count=$((bad_count + 1))
         fi
     done
     _log_step "  已覆盖 $coloros_count 个 ColorOS 基础字体文件"
     [ "$bad_count" -gt 0 ] && _log_step "  ⚠ 其中 $bad_count 个校验异常，请检查源字体文件是否完整"
-
-    for name in $(_coloros_extra_names); do
-        _rom_font_target_exists "$name" || continue
-        if _font_alias "$regular_anchor" "$dest_dir/${name}.ttf"; then
-            extra_count=$((extra_count + 1))
-        fi
-    done
-    [ "$extra_count" -gt 0 ] && _log_step "  已覆盖 $extra_count 个额外字体文件（数字/英文粗体等）"
-
-    # 多字重支持：如果用户字体族提供了 Bold/Medium/Light 等文件，生成对应字重变体
-    if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
-        weights=$(scan_family_weights "$font_family")
-        weight_base="SysSans-Hant SysSans-Hans SysFont-Static SysFont-Myanmar SysFont-Hant SysFont-Hans SysFont SysSans-En"
-        for w in $(echo "$weights" | tr ',' ' '); do
-            [ "$w" = "regular" ] && continue
-            w_file=$(get_weight_file "$font_family" "$w")
-            [ -z "$w_file" ] && continue
-            w_cap=$(capitalize_first "$w")
-            w_anchor=$(_font_anchor "$w_file" "$dest_dir" "$w") || continue
-            for base in $weight_base; do
-                dest_name="${base}-${w_cap}.ttf"
-                _rom_exact_target_exists "$dest_name" || continue
-                if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
-                    weight_count=$((weight_count + 1))
-                fi
-            done
-        done
-        [ "$weight_count" -gt 0 ] && _log_step "  已创建 $weight_count 个字重变体文件（Bold/Medium/Light等）"
-    fi
+    [ "$extra_count" -gt 0 ] && _log_step "  已覆盖 $extra_count 个额外字体文件（数字/英文/系统 UI 等）"
+    [ "$weight_count" -gt 0 ] && _log_step "  已按字重对应 $weight_count 个槽位（Bold/Medium/Light等）"
     return 0
 }
 

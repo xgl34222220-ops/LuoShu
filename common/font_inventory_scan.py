@@ -4,6 +4,8 @@
 Revision 4 keeps replaceable slots restricted to the partitions supported by the
 runtime, adds a vendor-independent verified text scan, and persists an install-time
 path probe even when the current boot still has an older font overlay mounted.
+Revision 5 records digit/script coverage so measured digit/display faces (OEM
+lock-screen numerals, OplusOSUI) and ColorOS/OxygenOS UI families are admitted.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ import font_inventory as base
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 4
+SCANNER_REVISION = 5
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.

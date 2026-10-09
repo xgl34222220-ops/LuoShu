@@ -286,8 +286,14 @@ run_bounded() {
         --pid-file "$_switch_manager_pidfile" --task "manager-$_task" --timeout "$TIMEOUT_SECONDS" \
         -- sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
     _child=$!; _switch_child=$_child; _elapsed=0; _next_heartbeat=0
+    # Poll the manager in fifths of a second so a finished switch is reported
+    # up to ~0.8 s sooner. Heartbeats, elapsed seconds and the timeout keep
+    # their one-second meaning; without fractional sleep it stays at 1 s.
+    _poll_ticks=1; _poll_sleep=1
+    if sleep 0.01 2>/dev/null; then _poll_ticks=5; _poll_sleep=0.2; fi
+    _poll_tick=0
     while pid_alive "$_child"; do
-        if [ "$_elapsed" -ge "$_next_heartbeat" ]; then
+        if [ "$_poll_tick" -eq 0 ] && [ "$_elapsed" -ge "$_next_heartbeat" ]; then
             _fallback=$((5 + (_elapsed * 80 / TIMEOUT_SECONDS)))
             [ "$_fallback" -le 85 ] 2>/dev/null || _fallback=85
             _percent=$(progress_value "$_progress_file" "$_fallback")
@@ -296,7 +302,9 @@ run_bounded() {
                 "$(date +%s 2>/dev/null || echo 0)" "$TIMEOUT_SECONDS" "$_elapsed" "$(current_boot_id)" false "$_percent" || true
             _next_heartbeat=$((_elapsed + HEARTBEAT_INTERVAL))
         fi
-        sleep 1; _elapsed=$((_elapsed + 1))
+        sleep "$_poll_sleep"
+        _poll_tick=$((_poll_tick + 1))
+        if [ "$_poll_tick" -ge "$_poll_ticks" ]; then _poll_tick=0; _elapsed=$((_elapsed + 1)); fi
     done
     wait "$_child"
     _switch_rc=$?

@@ -283,20 +283,57 @@ safe_validator_identity() {
     safe_code_identity "$LEGACY_DIR/font_check.sh" "$LEGACY_DIR/font_coverage.py"
 }
 
+# One switch evaluates the family membership up to six times (lookup, cache
+# key/match on restore, key/store/recheck on a miss). Detecting a family forks
+# a subshell per library file, so a 200-font library cost >1000 forks. The
+# membership is memoized per process and keyed by the complete, shell-globbed
+# file name list: an added, removed or renamed file is a different key and is
+# re-evaluated. File identities (stat) are still read on every call.
+SAFE_FAMILY_MEMO_KEY=''
+SAFE_FAMILY_MEMO_FILES=''
+safe_family_files() {
+    _sff_family="$1"
+    _sff_names=''
+    for _sff_file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+                     "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$_sff_file" ] || continue
+        _sff_names="$_sff_names
+$_sff_file"
+    done
+    _sff_key="${#_sff_family}:$_sff_family|$USER_FONTS_DIR|$_sff_names"
+    if [ -n "$SAFE_FAMILY_MEMO_KEY" ] && [ "$_sff_key" = "$SAFE_FAMILY_MEMO_KEY" ]; then
+        SAFE_FAMILY_FILES="$SAFE_FAMILY_MEMO_FILES"
+        return 0
+    fi
+    type detect_font_family >/dev/null 2>&1 || return 1
+    SAFE_FAMILY_FILES=''
+    while IFS= read -r _sff_file; do
+        [ -n "$_sff_file" ] || continue
+        [ "$(detect_font_family "${_sff_file##*/}")" = "$_sff_family" ] || continue
+        SAFE_FAMILY_FILES="$SAFE_FAMILY_FILES
+$_sff_file"
+    done <<EOF_SAFE_FAMILY_NAMES
+$_sff_names
+EOF_SAFE_FAMILY_NAMES
+    SAFE_FAMILY_MEMO_KEY="$_sff_key"
+    SAFE_FAMILY_MEMO_FILES="$SAFE_FAMILY_FILES"
+}
+
 safe_family_identity() {
     _sfi_family="$1"
     # The mapper can select any weight in this family. A primary Regular file
     # staying unchanged must not hide an edited/added/removed Bold donor.
-    type detect_font_family >/dev/null 2>&1 || return 1
+    safe_family_files "$_sfi_family" || return 1
     _sfi_input=''
-    for _sfi_file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-                     "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+    while IFS= read -r _sfi_file; do
+        [ -n "$_sfi_file" ] || continue
         [ -f "$_sfi_file" ] || continue
-        [ "$(detect_font_family "${_sfi_file##*/}")" = "$_sfi_family" ] || continue
         _sfi_identity=$(safe_source_identity "$_sfi_file") || return 1
         _sfi_input="$_sfi_input
 $_sfi_file|$_sfi_identity"
-    done
+    done <<EOF_SAFE_FAMILY_FILES
+$SAFE_FAMILY_FILES
+EOF_SAFE_FAMILY_FILES
     printf '%s\n' "$_sfi_input" | safe_hash_stream
 }
 
@@ -662,15 +699,24 @@ trap 'safe_exit_cleanup 143 interrupted; exit 143' TERM
 
 find_text_font_file() {
     _wanted="$1"
+    case "$_wanted" in SysFont*|SysSans*) return 1 ;; esac
+    if type detect_font_family >/dev/null 2>&1; then
+        # Same glob order as before; the membership scan is shared with the
+        # cache identity below instead of being repeated per lookup.
+        safe_family_files "$_wanted" || return 1
+        while IFS= read -r _file; do
+            [ -n "$_file" ] && [ -f "$_file" ] || continue
+            printf '%s\n' "$_file"
+            return 0
+        done <<EOF_SAFE_TEXT_FONT
+$SAFE_FAMILY_FILES
+EOF_SAFE_TEXT_FONT
+        return 1
+    fi
     for _file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
                  "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_file" ] || continue
-        if type detect_font_family >/dev/null 2>&1; then
-            _family="$(detect_font_family "$(basename "$_file")")"
-        else
-            _family="${_file##*/}"; _family="${_family%.*}"
-        fi
-        case "$_family" in SysFont*|SysSans*) continue ;; esac
+        _family="${_file##*/}"; _family="${_family%.*}"
         [ "$_family" = "$_wanted" ] && { printf '%s\n' "$_file"; return 0; }
     done
     return 1
@@ -884,6 +930,7 @@ write_runtime_state() {
 prewarm_start() {
     _font="$1"
     [ -n "$_font" ] && [ "$_font" != default ] || return 0
+    safe_family_files "$_font" >/dev/null 2>&1 || true
     _source="$(find_text_font_file "$_font")"
     [ -f "$_source" ] || return 0
     type luoshu_scope_runner >/dev/null 2>&1 || return 0
@@ -930,6 +977,7 @@ prewarm_font() {
     [ "$_prewarm_lock_rc" -eq 0 ] || return 0
     switch_busy && return 0
 
+    safe_family_files "$_font" >/dev/null 2>&1 || true
     _source="$(find_text_font_file "$_font")"
     [ -f "$_source" ] || return 0
     validate_global "$_source" || return 0
@@ -970,6 +1018,7 @@ switch_font() {
     if [ "$_font" != default ]; then
         safe_timing_phase source_lookup_validation
         progress 6 '正在查找并校验字体文件'
+        safe_family_files "$_font" >/dev/null 2>&1 || true
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
         if ! validate_global "$_source"; then
