@@ -333,12 +333,15 @@ private fun TaskCard(task: TaskCenterItem) {
     val tokens = LocalMiuixTokens.current
     var expanded by rememberSaveable(task.id) { mutableStateOf(false) }
     val interactionSource = remember(task.id) { MutableInteractionSource() }
-    val color = when (task.phase) {
-        TaskPhase.FAILED -> MaterialTheme.colorScheme.error
-        TaskPhase.SUCCESS -> tokens.success
-        TaskPhase.WAITING_REBOOT, TaskPhase.WAITING_CONFIRMATION -> tokens.warning
-        TaskPhase.INFO -> tokens.textSecondary
-        else -> MaterialTheme.colorScheme.primary
+    val color = when {
+        task.kind == TaskKind.PRECONDITION && task.phase != TaskPhase.FAILED -> tokens.warning
+        else -> when (task.phase) {
+            TaskPhase.FAILED -> MaterialTheme.colorScheme.error
+            TaskPhase.SUCCESS -> tokens.success
+            TaskPhase.WAITING_REBOOT, TaskPhase.WAITING_CONFIRMATION -> tokens.warning
+            TaskPhase.INFO -> tokens.textSecondary
+            else -> MaterialTheme.colorScheme.primary
+        }
     }
     Card(
         onClick = { expanded = !expanded },
@@ -442,5 +445,6 @@ private fun taskKindIcon(kind: TaskKind): ImageVector = when (kind) {
     TaskKind.DELETE -> Icons.Rounded.Delete
     TaskKind.REBOOT -> Icons.Rounded.RestartAlt
     TaskKind.TEMPLATE -> Icons.Rounded.Description
+    TaskKind.PRECONDITION -> Icons.Rounded.Warning
     TaskKind.DIAGNOSTIC -> Icons.Rounded.Description
 }

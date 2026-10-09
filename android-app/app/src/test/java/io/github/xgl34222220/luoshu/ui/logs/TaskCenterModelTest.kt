@@ -146,4 +146,53 @@ class TaskCenterModelTest {
         assertFalse(pending.copy(phase = TaskPhase.FAILED).active)
         assertFalse(pending.copy(phase = TaskPhase.SUCCESS).active)
     }
+
+    @Test
+    fun missingRootNoticeIsAPreconditionNotACompletedReboot() {
+        val message = "未找到 Root 命令 su。请先在 Root 管理器中完成待生效变更并完整重启，然后为洛书授予 Root 权限。"
+        val kind = taskKindFor(message)
+        val phase = taskPhaseFor("", message)
+        assertEquals(TaskKind.PRECONDITION, kind)
+        assertEquals(TaskPhase.INFO, phase)
+        assertEquals("运行前提未满足", taskTitle(kind, phase))
+        val item = TaskCenterItem(id = "notice", kind = kind, phase = phase, title = taskTitle(kind, phase), message = message)
+        assertFalse(item.completed)
+        assertFalse(item.active)
+
+        val history = parseTaskLogItems("[2026-09-28 22:40:00] [INFO] $message").single()
+        assertEquals(TaskKind.PRECONDITION, history.kind)
+        assertEquals(TaskPhase.INFO, history.phase)
+        assertFalse(history.completed)
+    }
+
+    @Test
+    fun rootPermissionHintsNeverCountAsSuccess() {
+        listOf(
+            "请先连接洛书模块并授予 Root 权限",
+            "请先授予 Root 权限",
+            "安装模块并授予 Root 权限后才能应用全局字体",
+        ).forEach { message ->
+            assertEquals(message, TaskKind.PRECONDITION, taskKindFor(message))
+            assertFalse(message, taskPhaseFor("", message) == TaskPhase.SUCCESS)
+        }
+    }
+
+    @Test
+    fun negatedCompletionWordingIsNotSuccess() {
+        listOf(
+            "请先完成待生效变更",
+            "字体导入未完成",
+            "复合字体尚未完成",
+            "字体扫描没有完成",
+        ).forEach { message ->
+            assertFalse(message, taskPhaseFor("INFO", message) == TaskPhase.SUCCESS)
+        }
+        assertEquals(TaskPhase.SUCCESS, taskPhaseFor("INFO", "字体扫描已完成"))
+    }
+
+    @Test
+    fun explicitPersistedStateStillWinsOverPreconditionWording() {
+        assertEquals(TaskPhase.SUCCESS, taskPhaseFor("", "请先授予 Root 权限", "success"))
+        assertEquals(TaskPhase.FAILED, taskPhaseFor("ERROR", "Root 授权失败或 su 不可用"))
+    }
 }
