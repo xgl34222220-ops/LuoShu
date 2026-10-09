@@ -1,6 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,15 +18,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Refresh
@@ -37,102 +44,199 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import io.github.xgl34222220.luoshu.ui.theme.luoShuPressScale
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
+
+private enum class LogsTab(val label: String) {
+    TASKS("任务"), ISSUES("问题"), LOGS("日志"),
+}
+
+private enum class LogFilter(val label: String) {
+    ALL("全部"), WARNING("警告"), ERROR("错误"),
+}
+
+private fun logMatchesFilter(line: String, filter: LogFilter): Boolean = when (filter) {
+    LogFilter.ALL -> true
+    LogFilter.WARNING -> line.contains("warn", true) || line.contains("警告")
+    LogFilter.ERROR -> line.contains("error", true) || line.contains("failed", true) ||
+        line.contains("失败") || line.contains("错误")
+}
 
 @Composable
 internal fun LogsScreenMiuix(
+    style: UiStyle,
     state: LogsUiState,
     actions: LogsActions,
     diagnosticState: DiagnosticExportState,
     onDiagnostic: () -> Unit,
-) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            MiuixTaskCenterHeader(
-                onRefresh = actions.refresh,
-                diagnosticState = diagnosticState,
-                onDiagnostic = onDiagnostic,
-            )
-        }
-        item { MiuixTaskOverview(state) }
-        item { MiuixSectionTitle("任务时间线", "最近 ${state.tasks.size} 条状态") }
-
-        if (state.tasks.isEmpty()) {
-            item { MiuixTaskEmpty() }
-        } else {
-            items(state.tasks, key = { it.id }) { task ->
-                MiuixTaskCard(task)
-            }
-        }
-
-        item { MiuixSectionTitle("原始日志", "诊断字体引擎和挂载问题") }
-        item { MiuixLogSummary(state) }
-        item { MiuixLogPanel(state.content) }
-    }
-}
-
-@Composable
-private fun MiuixTaskCenterHeader(
-    onRefresh: () -> Unit,
-    diagnosticState: DiagnosticExportState,
-    onDiagnostic: () -> Unit,
+    onBack: () -> Unit,
+    controlsBottomPadding: Dp = 0.dp,
 ) {
     val tokens = LocalMiuixTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "TASK CENTER",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.4.sp,
+    val clipboard = LocalClipboardManager.current
+    var tabName by rememberSaveable { mutableStateOf(LogsTab.TASKS.name) }
+    var filterName by rememberSaveable { mutableStateOf(LogFilter.ALL.name) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val taskListState = rememberLazyListState()
+    val issueListState = rememberLazyListState()
+    val logListState = rememberLazyListState()
+    val tab = LogsTab.valueOf(tabName)
+    val filter = LogFilter.valueOf(filterName)
+    // Keep the raw log out of one enormous Text layout. Only visible rows are composed.
+    val lines = remember(state.content) { state.content.lineSequence().withIndex().filter { it.value.isNotBlank() }.toList() }
+    val visibleLines = remember(lines, filter, query) {
+        lines.filter { logMatchesFilter(it.value, filter) && (query.isBlank() || it.value.contains(query.trim(), true)) }
+    }
+    val failed = remember(state.tasks) { state.tasks.filter { it.phase == TaskPhase.FAILED } }
+    LaunchedEffect(filter, query) { logListState.scrollToItem(0) }
+
+    Column(Modifier.fillMaxSize()) {
+        LuoShuDetailBar(title = "任务与日志", onBack = onBack) {
+            DiagnosticExportButton(style = style, state = diagnosticState, onClick = onDiagnostic)
+            LuoShuHeaderAction(
+                icon = Icons.Rounded.Refresh,
+                contentDescription = "刷新任务和日志",
+                onClick = actions.refresh,
+                containerColor = tokens.elevatedCardBackground,
             )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "任务中心",
-                color = tokens.textPrimary,
-                fontSize = 39.sp,
-                lineHeight = 44.sp,
-                fontWeight = FontWeight.Black,
-            )
-            Text("扫描、导入、应用、组合与重启状态", color = tokens.textSecondary, fontSize = 12.sp)
         }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        LogTabSelector(tab) { tabName = it.name }
+        LazyColumn(
+            state = when (tab) { LogsTab.TASKS -> taskListState; LogsTab.ISSUES -> issueListState; LogsTab.LOGS -> logListState },
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = controlsBottomPadding + 28.dp),
+            verticalArrangement = Arrangement.spacedBy(if (tab == LogsTab.LOGS) 8.dp else 12.dp),
         ) {
-            DiagnosticExportButton(
-                style = UiStyle.MIUIX,
-                state = diagnosticState,
-                onClick = onDiagnostic,
-            )
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-            ) {
-                IconButton(onClick = onRefresh, modifier = Modifier.size(50.dp)) {
-                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新任务和日志")
+            when (tab) {
+                LogsTab.TASKS -> {
+                    item(key = "overview") { OverviewCard(state) }
+                    item(key = "task-heading") { LuoShuSectionHeading("最近任务", "${state.tasks.size} 条记录") }
+                    if (state.tasks.isEmpty()) {
+                        item(key = "task-empty") {
+                            EmptyState(Icons.Rounded.CheckCircle, "还没有字体任务", "扫描、导入、应用或组合字体后，进度和结果会显示在这里。")
+                        }
+                    } else {
+                        items(state.tasks, key = { "task-${it.id}" }) { TaskCard(it) }
+                    }
+                }
+                LogsTab.ISSUES -> {
+                    item(key = "issue-summary") { IssueSummary(failed.size, state.warningCount, state.errorCount) }
+                    if (failed.isEmpty() && state.errorCount == 0 && state.warningCount == 0) {
+                        item(key = "issue-empty") {
+                            EmptyState(Icons.Rounded.CheckCircle, "暂无问题记录", "当前任务和日志中没有失败、错误或警告记录。")
+                        }
+                    } else {
+                        items(failed, key = { "issue-${it.id}" }) { TaskCard(it) }
+                        if (state.warningCount > 0 || state.errorCount > 0) {
+                            item(key = "open-issue-logs") {
+                                Surface(
+                                    onClick = {
+                                        filterName = if (state.errorCount > 0) LogFilter.ERROR.name else LogFilter.WARNING.name
+                                        query = ""
+                                        tabName = LogsTab.LOGS.name
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = LuoShuSmoothShape(24.dp),
+                                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = .55f),
+                                ) {
+                                    Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Rounded.Search, null, tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text("查看相关日志", color = MaterialTheme.colorScheme.onTertiaryContainer, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                            Text("${state.warningCount} 条警告 · ${state.errorCount} 条错误", color = MaterialTheme.colorScheme.onTertiaryContainer, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                LogsTab.LOGS -> {
+                    item(key = "log-summary") {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+                            shape = LuoShuSmoothShape(24.dp),
+                            colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+                            elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+                            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+                        ) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Metric("日志", state.lineCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                                    Metric("警告", state.warningCount, tokens.warning, Modifier.weight(1f))
+                                    Metric("错误", state.errorCount, MaterialTheme.colorScheme.error, Modifier.weight(1f))
+                                }
+                                OutlinedTextField(
+                                    value = query,
+                                    onValueChange = { query = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    placeholder = { Text("搜索任务、字体或关键字", fontSize = 13.sp) },
+                                    leadingIcon = { Icon(Icons.Rounded.Search, null, modifier = Modifier.size(22.dp)) },
+                                    trailingIcon = if (query.isNotEmpty()) {
+                                        { IconButton(onClick = { query = "" }) { Icon(Icons.Rounded.Close, "清空搜索", modifier = Modifier.size(20.dp)) } }
+                                    } else null,
+                                    singleLine = true,
+                                    shape = LuoShuSmoothShape(16.dp),
+                                )
+                                Row(Modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    LogFilter.entries.forEach { option ->
+                                        ChoiceChip(option.label, option == filter, Modifier.weight(1f)) { filterName = option.name }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    item(key = "log-heading") {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${visibleLines.size} 条记录", color = tokens.textSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                            TextButton(
+                                onClick = { clipboard.setText(AnnotatedString(visibleLines.joinToString("\n") { it.value })) },
+                                enabled = visibleLines.isNotEmpty(),
+                            ) {
+                                Icon(Icons.Rounded.ContentCopy, null, modifier = Modifier.size(17.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (filter == LogFilter.ALL && query.isBlank()) "复制全部" else "复制筛选结果", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                    if (visibleLines.isEmpty()) {
+                        item(key = "log-empty") { EmptyState(Icons.Rounded.Search, "没有匹配的日志", "换一个关键字，或选择“全部”查看运行记录。") }
+                    } else {
+                        items(visibleLines, key = { "log-${it.index}" }) { line -> LogLine(line.index + 1, line.value) }
+                    }
                 }
             }
         }
@@ -140,276 +244,199 @@ private fun MiuixTaskCenterHeader(
 }
 
 @Composable
-private fun MiuixTaskOverview(state: LogsUiState) {
+private fun LogTabSelector(selected: LogsTab, onSelected: (LogsTab) -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+        shape = LuoShuSmoothShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .65f),
+    ) {
+        Row(Modifier.fillMaxWidth().selectableGroup().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            LogsTab.entries.forEach { option -> ChoiceChip(option.label, option == selected, Modifier.weight(1f)) { onSelected(option) } }
+        }
+    }
+}
+
+@Composable
+private fun ChoiceChip(label: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        modifier = modifier.clip(LuoShuSmoothShape(14.dp)).selectable(selected = selected, role = Role.Tab, onClick = onClick),
+        shape = LuoShuSmoothShape(14.dp),
+        color = if (selected) LocalMiuixTokens.current.cardBackground else Color.Transparent,
+        contentColor = if (selected) MaterialTheme.colorScheme.primary else LocalMiuixTokens.current.textSecondary,
+        shadowElevation = 0.dp,
+    ) {
+        Box(Modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+            Text(label, textAlign = TextAlign.Center, fontSize = 14.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun OverviewCard(state: LogsUiState) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(28.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(26.dp)),
+        shape = LuoShuSmoothShape(26.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(19.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-                Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
+                StatusIcon(if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle, MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        if (state.activeTaskCount > 0) "${state.activeTaskCount} 个任务正在处理" else "当前任务队列空闲",
-                        color = tokens.textPrimary,
-                        fontSize = 19.sp,
-                        fontWeight = FontWeight.Black,
+                        if (state.activeTaskCount > 0) "${state.activeTaskCount} 个任务正在处理" else "当前没有进行中的任务",
+                        color = tokens.textPrimary, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        if (state.rebootRequired) "字体已准备完成，等待完整重启" else "进入页面时自动同步后台状态",
+                        if (state.rebootRequired) "字体已准备好，重启后生效" else "最近的操作结果保留在下方",
                         color = if (state.rebootRequired) MaterialTheme.colorScheme.primary else tokens.textSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp, lineHeight = 18.sp,
                     )
                 }
             }
-            Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MiuixOverviewMetric("进行中", state.activeTaskCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-                MiuixOverviewMetric("已完成", state.completedTaskCount, tokens.success, Modifier.weight(1f))
-                MiuixOverviewMetric("失败", state.failedTaskCount, MaterialTheme.colorScheme.error, Modifier.weight(1f))
+                Metric("进行中", state.activeTaskCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+                Metric("已完成", state.completedTaskCount, tokens.success, Modifier.weight(1f))
+                Metric("失败", state.failedTaskCount, MaterialTheme.colorScheme.error, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun MiuixOverviewMetric(label: String, value: Int, color: Color, modifier: Modifier) {
+private fun IssueSummary(failedCount: Int, warningCount: Int, errorCount: Int) {
     val tokens = LocalMiuixTokens.current
-    Surface(modifier = modifier, shape = RoundedCornerShape(17.dp), color = color.copy(alpha = .09f)) {
-        Column(Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
-            Text(value.toString(), color = color, fontSize = 18.sp, fontWeight = FontWeight.Black)
-            Text(label, color = tokens.textSecondary, fontSize = 10.sp)
+    val hasIssues = failedCount > 0 || warningCount > 0 || errorCount > 0
+    Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
+            StatusIcon(if (hasIssues) Icons.Rounded.Warning else Icons.Rounded.CheckCircle, if (hasIssues) tokens.warning else tokens.success)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(if (failedCount > 0) "$failedCount 个任务未完成" else if (hasIssues) "有需要查看的运行记录" else "当前没有问题记录", color = tokens.textPrimary, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+                Text("$warningCount 条警告 · $errorCount 条错误日志", color = tokens.textSecondary, fontSize = 12.sp, lineHeight = 18.sp)
+            }
         }
     }
 }
 
 @Composable
-private fun MiuixSectionTitle(title: String, subtitle: String) {
+private fun TaskCard(task: TaskCenterItem) {
     val tokens = LocalMiuixTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        Text(title, color = tokens.textPrimary, fontSize = 22.sp, fontWeight = FontWeight.Black, modifier = Modifier.weight(1f))
-        Text(subtitle, color = tokens.textSecondary, fontSize = 10.sp)
+    var expanded by rememberSaveable(task.id) { mutableStateOf(false) }
+    val interactionSource = remember(task.id) { MutableInteractionSource() }
+    val color = when {
+        task.kind == TaskKind.PRECONDITION && task.phase != TaskPhase.FAILED -> tokens.warning
+        else -> when (task.phase) {
+            TaskPhase.FAILED -> MaterialTheme.colorScheme.error
+            TaskPhase.SUCCESS -> tokens.success
+            TaskPhase.WAITING_REBOOT, TaskPhase.WAITING_CONFIRMATION -> tokens.warning
+            TaskPhase.INFO -> tokens.textSecondary
+            else -> MaterialTheme.colorScheme.primary
+        }
     }
-}
-
-@Composable
-private fun MiuixTaskCard(task: TaskCenterItem) {
-    val tokens = LocalMiuixTokens.current
-    val color = miuixTaskPhaseColor(task.phase)
     Card(
-        shape = RoundedCornerShape(24.dp),
+        onClick = { expanded = !expanded },
+        interactionSource = interactionSource,
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f)
+            .luoShuGlassHighlight(LuoShuSmoothShape(24.dp)).animateContentSize(spring(dampingRatio = .9f, stiffness = 420f)),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (task.current) 4.dp else 2.dp),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    modifier = Modifier.size(42.dp),
-                    shape = RoundedCornerShape(15.dp),
-                    color = color.copy(alpha = .11f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(miuixTaskKindIcon(task.kind), contentDescription = null, tint = color, modifier = Modifier.size(23.dp))
-                    }
-                }
+                StatusIcon(taskKindIcon(task.kind), color)
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        task.title,
-                        color = tokens.textPrimary,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        task.message,
-                        color = tokens.textSecondary,
-                        fontSize = 11.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(task.title, color = tokens.textPrimary, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+                    if (task.timeLabel.isNotBlank()) Text(task.timeLabel, color = tokens.textSecondary, fontSize = 12.sp)
                 }
                 Spacer(Modifier.width(8.dp))
-                Column(horizontalAlignment = Alignment.End) {
-                    Surface(shape = RoundedCornerShape(999.dp), color = color.copy(alpha = .11f)) {
-                        Text(
-                            task.phase.label,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            color = color,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
-                    if (task.timeLabel.isNotBlank()) {
-                        Spacer(Modifier.height(5.dp))
-                        Text(task.timeLabel, color = tokens.textSecondary, fontSize = 9.sp)
-                    }
-                }
+                Icon(if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, if (expanded) "收起任务详情" else "展开任务详情", tint = tokens.textSecondary, modifier = Modifier.size(20.dp))
             }
-            if (task.active && task.progress >= 0) {
-                Spacer(Modifier.height(10.dp))
-                LinearProgressIndicator(
-                    progress = { task.progress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.fillMaxWidth().height(5.dp),
-                )
+            Text(task.message, color = tokens.textSecondary, fontSize = 13.sp, lineHeight = 20.sp, maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Surface(shape = LuoShuSmoothShape(10.dp), color = color.copy(alpha = .09f)) {
+                    Text(task.phase.label, Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+                Spacer(Modifier.weight(1f))
+                if (task.active && task.progress >= 0) Text("${task.progress.coerceIn(0, 100)}%", color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (task.active) {
+                if (task.progress >= 0) {
+                    LinearProgressIndicator(progress = { task.progress.coerceIn(0, 100) / 100f }, modifier = Modifier.fillMaxWidth().height(5.dp).clip(LuoShuSmoothShape(5.dp)), color = color)
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(5.dp).clip(LuoShuSmoothShape(5.dp)), color = color)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun MiuixTaskEmpty() {
+private fun LogLine(number: Int, text: String) {
+    val tokens = LocalMiuixTokens.current
+    val color = when {
+        logMatchesFilter(text, LogFilter.ERROR) -> MaterialTheme.colorScheme.error
+        logMatchesFilter(text, LogFilter.WARNING) -> tokens.warning
+        else -> tokens.textPrimary
+    }
+    Surface(modifier = Modifier.fillMaxWidth(), shape = LuoShuSmoothShape(14.dp), color = tokens.cardBackground) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.Top) {
+            Text(number.toString(), modifier = Modifier.width(34.dp), color = tokens.textSecondary, fontSize = 11.sp, lineHeight = 19.sp, fontFamily = FontFamily.Default)
+            SelectionContainer(Modifier.weight(1f)) {
+                Text(text, color = color, fontFamily = FontFamily.Default, fontSize = 12.sp, lineHeight = 19.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Metric(label: String, value: Int, color: Color, modifier: Modifier) {
+    Surface(modifier = modifier, shape = LuoShuSmoothShape(16.dp), color = color.copy(alpha = .07f)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(value.toString(), color = color, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold)
+            Text(label, color = LocalMiuixTokens.current.textSecondary, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun StatusIcon(icon: ImageVector, color: Color) {
+    Surface(modifier = Modifier.size(44.dp), shape = LuoShuSmoothShape(16.dp), color = color.copy(alpha = .09f)) {
+        Box(contentAlignment = Alignment.Center) { Icon(icon, null, tint = color, modifier = Modifier.size(23.dp)) }
+    }
+}
+
+@Composable
+private fun EmptyState(icon: ImageVector, title: String, message: String) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(34.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
-        Column(
-            modifier = Modifier.fillMaxWidth().padding(32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Surface(
-                modifier = Modifier.size(58.dp),
-                shape = RoundedCornerShape(21.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-            Spacer(Modifier.height(13.dp))
-            Text("还没有字体任务记录", color = tokens.textPrimary, fontSize = 20.sp, fontWeight = FontWeight.Black)
-            Text("执行扫描、导入、应用或组合后会显示在这里", color = tokens.textSecondary, fontSize = 11.sp)
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            StatusIcon(icon, MaterialTheme.colorScheme.primary)
+            Text(title, color = tokens.textPrimary, fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(message, color = tokens.textSecondary, fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
         }
     }
 }
 
-@Composable
-private fun MiuixLogSummary(state: LogsUiState) {
-    val tokens = LocalMiuixTokens.current
-    Card(
-        shape = RoundedCornerShape(32.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-    ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 7.dp)) {
-            MiuixLogSummaryRow(Icons.Rounded.Description, "日志行数", state.lineCount.toString(), MaterialTheme.colorScheme.primary)
-            MiuixSummaryDivider()
-            MiuixLogSummaryRow(Icons.Rounded.Warning, "警告记录", state.warningCount.toString(), tokens.warning)
-            MiuixSummaryDivider()
-            MiuixLogSummaryRow(
-                Icons.Rounded.CheckCircle,
-                "错误记录",
-                state.errorCount.toString(),
-                if (state.errorCount == 0) tokens.success else MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MiuixLogSummaryRow(icon: ImageVector, title: String, value: String, color: Color) {
-    val tokens = LocalMiuixTokens.current
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Surface(modifier = Modifier.size(40.dp), shape = RoundedCornerShape(15.dp), color = color.copy(alpha = .11f)) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(21.dp))
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Text(title, color = tokens.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        Text(value, color = color, fontSize = 17.sp, fontWeight = FontWeight.Black)
-    }
-}
-
-@Composable
-private fun MiuixSummaryDivider() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 54.dp)
-            .height(1.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f)),
-    )
-}
-
-@Composable
-private fun MiuixLogPanel(content: String) {
-    val tokens = LocalMiuixTokens.current
-    Card(
-        shape = RoundedCornerShape(34.dp),
-        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 17.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(
-                    modifier = Modifier.size(34.dp),
-                    shape = RoundedCornerShape(13.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("运行输出", color = tokens.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Text("长按可选择并复制日志文本", color = tokens.textSecondary, fontSize = 10.sp)
-                }
-            }
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
-                    .height(1.dp)
-                    .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f)),
-            )
-            SelectionContainer {
-                Text(
-                    text = content,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 300.dp, max = 620.dp)
-                        .verticalScroll(rememberScrollState())
-                        .padding(17.dp),
-                    color = tokens.textSecondary,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    lineHeight = 15.sp,
-                )
-            }
-        }
-    }
-}
-
-private fun miuixTaskKindIcon(kind: TaskKind): ImageVector = when (kind) {
+private fun taskKindIcon(kind: TaskKind): ImageVector = when (kind) {
     TaskKind.SCAN -> Icons.Rounded.Search
     TaskKind.IMPORT -> Icons.Rounded.Add
     TaskKind.APPLY -> Icons.Rounded.FontDownload
@@ -417,17 +444,7 @@ private fun miuixTaskKindIcon(kind: TaskKind): ImageVector = when (kind) {
     TaskKind.MIX -> Icons.Rounded.Layers
     TaskKind.DELETE -> Icons.Rounded.Delete
     TaskKind.REBOOT -> Icons.Rounded.RestartAlt
+    TaskKind.TEMPLATE -> Icons.Rounded.Description
+    TaskKind.PRECONDITION -> Icons.Rounded.Warning
     TaskKind.DIAGNOSTIC -> Icons.Rounded.Description
-}
-
-@Composable
-private fun miuixTaskPhaseColor(phase: TaskPhase): Color {
-    val tokens = LocalMiuixTokens.current
-    return when (phase) {
-        TaskPhase.FAILED -> MaterialTheme.colorScheme.error
-        TaskPhase.SUCCESS -> tokens.success
-        TaskPhase.WAITING_REBOOT -> MaterialTheme.colorScheme.secondary
-        TaskPhase.INFO -> tokens.textSecondary
-        TaskPhase.QUEUED, TaskPhase.RUNNING, TaskPhase.WAITING_CLEANUP -> MaterialTheme.colorScheme.primary
-    }
 }

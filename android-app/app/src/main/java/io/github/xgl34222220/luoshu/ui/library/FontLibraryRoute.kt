@@ -118,7 +118,7 @@ internal fun FontLibraryRoute(
             scaleY = pageScale
         },
     ) {
-        FontLibraryScreenCompact(
+        FontLibraryScreenMiuix(
             style = style,
             state = displayState,
             actions = displayActions,

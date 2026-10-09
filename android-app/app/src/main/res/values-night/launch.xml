@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="launch_background">#252E45</color>
+    <color name="launch_gradient_start">#192942</color>
+    <color name="launch_gradient_center">#282740</color>
+    <color name="launch_gradient_end">#162F38</color>
+    <color name="launch_ink">#9EADC5</color>
+    <color name="launch_gold">#C8B185</color>
+    <color name="launch_glass_top">#435679</color>
+    <color name="launch_glass_center">#3D4268</color>
+    <color name="launch_glass_bottom">#345C67</color>
+    <color name="launch_glass_edge">#BDCEE9</color>
+    <color name="launch_glass_shadow">#091324</color>
+    <bool name="launch_light_system_bars">false</bool>
+</resources>

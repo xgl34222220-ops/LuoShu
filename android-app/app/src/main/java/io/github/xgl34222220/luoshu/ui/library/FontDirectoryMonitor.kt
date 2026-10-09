@@ -7,6 +7,8 @@ import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,7 +16,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Folder
@@ -29,12 +30,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,13 +47,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.NativeImportViewModel
 import io.github.xgl34222220.luoshu.rememberNativeImportViewModel
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import java.util.ArrayDeque
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -59,6 +67,7 @@ import org.json.JSONObject
 private const val FONT_WATCH_SCHEMA = 1
 private const val FONT_WATCH_MAX_DOCUMENTS = 2_048
 private const val FONT_WATCH_MAX_DEPTH = 6
+private const val FONT_WATCH_IMPORT_BATCH_SIZE = 32
 private val FONT_WATCH_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
 
 @Immutable
@@ -93,7 +102,24 @@ internal data class FontDirectoryWatchConfig(
 private data class FontDirectoryScan(
     val documents: List<WatchedFontDocument>,
     val diff: FontDirectoryDiff,
+    val request: FontDirectoryScanRequests.Request,
 )
+
+/** Identity also distinguishes a reconnect or a replacement request for the same URI. */
+internal class FontDirectoryScanRequests {
+    class Request(val treeUri: String)
+
+    private var current: Request? = null
+
+    fun start(treeUri: String): Request = Request(treeUri).also { current = it }
+
+    fun invalidate() {
+        current = null
+    }
+
+    fun isCurrent(request: Request, treeUri: String): Boolean =
+        current === request && request.treeUri == treeUri
+}
 
 internal class FontDirectoryWatchStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -169,6 +195,18 @@ internal fun diffFontDirectorySnapshots(
     )
 }
 
+internal fun fontDirectoryImportBatchCount(documents: List<WatchedFontDocument>): Int =
+    (documents.size + FONT_WATCH_IMPORT_BATCH_SIZE - 1) / FONT_WATCH_IMPORT_BATCH_SIZE
+
+internal fun fontDirectoryImportBatch(
+    documents: List<WatchedFontDocument>,
+    batchIndex: Int,
+): List<WatchedFontDocument> {
+    val lastBatchIndex = (fontDirectoryImportBatchCount(documents) - 1).coerceAtLeast(0)
+    return documents.drop(batchIndex.coerceIn(0, lastBatchIndex) * FONT_WATCH_IMPORT_BATCH_SIZE)
+        .take(FONT_WATCH_IMPORT_BATCH_SIZE)
+}
+
 internal fun hasPersistedFontDirectoryPermission(context: Context, config: FontDirectoryWatchConfig): Boolean {
     if (!config.configured) return false
     return context.contentResolver.persistedUriPermissions.any { permission ->
@@ -186,34 +224,61 @@ internal fun FontDirectoryMonitorTool(
     val scope = rememberCoroutineScope()
     val store = remember(context.applicationContext) { FontDirectoryWatchStore(context.applicationContext) }
     val importViewModel = rememberNativeImportViewModel()
-    var config by remember { mutableStateOf(store.load()) }
+    // A same-URI selection still has its own identity for the asynchronous label lookup.
+    var config by remember { mutableStateOf(store.load(), referentialEqualityPolicy()) }
     var scan by remember { mutableStateOf<FontDirectoryScan?>(null) }
     var scanning by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    var importRequestMessage by remember { mutableStateOf("") }
     var showDialog by remember { mutableStateOf(false) }
+    val scanRequests = remember { FontDirectoryScanRequests() }
+    var scanJob by remember { mutableStateOf<Job?>(null) }
 
-    suspend fun scanNow(target: FontDirectoryWatchConfig) {
-        if (!target.configured || scanning) return
-        scanning = true
-        errorMessage = ""
-        val result = runCatching {
-            withContext(Dispatchers.IO) {
-                val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
-                FontDirectoryScan(documents, diffFontDirectorySnapshots(target.snapshot, documents))
-            }
-        }
-        scan = result.getOrNull()
-        errorMessage = result.exceptionOrNull()?.message.orEmpty()
+    fun cancelScan() {
+        scanRequests.invalidate()
+        scanJob?.cancel()
+        scanJob = null
         scanning = false
+        scan = null
     }
 
     fun requestScan(target: FontDirectoryWatchConfig = config) {
-        if (!target.configured || scanning) return
-        scope.launch { scanNow(target) }
+        if (!target.configured || target.treeUri != config.treeUri) return
+        val request = scanRequests.start(target.treeUri)
+        scanJob?.cancel()
+        scanning = true
+        scan = null
+        errorMessage = ""
+        importRequestMessage = ""
+        scanJob = scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
+                    FontDirectoryScan(documents, diffFontDirectorySnapshots(target.snapshot, documents), request)
+                }
+                if (scanRequests.isCurrent(request, config.treeUri)) scan = result
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (scanRequests.isCurrent(request, config.treeUri)) errorMessage = error.message.orEmpty()
+            } finally {
+                if (scanRequests.isCurrent(request, config.treeUri)) {
+                    scanning = false
+                    scanJob = null
+                }
+            }
+        }
     }
 
-    LaunchedEffect(config.treeUri) {
-        if (config.configured) scanNow(config)
+    DisposableEffect(Unit) {
+        onDispose {
+            scanRequests.invalidate()
+            scanJob?.cancel()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        requestScan()
     }
 
     val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -238,15 +303,23 @@ internal fun FontDirectoryMonitorTool(
                     )
                 }
             }
+            cancelScan()
             val next = FontDirectoryWatchConfig(
                 treeUri = uri.toString(),
-                label = withContext(Dispatchers.IO) { queryTreeLabel(context, uri) },
                 snapshot = emptyMap(),
             )
             store.save(next)
             config = next
             scan = null
+            importRequestMessage = ""
             showDialog = true
+            requestScan(next)
+            val label = withContext(Dispatchers.IO) { queryTreeLabel(context, uri) }
+            if (config === next) {
+                val labelled = next.copy(label = label)
+                store.save(labelled)
+                config = labelled
+            }
         }
     }
 
@@ -269,25 +342,40 @@ internal fun FontDirectoryMonitorTool(
             scan = scan,
             scanning = scanning,
             errorMessage = errorMessage,
+            importRequestMessage = importRequestMessage,
+            importEnabled = enabled,
             importViewModel = importViewModel,
             onChooseDirectory = { treeLauncher.launch(Uri.parse(config.treeUri).takeIf { config.configured }) },
             onScan = { requestScan() },
             onImport = { documents ->
-                importViewModel.startImport(documents.take(32).map { Uri.parse(it.uri) })
-                val current = scan?.documents.orEmpty().associateBy { it.key }
-                val next = config.copy(snapshot = current)
-                store.save(next)
-                config = next
-                scan = scan?.copy(diff = FontDirectoryDiff())
+                val importState = importViewModel.state
+                val currentScan = scan
+                if (enabled && !scanning && !importState.busy && !importState.paused &&
+                    config.configured && currentScan != null &&
+                    scanRequests.isCurrent(currentScan.request, config.treeUri)
+                ) {
+                    val selected = documents.filter { it in currentScan.diff.actionable }.take(FONT_WATCH_IMPORT_BATCH_SIZE)
+                    if (selected.isNotEmpty()) {
+                        importViewModel.startImport(selected.map { Uri.parse(it.uri) })
+                        importRequestMessage = "已请求导入 ${selected.size} 项，结果请在任务中心查看。目录变更仍保留，确认处理完后可选择“仅记录基线”。"
+                    }
+                }
             },
             onUseBaseline = {
-                val current = scan?.documents.orEmpty().associateBy { it.key }
-                val next = config.copy(snapshot = current)
-                store.save(next)
-                config = next
-                scan = scan?.copy(diff = FontDirectoryDiff())
+                val currentScan = scan
+                if (!scanning && config.configured && currentScan != null &&
+                    scanRequests.isCurrent(currentScan.request, config.treeUri)
+                ) {
+                    val current = currentScan.documents.associateBy { it.key }
+                    val next = config.copy(snapshot = current)
+                    store.save(next)
+                    config = next
+                    scan = scan?.copy(diff = FontDirectoryDiff())
+                    importRequestMessage = ""
+                }
             },
             onDisconnect = {
+                cancelScan()
                 runCatching {
                     context.contentResolver.releasePersistableUriPermission(
                         Uri.parse(config.treeUri),
@@ -298,6 +386,7 @@ internal fun FontDirectoryMonitorTool(
                 config = FontDirectoryWatchConfig()
                 scan = null
                 errorMessage = ""
+                importRequestMessage = ""
             },
             onDismiss = { showDialog = false },
         )
@@ -319,11 +408,12 @@ private fun FontDirectoryMonitorButton(
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = scheme.surfaceContainerLow,
+        modifier = modifier.luoShuGlassHighlight(LuoShuSmoothShape(22.dp)),
+        shape = LuoShuSmoothShape(22.dp),
+        color = LocalMiuixTokens.current.glassCardColor,
         contentColor = scheme.onSurface,
-        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
+        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -338,7 +428,7 @@ private fun FontDirectoryMonitorButton(
             )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     when {
                         !configured -> "选择 SAF 目录"
@@ -361,6 +451,8 @@ private fun FontDirectoryMonitorDialog(
     scan: FontDirectoryScan?,
     scanning: Boolean,
     errorMessage: String,
+    importRequestMessage: String,
+    importEnabled: Boolean,
     importViewModel: NativeImportViewModel,
     onChooseDirectory: () -> Unit,
     onScan: () -> Unit,
@@ -370,18 +462,24 @@ private fun FontDirectoryMonitorDialog(
     onDismiss: () -> Unit,
 ) {
     val diff = scan?.diff ?: FontDirectoryDiff()
+    val documents = diff.actionable
+    var batchIndex by remember(documents) { mutableStateOf(0) }
+    val batchCount = fontDirectoryImportBatchCount(documents)
+    val importBatch = fontDirectoryImportBatch(documents, batchIndex)
+    val canImport = importEnabled && !scanning && !importViewModel.state.busy && !importViewModel.state.paused
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 14.dp,
+            modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(34.dp)),
+            shape = LuoShuSmoothShape(34.dp),
+            color = LocalMiuixTokens.current.glassDialogColor,
+            shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
+            border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
         ) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
+            Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(11.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         modifier = Modifier.size(46.dp),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = LuoShuSmoothShape(16.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
@@ -395,7 +493,7 @@ private fun FontDirectoryMonitorDialog(
                     }
                     Spacer(Modifier.size(11.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.Black)
+                        Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                         Text("进入字体库时扫描，不在后台常驻", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                     }
                     IconButton(onClick = onDismiss) { LuoShuGlyph(
@@ -406,14 +504,16 @@ private fun FontDirectoryMonitorDialog(
                 }
 
                 Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(20.dp)),
+                    shape = LuoShuSmoothShape(20.dp),
+                    color = LocalMiuixTokens.current.glassCardColor,
+                    border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                    shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(
                             if (config.configured) config.label.ifBlank { "已选择目录" } else "尚未选择目录",
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -431,9 +531,11 @@ private fun FontDirectoryMonitorDialog(
 
                 if (errorMessage.isNotBlank()) {
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(18.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(18.dp)),
+                        shape = LuoShuSmoothShape(18.dp),
+                        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = if (LocalMiuixTokens.current.glassEnabled) .86f else 1f),
+                        border = BorderStroke(1.dp, LocalMiuixTokens.current.glassOutlineBrush),
+                        shadowElevation = LocalMiuixTokens.current.cardShadowElevation,
                     ) {
                         Row(Modifier.padding(11.dp), verticalAlignment = Alignment.Top) {
                             Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
@@ -463,21 +565,46 @@ private fun FontDirectoryMonitorDialog(
 
                 if (diff.hasChanges) {
                     Text(
-                        "新增与变更会进入现有安全导入队列；目录删除只作提示，洛书不会自动删除字体库文件。",
+                        "新增与变更可分批请求导入，结果请查看任务中心。目录变更仅在选择“仅记录基线”后清除；目录删除只作提示。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp,
                         lineHeight = 14.sp,
                     )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onUseBaseline, modifier = Modifier.weight(1f)) { Text("仅记录基线") }
-                        OutlinedButton(
-                            onClick = { onImport(diff.actionable) },
-                            enabled = diff.actionable.isNotEmpty() && !importViewModel.state.busy && !importViewModel.state.paused,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Text(if (diff.actionable.size > 32) "导入前 32 项" else "导入 ${diff.actionable.size} 项")
+                    if (batchCount > 1) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { batchIndex = (batchIndex - 1).coerceAtLeast(0) }, enabled = canImport && batchIndex > 0) {
+                                Text("上一批")
+                            }
+                            Text(
+                                "第 ${batchIndex + 1}/$batchCount 批",
+                                modifier = Modifier.weight(1f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.sp,
+                            )
+                            TextButton(onClick = { batchIndex = (batchIndex + 1).coerceAtMost(batchCount - 1) }, enabled = canImport && batchIndex + 1 < batchCount) {
+                                Text("下一批")
+                            }
                         }
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onUseBaseline, enabled = !scanning, modifier = Modifier.weight(1f)) { Text("仅记录基线") }
+                        OutlinedButton(
+                            onClick = { onImport(importBatch) },
+                            enabled = importBatch.isNotEmpty() && canImport,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(when {
+                                importViewModel.state.busy -> "正在导入"
+                                importViewModel.state.paused -> "导入已暂停"
+                                batchCount > 1 -> "导入本批 ${importBatch.size} 项"
+                                else -> "导入 ${importBatch.size} 项"
+                            })
+                        }
+                    }
+                }
+
+                if (importRequestMessage.isNotBlank()) {
+                    Text(importRequestMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 14.sp)
                 }
 
                 if (config.configured) {
@@ -545,7 +672,7 @@ private fun scanFontDirectory(context: Context, treeUri: Uri): List<WatchedFontD
 }
 
 private fun queryTreeLabel(context: Context, treeUri: Uri): String {
-    return runCatching {
+    return try {
         val rootId = DocumentsContract.getTreeDocumentId(treeUri)
         val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootId)
         context.contentResolver.query(
@@ -556,6 +683,10 @@ private fun queryTreeLabel(context: Context, treeUri: Uri): String {
             null,
         )?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else ""
-        }.orEmpty()
-    }.getOrDefault("").ifBlank { "字体监视目录" }
+        }.orEmpty().ifBlank { "字体监视目录" }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        "字体监视目录"
+    }
 }

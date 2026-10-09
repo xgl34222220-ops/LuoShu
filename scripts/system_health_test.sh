@@ -50,6 +50,14 @@ test ! -e "$MOD/config/dead.pid"
 cp "$ROOT/common/background_task.sh" "$MOD/common/background_task.sh"
 printf '%s\n' "$$" > "$MOD/config/live.pid"
 printf 'active-task-123\n' > "$MOD/config/live.pid.task"
+# A live record now needs boot + start-time proof (luoshu_task_pid_alive no longer
+# trusts a bare PID), so give the fixture the same sidecars a real launch writes.
+cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n' > "$MOD/config/live.pid.boot" || true
+[ -s "$MOD/config/live.pid.boot" ] || printf 'unknown' > "$MOD/config/live.pid.boot"
+_live_stat=$(cat "/proc/$$/stat")
+set -- ${_live_stat##*) }
+shift 19
+printf '%s\n' "$1" > "$MOD/config/live.pid.start"
 printf '%s\n' "$$" > "$MOD/config/stale-boot.pid"
 printf 'active-task-123\n' > "$MOD/config/stale-boot.pid.task"
 printf 'previous-boot\n' > "$MOD/config/stale-boot.pid.boot"

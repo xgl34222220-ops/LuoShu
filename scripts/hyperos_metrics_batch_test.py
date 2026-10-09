@@ -14,17 +14,25 @@ sys.path.insert(0, str(ROOT / 'common'))
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
+from font_inventory import _read_metrics
 import hyperos_metrics_batch as batch
+import font_live_payload as live_payload
 
 
-def font_file(path, top=700):
-    pen = TTGlyphPen(None)
-    pen.moveTo((0, 0)); pen.lineTo((500, 0)); pen.lineTo((500, top)); pen.closePath()
+def font_file(path, top=700, points=(65,)):
+    path.parent.mkdir(parents=True, exist_ok=True)
     fb = FontBuilder(1000, isTTF=True)
-    fb.setupGlyphOrder(['.notdef', 'A'])
-    fb.setupCharacterMap({65: 'A'})
-    fb.setupGlyf({'.notdef': pen.glyph(), 'A': pen.glyph()})
-    fb.setupHorizontalMetrics({name: (600, 0) for name in ['.notdef', 'A']})
+    cmap = {cp: 'A' if cp == 65 else f'u{cp:X}' for cp in points}
+    order = ['.notdef', *cmap.values()]
+    glyphs = {}
+    for name in order:
+        pen = TTGlyphPen(None)
+        pen.moveTo((0, 0)); pen.lineTo((500, 0)); pen.lineTo((500, top)); pen.closePath()
+        glyphs[name] = pen.glyph()
+    fb.setupGlyphOrder(order)
+    fb.setupCharacterMap(cmap)
+    fb.setupGlyf(glyphs)
+    fb.setupHorizontalMetrics({name: (600, 0) for name in order})
     fb.setupHorizontalHeader(ascent=1600, descent=-600)
     fb.setupOS2(sTypoAscender=1600, sTypoDescender=-600, usWinAscent=1700, usWinDescent=700)
     fb.setupNameTable({'familyName': 'Fixture', 'styleName': 'Regular'})
@@ -70,6 +78,214 @@ class HyperOSMetricsTest(unittest.TestCase):
         for logical in slots:
             part, name = logical.split('/')[1], logical.split('/')[-1]
             (self.root / 'stock' / part / name).touch()
+
+    def verified(self, name, part='product', weight=400, families=()):
+        path = self.root / 'stock' / part / name
+        font_file(path, points=(*range(32, 127), 0xA0))
+        fmt, metrics = _read_metrics(path)
+        return {'path': f'/{part}/fonts/{name}', 'source': 'verified-scan',
+                'weight': weight, 'style': 'normal', 'faceIndex': 0,
+                'families': list(families), 'format': fmt, 'metrics': metrics}
+
+    def report(self):
+        return {row['slot']: row for row in json.loads(
+            (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
+
+    def test_trusted_inventory_completes_oem_names_and_explicit_weights(self):
+        # Names/styles match actual stock inventory omissions from Redmi/dali
+        # OS3.0.303. Synthetic outlines avoid copying ROM fonts into the repo.
+        cases = (('CarroisGothicSC-Regular.ttf', 'system', 400),
+                 ('MiuiEx-Light.ttf', 'product', 300),
+                 ('Interscaled-Medium.otf', 'product', 500),
+                 ('ChamberiDisplay-Semibold.ttf', 'product', 600),
+                 ('MiuiEx-Bold.ttf', 'product', 700),
+                 ('Coca-ColaCareFontKaiTi.TTF', 'product', 400))
+        tops = {300: 620, 400: 700, 500: 790, 600: 850, 700: 920}
+        for weight, top in tops.items():
+            font_file(self.fonts / f'{weight}.ttf', top)
+        slots = {f'/{part}/fonts/{name}': self.verified(name, part, weight)
+                 for name, part, weight in cases}
+        slots['/system/fonts/CarroisGothicSC-Regular.ttf'].update(
+            source='xml', families=['sans-serif-smallcaps'])
+        self.inventory(slots)
+        result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], len(cases))
+        self.assertEqual(result['fallbackSlots'], 0)
+        reports = self.report()
+        for name, part, weight in cases:
+            with TTFont(self.stage / part / 'fonts' / name) as font:
+                self.assertEqual(font['glyf']['A'].yMax, tops[weight])
+                self.assertEqual(font['hhea'].ascent, slots[f'/{part}/fonts/{name}']['metrics']['hhea']['ascent'])
+            self.assertEqual(reports[f'/{part}/fonts/{name}']['slotSource'], 'stock-inventory')
+
+    def test_unavailable_completion_weight_uses_selected_regular_source(self):
+        self.inventory({'/product/fonts/MiuiEx-Bold.ttf': self.verified('MiuiEx-Bold.ttf', weight=700)})
+        batch.build(self.module, self.stage, [])
+        with TTFont(self.stage / 'product/fonts/MiuiEx-Bold.ttf') as font:
+            self.assertEqual(font['glyf']['A'].yMax, 700)
+
+    def test_inventory_completion_excludes_unsafe_faces_and_managed_symlinks(self):
+        slots = {'/system/fonts/MiSansVF.ttf': slot()}
+        names = ('Symbols.ttf', 'NovelUI.ttf', 'Roboto-Italic.ttf', 'NotoSansArabic.ttf',
+                 'RobotoMono.ttf', 'Collection.ttf', 'OtherFace.ttf', 'GoogleSansManaged.ttf')
+        for name in names:
+            slots[f'/product/fonts/{name}'] = self.verified(name)
+        slots['/product/fonts/NovelUI.ttf']['metrics'].pop('coverage')
+        slots['/product/fonts/Collection.ttf']['format'] = 'TTC'
+        slots['/product/fonts/OtherFace.ttf']['faceIndex'] = 1
+        self.inventory(slots)
+        managed = self.root / 'stock/product/GoogleSansManaged.ttf'
+        managed.unlink(); managed.symlink_to(self.root / 'stock/product/NovelUI.ttf')
+        result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(result['mapped'], 1)
+        for name in names:
+            self.assertFalse((self.stage / 'product/fonts' / name).exists(), name)
+
+    def test_completion_uses_only_manifest_partitions_and_canonical_paths(self):
+        slots = {'/system/fonts/MiSansVF.ttf': slot()}
+        for part in ('vendor_custom', 'unrecorded', 'data'):
+            root = self.root / 'stock' / part
+            root.mkdir()
+            os.environ[f'LUOSHU_{part.upper()}_FONTS_ROOT'] = str(root)
+            slots[f'/{part}/fonts/NovelUI.ttf'] = self.verified('NovelUI.ttf', part)
+        slots['/vendor_custom/fonts/subdir/Nested.ttf'] = self.verified('Nested.ttf', 'vendor_custom')
+        slots['/vendor_custom/fonts//NovelUI.ttf'] = self.verified('NovelUI.ttf', 'vendor_custom')
+        slots['/vendor_custom/fonts//NovelUI.ttf']['path'] = '/vendor_custom/fonts//NovelUI.ttf'
+        slots['/vendor_custom/fonts/subdir/Nested.ttf']['path'] = '/vendor_custom/fonts/subdir/Nested.ttf'
+        self.inventory(slots)
+        (self.module / 'config/device_font_partitions.conf').write_text('vendor_custom\ndata\n../escape\n')
+        result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(result['mapped'], 2)
+        self.assertTrue((self.stage / 'vendor_custom/fonts/NovelUI.ttf').is_file())
+        self.assertFalse((self.stage / 'unrecorded/fonts/NovelUI.ttf').exists())
+        self.assertFalse((self.stage / 'data/fonts/NovelUI.ttf').exists())
+        self.assertFalse((self.stage / 'vendor_custom/fonts/subdir/Nested.ttf').exists())
+
+    def test_absent_or_invalid_stock_inventory_never_creates_completion_targets(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
+                        '/product/fonts/NovelUI.ttf': self.verified('NovelUI.ttf')})
+        (self.root / 'stock/product/NovelUI.ttf').unlink()
+        self.assertEqual(batch.build(self.module, self.stage, ['MiSansVF.ttf'])['mapped'], 1)
+        self.assertFalse((self.stage / 'product/fonts/NovelUI.ttf').exists())
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
+                        '/product/fonts/NovelUI.ttf': self.verified('NovelUI.ttf')})
+        config = self.module / 'config/device_font_inventory.json'
+        data = json.loads(config.read_text())
+        data['slots']['/product/fonts/NovelUI.ttf']['metrics']['hhea']['ascent'] = -1
+        config.write_text(json.dumps(data))
+        self.assertEqual(batch.build(self.module, self.stage, ['MiSansVF.ttf'])['mapped'], 1)
+        self.assertFalse((self.stage / 'product/fonts/NovelUI.ttf').exists())
+        data['buildKey'] = 'another-rom'; config.write_text(json.dumps(data))
+        self.assertEqual(batch.build(self.module, self.stage, ['MiSansVF.ttf'])['fallbackSlots'], 1)
+        self.assertFalse((self.stage / 'product/fonts/NovelUI.ttf').exists())
+
+    def test_known_target_cannot_create_fonts_through_outside_partition_symlink(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
+                        '/product/fonts/MiSansVF.ttf': slot()})
+        outside = self.root / 'outside'; outside.mkdir()
+        (self.stage / 'product').symlink_to(outside, target_is_directory=True)
+        before = (self.fonts / '400.ttf').read_bytes()
+        with self.assertRaisesRegex(ValueError, '隔离目录之外'):
+            batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertEqual((self.fonts / '400.ttf').read_bytes(), before)
+
+    def test_generator_store_cannot_escape_staging(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
+        outside = self.root / 'outside'; outside.mkdir()
+        (self.fonts / '.luoshu-font-store').symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, '隔离目录之外'):
+            batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(list(outside.iterdir()), [])
+        self.assertFalse((self.fonts / 'MiSansVF.ttf').exists())
+
+    def test_report_publication_does_not_modify_a_linked_live_report(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
+        live = self.module / '.luoshu-payload'
+        live.mkdir()
+        sentinel = live / '.luoshu-metrics-report.json'
+        sentinel.write_bytes(b'live-record-must-stay-unchanged')
+        report = self.stage / '.luoshu-metrics-report.json'
+        for link in ('symlink', 'hardlink', 'stale-temp-symlink', 'stale-temp-hardlink'):
+            with self.subTest(link=link):
+                report.unlink(missing_ok=True)
+                leaf = report.with_name(report.name + f'.tmp.{os.getpid()}') if link.startswith('stale-temp') else report
+                leaf.unlink(missing_ok=True)
+                if link.endswith('symlink'):
+                    leaf.symlink_to(sentinel)
+                else:
+                    os.link(sentinel, leaf)
+                batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+                self.assertEqual(sentinel.read_bytes(), b'live-record-must-stay-unchanged')
+                self.assertFalse(report.is_symlink())
+                self.assertNotEqual(report.stat().st_ino, sentinel.stat().st_ino)
+                self.assertEqual(list(self.report()), ['/system/fonts/MiSansVF.ttf'])
+                leaf.unlink(missing_ok=True)
+
+    def test_stale_alias_temp_cannot_mutate_a_live_inode(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
+        live = self.module / '.luoshu-payload'; live.mkdir()
+        sentinel = live / 'MiSansVF.ttf'
+        sentinel.write_bytes(b'live-font-must-stay-unchanged')
+        target = self.fonts / 'MiSansVF.ttf'
+        temporary = target.with_name(target.name + f'.tmp.{os.getpid()}')
+        for link in ('symlink', 'hardlink'):
+            with self.subTest(link=link):
+                if link == 'symlink':
+                    temporary.symlink_to(sentinel)
+                else:
+                    os.link(sentinel, temporary)
+                batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+                self.assertEqual(sentinel.read_bytes(), b'live-font-must-stay-unchanged')
+                self.assertFalse(temporary.exists())
+                with TTFont(target) as font:
+                    self.assertIn(65, font.getBestCmap())
+
+    def test_rejects_module_live_and_live_descendant_roots(self):
+        for target in (self.module, self.module / '.luoshu-payload',
+                       self.module / '.luoshu-payload/subdir'):
+            with self.subTest(target=target), self.assertRaisesRegex(ValueError, '本次启动'):
+                batch.build(self.module, target, [])
+
+    def test_completed_dynamic_slot_survives_live_copy_and_atomic_bind_visibility(self):
+        stock_root = self.root / 'stock/vendor_custom'; stock_root.mkdir()
+        os.environ['LUOSHU_VENDOR_CUSTOM_FONTS_ROOT'] = str(stock_root)
+        logical = '/vendor_custom/fonts/NovelUI.ttf'
+        self.inventory({logical: self.verified('NovelUI.ttf', 'vendor_custom')})
+        (self.module / 'config/device_font_partitions.conf').write_text('vendor_custom\n')
+        batch.build(self.module, self.stage, [])
+        generation = live_payload.prepare(self.stage, self.root / 'live-cache', 'host-fixture-boot',
+                                          self.root / 'live-temp')
+        mapped = self.stage / 'vendor_custom/fonts/NovelUI.ttf'
+        copied = generation / 'vendor_custom/fonts/NovelUI.ttf'
+        self.assertEqual(copied.read_bytes(), mapped.read_bytes())
+        self.assertNotEqual(copied.stat().st_ino, mapped.stat().st_ino)
+        visible = self.root / 'visible'; visible.mkdir()
+        font_file(visible / 'NovelUI.ttf', top=123)
+        state = self.root / 'mount-state'
+        calls = self.root / 'bind-calls'
+        # Run the unchanged atomic enumeration/bind/visibility implementations.
+        # Its kernel mount command is explicitly replaced by an isolated copy.
+        code = r'''
+. "$1"
+_luoshu_self_state_root() { printf '%s\n' "$FIXTURE_STATE"; }
+_luoshu_mount_cmd() {
+    [ "$1" = -o ] && [ "$2" = bind ] || return 1
+    printf '%s\n' "$3" >> "$FIXTURE_CALLS"
+    cp "$3" "$4"
+}
+_lsme_mount_list="$FIXTURE_JOURNAL"
+_luoshu_atomic_bind_tree "$FIXTURE_SOURCE" "$FIXTURE_VISIBLE" || exit 1
+_luoshu_atomic_tree_visible "$FIXTURE_SOURCE" "$FIXTURE_VISIBLE" bind
+'''
+        result = subprocess.run(['sh', '-c', code, 'sh', str(ROOT / 'common/mount_self_atomic.sh')],
+            env={**os.environ, 'FIXTURE_STATE': str(state), 'FIXTURE_CALLS': str(calls),
+                 'FIXTURE_JOURNAL': str(self.root / 'mount-journal'),
+                 'FIXTURE_SOURCE': str(copied.parent), 'FIXTURE_VISIBLE': str(visible)},
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls.read_text().splitlines(), [str(copied)])
+        self.assertEqual((visible / 'NovelUI.ttf').read_bytes(), mapped.read_bytes())
 
     def test_full_stock_contract_and_glyphs_unchanged(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
@@ -261,7 +477,8 @@ _hyperos_clock_ui_files() { :; }
     def test_stage_failure_propagates_through_both_callers(self):
         helper = self.module / 'common/hyperos_stage_complete.sh'
         helper.parent.mkdir(parents=True)
-        helper.write_text('exit 7\n')
+        helper.write_text('printf "called\\n" >> "$TEST_CALLS"\nexit 7\n')
+        marker = self.root / 'calls'
         for relative, function in (
             ('common/legacy_v14_4/font_switch_safe.sh', 'stage_hyperos_complete'),
             ('common/legacy_v14_4/mix_router.sh', 'complete_hyperos_stage'),
@@ -269,11 +486,14 @@ _hyperos_clock_ui_files() { :; }
             source = (ROOT / relative).read_text()
             start = source.index(function + '() {')
             code = source[start:source.index('\n}', start) + 2]
-            result = subprocess.run(['sh', '-c', code + '\ngetprop() { echo HyperOS; }\n' + function],
+            result = subprocess.run(['sh', '-c', '. "$1"\n' + code + '\ngetprop() { echo HyperOS; }\n' + function,
+                                     'sh', str(ROOT / 'common/legacy_v14_4/mix_phase_timing.sh')],
                 env={**os.environ, 'IS_HYPEROS': 'true', 'MODDIR': str(self.module),
                      'REALMOD': str(self.module), 'LOG_FILE': str(self.root / 'log'),
-                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage)})
+                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage),
+                     'TEST_CALLS': str(marker)})
             self.assertNotEqual(result.returncode, 0, relative)
+        self.assertEqual(marker.read_text().splitlines(), ['called', 'called'])
 
     def test_shell_entry_uses_one_python_process(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
@@ -307,6 +527,108 @@ _hyperos_clock_ui_files() { :; }
         result = subprocess.run(command, env=env, capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('HyperOS 字体处理失败', result.stderr)
+
+
+class FinalFallbackRoutingTest(unittest.TestCase):
+    """Actual SFNT routing; these fixtures are never incident-device fonts."""
+    CHAT = 0x804A
+
+    def chat_pair(self, *, empty=True):
+        from coloros_metrics_batch_test import ColorOSRoutingTest, font_file as make_font
+        import composite_font
+        from fontTools.pens.boundsPen import BoundsPen
+        harness = ColorOSRoutingTest()
+        harness.setUp(); self.addCleanup(harness.doCleanups)
+        harness.pair()
+        points = set(harness.POINTS) | set(composite_font.REQUIRED_LATIN) | set(composite_font.REQUIRED_DIGITS) | set(composite_font.CJK_PROBES) | {self.CHAT}
+        donor = harness.fonts / '.luoshu-font-store/regular.font'
+        fallback = harness.fonts / 'SysSans-Hans-Regular.ttf'
+        for path in (donor, fallback):
+            make_font(path, points=points)
+            with TTFont(path, recalcTimestamp=False) as font:
+                font['head'].created = font['head'].modified = 3500000000
+                if empty and path == fallback:
+                    font['glyf'][font.getBestCmap()[self.CHAT]] = TTGlyphPen(None).glyph()
+                font.save(path)
+        validation = composite_font._validate_output(fallback)
+        self.assertEqual(validation['inkValidation']['codepoints'], 77, 'all original bounded probes still pass')
+        return harness, donor, fallback
+
+    def bounds(self, path, codepoint):
+        from fontTools.pens.boundsPen import BoundsPen
+        with TTFont(path) as font:
+            name = font.getBestCmap().get(codepoint)
+            if name is None: return None
+            glyphs = font.getGlyphSet(); pen = BoundsPen(glyphs)
+            glyphs[name].draw(pen)
+            return pen.bounds
+
+    def test_empty_chat_fallback_does_not_prune_visible_primary(self):
+        harness, donor, fallback = self.chat_pair()
+        self.assertIsNotNone(self.bounds(donor, self.CHAT))
+        self.assertIsNone(self.bounds(fallback, self.CHAT))
+        harness.build()
+        primary = harness.stage / 'product/fonts/GoogleSansText-Regular.ttf'
+        with TTFont(primary) as font:
+            self.assertIn(self.CHAT, font.getBestCmap(), 'unproved final fallback must retain the visible primary glyph')
+            self.assertNotIn(harness.HAN, font.getBestCmap(), 'proved fallback glyphs still route normally')
+        self.assertIsNotNone(self.bounds(primary, self.CHAT))
+        self.assertGreater(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 0)
+        self.assertIn('unproven-glyphs-preserved', harness.reports[harness.GOOGLE]['cjkRoutingReason'])
+
+    def test_unmapped_final_fallback_is_counted_and_primary_is_retained(self):
+        harness, donor, fallback = self.chat_pair(empty=False)
+        with TTFont(fallback, recalcTimestamp=False) as font:
+            for table in font['cmap'].tables:
+                if table.isUnicode() and table.format != 14: table.cmap.pop(self.CHAT, None)
+            font.save(fallback)
+        harness.build()
+        self.assertIsNotNone(self.bounds(harness.stage/'product/fonts/GoogleSansText-Regular.ttf', self.CHAT))
+        self.assertEqual(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 1)
+
+    def test_another_fallback_cannot_mask_mapped_empty_main_glyph(self):
+        from coloros_metrics_batch_test import font_file as make_font
+        harness, donor, fallback = self.chat_pair()
+        with TTFont(donor) as font: points = tuple(font.getBestCmap())
+        second = harness.fonts/'MiSansVF.ttf';make_font(second, points=points)
+        harness.stock('/system/fonts/MiSansVF.ttf', points)
+        harness.build()
+        self.assertIsNone(self.bounds(fallback, self.CHAT))
+        self.assertIsNotNone(self.bounds(second, self.CHAT))
+        self.assertIsNotNone(self.bounds(harness.stage/'product/fonts/GoogleSansText-Regular.ttf', self.CHAT))
+        self.assertGreater(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 0)
+
+    def test_final_generated_fallback_not_only_source_cmap_is_checked(self):
+        import coloros_metrics_batch as coloros
+        harness, donor, fallback = self.chat_pair(empty=False)
+        original = coloros.write_metrics
+        def empty_final(source, output, *args, **kwargs):
+            report = original(source, output, *args, **kwargs)
+            if source == fallback:
+                with TTFont(output, recalcTimestamp=False) as font:
+                    font['glyf'][font.getBestCmap()[self.CHAT]] = TTGlyphPen(None).glyph()
+                    font.save(output)
+            return report
+        with patch.object(coloros, 'write_metrics', side_effect=empty_final):
+            harness.build()
+        self.assertIsNotNone(self.bounds(donor, self.CHAT))
+        self.assertIsNone(self.bounds(fallback, self.CHAT))
+        self.assertIsNotNone(self.bounds(harness.stage / 'product/fonts/GoogleSansText-Regular.ttf', self.CHAT))
+        self.assertGreater(harness.reports[harness.GOOGLE]['cjkUnprovenMappingsPreserved'], 0)
+
+    def test_collapsed_final_fallback_keeps_primary_and_multiple_slots_share_proof(self):
+        harness, donor, fallback = self.chat_pair(empty=False)
+        with TTFont(fallback, recalcTimestamp=False) as font:
+            pen = TTGlyphPen(None);pen.moveTo((0, 0));pen.lineTo((500, 0));pen.closePath()
+            font['glyf'][font.getBestCmap()[self.CHAT]] = pen.glyph();font.save(fallback)
+        for index in range(4):
+            harness.stock(f'/product/fonts/GoogleSansText-Extra{index}.ttf', (65,49), ('google-sans-text',))
+        with patch.object(batch, 'final_fallback_codepoints', wraps=batch.final_fallback_codepoints) as proof:
+            harness.build()
+        self.assertEqual(proof.call_count, 1, 'one actual fallback output is validated once for all primary aliases')
+        for name in ('GoogleSansText-Regular.ttf', *[f'GoogleSansText-Extra{i}.ttf' for i in range(4)]):
+            self.assertIsNotNone(self.bounds(harness.stage/'product/fonts'/name, self.CHAT))
+        self.assertFalse(list(harness.stage.glob('.coloros-metrics-*')))
 
 
 if __name__ == '__main__':

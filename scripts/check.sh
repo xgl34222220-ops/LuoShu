@@ -33,8 +33,10 @@ python3 -m py_compile \
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py" "$ROOT/common/font_live_payload.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
 python3 "$ROOT/scripts/apk_packaging_metadata_test.py"
+python3 "$ROOT/scripts/android_launch_source_test.py"
 sh "$ROOT/scripts/font_next_transaction_test.sh"
 python3 "$ROOT/scripts/font_live_switch_test.py"
+python3 "$ROOT/scripts/inventory_output_contract_test.py" >/dev/null
 sh "$ROOT/scripts/runtime_paths_test.sh"
 sh "$ROOT/scripts/installer_bootstrap_test.sh"
 python3 "$ROOT/scripts/task_scope_legacy_test.py"
@@ -45,6 +47,7 @@ python3 "$ROOT/scripts/installer_task_cleanup_test.py"
 python3 "$ROOT/scripts/task_scope_test.py"
 python3 "$ROOT/scripts/legacy_font_task_lifecycle_test.py"
 python3 "$ROOT/scripts/device_font_cache_lifecycle_test.py"
+python3 "$ROOT/scripts/boot_font_maintenance_test.py"
 sh "$ROOT/scripts/task_scope_shell_test.sh"
 sh "$ROOT/scripts/uninstall_safety_test.sh"
 sh "$ROOT/scripts/uninstall_cleanup_test.sh"
@@ -67,6 +70,10 @@ for file in \
   scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
+  common/legacy_v14_4/composite_cache_proof.sh scripts/legacy_mix_fixed_cache_identity_test.py \
+  common/legacy_v14_4/mix_phase_timing.sh scripts/legacy_mix_phase_timing_test.py \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontTaskTiming.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/FontTaskTimingTest.kt \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -270,6 +277,8 @@ sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
 sh "$ROOT/scripts/module_layout_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
+python3 "$ROOT/scripts/safe_switch_cache_identity_test.py"
+python3 "$ROOT/scripts/safe_switch_timing_test.py"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
 python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
@@ -278,11 +287,16 @@ python3 "$ROOT/scripts/font_inventory_symlink_test.py"
 python3 "$ROOT/scripts/hyperos_cjk_routing_test.py"
 python3 "$ROOT/scripts/google_font_fallback_test.py"
 python3 "$ROOT/scripts/google_font_fallback_integration_test.py"
+python3 "$ROOT/scripts/google_font_diagnostic_test.py"
+python3 "$ROOT/scripts/google_font_diagnostic_app_test.py"
+python3 "$ROOT/scripts/diagnostic_boot_summary_test.py"
 python3 "$ROOT/scripts/google_font_provider_lifecycle_test.py"
 python3 "$ROOT/scripts/google_font_refresh_test.py"
+python3 "$ROOT/scripts/google_font_guard_resume_test.py"
 python3 "$ROOT/scripts/google_font_provider_journal_test.py"
 python3 "$ROOT/scripts/hyperos_theme_font_bridge_test.py"
 python3 "$ROOT/scripts/status_provider_hotfix_test.py"
+sh "$ROOT/scripts/full_backup_root_test.sh"
 python3 "$ROOT/scripts/legacy_mix_status_lifecycle_test.py"
 python3 "$ROOT/scripts/scanner_refresh_test.py"
 sh "$ROOT/scripts/builder_update_policy_test.sh"
@@ -312,6 +326,9 @@ python3 "$ROOT/scripts/hyperos_layout_freetype_test.py"
 python3 "$ROOT/scripts/font_config_monospace_test.py"
 sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
 sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
+python3 "$ROOT/scripts/legacy_mix_fixed_prepare_reuse_test.py"
+python3 "$ROOT/scripts/legacy_mix_fixed_cache_identity_test.py"
+python3 "$ROOT/scripts/legacy_mix_phase_timing_test.py"
 sh "$ROOT/scripts/background_mix_worker_test.sh"
 sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 sh "$ROOT/scripts/font_switch_lock_test.sh"
@@ -337,8 +354,17 @@ sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"
 sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
 sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
-sh "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
+# The prior module-build rerun exited inside this gate without identifying the
+# failing command. Trace its isolated fixture; preserve every assertion.
+sh -x "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
 sh "$ROOT/scripts/stock_scan_lock_test.sh"
+
+# Exercise the same helper chain as the UI workflow; source checks alone do not
+# cover the production Java last-request projection used by session shutdown.
+python3 "$ROOT/scripts/android_ui_smoke_test.py"
+python3 "$ROOT/scripts/dump_ui_original_media_test.py"
+python3 "$ROOT/scripts/ui_snapshot_session_test.py"
+python3 "$ROOT/scripts/ui_snapshot_java_test.py"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
 echo 'LuoShu App-only source checks passed.'
@@ -348,4 +374,3 @@ grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
 grep -q 'prepared-v8' common/multiweight_mix_task.sh
-

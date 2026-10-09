@@ -31,5 +31,15 @@ jobs:
         run: sh scripts/v4_fast_validate_test.sh
       - name: Prepare bundled composite runtime
         run: sh scripts/prepare_composite_runtime.sh
+      - name: Prepare host source-check dependencies
+        run: |
+          # check.sh runs the screenshot-helper regressions (android_ui_smoke_test.py),
+          # which import Pillow and need real mksh. Match test-candidate.yml's isolated host venv.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends mksh python3-venv >/dev/null
+          python3 -m venv "$RUNNER_TEMP/luoshu-host-tests"
+          timeout 180s "$RUNNER_TEMP/luoshu-host-tests/bin/python" -m pip install --timeout 30 --retries 2 Pillow==12.3.0
+          echo "$RUNNER_TEMP/luoshu-host-tests/bin" >> "$GITHUB_PATH"
+
       - name: Complete repository source checks
         run: sh scripts/check.sh

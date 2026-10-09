@@ -1,0 +1,78 @@
+name: One-shot startup GPU diagnostic (not acceptance)
+
+on:
+  push:
+    branches: [claude/laughing-hypatia-ogd2oz]
+    paths:
+      - diagnostics/startup_gpu_probe.py
+      - .github/workflows/startup-gpu-diagnostic.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: startup-gpu-diagnostic-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    name: Diagnostic ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, flat_backdrop, no_glass_pipeline, simple_glyphs]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Verify isolated patch variants before changing temporary checkout
+        run: python3 diagnostics/startup_gpu_probe.py selftest
+      - name: Prepare temporary diagnostic sources (never commit or deliver APK)
+        run: python3 diagnostics/startup_gpu_probe.py prepare --mode '${{ matrix.mode }}'
+      - name: Compile instrumented diagnostic APK
+        timeout-minutes: 15
+        working-directory: android-app
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../diagnostic-output/build.log
+      - name: Enable required KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=15
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Measure one cold process on this group's fresh AVD
+        timeout-minutes: 9
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 4096M
+          heap-size: 512M
+          emulator-boot-timeout: 420
+          disable-animations: false
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -wipe-data -noaudio -no-boot-anim -camera-back none
+          script: python3 diagnostics/startup_gpu_probe.py run --mode '${{ matrix.mode }}' --apk android-app/app/build/outputs/apk/debug/app-debug.apk
+      - name: Retain measurements only, never diagnostic APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIAGNOSTIC-NOT-DELIVERY-${{ matrix.mode }}
+          path: diagnostic-output/
+          if-no-files-found: error
+          retention-days: 7

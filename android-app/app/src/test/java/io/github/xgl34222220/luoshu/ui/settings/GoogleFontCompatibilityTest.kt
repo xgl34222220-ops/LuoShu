@@ -5,7 +5,7 @@ import org.junit.Test
 
 class GoogleFontCompatibilityTest {
     private fun state(name: String, managed: Boolean, disabled: Boolean, user: Int = 0) =
-        """{"status":"diagnostic","state":"$name","title":"状态","message":"说明","user":$user,"managed":$managed,"componentDisabled":$disabled,"canEnable":true,"canRestore":true}"""
+        """{"status":"diagnostic","state":"$name","title":"状态","message":"说明","user":$user,"managed":$managed,"componentDisabled":$disabled,"canEnable":true,"canRestore":true,"canReapply":true}"""
 
     @Test fun ownedDisabledOffersRestoreOnly() {
         val result = parseGoogleFontCompatibility(state("enabled", true, true), 0)
@@ -50,4 +50,27 @@ class GoogleFontCompatibilityTest {
         assertTrue(googleFontActionMessage("restore", "restored").contains("恢复"))
     }
     @Test(expected = IllegalArgumentException::class) fun unexpectedActionOutputIsNotSuccess() { googleFontActionMessage("enable", "ok") }
+    @Test fun verifiedOwnedStatesOfferReapply() {
+        assertTrue(parseGoogleFontCompatibility(state("enabled", true, true), 0).canReapply)
+        assertTrue(parseGoogleFontCompatibility(state("changed", true, false), 0).canReapply)
+    }
+    @Test fun reapplyCannotClaimExternalOrConflictingState() {
+        for (name in listOf("off", "external", "conflict", "unavailable")) {
+            assertFalse(parseGoogleFontCompatibility(state(name, true, false), 0).canReapply)
+        }
+        assertFalse(parseGoogleFontCompatibility(state("changed", false, false), 0).canReapply)
+    }
+    @Test fun backendCanDenyReapplyEvenWithOwnedRecord() {
+        val raw = state("enabled", true, true).replace("\"canReapply\":true", "\"canReapply\":false")
+        assertFalse(parseGoogleFontCompatibility(raw, 0).canReapply)
+    }
+    @Test fun maintenanceAndExplicitRepairHavePinnedCommandsAndVerifiedResults() {
+        assertTrue(googleFontCommand("reconcile-owned", 10).contains("reconcile-owned --user 10 --json"))
+        assertTrue(googleFontCommand("reapply-owned", 10).contains("reapply-owned --user 10 --json"))
+        assertTrue(googleFontActionMessage("reapply-owned", "component-disabled").contains("保留原恢复记录"))
+        assertTrue(googleFontActionMessage("reconcile-owned", "unchanged").contains("未切换组件"))
+    }
+    @Test(expected = IllegalArgumentException::class) fun repairDoesNotAcceptUnverifiedUnchangedResult() {
+        googleFontActionMessage("reapply-owned", "unchanged")
+    }
 }

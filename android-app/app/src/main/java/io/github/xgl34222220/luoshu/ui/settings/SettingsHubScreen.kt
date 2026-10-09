@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.settings
 
 import android.content.Intent
+import android.os.Build
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
@@ -64,6 +66,9 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import io.github.xgl34222220.luoshu.ui.theme.luoShuPressScale
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -73,7 +78,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -101,6 +105,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuInsetPanel
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 
 data class AppearanceActions(
@@ -191,16 +196,12 @@ internal fun SettingsHubRoute(
                 Modifier
                     .fillMaxSize()
                     .navigationBarsPadding()
-                    .padding(start = if (settings.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
-                    .then(
-                        if (settings.uiStyle == UiStyle.MIUIX) {
-                            Modifier
-                                .shadow(22.dp, detailShape, clip = false)
-                                .clip(detailShape)
-                                .background(LocalMiuixTokens.current.pageBackground)
-                        } else {
-                            Modifier
-                        },
+                    .padding(start = 6.dp)
+                    .clip(detailShape)
+                    .background(
+                        LocalMiuixTokens.current.pageBackground.copy(
+                            alpha = if (LocalMiuixTokens.current.glassEnabled) .46f else 1f,
+                        ),
                     ),
             ) {
                 LuoShuDetailBar(title = target.label, onBack = { sectionName = null })
@@ -208,7 +209,7 @@ internal fun SettingsHubRoute(
                     when (target) {
                         SettingsSection.OVERVIEW -> OverviewPage(model)
                         SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
-                        SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
+                        SettingsSection.SAFETY -> SafetyPage(model)
                         SettingsSection.GOOGLE -> GoogleFontCompatibilityPage()
                         SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
                         SettingsSection.UPDATE -> UpdatePage(model)
@@ -308,18 +309,22 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
         health.level == HealthLevel.WARNING -> tokens.warning
         else -> tokens.success
     }
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
+        interactionSource = interactionSource,
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f)
+            .luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         color = tokens.cardBackground,
-        shadowElevation = 1.dp,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+        shadowElevation = tokens.cardShadowElevation,
     ) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(52.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    shape = LuoShuSmoothShape(18.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -338,8 +343,8 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
                 }
                 Icon(Icons.Rounded.ChevronRight, null, tint = tokens.textSecondary, modifier = Modifier.size(22.dp))
             }
-            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .045f)) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            LuoShuInsetPanel {
+                Column(Modifier.fillMaxWidth()) {
                     Text("当前字体", color = tokens.textSecondary, fontSize = 12.sp)
                     Spacer(Modifier.height(3.dp))
                     Text(
@@ -365,11 +370,12 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
 private fun SettingsGroup(content: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         color = tokens.cardBackground,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        shadowElevation = tokens.cardShadowElevation,
     ) {
         Column { content() }
     }
@@ -405,9 +411,11 @@ private fun SettingsNavigationRow(
     onClick: () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
+    val interactionSource = remember { MutableInteractionSource() }
     Surface(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
+        interactionSource = interactionSource,
+        modifier = Modifier.fillMaxWidth().luoShuPressScale(interactionSource, pressedScale = .985f),
         color = androidx.compose.ui.graphics.Color.Transparent,
     ) {
         Row(
@@ -416,7 +424,7 @@ private fun SettingsNavigationRow(
         ) {
             Surface(
                 modifier = Modifier.size(42.dp),
-                shape = RoundedCornerShape(13.dp),
+                shape = LuoShuSmoothShape(13.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
                 contentColor = MaterialTheme.colorScheme.primary,
             ) {
@@ -430,7 +438,7 @@ private fun SettingsNavigationRow(
                 }
             }
             Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(title, color = tokens.textPrimary, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium)
                 Text(
                     subtitle,
@@ -491,80 +499,92 @@ private fun OverviewPage(model: SystemCenterViewModel) = pageList {
 }
 
 @Composable
-private fun AppearancePage(settings: AppearanceSettings, actions: AppearanceActions) = pageList {
-    item {
-        SettingCard("外观预览") {
-            Text("让文字更悦目", color = MaterialTheme.colorScheme.primary, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(5.dp))
-            Text("Aa 0123456789 · 洛书", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp, lineHeight = 22.sp)
-            Spacer(Modifier.height(16.dp))
-            ChoiceRow(UiStyle.entries, settings.uiStyle, { it.label }, actions.setUiStyle)
+private fun AppearancePage(settings: AppearanceSettings, actions: AppearanceActions) {
+    val monetSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val effectiveMonet = settings.monetEnabled && monetSupported
+    pageList {
+        item {
+            SettingCard("外观预览") {
+                Text("让文字更悦目", color = MaterialTheme.colorScheme.primary, fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(5.dp))
+                Text("Aa 0123456789 · 洛书", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp, lineHeight = 22.sp)
+            }
         }
-    }
-    item {
-        SettingCard("颜色与模式") {
-            Text("深色模式", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(7.dp))
-            ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
-            Spacer(Modifier.height(13.dp))
-            Text("取色风格", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(7.dp))
-            ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
+        item {
+            SettingCard("颜色与模式") {
+                Text("深色模式", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
+                Spacer(Modifier.height(13.dp))
+                Text("取色风格", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(7.dp))
+                ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
+            }
         }
-    }
-    item {
-        SettingCard("主题色") {
-            Text(
-                if (settings.monetEnabled) "已跟随壁纸取色；关闭动态取色后可选择主题色。" else "为界面选择一种喜欢的颜色。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
-                lineHeight = 18.sp,
-            )
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().padding(top = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                AccentOptions.forEach { option ->
-                    val active = settings.seedArgb == option.argb
-                    Column(
-                        Modifier.clip(RoundedCornerShape(16.dp)).selectable(
-                            selected = active,
-                            enabled = !settings.monetEnabled,
-                            role = Role.RadioButton,
-                            onClick = { actions.setSeedArgb(option.argb) },
-                        ).padding(horizontal = 5.dp, vertical = 5.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Surface(
-                            modifier = Modifier.size(46.dp),
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color(option.argb).copy(alpha = if (settings.monetEnabled) .35f else 1f),
+        item {
+            SettingCard("主题色") {
+                Text(
+                    when {
+                        !monetSupported -> "当前系统不支持壁纸取色，可直接选择主题色。"
+                        effectiveMonet -> "已跟随壁纸取色；关闭动态取色后可选择主题色。"
+                        else -> "为界面选择一种喜欢的颜色。"
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                )
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup().padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    AccentOptions.forEach { option ->
+                        val active = settings.seedArgb == option.argb
+                        Column(
+                            Modifier.clip(LuoShuSmoothShape(16.dp)).selectable(
+                                selected = active,
+                                enabled = !effectiveMonet,
+                                role = Role.RadioButton,
+                                onClick = { actions.setSeedArgb(option.argb) },
+                            ).padding(horizontal = 5.dp, vertical = 5.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                if (active) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                            Surface(
+                                modifier = Modifier.size(46.dp),
+                                shape = LuoShuSmoothShape(16.dp),
+                                color = Color(option.argb).copy(alpha = if (effectiveMonet) .35f else 1f),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (active) Icon(Icons.Rounded.CheckCircle, null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                }
                             }
+                            Text(option.label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         }
-                        Text(option.label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
             }
         }
-    }
-    item {
-        SettingCard("视觉与显示") {
-            ToggleLine("Monet 动态取色", "跟随系统壁纸强调色", settings.monetEnabled, actions.setMonetEnabled)
-            ToggleLine("纯黑深色模式", "AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
-            ToggleLine("玻璃半透明", "用于悬浮底栏和弹层，内容卡片保持清晰", settings.glassEnabled, actions.setGlassEnabled)
-            ToggleLine("背景模糊", "模糊底栏后方经过的内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
-            ToggleLine("悬浮底栏", "关闭后贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
-            ToggleLine("高刷新率", "优先同分辨率高刷新模式", settings.highRefreshRate, actions.setHighRefreshRate)
+        item {
+            SettingCard("视觉与显示") {
+                ToggleLine(
+                    "Monet 动态取色",
+                    if (monetSupported) "跟随系统壁纸强调色" else "需要 Android 12 或更高版本，当前可手动选色",
+                    effectiveMonet,
+                    actions.setMonetEnabled,
+                    enabled = monetSupported,
+                )
+                ToggleLine("纯黑深色模式", "AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
+                ToggleLine("玻璃半透明", "柔和透光的卡片、悬浮底栏与弹层", settings.glassEnabled, actions.setGlassEnabled)
+                ToggleLine("背景模糊", "模糊底栏后方经过的内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
+                ToggleLine("悬浮底栏", "关闭后贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
+                ToggleLine("高刷新率", "优先同分辨率高刷新模式", settings.highRefreshRate, actions.setHighRefreshRate)
+            }
         }
     }
 }
 
 @Composable
-private fun SafetyPage(model: SystemCenterViewModel, style: UiStyle) {
+private fun SafetyPage(model: SystemCenterViewModel) {
     val h = model.health
     val m = model.maintenance
     var confirmRestore by remember { mutableStateOf(false) }
@@ -609,7 +629,7 @@ private fun SafetyPage(model: SystemCenterViewModel, style: UiStyle) {
     }
     if (confirmRestore) AlertDialog(
         onDismissRequest = { confirmRestore = false },
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
+        shape = LuoShuSmoothShape(24.dp),
         icon = { Icon(Icons.Rounded.Restore, null, tint = MaterialTheme.colorScheme.primary) },
         title = { Text("恢复系统默认字体？", fontWeight = FontWeight.Black) },
         text = { Text("完成后需要完整重启手机。") },
@@ -659,12 +679,12 @@ private fun <T> ChoiceRow(entries: List<T>, selected: T, label: (T) -> String, o
         entries.forEach { item ->
             val active = item == selected
             Surface(
-                modifier = Modifier.clip(RoundedCornerShape(15.dp)).selectable(
+                modifier = Modifier.clip(LuoShuSmoothShape(15.dp)).selectable(
                     selected = active,
                     role = Role.RadioButton,
                     onClick = { onSelected(item) },
                 ),
-                shape = RoundedCornerShape(15.dp),
+                shape = LuoShuSmoothShape(15.dp),
                 color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
@@ -679,7 +699,7 @@ private fun <T> ChoiceRow(entries: List<T>, selected: T, label: (T) -> String, o
 @Composable
 private fun ToggleLine(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).toggleable(
+        Modifier.fillMaxWidth().clip(LuoShuSmoothShape(12.dp)).toggleable(
             value = checked,
             enabled = enabled,
             role = Role.Switch,
@@ -698,15 +718,15 @@ private fun ToggleLine(title: String, description: String, checked: Boolean, onC
 @Composable
 private fun SettingCard(title: String, content: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
-    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         border = BorderStroke(
-            0.5.dp,
-            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+            1.dp,
+            tokens.glassOutlineBrush,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
     ) {
         Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
             Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
@@ -720,19 +740,19 @@ private fun SettingCard(title: String, content: @Composable () -> Unit) {
 private fun StatusCard(title: String, subtitle: String, level: HealthLevel, loading: Boolean, content: @Composable () -> Unit) {
     val accent = when (level) { HealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary; HealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary; HealthLevel.ERROR -> MaterialTheme.colorScheme.error }
     val tokens = LocalMiuixTokens.current
-    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         border = BorderStroke(
-            0.5.dp,
-            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+            1.dp,
+            tokens.glassOutlineBrush,
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
     ) {
         Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(Modifier.size(38.dp), RoundedCornerShape(13.dp), color = accent.copy(alpha = .11f), contentColor = accent) {
+                Surface(Modifier.size(38.dp), LuoShuSmoothShape(13.dp), color = accent.copy(alpha = .11f), contentColor = accent) {
                     Box(contentAlignment = Alignment.Center) { if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(when (level) { HealthLevel.HEALTHY -> Icons.Rounded.CheckCircle; HealthLevel.WARNING -> Icons.Rounded.Info; HealthLevel.ERROR -> Icons.Rounded.Error }, null, Modifier.size(21.dp)) }
                 }
                 Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold); Text(if (loading) "正在读取状态…" else subtitle, color = accent, fontSize = 12.sp, lineHeight = 18.sp) }
@@ -797,13 +817,13 @@ private fun InfoLine(label: String, value: String) {
             val clipboard = LocalClipboardManager.current
             Surface(
                 modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp),
+                shape = LuoShuSmoothShape(12.dp),
                 color = if (scheme.background.luminance() < .5f) {
                     scheme.surfaceContainerHigh
                 } else {
                     LuoShuLayoutTokens.TechnicalSurface
                 },
-                border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .42f)),
+                border = BorderStroke(1.dp, scheme.outlineVariant.copy(alpha = .42f)),
             ) {
                 Row(
                     modifier = Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
@@ -850,7 +870,7 @@ private fun InfoLine(label: String, value: String) {
 private fun NoticeLine(text: String) = Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(7.dp)); Text(text, Modifier.weight(1f), fontSize = 13.sp) }
 
 @Composable
-private fun ConflictLine(c: ModuleConflict) = Surface(Modifier.fillMaxWidth().padding(vertical = 4.dp), RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .48f)) {
+private fun ConflictLine(c: ModuleConflict) = Surface(Modifier.fillMaxWidth().padding(vertical = 4.dp), LuoShuSmoothShape(18.dp), color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .48f)) {
     Column(Modifier.fillMaxWidth().padding(11.dp)) { Text(c.moduleName, fontSize = 12.sp, fontWeight = FontWeight.Black); Text("${c.moduleId} · ${c.target}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(if (c.type == "directory") "目录覆盖 · ${c.fileCount} 个字体/配置文件" else "配置文件覆盖", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold) }
 }
 
@@ -859,7 +879,7 @@ private fun DownloadButton(label: String, url: String, sha: String, onClick: () 
     onClick = onClick,
     modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
     enabled = url.startsWith("https://"),
-    shape = RoundedCornerShape(18.dp),
+    shape = LuoShuSmoothShape(18.dp),
 ) {
     Icon(Icons.Rounded.OpenInNew, null, Modifier.size(18.dp))
     Spacer(Modifier.width(9.dp))

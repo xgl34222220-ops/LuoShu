@@ -7,6 +7,7 @@ This verifies the routing contract, not QQ/Coolapk rendering on a K80 device.
 import ctypes as C
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 import sys
@@ -20,7 +21,8 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.recordingPen import RecordingPen
-from fontTools.ttLib import TTFont
+from fontTools.ttLib import TTFont, TTCollection
+from fontTools.ttLib.sfnt import SFNTReader
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 import font_inventory as inventory
 import font_inventory_scan as scanner
@@ -106,7 +108,18 @@ class RoutingTest(unittest.TestCase):
             'schema': inventory.SCHEMA, 'inventoryRevision': 1, 'metricsRevision': 3,
             'state': 'ready', 'buildKey': 'routing-test', 'slots': self.slots,
             'preservedDynamicAliases': self.dynamic_aliases}))
-        with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('rebuild outlines')):
+        read_glyph_set = TTFont.getGlyphSet
+        proof_code = batch.final_fallback_codepoints.__code__
+
+        def guarded_glyph_set(font, *args, **kwargs):
+            caller = sys._getframe(1)
+            # The generated fallback needs read-only geometry proof. Keep the
+            # old ban on rebuilding outlines in metrics/subsetting helpers.
+            if caller.f_code is not proof_code or caller.f_locals.get('font') is not font:
+                raise AssertionError('rebuild outlines')
+            return read_glyph_set(font, *args, **kwargs)
+
+        with patch.object(TTFont, 'getGlyphSet', new=guarded_glyph_set):
             result = batch.build(self.module, self.stage,
                                  names or [Path(logical).name for logical in (*self.slots, *self.dynamic_aliases)])
         self.reports = {entry['slot']: entry for entry in json.loads(
@@ -159,6 +172,40 @@ class RoutingTest(unittest.TestCase):
     def test_cff_cjk_routes_to_fallback_with_compact_latin_outlines(self):
         self.assert_routing_and_compact_outlines(cff=True)
 
+    def test_final_geometry_guard_keeps_mapped_empty_han_in_primary(self):
+        self.default_pair()
+        (self.fonts / '400.ttf').rename(self.fonts / 'Roboto-Regular.ttf')
+        fallback = self.fonts / 'MiSansVF.ttf'
+        make_font(fallback)
+        with TTFont(fallback, recalcBBoxes=False) as font:
+            font['glyf'][font.getBestCmap()[HAN]] = TTGlyphPen(None).glyph()
+            font.save(fallback)
+        self.build()
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as primary:
+            self.assertIn(HAN, primary.getBestCmap(), 'mapped-empty final fallback is not proof')
+            self.assertNotIn(OTHER_HAN, primary.getBestCmap(), 'positive final geometry still routes')
+        report = self.reports['/system/fonts/Roboto-Regular.ttf']
+        self.assertEqual(report['cjkUnprovenMappingsPreserved'], 1)
+        self.assertEqual(report['cjkRoutingReason'], 'stock-latin-primary-unproven-glyphs-preserved')
+
+    def test_final_geometry_exception_does_not_allow_metrics_outline_rebuild(self):
+        self.default_pair(cff=True)
+        source = self.fonts / '400.ttf'
+        before = source.read_bytes()
+        original_writer = batch.write_metrics
+
+        def rebuilding_writer(source, output, *args, **kwargs):
+            with TTFont(source, lazy=True) as font:
+                font.getGlyphSet()
+            return original_writer(source, output, *args, **kwargs)
+
+        with patch.object(batch, 'write_metrics', new=rebuilding_writer):
+            with self.assertRaisesRegex(AssertionError, 'rebuild outlines'):
+                self.build()
+        self.assertEqual(source.read_bytes(), before)
+        self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
+        self.assertFalse(list((self.fonts / '.luoshu-font-store').glob('hyperos-metrics-*')))
+
     def test_compaction_preserves_legacy_symbol_and_variation_only_mappings(self):
         self.default_pair()
         source_path = self.fonts / '400.ttf'
@@ -198,6 +245,147 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(result['mapped'], 22)
         self.assertEqual(compact.call_count, 1)
         self.assertFalse(list((self.fonts / '.luoshu-font-store').glob('hyperos-metrics-*')))
+
+    def prepare_source_aliases(self, *, collection=False, hardlinks=True, punctuation=False):
+        self.default_pair()
+        anchor = self.root / ('candidate.ttc' if collection else 'candidate.ttf')
+        if collection:
+            latin, han = self.root / 'latin.ttf', self.root / 'han.ttf'
+            make_font(latin, (LATIN, 48)); make_font(han, uvs=True)
+            with TTFont(latin) as first, TTFont(han) as second:
+                fonts = TTCollection(); fonts.fonts = [first, second]; fonts.save(anchor)
+        else:
+            make_font(anchor, uvs=True)
+        paths, jobs = [], []
+        for index in range(3):
+            alias = self.root / f'weight-{index}{anchor.suffix}'
+            if hardlinks: os.link(anchor, alias)
+            else: shutil.copyfile(anchor, alias)
+            paths.append(alias)
+            name = f'Roboto-Alias{index}.ttf'
+            self.stock(name, (LATIN, 48, PUNCT) if punctuation and index == 0 else (LATIN, 48))
+            logical = '/system/fonts/' + name
+            jobs.append((alias, self.fonts / name, batch.contract_for_slot({'slots': self.slots}, logical)))
+        fallback = self.fonts / '400.ttf'
+        if punctuation:
+            with TTFont(fallback, recalcBBoxes=False) as font:
+                font['glyf'][font.getBestCmap()[PUNCT]] = TTGlyphPen(None).glyph()
+                font.save(fallback)
+        jobs.append((fallback, self.fonts / 'MiSansVF.ttf',
+                     batch.contract_for_slot({'slots': self.slots}, '/system/fonts/MiSansVF.ttf')))
+        outputs = self.root / 'prepared'; outputs.mkdir()
+        before = [path.read_bytes() for path in paths]
+        pick, table_read = batch._pick_face, SFNTReader.__getitem__
+        reads, picks = [], []
+
+        def picked(path):
+            if path in paths: picks.append(path)
+            return pick(path)
+
+        def read_table(reader, tag):
+            name = getattr(reader.file, 'name', None)
+            if tag == 'cmap' and name and Path(name) in paths: reads.append(name)
+            return table_read(reader, tag)
+
+        with patch.object(batch, '_pick_face', new=picked), \
+                patch.object(SFNTReader, '__getitem__', new=read_table), \
+                patch.object(batch, 'final_fallback_codepoints', wraps=batch.final_fallback_codepoints) as proof:
+            proven, prepared, evidence = batch.prepare_cjk_routing(
+                {'slots': self.slots}, jobs, self.stage, outputs)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+        self.assertEqual(proof.call_count, 1, 'actual final geometry still executes')
+        self.assertEqual(len(prepared), 1)
+        self.assertEqual(evidence['finalFallbackOutputs'], 1)
+        self.assertNotIn(UVS_HAN, proven, 'variation bases remain outside prune candidates')
+        return proven, evidence, picks, reads
+
+    def test_hardlinked_ttf_candidate_cmap_is_read_once_per_build(self):
+        proven, evidence, picks, reads = self.prepare_source_aliases()
+        self.assertEqual(proven, frozenset({HAN, OTHER_HAN, PUNCT}))
+        self.assertEqual(evidence['glyphsDrawn'], 3)
+        self.assertEqual(len(picks), 1)
+        self.assertEqual(len(reads), 1)
+
+    def test_hardlinked_ttc_face_selection_and_candidate_cmap_are_read_once(self):
+        proven, _evidence, picks, reads = self.prepare_source_aliases(collection=True)
+        self.assertEqual(proven, frozenset({HAN, OTHER_HAN, PUNCT}))
+        self.assertEqual(len(picks), 1)
+        self.assertEqual(len(reads), 3, 'two face scores and one selected cmap')
+
+    def test_different_inode_candidate_cmaps_are_not_shared(self):
+        for collection in (False, True):
+            with self.subTest(collection=collection):
+                # Each subcase owns a separate fixture namespace.
+                fixture = RoutingTest(); fixture.setUp()
+                try:
+                    proven, _evidence, picks, reads = fixture.prepare_source_aliases(
+                        collection=collection, hardlinks=False)
+                    self.assertEqual(proven, frozenset({HAN, OTHER_HAN, PUNCT}))
+                    self.assertEqual(len(picks), 3)
+                    self.assertEqual(len(reads), 9 if collection else 3)
+                finally:
+                    fixture.doCleanups()
+
+    def test_cached_candidates_keep_per_slot_stock_punctuation_independent(self):
+        proven, evidence, picks, reads = self.prepare_source_aliases(punctuation=True)
+        self.assertEqual(proven, frozenset({HAN, OTHER_HAN}))
+        self.assertEqual(evidence['unprovenBySlot']['/system/fonts/Roboto-Alias0.ttf'], 0)
+        self.assertEqual(evidence['unprovenBySlot']['/system/fonts/Roboto-Alias1.ttf'], 1)
+        self.assertEqual(evidence['unprovenBySlot']['/system/fonts/Roboto-Alias2.ttf'], 1)
+        self.assertEqual(len(picks), 1)
+        self.assertEqual(len(reads), 1)
+
+    def test_retained_mtime_in_place_change_invalidates_source_cmap_reuse(self):
+        self.default_pair()
+        anchor = self.root / 'candidate.ttf'; make_font(anchor, (LATIN, HAN))
+        alias = self.root / 'alias.ttf'; os.link(anchor, alias)
+        original_stat = anchor.stat()
+        jobs = []
+        for index, source in enumerate((anchor, alias)):
+            name = f'Roboto-Mutation{index}.ttf'; self.stock(name, (LATIN, 48))
+            logical = '/system/fonts/' + name
+            jobs.append((source, self.fonts / name, batch.contract_for_slot({'slots': self.slots}, logical)))
+        jobs.append((self.fonts / '400.ttf', self.fonts / 'MiSansVF.ttf',
+                     batch.contract_for_slot({'slots': self.slots}, '/system/fonts/MiSansVF.ttf')))
+        picks = []; pick = batch._pick_face
+
+        def mutate():
+            # Equal-size cmap edit on the same inode, with mtime restored.
+            with TTFont(anchor, recalcTimestamp=False) as font:
+                for table in font['cmap'].tables:
+                    if table.isUnicode() and HAN in table.cmap:
+                        table.cmap[UVS_HAN] = table.cmap.pop(HAN)
+                font.save(anchor)
+            os.utime(anchor, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            current = anchor.stat()
+            self.assertEqual(current.st_ino, original_stat.st_ino)
+            self.assertEqual(current.st_size, original_stat.st_size)
+            self.assertEqual(current.st_mtime_ns, original_stat.st_mtime_ns)
+            self.assertNotEqual(current.st_ctime_ns, original_stat.st_ctime_ns)
+
+        class ChangingJobs(list):
+            changed = False
+
+            def __iter__(self):
+                for index, job in enumerate(list.__iter__(self)):
+                    if index == 1 and not self.changed:
+                        mutate(); self.changed = True
+                    yield job
+
+        def picked(path):
+            if path in (anchor, alias): picks.append(path)
+            return pick(path)
+
+        # Mutation is a defensive cache invalidation fixture, not a supported
+        # publication mode. Production sources remain pinned for the build.
+        outputs = self.root / 'prepared'; outputs.mkdir()
+        with patch.object(batch, '_pick_face', new=picked):
+            proven, _prepared, evidence = batch.prepare_cjk_routing(
+                {'slots': self.slots}, ChangingJobs(jobs), self.stage, outputs)
+        self.assertEqual(len(picks), 2)
+        self.assertEqual(evidence['candidateCodepoints'], 2)
+        self.assertEqual(proven, frozenset({HAN, UVS_HAN}))
+        self.assertEqual(evidence['finalFallbackOutputs'], 1)
 
     def test_dali_dynamic_overlay_is_not_frozen_to_the_init_roboto_seed(self):
         self.default_pair()
@@ -324,11 +512,28 @@ class RoutingTest(unittest.TestCase):
 
     def test_no_staged_fallback_keeps_primary_han(self):
         self.default_pair()
+        # An omitted filename alone no longer proves absence: trusted current
+        # inventory completes such targets. A physically missing fallback does.
+        (self.root / 'stock/system/MiSansVF.ttf').unlink()
         self.build(['Roboto-Regular.ttf'])
         with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
             self.assertIn(HAN, font.getBestCmap())
         self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],
                          'no-staged-cjk-fallback')
+
+    def test_inventory_completes_fallback_omitted_from_filename_list_before_routing(self):
+        self.default_pair()
+        result = self.build(['Roboto-Regular.ttf'])
+        self.assertEqual(result['mapped'], 2)
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as primary, \
+                TTFont(self.fonts / 'MiSansVF.ttf') as fallback:
+            self.assertNotIn(HAN, primary.getBestCmap())
+            self.assertIn(HAN, fallback.getBestCmap())
+            self.assertIn(LATIN, primary.getBestCmap())
+            self.assertIn(48, primary.getBestCmap())
+        self.assertEqual(self.reports['/system/fonts/MiSansVF.ttf']['slotSource'], 'stock-inventory')
+        self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],
+                         'stock-latin-primary')
 
     def test_unrelated_named_han_family_is_not_proof_of_system_fallback(self):
         make_font(self.fonts / '400.ttf')

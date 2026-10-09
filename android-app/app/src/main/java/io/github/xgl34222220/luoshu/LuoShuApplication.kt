@@ -12,12 +12,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 internal class LuoShuApplication : Application(), ViewModelStoreOwner {
     override val viewModelStore: ViewModelStore = ViewModelStore()
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    val googleFontMaintenance by lazy(LazyThreadSafetyMode.NONE) {
+        GoogleFontCompatibilityMaintenance(this, applicationScope)
+    }
+    val maintenanceCompletion: StateFlow<Long>
+        get() = googleFontMaintenance.completion
 
     val nativeImportViewModel: NativeImportViewModel by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         ViewModelProvider(
@@ -28,6 +34,7 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
 
     override fun onCreate() {
         super.onCreate()
+        googleFontMaintenance.register()
         NativeImportNotificationController.ensureChannel(this)
         superviseNativeImport()
     }
@@ -75,6 +82,7 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
     }
 
     override fun onTerminate() {
+        googleFontMaintenance.close()
         applicationScope.cancel()
         viewModelStore.clear()
         super.onTerminate()

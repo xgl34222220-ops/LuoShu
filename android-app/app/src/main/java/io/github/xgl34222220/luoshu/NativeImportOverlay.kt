@@ -1,10 +1,13 @@
 package io.github.xgl34222220.luoshu
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,18 +15,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -36,20 +38,51 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.library.FontLibraryAccessState
+import io.github.xgl34222220.luoshu.ui.library.fontLibraryAccessState
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
-import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
+
+internal data class NativeImportEntryGate(
+    val canStart: Boolean,
+    val canResume: Boolean,
+    val blockedMessage: String,
+)
+
+internal fun nativeImportEntryGate(
+    access: FontLibraryAccessState,
+    fontLoading: Boolean,
+    state: NativeImportState,
+): NativeImportEntryGate {
+    val ready = !access.actionsBlocked && !fontLoading && !state.busy
+    val message = when {
+        access.error.isNotBlank() -> access.error
+        access.operationRunning -> "当前有字体操作进行中，请稍后重新选择文件。"
+        access.actionsBlocked -> "正在检查模块状态，请稍后重新选择文件。"
+        fontLoading -> "正在刷新字体库，请稍后重新选择文件。"
+        state.busy -> "导入任务正在进行，请在任务中心查看。"
+        state.paused -> "导入任务已暂停，请继续或取消当前任务后再选择文件。"
+        else -> ""
+    }
+    return NativeImportEntryGate(
+        canStart = ready && !state.paused,
+        canResume = ready && state.paused,
+        blockedMessage = message,
+    )
+}
 
 @Composable
 internal fun NativeImportOverlay(
@@ -59,8 +92,16 @@ internal fun NativeImportOverlay(
     embedded: Boolean = false,
 ) {
     val importViewModel = rememberNativeImportViewModel()
+    val context = LocalContext.current
     val state = importViewModel.state
     var expanded by remember { mutableStateOf(false) }
+    val readGate by rememberUpdatedState(newValue = {
+        nativeImportEntryGate(
+            access = fontLibraryAccessState(viewModel.snapshot, viewModel.operationBusy, viewModel.mixState.busy),
+            fontLoading = viewModel.fontLoading || viewModel.fontRefreshing,
+            state = importViewModel.state,
+        )
+    })
 
     LaunchedEffect(embedded, state.busy, state.paused) {
         expanded = embedded || state.busy || state.paused
@@ -73,29 +114,32 @@ internal fun NativeImportOverlay(
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris ->
-        importViewModel.startImport(uris)
+        if (uris.isNotEmpty()) {
+            val gate = readGate()
+            if (gate.canStart) importViewModel.startImport(uris)
+            else Toast.makeText(context, gate.blockedMessage, Toast.LENGTH_LONG).show()
+        }
     }
 
-    val importEnabled = viewModel.snapshot.installed &&
-        !viewModel.operationBusy &&
-        !viewModel.mixState.busy &&
-        (!state.busy || state.paused)
+    val gate = readGate()
+    val importEnabled = gate.canStart || gate.canResume
     val onImport = {
-        if (state.paused) {
-            importViewModel.resumeImport()
-        } else {
-            launcher.launch(arrayOf("*/*"))
+        val currentGate = readGate()
+        when {
+            currentGate.canResume -> importViewModel.resumeImport()
+            currentGate.canStart -> launcher.launch(arrayOf("*/*"))
+            else -> Toast.makeText(context, currentGate.blockedMessage, Toast.LENGTH_LONG).show()
         }
     }
 
     if (embedded) {
         val tokens = LocalMiuixTokens.current
         Surface(
-            modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
-            color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = if (style == UiStyle.MIUIX) 2.dp else 1.dp,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
+            modifier = modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(28.dp)),
+            shape = LuoShuSmoothShape(28.dp),
+            color = tokens.glassCardColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -154,7 +198,6 @@ private fun ImportActionButton(
 ) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalMiuixTokens.current
-    val dark = scheme.background.luminance() < .5f
     val taskVisible = state.busy || state.paused
     val targetWidth = when {
         !expanded -> 54.dp
@@ -178,14 +221,11 @@ private fun ImportActionButton(
         label = "nativeImportGlassHeight",
     )
     val glassColor = when {
-        embedded && !dark -> LuoShuLayoutTokens.SecondaryBlueSurface
-        embedded -> scheme.surfaceContainerLow
-        style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .76f else .72f)
-        dark -> scheme.surfaceContainerHigh.copy(alpha = .72f)
-        else -> Color.White.copy(alpha = .70f)
+        !tokens.glassEnabled && embedded -> scheme.primaryContainer
+        embedded -> lerp(tokens.glassCardColor, scheme.primaryContainer, .18f)
+        else -> tokens.glassDialogColor
     }
-    val borderColor = if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .82f)
-    val textColor = if (style == UiStyle.MIUIX) tokens.textPrimary else scheme.onSurface
+    val textColor = tokens.textPrimary
 
     val buttonModifier = if (embedded) {
         modifier.fillMaxWidth().height(height)
@@ -195,15 +235,12 @@ private fun ImportActionButton(
     Surface(
         onClick = onImport,
         enabled = enabled,
-        modifier = buttonModifier,
-        shape = if (embedded) RoundedCornerShape(20.dp) else CircleShape,
+        modifier = buttonModifier.luoShuGlassHighlight(LuoShuSmoothShape(if (embedded) 20.dp else 26.dp)),
+        shape = LuoShuSmoothShape(if (embedded) 20.dp else 26.dp),
         color = glassColor,
         contentColor = scheme.primary,
-        shadowElevation = if (embedded) 0.dp else if (style == UiStyle.MIUIX) 10.dp else 8.dp,
-        border = BorderStroke(
-            if (embedded) 0.5.dp else 1.dp,
-            if (embedded) scheme.outlineVariant.copy(alpha = .48f) else borderColor,
-        ),
+        shadowElevation = if (embedded) 0.dp else tokens.cardShadowElevation,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         if (!expanded) {
             Box(contentAlignment = Alignment.Center) {
@@ -249,7 +286,7 @@ private fun ImportActionButton(
                             else -> "导入字体"
                         },
                         color = textColor,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         fontSize = 14.sp,
                         maxLines = 1,
                         softWrap = false,
@@ -288,64 +325,57 @@ private fun ImportResultDialog(
         else -> MaterialTheme.colorScheme.primary
     }
 
-    if (style == UiStyle.MATERIAL) {
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            icon = {
-                Icon(icon, contentDescription = null, tint = accent)
-            },
-            title = { Text(state.title, fontWeight = FontWeight.Black) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(state.summary)
-                    Text(
-                        "支持 TTF、OTF、TTC 与字体模块 ZIP。ZIP 只提取字体文件，不执行包内脚本。",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            },
-            confirmButton = { Button(onClick = onDismiss) { Text("完成") } },
-            shape = MaterialTheme.shapes.extraLarge,
-        )
-    } else {
-        val tokens = LocalMiuixTokens.current
-        Dialog(onDismissRequest = onDismiss) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(38.dp),
-                color = tokens.elevatedCardBackground,
-                shadowElevation = 20.dp,
+    val tokens = LocalMiuixTokens.current
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 660.dp).luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
+            shape = LuoShuSmoothShape(32.dp),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(13.dp),
-                ) {
-                    Text(
-                        "IMPORT RESULT",
-                        color = accent,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp,
-                    )
-                    Text(
-                        state.title,
-                        color = tokens.textPrimary,
-                        fontSize = 25.sp,
-                        lineHeight = 30.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Text(state.summary, color = tokens.textPrimary, lineHeight = 20.sp)
-                    Text(
-                        "ZIP 仅安全提取字体，不执行包内脚本。导入记录可在任务中心控制。",
-                        color = tokens.textSecondary,
-                        fontSize = 11.sp,
-                    )
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
-                        Button(onClick = onDismiss, shape = RoundedCornerShape(18.dp)) {
-                            Text("完成", fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        modifier = Modifier.size(48.dp),
+                        shape = LuoShuSmoothShape(18.dp),
+                        color = accent.copy(alpha = .09f),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, contentDescription = null, tint = accent)
                         }
                     }
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        state.title,
+                        modifier = Modifier.weight(1f),
+                        color = tokens.textPrimary,
+                        fontSize = 22.sp,
+                        lineHeight = 30.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(state.summary, color = tokens.textPrimary, fontSize = 14.sp, lineHeight = 22.sp)
+                    Text(
+                        "支持 TTF、OTF、TTC 与字体模块 ZIP。ZIP 只提取字体文件，不执行包内脚本。导入记录可在任务中心控制。",
+                        color = tokens.textSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                    )
+                }
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                    shape = LuoShuSmoothShape(18.dp),
+                ) {
+                    Text("完成", fontWeight = FontWeight.SemiBold)
                 }
             }
         }

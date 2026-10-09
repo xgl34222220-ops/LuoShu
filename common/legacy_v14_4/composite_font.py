@@ -28,7 +28,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 
 from composite_layout import (_role_transform, clear_imported_metric_variations,
-                              enclose_imported_bounds)
+                              enclose_imported_bounds, validate_required_ink)
 
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
@@ -274,24 +274,12 @@ def _validate_output(path: Path) -> dict[str, object]:
     font = TTFont(str(path), lazy=False, recalcTimestamp=False)
     try:
         cmap = font.getBestCmap() or {}
-        required = {"cjk": ord("中"), "latin": ord("A"), "digit": ord("1")}
-        missing = [role for role, cp in required.items() if cp not in cmap]
-        if missing:
-            raise CompositeError("复合字体缺少必要字符：" + ", ".join(missing))
-        glyph_set = font.getGlyphSet()
-        bounds = {}
-        for role, cp in required.items():
-            glyph_name = cmap[cp]
-            pen = BoundsPen(glyph_set)
-            glyph_set[glyph_name].draw(pen)
-            if pen.bounds is None:
-                raise CompositeError(f"复合字体的 {role} 字形为空")
-            bounds[role] = list(pen.bounds)
+        ink = validate_required_ink(font, REQUIRED_LATIN, REQUIRED_DIGITS, CJK_PROBES)
         return {
             "tables": list(font.keys()),
             "glyphs": int(font["maxp"].numGlyphs),
             "coverage": len(cmap),
-            "bounds": bounds,
+            **ink,
             "upem": int(font["head"].unitsPerEm),
         }
     finally:
@@ -371,7 +359,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     try:
-        result = build(parse_args())
+        if len(sys.argv) == 3 and sys.argv[1] == "--validate-output":
+            result = {"status": "ok", "validation": _validate_output(Path(sys.argv[2]))}
+        else:
+            result = build(parse_args())
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
     except MemoryError:

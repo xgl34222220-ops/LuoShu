@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One static native glass emblem; never another full-screen branding layer.
+  The glass lens fits Android's 192dp safe circle in the 288dp icon canvas.
+  Gradients are native vector fills: no blur, bitmap decode, animator or delay.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="288dp"
+    android:height="288dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- A diffuse translucent lens carries the same blue/lilac/cyan light as
+         the first App-controlled full-screen backdrop. -->
+    <path
+        android:name="diffuse_lens"
+        android:fillAlpha="0.24"
+        android:pathData="M54,19a35,35 0,1 0,0 70a35,35 0,1 0,0 -70">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="28" android:startY="24"
+                android:endX="82" android:endY="88">
+                <item android:offset="0" android:color="@color/launch_glass_top" />
+                <item android:offset="0.48" android:color="@color/launch_glass_center" />
+                <item android:offset="1" android:color="@color/launch_glass_bottom" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path
+        android:name="glass_lens_rim"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/launch_glass_edge"
+        android:strokeAlpha="0.25"
+        android:strokeWidth="0.75"
+        android:pathData="M54,20a34,34 0,1 0,0 68a34,34 0,1 0,0 -68" />
+    <path
+        android:name="lens_lowlight"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@color/launch_glass_shadow"
+        android:strokeAlpha="0.08"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M26,73C32,85 47,88 62,86" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.8"
+        android:scaleY="0.8">
+        <path
+            android:name="glass_core"
+            android:fillAlpha="0.72"
+            android:pathData="M36,26H72C78.6,26 82,29.4 82,36V72C82,78.6 78.6,82 72,82H36C29.4,82 26,78.6 26,72V36C26,29.4 29.4,26 36,26Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="27" android:startY="27"
+                    android:endX="80" android:endY="83">
+                    <item android:offset="0" android:color="@color/launch_glass_top" />
+                    <item android:offset="0.48" android:color="@color/launch_glass_center" />
+                    <item android:offset="1" android:color="@color/launch_glass_bottom" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:name="glass_core_highlight"
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="@color/launch_glass_edge"
+            android:strokeAlpha="0.10"
+            android:strokeWidth="1.15"
+            android:strokeLineCap="round"
+            android:pathData="M36,27H72C78,27 81,30 81,36V53 M27,64V36C27,30 30,27 36,27" />
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="@color/launch_ink"
+            android:strokeWidth="1.35"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M36,26H72C78.6,26 82,29.4 82,36V72C82,78.6 78.6,82 72,82H36C29.4,82 26,78.6 26,72V36C26,29.4 29.4,26 36,26Z M44.7,27V81 M63.3,27V81 M27,44.7H81 M27,63.3H81" />
+        <path
+            android:fillColor="@color/launch_gold"
+            android:pathData="M35.3,33.7a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M54,33.7a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M72.7,33.7a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M35.3,52.4a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M72.7,52.4a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M35.3,71.1a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M54,71.1a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M72.7,71.1a1.6,1.6 0,1 0,0 3.2a1.6,1.6 0,1 0,0 -3.2 M54,50.9a3.1,3.1 0,1 0,0 6.2a3.1,3.1 0,1 0,0 -6.2" />
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="@color/launch_gold"
+            android:strokeWidth="1.6"
+            android:strokeLineCap="round"
+            android:pathData="M45,23C51,24 64,15 69,20C75,27 47,37 41,41 M29,49C20,58 16,74 24,81C37,95 74,73 84,52C91,38 85,32 76,31" />
+    </group>
+</vector>

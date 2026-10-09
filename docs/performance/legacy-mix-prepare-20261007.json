@@ -1,0 +1,46 @@
+{
+  "scope": "Linux host fixtures only; not phone measurements",
+  "head": "03cf4b38dcc0be3bd38c7fa847373daf69855d3a",
+  "beforeEngineSha256": "fa08616b675d720c1c99b17889a96807698ee01638960a1651d087d58c210f23",
+  "afterEngineSha256": "846a189e75a9854b106a9de273334067d1628587ab93239008a88ccfd03702b2",
+  "successfulFixedPreparation": {
+    "beforeCalls": 9,
+    "afterCalls": 1,
+    "beforeSeconds": 1.6774,
+    "afterSeconds": 0.4338,
+    "bytesPerOutput": 8904,
+    "beforeAfterSha256": "1128146d41cf0fc94cc5996b90656b3cb9f97bb90f430ffc6440dde1d10780b6"
+  },
+  "successfulMixedPreparation": {
+    "beforeCalls": 27,
+    "afterCalls": 11,
+    "beforeSeconds": 5.1431,
+    "afterSeconds": 2.6819,
+    "totalOutputBytes": 240408,
+    "beforeAfterSha256": "251b6bace0ac2faf01103bcc59aabda97ea2a314ad4f06dabbad49692af1cedc"
+  },
+  "fullWorker": {
+    "beforeState": "failed",
+    "beforeMessage": "中文字体 200 字重准备失败",
+    "beforeCalls": 3,
+    "beforeSeconds": 0.8582,
+    "afterState": "success",
+    "afterCalls": 11,
+    "afterSeconds": 4.4446,
+    "afterWeightOutputs": 9,
+    "speedComparisonValid": false
+  },
+  "tests": {
+    "newSuitePassed": 11,
+    "realSupervisorTimeoutCode": 124,
+    "realSupervisorCancellationCode": 143,
+    "cleanupConfirmed": true,
+    "leftoverPids": []
+  },
+  "unchangedBudgets": true,
+  "historical600630SecondsPhoneReceiptFound": false,
+  "commands": {
+    "beforeSuccessfulDriver": "LUOSHU_REUSE_TEST_ENGINE=/workspace/scratch/luoshu-rescue-synthesis/v143_auto_multiweight_mix.sh.before python3 scripts/legacy_mix_fixed_prepare_reuse_test.py LegacyMixPrepareReuse.test_mixed_preparation_driver_preserves_all_output_bytes",
+    "afterSuite": "python3 scripts/legacy_mix_fixed_prepare_reuse_test.py"
+  }
+}

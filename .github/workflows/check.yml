@@ -59,7 +59,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv mksh fonts-noto-cjk fonts-dejavu-core >/dev/null
 
       - uses: actions/cache@v4
         with:
@@ -71,6 +71,14 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
+
+      - name: Prepare host source-check dependencies
+        run: |
+          # check.sh runs the screenshot-helper regressions (android_ui_smoke_test.py),
+          # which import Pillow. Match test-candidate.yml's isolated host venv.
+          python3 -m venv "$RUNNER_TEMP/luoshu-host-tests"
+          timeout 180s "$RUNNER_TEMP/luoshu-host-tests/bin/python" -m pip install --timeout 30 --retries 2 Pillow==12.3.0
+          echo "$RUNNER_TEMP/luoshu-host-tests/bin" >> "$GITHUB_PATH"
 
       - name: Run source checks
         run: sh ./scripts/check.sh

@@ -26,6 +26,7 @@ if [ -z "$_luof_core" ]; then
     return 1 2>/dev/null || exit 1
 fi
 . "$_luof_core"
+[ ! -f "${_luof_core%/*}/font_settings_policy.sh" ] || . "${_luof_core%/*}/font_settings_policy.sh"
 unset _luof_candidate _luof_core
 
 # Return the Linux process start time (field 22 of /proc/<pid>/stat).

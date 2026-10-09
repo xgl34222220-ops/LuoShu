@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu
 
+import io.github.xgl34222220.luoshu.ui.library.fontLibraryAccessState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -102,5 +103,56 @@ class NativeImportControlsTest {
         assertEquals("字体导入已取消", state.title)
         assertTrue(state.summary.contains("已处理 3/5 个文件"))
         assertTrue(state.summary.contains("取消 2 个待处理文件"))
+    }
+
+    @Test
+    fun importEntryBlocksModuleCheckingAndMissingRootWithoutCallingThemBusy() {
+        val ready = ModuleSnapshot(loading = false, rootGranted = true, installed = true)
+        for (snapshot in listOf(
+            ready.copy(loading = true),
+            ready.copy(statusCached = true),
+            ready.copy(rootGranted = false),
+            ready.copy(installed = false),
+        )) {
+            val access = fontLibraryAccessState(snapshot, operationBusy = false, mixBusy = false)
+            val gate = nativeImportEntryGate(access, fontLoading = false, NativeImportState())
+            assertFalse(access.operationRunning)
+            assertFalse(gate.canStart)
+            assertFalse(gate.canResume)
+            assertTrue(gate.blockedMessage.isNotBlank())
+        }
+    }
+
+    @Test
+    fun pickerReturnRechecksAccessAndFontLoadingInsteadOfTheOpeningState() {
+        val ready = ModuleSnapshot(loading = false, rootGranted = true, installed = true)
+        val openingAccess = fontLibraryAccessState(ready, operationBusy = false, mixBusy = false)
+        assertTrue(nativeImportEntryGate(openingAccess, false, NativeImportState()).canStart)
+
+        val returnedAccess = fontLibraryAccessState(ready.copy(loading = true), false, false)
+        assertFalse(nativeImportEntryGate(returnedAccess, false, NativeImportState()).canStart)
+        assertFalse(nativeImportEntryGate(openingAccess, true, NativeImportState()).canStart)
+        assertFalse(nativeImportEntryGate(fontLibraryAccessState(ready, true, false), false, NativeImportState()).canStart)
+        assertFalse(nativeImportEntryGate(fontLibraryAccessState(ready, false, true), false, NativeImportState()).canStart)
+    }
+
+    @Test
+    fun pausedEntryResumesButNeverAcceptsNewPickerUris() {
+        val access = fontLibraryAccessState(ModuleSnapshot(loading = false, rootGranted = true, installed = true), false, false)
+        val paused = NativeImportState(phase = NativeImportPhase.PAUSED)
+        val gate = nativeImportEntryGate(access, false, paused)
+
+        assertFalse(gate.canStart)
+        assertTrue(gate.canResume)
+        assertTrue(gate.blockedMessage.contains("已暂停"))
+        assertFalse(nativeImportEntryGate(access, true, paused).canResume)
+    }
+
+    @Test
+    fun cancellationInProgressBlocksSelectionButCancelledTaskCanStartAgain() {
+        val access = fontLibraryAccessState(ModuleSnapshot(loading = false, rootGranted = true, installed = true), false, false)
+        val cancelling = NativeImportState(phase = NativeImportPhase.RUNNING, message = "当前文件完成后取消剩余导入")
+        assertFalse(nativeImportEntryGate(access, false, cancelling).canStart)
+        assertTrue(nativeImportEntryGate(access, false, NativeImportState(phase = NativeImportPhase.CANCELLED)).canStart)
     }
 }

@@ -48,7 +48,9 @@ class AppearanceRepository(private val context: Context) {
             ).normalized()
         }
 
-    suspend fun setUiStyle(value: UiStyle) = edit { it[Keys.uiStyle] = value.name }
+    // Retained for older backup payloads; changing style cannot re-enable the removed UI.
+    @Suppress("UNUSED_PARAMETER")
+    suspend fun setUiStyle(value: UiStyle) = edit { it[Keys.uiStyle] = UiStyle.MIUIX.name }
     suspend fun setThemeMode(value: ThemeMode) = edit { it[Keys.themeMode] = value.storageValue }
     suspend fun setSeedArgb(value: Int) = edit { it[Keys.seedArgb] = accentOptionFor(value).argb }
     suspend fun setKolorStyle(value: KolorStyle) = edit { it[Keys.kolorStyle] = value.name }

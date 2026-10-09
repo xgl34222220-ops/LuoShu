@@ -60,18 +60,130 @@ class HotfixTest(unittest.TestCase):
         self.assertFalse((self.module / '.legacy-v14-runtime').exists())
         self.assertFalse((self.module / '.luoshu-payload').exists())
 
-    def test_weight_read_does_not_migrate_fonts_and_queries_settings_once(self):
-        for name in ('font_manager_v4.sh', 'util_functions.sh', 'util_functions_core.sh'):
+    def test_retired_weight_actions_are_inert_before_loading_helpers(self):
+        for name in ('font_manager_v4.sh', 'font_manager.sh', 'util_functions.sh', 'util_functions_core.sh',
+                     'task_scope.sh', 'task_scope.py', 'runtime_paths.sh', 'runtime_paths_lock.py'):
             self.copy(name)
         legacy = self.root / 'legacy'
         legacy.mkdir()
         (legacy / 'Large-Regular.ttf').write_bytes(b'old-user-font')
         self.env['LEGACY_FONTS_DIR'] = str(legacy)
         self.command('settings', 'echo call >> "$TEST_ROOT/settings-calls"\necho 50\n')
-        result = json.loads(self.run_shell(self.common / 'font_manager_v4.sh', 'action', 'font_weight_status'))
-        self.assertEqual(result['data']['weight'], 450)
-        self.assertEqual((self.root / 'settings-calls').read_text().splitlines(), ['call'])
-        self.assertFalse((self.root / 'public').exists(), 'status migrated public fonts')
+        configs = {
+            'font_weight.conf': 'weight=500\nadjustment=100\n',
+            'font_weight_original.conf': 'adjustment=-25\n',
+        }
+        for name, content in configs.items():
+            (self.module / 'config' / name).write_text(content)
+        for manager in ('font_manager_v4.sh', 'font_manager.sh'):
+            for action in ('font_weight_status', 'font_weight_set', 'font_weight_reset'):
+                with self.subTest(manager=manager, action=action):
+                    result = json.loads(self.run_shell(self.common / manager, 'action', action, '500'))
+                    self.assertEqual(result['status'], 'error')
+                    self.assertIn('已移除', result['message'])
+                    self.assertFalse((self.root / 'settings-calls').exists())
+                    self.assertFalse((self.root / 'public').exists(), 'retired action migrated public fonts')
+                    for name, content in configs.items():
+                        self.assertEqual((self.module / 'config' / name).read_text(), content)
+
+    def test_settings_policy_blocks_only_retired_secure_put_and_is_idempotent(self):
+        policy = self.copy('font_settings_policy.sh')
+        self.command('settings',
+                     'printf "call\\n" >> "$TEST_ROOT/settings-calls"\n'
+                     'printf "%s\\n" "$@" >> "$TEST_ROOT/settings-arguments"\nexit 7\n')
+        blocked = [
+            ('put', 'secure', 'font_weight_adjustment', '100'),
+            ('--user', 'current', 'put', 'secure', 'font_weight_adjustment', '100'),
+            ('--user', '0', 'put', 'secure', 'font_weight_adjustment', '100'),
+            ('--user', 'null', 'put', 'secure', 'font_weight_adjustment', '100'),
+        ]
+        forwarded = [
+            (), ('--user',), ('--user', 'null'),
+            ('get', 'secure', 'font_weight_adjustment'),
+            ('put', 'system', 'font_weight_adjustment', '100'),
+            ('put', 'secure', 'font_scale', '1.2'),
+            ('--user', '0', 'put', 'secure', 'other_key', 'value with spaces'),
+        ]
+        for arguments, expected in [(args, 1) for args in blocked] + [(args, 7) for args in forwarded]:
+            with self.subTest(arguments=arguments):
+                calls = self.root / 'settings-calls'
+                recorded = self.root / 'settings-arguments'
+                calls.unlink(missing_ok=True)
+                recorded.unlink(missing_ok=True)
+                result = subprocess.run(
+                    ['sh', '-c', '. "$1"; . "$1"; shift; settings "$@"', 'sh', str(policy), *arguments],
+                    env=self.env, capture_output=True, text=True, timeout=3)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected == 1:
+                    self.assertFalse(calls.exists())
+                    self.assertFalse(recorded.exists())
+                else:
+                    self.assertEqual(calls.read_text().splitlines(), ['call'])
+                    self.assertEqual(recorded.read_text().splitlines(), list(arguments) or [''])
+
+    def test_real_service_routes_never_replay_retired_weight_configuration(self):
+        for name in ('util_functions.sh', 'util_functions_core.sh', 'font_settings_policy.sh'):
+            self.copy(name)
+        shutil.copyfile(ROOT / 'service.sh', self.module / 'service.sh')
+        core = self.module / '.luoshu-runtime/core'
+        core.mkdir(parents=True)
+        shutil.copyfile(ROOT / '.luoshu-runtime/core/service.sh', core / 'service.sh')
+        self.command('settings', 'echo call >> "$TEST_ROOT/settings-calls"\n')
+        self.command('getprop', 'echo 1\n')
+        config = self.module / 'config'
+        weight = config / 'font_weight.conf'
+        original = config / 'font_weight_original.conf'
+        weight.write_text('weight=500\nadjustment=100\n')
+        original.write_text('adjustment=-25\n')
+        legacy = config / 'font_runtime_legacy_v14_4.conf'
+        for route in ('v4', 'physical'):
+            with self.subTest(route=route):
+                if route == 'physical':
+                    legacy.write_text('font=default\n')
+                self.run_shell(self.module / 'service.sh')
+                self.assertFalse((self.root / 'settings-calls').exists())
+                self.assertEqual(weight.read_text(), 'weight=500\nadjustment=100\n')
+                self.assertEqual(original.read_text(), 'adjustment=-25\n')
+                if route == 'v4':
+                    log = (self.module / 'logs/fontswitch.log').read_text()
+                    self.assertIn('字体粗细调整恢复失败', log, 'frozen weight replay branch was not exercised')
+                    self.assertIn('服务脚本执行完成', log)
+                else:
+                    self.assertIn('physical compatibility service complete',
+                                  (self.module / 'logs/service-legacy-v14.4.log').read_text())
+
+    def test_real_uninstall_never_resets_unowned_or_owned_global_weight(self):
+        self.copy('font_settings_policy.sh')
+        shutil.copyfile(ROOT / 'uninstall.sh', self.module / 'uninstall.sh')
+        compat = self.module / '.luoshu-runtime/compat/v227'
+        compat.mkdir(parents=True)
+        shutil.copyfile(ROOT / '.luoshu-runtime/compat/v227/uninstall.sh', compat / 'uninstall.sh')
+        self.command('settings', 'echo call >> "$TEST_ROOT/settings-calls"\n')
+        self.env.update({
+            'LUOSHU_MODULES_DIR': str(self.root / 'modules'),
+            'LUOSHU_MODULES_UPDATE_DIR': str(self.root / 'modules-update'),
+            'LUOSHU_METAMODULE_MNT': str(self.root / 'metamodule'),
+            'LUOSHU_MAGIC_MOUNT_CONFIG': str(self.root / 'magic-mount/config.toml'),
+            'LUOSHU_SELF_MOUNT_STATE': str(self.root / 'self-mount'),
+        })
+        original = self.module / 'config/font_weight_original.conf'
+        for owned in (False, True):
+            with self.subTest(owned=owned):
+                if owned:
+                    original.write_text('adjustment=-25\n')
+                self.run_shell(self.module / 'uninstall.sh')
+                self.assertFalse((self.root / 'settings-calls').exists())
+                if owned:
+                    self.assertEqual(original.read_text(), 'adjustment=-25\n')
+
+    def test_native_app_has_no_retired_global_weight_control_and_policy_is_packaged(self):
+        app = ROOT / 'android-app/app/src/main/java'
+        for path in app.rglob('*.kt'):
+            source = path.read_text()
+            for action in ('font_weight_status', 'font_weight_set', 'font_weight_reset'):
+                self.assertNotIn(action, source, str(path))
+        manifest = (ROOT / 'scripts/module_payload_manifest.txt').read_text().splitlines()
+        self.assertIn('common/font_settings_policy.sh', manifest)
 
     def test_status_does_not_start_deep_verifier_or_root_manager_daemon(self):
         self.copy('font_boot_state.sh')

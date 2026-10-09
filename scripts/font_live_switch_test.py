@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Live wrapper integration with isolated mount APIs; no real mounts or device I/O."""
 import importlib.util
+import builtins
+from contextlib import ExitStack
+import hashlib
+import io
 import json
 import os
 import re
@@ -9,13 +13,136 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
+
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont, newTable
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('live_copy', ROOT / 'common/font_live_payload.py')
 copy_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(copy_module)
+
+
+class PayloadIOMeter:
+    """Count returned file API bytes, including copyfile's Linux sendfile path.
+
+    These are logical bytes through real reads/copies, not physical disk traffic.
+    Open lifetimes include hashing/writes and overlap, so they are not additive.
+    """
+    def __init__(self, source, cache, temporary):
+        self.roots = {'source': source, 'cache': cache, 'temporary': temporary}
+        self.data = {role: {'opens': 0, 'readCalls': 0, 'readBytes': 0,
+                            'writeBytes': 0, 'openSeconds': 0.0}
+                     for role in self.roots}
+        self.data.update(copyCalls=0, copySeconds=0.0, linkCalls=0,
+                         cleanupCalls=0, cleanupSeconds=0.0)
+
+    def role(self, name):
+        if isinstance(name, int):
+            name = os.readlink('/proc/self/fd/' + str(name))
+        path = Path(name)
+        for role, root in self.roots.items():
+            if path.is_relative_to(root):
+                return role
+
+    def __enter__(self):
+        meter = self
+        original_path_open, original_open = Path.open, builtins.open
+        original_copy, original_link = shutil.copyfile, os.link
+        original_cleanup = shutil.rmtree
+
+        class Stream:
+            def __init__(self, stream, role):
+                self.stream, self.role, self.started = stream, role, time.perf_counter()
+                self.closed = False
+                meter.data[role]['opens'] += 1
+
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+
+            def __enter__(self):
+                self.stream.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                try:
+                    return self.stream.__exit__(*args)
+                finally:
+                    if not self.closed:
+                        meter.data[self.role]['openSeconds'] += time.perf_counter() - self.started
+                        self.closed = True
+
+            def read(self, *args):
+                value = self.stream.read(*args)
+                meter.data[self.role]['readCalls'] += 1
+                meter.data[self.role]['readBytes'] += len(value)
+                return value
+
+            def readinto(self, *args):
+                size = self.stream.readinto(*args)
+                meter.data[self.role]['readCalls'] += 1
+                meter.data[self.role]['readBytes'] += size or 0
+                return size
+
+            def write(self, value):
+                size = self.stream.write(value)
+                meter.data[self.role]['writeBytes'] += size
+                return size
+
+        def opened(original, name, *args, **kwargs):
+            stream = original(name, *args, **kwargs)
+            mode = kwargs.get('mode', args[0] if args else 'r')
+            role = self.role(name)
+            return Stream(stream, role) if role and 'b' in mode else stream
+
+        def copied(*args, **kwargs):
+            self.data['copyCalls'] += 1
+            started = time.perf_counter()
+            try:
+                return original_copy(*args, **kwargs)
+            finally:
+                self.data['copySeconds'] += time.perf_counter() - started
+
+        def linked(*args, **kwargs):
+            self.data['linkCalls'] += 1
+            return original_link(*args, **kwargs)
+
+        def cleaned(*args, **kwargs):
+            self.data['cleanupCalls'] += 1
+            started = time.perf_counter()
+            try:
+                return original_cleanup(*args, **kwargs)
+            finally:
+                self.data['cleanupSeconds'] += time.perf_counter() - started
+
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(Path, 'open', lambda name, *a, **k: opened(original_path_open, name, *a, **k)))
+        self.stack.enter_context(patch.object(builtins, 'open', lambda name, *a, **k: opened(original_open, name, *a, **k)))
+        self.stack.enter_context(patch.object(shutil, 'copyfile', copied))
+        self.stack.enter_context(patch.object(os, 'link', linked))
+        self.stack.enter_context(patch.object(shutil, 'rmtree', cleaned))
+        if hasattr(os, 'sendfile'):
+            original_sendfile = os.sendfile
+            def sent(outfd, infd, *args, **kwargs):
+                size = original_sendfile(outfd, infd, *args, **kwargs)
+                source_role, destination_role = self.role(infd), self.role(outfd)
+                if source_role:
+                    self.data[source_role]['readCalls'] += 1
+                    self.data[source_role]['readBytes'] += size
+                if destination_role:
+                    self.data[destination_role]['writeBytes'] += size
+                return size
+            self.stack.enter_context(patch.object(os, 'sendfile', sent))
+        self.started = time.perf_counter()
+        return self.data
+
+    def __exit__(self, *args):
+        self.data['prepareSeconds'] = time.perf_counter() - self.started
+        return self.stack.__exit__(*args)
 
 # The unchanged atomic-mount tests cover kernel mount policy. This fixture tests
 # the new source lifetime, journal, restoration and truthful result boundary.
@@ -393,6 +520,411 @@ printf 'B\n' > "$MODDIR/config/active_font.conf"
         source_file.unlink(); source_file.symlink_to('/etc/hosts')
         with self.assertRaisesRegex(ValueError, 'non-regular'):
             copy_module.prepare(source, cache, 'boot-new', self.module / 'tmp-copy-4')
+
+    def copy_fixture(self):
+        source = self.module / 'copy-source'
+        fonts = source / 'system/fonts'
+        fonts.mkdir(parents=True)
+        font = fonts / 'Roboto-Regular.ttf'
+        font.write_bytes(bytes(range(256)) * (16 * 1024 * 1024 // 256))
+        os.link(font, fonts / 'MiSansVF.ttf')
+        xml = source / 'system/etc/fonts.xml'
+        xml.parent.mkdir()
+        xml.write_bytes(b'<font/>' * 1024)
+        return source, self.module / 'cache/io-fixture', font.stat().st_size + xml.stat().st_size
+
+    def warm_copy_fixture(self):
+        def sfnt(top, fill):
+            builder = FontBuilder(1000, isTTF=True)
+            builder.setupGlyphOrder(['.notdef', 'A'])
+            builder.setupCharacterMap({65: 'A'})
+            glyphs = {}
+            for name in ['.notdef', 'A']:
+                pen = TTGlyphPen(None)
+                pen.moveTo((0, 0)); pen.lineTo((500, 0))
+                pen.lineTo((500, top)); pen.lineTo((0, top)); pen.closePath()
+                glyphs[name] = pen.glyph()
+            builder.setupGlyf(glyphs)
+            builder.setupHorizontalMetrics({name: (600, 0) for name in glyphs})
+            builder.setupHorizontalHeader(ascent=900, descent=-200)
+            builder.setupOS2(sTypoAscender=900, sTypoDescender=-200,
+                             usWinAscent=900, usWinDescent=200)
+            builder.setupNameTable({'familyName': 'WarmIntegrityFixture', 'styleName': 'Regular'})
+            builder.setupPost(); builder.setupMaxp()
+            builder.font['head'].created = builder.font['head'].modified = 3_400_000_000
+            padding = newTable('TEST'); padding.data = bytes([fill]) * (2 * 1024 * 1024)
+            builder.font['TEST'] = padding
+            output = io.BytesIO(); builder.save(output)
+            data = output.getvalue()
+            with TTFont(io.BytesIO(data), checkChecksums=2) as parsed:
+                self.assertEqual(parsed.getBestCmap(), {65: 'A'})
+                self.assertEqual(parsed['glyf']['A'].yMax, top)
+            return data
+
+        original, selected = sfnt(700, 65), sfnt(800, 66)
+        self.assertEqual(len(original), len(selected))
+        source = self.module / 'warm-source'; fonts = source / 'system/fonts'
+        fonts.mkdir(parents=True)
+        font = fonts / 'MiSansVF.ttf'; font.write_bytes(original)
+        os.link(font, fonts / 'Roboto-Regular.ttf')
+        cache = self.module / 'cache/warm-integrity'
+        previous = copy_module.prepare(source, cache, 'io-boot', self.module / 'warm-seed')
+        font.write_bytes(selected)
+        return source, cache, font, previous, original, selected
+
+    def record_warm_integrity(self, name, source, previous, generation=None, **details):
+        artifact = os.environ.get('LUOSHU_WARM_INTEGRITY_ARTIFACT_DIR')
+        if artifact:
+            output = Path(artifact); output.mkdir(parents=True, exist_ok=True)
+            relative = 'system/fonts/MiSansVF.ttf'
+            def sha(path):
+                return hashlib.sha256(path.read_bytes()).hexdigest()
+            (output / (name + '.json')).write_text(json.dumps({
+                'scope': 'fixed generated real SFNT; host helper integrity and logical I/O only',
+                'sourceSha256': sha(source / relative),
+                'previousOutputSha256': sha(previous / relative),
+                'outputSha256': sha(generation / relative) if generation else None,
+                'published': generation is not None, **details}, indent=2) + '\n')
+
+    def test_warm_generation_miss_rejects_parent_swap_during_second_open(self):
+        source, cache, font, previous, original, selected = self.warm_copy_fixture()
+        temporary = self.module / 'warm-parent-copy'
+        parent, parked, donor = font.parent, self.module / 'parked-fonts', self.module / 'donor-fonts'
+        donor.mkdir(); (donor / font.name).write_bytes(original)
+        os.link(donor / font.name, donor / 'Roboto-Regular.ttf')
+        before = copy_module._source_identity(font.lstat())
+        original_path_open, original_open = Path.open, builtins.open
+        opens, result = [], None
+
+        def opened(real_open, name, *args, **kwargs):
+            mode = kwargs.get('mode', args[0] if args else 'r')
+            if not isinstance(name, int) and Path(name) == font and mode == 'rb':
+                opens.append(mode)
+                if len(opens) == 2:
+                    parent.rename(parked); donor.rename(parent)
+                    try:
+                        return real_open(name, *args, **kwargs)
+                    finally:
+                        parent.rename(donor); parked.rename(parent)
+            return real_open(name, *args, **kwargs)
+
+        try:
+            with patch.object(Path, 'open', lambda name, *a, **k: opened(original_path_open, name, *a, **k)), \
+                    patch.object(builtins, 'open', lambda name, *a, **k: opened(original_open, name, *a, **k)):
+                with self.assertRaisesRegex(ValueError, 'source changed'):
+                    result = copy_module.prepare(source, cache, 'io-boot', temporary)
+        finally:
+            self.record_warm_integrity('parent-swap', source, previous, result,
+                sourceMetadataRestored=copy_module._source_identity(font.lstat()) == before,
+                sourceReadOpens=len(opens))
+        self.assertEqual(len(opens), 2)
+        self.assertEqual(copy_module._source_identity(font.lstat()), before)
+        self.assertEqual(font.read_bytes(), selected)
+        self.assertEqual((previous / font.relative_to(source)).read_bytes(), original)
+        self.assertFalse(temporary.exists())
+        self.assertEqual(list(cache.glob('generation-*')), [previous])
+
+    def test_warm_generation_miss_rejects_same_size_midstream_rewrite_with_restored_mtime(self):
+        source, cache, font, previous, original, _ = self.warm_copy_fixture()
+        temporary = self.module / 'warm-rewrite-copy'
+        original_path_open, original_open = Path.open, builtins.open
+        before = font.stat(); opens, changed = [], []
+
+        class ChangedStream:
+            def __init__(self, stream):
+                self.stream = stream
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+            def __enter__(self):
+                self.stream.__enter__(); return self
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+            def read(self, *args):
+                data = self.stream.read(*args)
+                if data and not changed:
+                    with original_path_open(font, 'r+b') as output:
+                        output.seek(1024 * 1024 + 128); output.write(b'Z')
+                    os.utime(font, ns=(before.st_atime_ns, before.st_mtime_ns))
+                    changed.append(True)
+                return data
+
+        def opened(real_open, name, *args, **kwargs):
+            stream = real_open(name, *args, **kwargs)
+            mode = kwargs.get('mode', args[0] if args else 'r')
+            if not isinstance(name, int) and Path(name) == font and mode == 'rb':
+                opens.append(mode)
+                if len(opens) == 2:
+                    return ChangedStream(stream)
+            return stream
+
+        with patch.object(Path, 'open', lambda name, *a, **k: opened(original_path_open, name, *a, **k)), \
+                patch.object(builtins, 'open', lambda name, *a, **k: opened(original_open, name, *a, **k)), \
+                patch.object(shutil, '_USE_CP_SENDFILE', False, create=True):
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertEqual(changed, [True]); self.assertEqual(len(opens), 2)
+        self.assertEqual((font.stat().st_size, font.stat().st_mtime_ns), (before.st_size, before.st_mtime_ns))
+        self.assertEqual((previous / font.relative_to(source)).read_bytes(), original)
+        self.assertFalse(temporary.exists())
+        self.assertEqual(list(cache.glob('generation-*')), [previous])
+        self.record_warm_integrity('midstream-rewrite', source, previous, mutationTriggered=True,
+                                   sizeAndMtimeRestored=True)
+
+    def test_warm_generation_miss_rechecks_earlier_alias_before_publication(self):
+        source, cache, font, previous, original, _ = self.warm_copy_fixture()
+        last = font.parent / 'ZZ-last.ttf'; last.write_bytes(original)
+        alias = font.parent / 'Roboto-Regular.ttf'
+        replacement = self.module / 'alias-replacement.ttf'; replacement.write_bytes(original)
+        temporary = self.module / 'warm-alias-copy'
+        real_chmod, changed = os.chmod, []
+
+        def changed_alias(path, mode):
+            result = real_chmod(path, mode)
+            if path == temporary / last.relative_to(source):
+                alias.unlink(); os.link(replacement, alias); changed.append(True)
+            return result
+
+        with patch.object(copy_module.os, 'chmod', changed_alias):
+            with self.assertRaisesRegex(ValueError, 'source changed during preparation'):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertEqual(changed, [True])
+        self.assertEqual(alias.stat().st_ino, replacement.stat().st_ino)
+        self.assertEqual((previous / font.relative_to(source)).read_bytes(), original)
+        self.assertFalse(temporary.exists())
+        self.assertEqual(list(cache.glob('generation-*')), [previous])
+        self.record_warm_integrity('earlier-alias', source, previous, mutationTriggered=True)
+
+    def test_warm_generation_miss_copy_error_preserves_previous_and_foreign_temp(self):
+        source, cache, font, previous, original, _ = self.warm_copy_fixture()
+        temporary, foreign = self.module / 'warm-error-copy', self.module / 'warm-foreign'
+        foreign.mkdir(); (foreign / 'keep').write_text('foreign')
+        with patch.object(copy_module.os, 'chmod', side_effect=OSError('warm fixture write failed')):
+            with self.assertRaisesRegex(OSError, 'warm fixture write failed'):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertFalse(temporary.exists())
+        self.assertEqual(list(cache.glob('generation-*')), [previous])
+        self.assertEqual((previous / font.relative_to(source)).read_bytes(), original)
+        with self.assertRaises(FileExistsError):
+            copy_module.prepare(source, cache, 'io-boot', foreign)
+        self.assertEqual((foreign / 'keep').read_text(), 'foreign')
+        self.assertEqual(list(cache.glob('generation-*')), [previous])
+        self.record_warm_integrity('owned-error', source, previous, foreignSentinelPreserved=True)
+
+    def test_warm_generation_miss_reads_twice_and_hit_verifies_without_staging_writes(self):
+        source, cache, font, previous, original, selected = self.warm_copy_fixture()
+        temporary, hit_tmp = self.module / 'warm-miss-copy', self.module / 'warm-hit-copy'
+        rows = {}
+        with PayloadIOMeter(source, cache, temporary) as rows['miss']:
+            generation = copy_module.prepare(source, cache, 'io-boot', temporary)
+        with PayloadIOMeter(source, cache, hit_tmp) as rows['hit']:
+            same = copy_module.prepare(source, cache, 'io-boot', hit_tmp)
+        needed = len(selected)
+        self.assertEqual(rows['miss']['source']['readBytes'], 2 * needed)
+        self.assertEqual(rows['miss']['source']['opens'], 2)
+        self.assertEqual(rows['miss']['temporary']['writeBytes'], needed)
+        self.assertEqual(rows['miss']['copyCalls'], 0)
+        self.assertEqual(rows['miss']['linkCalls'], 1)
+        self.assertEqual(rows['hit']['source']['readBytes'], needed)
+        self.assertEqual(rows['hit']['source']['opens'], 1)
+        self.assertEqual(rows['hit']['cache']['readBytes'], needed)
+        self.assertEqual(rows['hit']['cache']['opens'], 1)
+        self.assertEqual(rows['hit']['temporary']['writeBytes'], 0)
+        self.assertEqual(rows['hit']['temporary']['opens'], 0)
+        self.assertEqual(rows['hit']['copyCalls'], 0)
+        self.assertEqual(generation, same)
+        expected = hashlib.sha256()
+        for name in ('MiSansVF.ttf', 'Roboto-Regular.ttf'):
+            expected.update(('system/fonts/' + name).encode() + b'\0')
+            expected.update(hashlib.sha256(selected).digest())
+        self.assertEqual(generation.name, 'generation-' + expected.hexdigest())
+        self.assertEqual(json.loads((generation / '.generation.json').read_text())['bytes'], needed)
+        cached = generation / font.relative_to(source)
+        self.assertEqual(cached.read_bytes(), selected)
+        self.assertNotEqual(cached.stat().st_ino, font.stat().st_ino)
+        self.assertEqual(cached.stat().st_ino, (generation / 'system/fonts/Roboto-Regular.ttf').stat().st_ino)
+        self.assertEqual((previous / font.relative_to(source)).read_bytes(), original)
+        self.assertFalse(temporary.exists()); self.assertFalse(hit_tmp.exists())
+        self.record_warm_integrity('logical-io', source, previous, generation,
+                                   uniqueSourceBytes=needed, stages=rows)
+
+    def test_first_boot_generation_streams_source_once_and_warm_fully_verifies(self):
+        source, cache, needed = self.copy_fixture()
+        rows = {}
+        cold_tmp, warm_tmp = self.module / 'copy-cold', self.module / 'copy-warm'
+        with PayloadIOMeter(source, cache, cold_tmp) as rows['cold']:
+            generation = copy_module.prepare(source, cache, 'io-boot', cold_tmp)
+        with PayloadIOMeter(source, cache, warm_tmp) as rows['warm']:
+            same = copy_module.prepare(source, cache, 'io-boot', warm_tmp)
+        artifact = os.environ.get('LUOSHU_LIVE_IO_TEST_ARTIFACT_DIR')
+        if artifact:
+            output = Path(artifact); output.mkdir(parents=True, exist_ok=True)
+            (output / 'logical-io.json').write_text(json.dumps({
+                'scope': 'host prepare helper; actual returned read/sendfile bytes; no disk/device/full-switch claim',
+                'helperSha256': hashlib.sha256((ROOT / 'common/font_live_payload.py').read_bytes()).hexdigest(),
+                'uniqueSourceBytes': needed, 'stages': rows}, indent=2) + '\n')
+        self.assertEqual(rows['cold']['source']['readBytes'], needed)
+        self.assertEqual(rows['cold']['source']['opens'], 2)
+        self.assertEqual(rows['cold']['temporary']['writeBytes'], needed)
+        self.assertEqual(rows['cold']['copyCalls'], 0)
+        self.assertEqual(rows['cold']['linkCalls'], 1)
+        self.assertEqual(rows['warm']['source']['readBytes'], needed)
+        self.assertEqual(rows['warm']['cache']['readBytes'], needed)
+        self.assertEqual(rows['warm']['temporary']['writeBytes'], 0)
+        self.assertEqual(rows['warm']['copyCalls'], 0)
+        self.assertEqual(generation, same)
+        expected = hashlib.sha256()
+        for current, directories, files in os.walk(source):
+            directories.sort()
+            for name in sorted(files):
+                path = Path(current) / name
+                expected.update(str(path.relative_to(source)).encode() + b'\0')
+                expected.update(hashlib.sha256(path.read_bytes()).digest())
+        self.assertEqual(generation.name, 'generation-' + expected.hexdigest())
+        self.assertFalse(cold_tmp.exists()); self.assertFalse(warm_tmp.exists())
+        cached_font = generation / 'system/fonts/Roboto-Regular.ttf'
+        self.assertNotEqual(cached_font.stat().st_ino, (source / 'system/fonts/Roboto-Regular.ttf').stat().st_ino)
+        self.assertEqual(cached_font.stat().st_ino, (generation / 'system/fonts/MiSansVF.ttf').stat().st_ino)
+        # Same size and restored mtime must not bypass the complete cache SHA.
+        info = cached_font.stat()
+        with cached_font.open('r+b') as stream:
+            stream.write(b'X')
+        os.utime(cached_font, ns=(info.st_atime_ns, info.st_mtime_ns))
+        with self.assertRaisesRegex(ValueError, 'content mismatch'):
+            copy_module.prepare(source, cache, 'io-boot', self.module / 'copy-corrupt')
+
+    def test_first_boot_generation_rejects_source_fd_replacement(self):
+        source = self.module / 'copy-source-race'
+        source.mkdir()
+        font = source / 'font.ttf'; font.write_bytes(b'first-content')
+        replacement = self.module / 'replacement.ttf'; replacement.write_bytes(b'other-content')
+        cache, temporary = self.module / 'cache/fd-race', self.module / 'copy-fd-race'
+        original_open = Path.open
+        def changed(path, *args, **kwargs):
+            if path == font and (args[0] if args else kwargs.get('mode')) == 'rb':
+                os.replace(replacement, font)
+            return original_open(path, *args, **kwargs)
+        with patch.object(Path, 'open', changed):
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertFalse(temporary.exists())
+        self.assertFalse(any(cache.glob('generation-*')))
+
+    def test_first_boot_generation_rejects_midread_rewrite_and_cleans_partial_copy(self):
+        source = self.module / 'copy-source-rewrite'; source.mkdir()
+        font = source / 'font.ttf'; font.write_bytes(b'A' * (2 * 1024 * 1024))
+        cache, temporary = self.module / 'cache/rewrite', self.module / 'copy-rewrite'
+        original_open = Path.open
+        class ChangedStream:
+            def __init__(self, stream):
+                self.stream, self.changed = stream, False
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
+            def __enter__(self):
+                self.stream.__enter__(); return self
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
+            def read(self, *args):
+                data = self.stream.read(*args)
+                if data and not self.changed:
+                    self.changed = True
+                    info = font.stat()
+                    with original_open(font, 'r+b') as output:
+                        output.write(b'B')
+                    os.utime(font, ns=(info.st_atime_ns, info.st_mtime_ns))
+                return data
+        def opened(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            return ChangedStream(stream) if path == font and args == ('rb',) else stream
+        with patch.object(Path, 'open', opened):
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertFalse(temporary.exists())
+        self.assertFalse(any(cache.glob('generation-*')))
+
+    def test_first_boot_generation_copy_error_keeps_owned_cleanup_and_foreign_temp(self):
+        source = self.module / 'copy-source-error'; source.mkdir()
+        (source / 'font.ttf').write_bytes(b'font-bytes')
+        cache, temporary = self.module / 'cache/error', self.module / 'copy-error'
+        foreign = self.module / 'foreign-temp'; foreign.mkdir()
+        (foreign / 'keep').write_text('foreign')
+        with patch.object(copy_module.os, 'chmod', side_effect=OSError('fixture write failed')):
+            with self.assertRaisesRegex(OSError, 'fixture write failed'):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertFalse(temporary.exists())
+        self.assertFalse(any(cache.glob('generation-*')))
+        self.assertEqual((foreign / 'keep').read_text(), 'foreign')
+        with self.assertRaises(FileExistsError):
+            copy_module.prepare(source, cache, 'io-boot', foreign)
+        self.assertEqual((foreign / 'keep').read_text(), 'foreign')
+
+    def test_first_boot_generation_validates_late_existing_generation_without_overwriting(self):
+        source = self.module / 'copy-source-late'; source.mkdir()
+        font = source / 'font.ttf'; font.write_bytes(b'late-content')
+        digest = hashlib.sha256(b'font.ttf\0' + hashlib.sha256(font.read_bytes()).digest()).hexdigest()
+        cache, temporary = self.module / 'cache/late', self.module / 'copy-late'
+        generation = cache / ('generation-' + digest)
+        original_open = Path.open
+        published_inode = []
+        def late_generation(path, *args, **kwargs):
+            if path == font and args == ('rb',) and not generation.exists():
+                generation.mkdir()
+                (generation / 'font.ttf').write_bytes(font.read_bytes())
+                published_inode.append((generation / 'font.ttf').stat().st_ino)
+                (generation / '.generation.json').write_text(json.dumps({
+                    'schema': 'luoshu-live-font-v1', 'digest': digest, 'bootId': 'io-boot'}))
+            return original_open(path, *args, **kwargs)
+        with patch.object(Path, 'open', late_generation):
+            result = copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertEqual(result, generation)
+        inode = (generation / 'font.ttf').stat().st_ino
+        self.assertEqual(inode, published_inode[0])
+        self.assertFalse(temporary.exists())
+        self.assertEqual((generation / 'font.ttf').read_bytes(), font.read_bytes())
+        self.assertEqual((generation / 'font.ttf').stat().st_ino, inode)
+        # An already present corrupt generation is rejected rather than replaced.
+        (generation / 'font.ttf').write_bytes(b'bad-content!')
+        with self.assertRaisesRegex(ValueError, 'content mismatch'):
+            copy_module.prepare(source, cache, 'io-boot', self.module / 'copy-late-bad')
+        self.assertEqual((generation / 'font.ttf').stat().st_ino, inode)
+        self.assertEqual((generation / 'font.ttf').read_bytes(), b'bad-content!')
+
+    def test_live_lock_refuses_concurrent_request_without_touching_generation(self):
+        self.select('A'); self.assertTrue(self.run_live()[1]['liveApplied'])
+        state = (self.config / 'font-live.conf').read_bytes()
+        source = Path(self.state()['source'])
+        font = source / 'system/fonts/Roboto-Regular.ttf'
+        inode, content = font.stat().st_ino, font.read_bytes()
+        lock = self.module / '.luoshu-state/tasks/font-live.lock'
+        with lock.open('rb') as stream:
+            copy_module.fcntl.flock(stream.fileno(), copy_module.fcntl.LOCK_EX | copy_module.fcntl.LOCK_NB)
+            self.select('B')
+            result, _ = self.run_live()
+            self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.config / 'font-live.conf').read_bytes(), state)
+        self.assertEqual(font.stat().st_ino, inode)
+        self.assertEqual(font.read_bytes(), content)
+        self.assertTrue(self.run_live()[1]['liveApplied'])
+        self.assertEqual((self.module / 'visible/font').read_text(), 'B-font-bytes')
+
+    def test_generation_publication_collision_does_not_overwrite_existing_record(self):
+        source = self.module / 'copy-source-collision'; source.mkdir()
+        (source / 'font.ttf').write_bytes(b'selected-content')
+        cache, temporary = self.module / 'cache/collision', self.module / 'copy-collision'
+        original_rename = Path.rename
+        collision = []
+        def collided(path, target):
+            if path == temporary:
+                generation = Path(target); generation.mkdir()
+                (generation / 'font.ttf').write_bytes(b'existing-content')
+                (generation / '.generation.json').write_text('existing-record')
+                collision.append(generation)
+            return original_rename(path, target)
+        with patch.object(Path, 'rename', collided):
+            with self.assertRaises(OSError):
+                copy_module.prepare(source, cache, 'io-boot', temporary)
+        self.assertFalse(temporary.exists())
+        self.assertEqual((collision[0] / 'font.ttf').read_bytes(), b'existing-content')
+        self.assertEqual((collision[0] / '.generation.json').read_text(), 'existing-record')
 
 
 if __name__ == '__main__':

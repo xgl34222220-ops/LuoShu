@@ -1,0 +1,112 @@
+name: One-shot native startup pair (not acceptance)
+on:
+  push:
+    branches: [claude/laughing-hypatia-ogd2oz]
+    paths:
+      - diagnostics/startup_native_pair.py
+      - .github/workflows/startup-native-pair.yml
+permissions:
+  contents: read
+concurrency:
+  group: startup-native-pair-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  pair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Prepare shared decoding tools
+        timeout-minutes: 6
+        run: |
+          if ! command -v ffmpeg || ! command -v ffprobe; then
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 update -qq
+            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 install -y --no-install-recommends ffmpeg
+          fi
+          python3 -m venv "$RUNNER_TEMP/pair-tools"
+          "$RUNNER_TEMP/pair-tools/bin/pip" install --timeout 30 --retries 2 numpy==2.3.5
+          echo "$RUNNER_TEMP/pair-tools/bin" >> "$GITHUB_PATH"
+      - name: Prepare isolated App and pure-native sources with identical instrumentation
+        run: |
+          python3 diagnostics/startup_gpu_probe.py selftest
+          python3 diagnostics/startup_native_pair.py setup --native-project "$RUNNER_TEMP/native-project"
+          lscpu > paired-output/host-cpu.txt
+          uname -a > paired-output/host-kernel.txt
+      - name: Build App diagnostic
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          set -o pipefail
+          cd android-app
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee ../paired-output/app-build.log
+          cp app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/paired-app.apk"
+      - name: Build native diagnostic
+        timeout-minutes: 8
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace -p "$RUNNER_TEMP/native-project" :app:assembleDebug 2>&1 | tee paired-output/native-build.log
+          cp "$RUNNER_TEMP/native-project/app/build/outputs/apk/debug/app-debug.apk" "$RUNNER_TEMP/paired-native.apk"
+      - name: Enable required KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=15
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: First - current App once on fresh AVD
+        id: app
+        timeout-minutes: 9
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          avd-name: luoshu-pair-app
+          force-avd-creation: true
+          cores: 2
+          ram-size: 4096M
+          heap-size: 512M
+          emulator-boot-timeout: 420
+          disable-animations: false
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -wipe-data -noaudio -no-boot-anim -camera-back none
+          script: python3 diagnostics/startup_native_pair.py run --case app --apk "$RUNNER_TEMP/paired-app.apk" --output paired-output/app
+      - name: Second - native Activity once on a separate fresh AVD
+        if: ${{ !cancelled() && (steps.app.outcome == 'success' || steps.app.outcome == 'failure') }}
+        timeout-minutes: 9
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          avd-name: luoshu-pair-native
+          force-avd-creation: true
+          cores: 2
+          ram-size: 4096M
+          heap-size: 512M
+          emulator-boot-timeout: 420
+          disable-animations: false
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader -no-snapshot -wipe-data -noaudio -no-boot-anim -camera-back none
+          script: python3 diagnostics/startup_native_pair.py run --case native --apk "$RUNNER_TEMP/paired-native.apk" --output paired-output/native
+      - name: Retain only paired measurements and original footage, no APKs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIAGNOSTIC-NATIVE-PAIR-NOT-DELIVERY
+          path: paired-output/
+          if-no-files-found: error
+          retention-days: 7

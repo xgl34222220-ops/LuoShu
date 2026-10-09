@@ -47,12 +47,22 @@ grep -q 'stat -c %s' "$ROOT/common/legacy_v14_4/font_check.sh"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|device_font_payload_build' \
     "$ROOT/common/legacy_v14_4_switch.sh"
 
-grep -q 'MiuixTaskCenterHeader(' \
+# The production task center is a detail page with an in-flow header. Diagnostic
+# export and refresh remain available, and measured import controls never cover logs.
+grep -q 'LuoShuDetailBar(title = "任务与日志", onBack = onBack)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 grep -q 'DiagnosticExportButton(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
-grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
+grep -q 'contentDescription = "刷新任务和日志"' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
+grep -q 'verticalArrangement = Arrangement.spacedBy(if (tab == LogsTab.LOGS) 8.dp else 12.dp)' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
+grep -q 'bottom = controlsBottomPadding + 28.dp' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
+grep -q 'controlsBottomPadding = if (hasImportControls)' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
+grep -q 'onSizeChanged { importControlsHeight = it.height }' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
 ! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
 # All routed header actions keep an accessible touch target while their visible surface stays quiet.

@@ -12,6 +12,7 @@ on:
       - uninstall.sh
       - module.prop
       - .github/workflows/test-candidate.yml
+      - .github/workflows/android-ui-smoke.yml
   pull_request:
     branches:
       - main
@@ -28,6 +29,7 @@ on:
       - uninstall.sh
       - action.sh
       - .github/workflows/test-candidate.yml
+      - .github/workflows/android-ui-smoke.yml
 permissions:
   contents: read
 jobs:
@@ -65,6 +67,15 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
+
+      - name: Prepare host source-check dependencies
+        run: |
+          # The full source gate includes real screenshot-helper regressions.
+          # Match the UI workflow's isolated host dependency; never bundle it.
+          python3 -m venv "$RUNNER_TEMP/luoshu-candidate-host-tests"
+          timeout 180s "$RUNNER_TEMP/luoshu-candidate-host-tests/bin/python" -m pip install --timeout 30 --retries 2 Pillow==12.3.0
+          "$RUNNER_TEMP/luoshu-candidate-host-tests/bin/python" -c 'import PIL; assert PIL.__version__ == "12.3.0"; print("Verified host Pillow", PIL.__version__)'
+          echo "$RUNNER_TEMP/luoshu-candidate-host-tests/bin" >> "$GITHUB_PATH"
 
       # Keep the layout verifier on the same FreeType as the original Ubuntu
       # 24.04 build. Jammy's 2.11.1 lacks the HVAR no-variation sentinel support
@@ -113,8 +124,8 @@ jobs:
           set -euo pipefail
           log="$RUNNER_TEMP/luoshu-source-check.log"
           if ! sh ./scripts/check.sh >"$log" 2>&1; then
-            echo '源码门禁失败，输出最后 180 行：' >&2
-            tail -n 180 "$log" >&2
+            echo '源码门禁失败，输出完整原日志：' >&2
+            cat "$log" >&2
             mkdir -p dist
             cp -f "$log" dist/source-check.log
             exit 1
@@ -129,6 +140,7 @@ jobs:
           python3 scripts/task_scope_mksh_test.py
           python3 scripts/font_lock_namespace_test.py
           python3 scripts/font_state_read_test.py
+          python3 scripts/ui_snapshot_java_test.py
           sh -x scripts/background_task_test.sh
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh
@@ -280,6 +292,7 @@ jobs:
           python3 scripts/task_scope_mksh_test.py "$tmp"
           python3 scripts/font_lock_namespace_test.py "$tmp"
           python3 scripts/font_state_read_test.py "$tmp"
+          LUOSHU_TEST_ROOT="$tmp" python3 scripts/safe_switch_cache_identity_test.py
           python3 scripts/task_scope_namespace_lifecycle_test.py "$tmp"
           python3 scripts/installer_task_cleanup_test.py "$tmp"
           python3 scripts/stable111_rework_gate.py --zip "$module"

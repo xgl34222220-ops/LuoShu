@@ -1,7 +1,10 @@
 package io.github.xgl34222220.luoshu.ui.library
 
 import io.github.xgl34222220.luoshu.FontItem
+import io.github.xgl34222220.luoshu.ModuleSnapshot
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FontLibraryContractTest {
@@ -35,6 +38,71 @@ class FontLibraryContractTest {
     fun newestSortUsesTheImportedDateDescending() {
         val result = state.forDisplay(FontLibraryFilter.ALL, FontLibrarySort.NEWEST)
         assertEquals(listOf("invalid", "multi", "variable", "regular"), result.fonts.map { it.id })
+    }
+
+    @Test
+    fun missingSuBlocksActionsWithoutClaimingAFontOperationIsRunning() {
+        val error = "未找到 Root 命令 su"
+        val access = fontLibraryAccessState(
+            ModuleSnapshot(loading = false, error = error), operationBusy = false, mixBusy = false,
+        )
+
+        assertTrue(access.actionsBlocked)
+        assertFalse(access.operationRunning)
+        assertEquals(error, access.error)
+    }
+
+    @Test
+    fun deniedRootDoesNotAuthorizeActionsEvenWhenAModuleWasSeen() {
+        val access = fontLibraryAccessState(
+            ModuleSnapshot(loading = false, installed = true, rootGranted = false),
+            operationBusy = false, mixBusy = false,
+        )
+
+        assertTrue(access.actionsBlocked)
+        assertFalse(access.operationRunning)
+        assertTrue(access.error.contains("Root"))
+    }
+
+    @Test
+    fun missingModuleIsAnErrorRatherThanAnEndlessBusyState() {
+        val access = fontLibraryAccessState(
+            ModuleSnapshot(loading = false, rootGranted = true, installed = false),
+            operationBusy = false, mixBusy = false,
+        )
+
+        assertTrue(access.actionsBlocked)
+        assertFalse(access.operationRunning)
+        assertTrue(access.error.contains("模块"))
+    }
+
+    @Test
+    fun cachedOrCheckingConnectionBlocksActionsWithoutInventingProgressOrAnError() {
+        for (snapshot in listOf(
+            ModuleSnapshot(),
+            ModuleSnapshot(loading = false, statusCached = true, installed = true, rootGranted = true),
+        )) {
+            val access = fontLibraryAccessState(snapshot, operationBusy = false, mixBusy = false)
+            assertTrue(access.actionsBlocked)
+            assertFalse(access.operationRunning)
+            assertEquals("", access.error)
+        }
+    }
+
+    @Test
+    fun verifiedIdleConnectionEnablesActionsAndActualTransactionsKeepTheirProgress() {
+        val snapshot = ModuleSnapshot(loading = false, installed = true, rootGranted = true)
+        val idle = fontLibraryAccessState(snapshot, operationBusy = false, mixBusy = false)
+        assertFalse(idle.actionsBlocked)
+        assertFalse(idle.operationRunning)
+        assertEquals("", idle.error)
+
+        for ((directBusy, mixBusy) in listOf(true to false, false to true)) {
+            val running = fontLibraryAccessState(snapshot, directBusy, mixBusy)
+            assertTrue(running.actionsBlocked)
+            assertTrue(running.operationRunning)
+            assertEquals("", running.error)
+        }
     }
 
     private fun font(

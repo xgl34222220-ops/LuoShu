@@ -7,8 +7,9 @@ import org.junit.Test
 
 class AppearanceSettingsTest {
     @Test
-    fun uiStyleStorageFallsBackToMiuix() {
-        assertEquals(UiStyle.MATERIAL, UiStyle.fromStorage("material"))
+    fun legacyAndUnknownUiStyleStorageResolvesToMiuix() {
+        assertEquals(UiStyle.MIUIX, UiStyle.fromStorage("material"))
+        assertEquals(UiStyle.MIUIX, UiStyle.fromStorage("MATERIAL"))
         assertEquals(UiStyle.MIUIX, UiStyle.fromStorage("MIUIX"))
         assertEquals(UiStyle.MIUIX, UiStyle.fromStorage("unknown"))
         assertEquals(UiStyle.MIUIX, UiStyle.fromStorage(null))
@@ -50,9 +51,9 @@ class AppearanceSettingsTest {
     }
 
     @Test
-    fun validMaterialSettingsArePreserved() {
+    fun legacyStyleMigrationPreservesAllOtherAppearancePreferences() {
         val source = AppearanceSettings(
-            uiStyle = UiStyle.MATERIAL,
+            uiStyle = UiStyle.fromStorage("MATERIAL"),
             themeMode = ThemeMode.DARK,
             seedArgb = AccentOptions.last().argb,
             kolorStyle = KolorStyle.NEUTRAL,
@@ -61,10 +62,24 @@ class AppearanceSettingsTest {
             glassEnabled = true,
             blurEnabled = true,
             floatingDock = false,
+            highRefreshRate = true,
         )
 
         val normalized = source.normalized()
         assertEquals(source, normalized)
+        assertEquals(UiStyle.MIUIX, normalized.uiStyle)
         assertTrue(normalized.blurEnabled)
+        assertTrue(normalized.highRefreshRate)
+    }
+
+    @Test
+    fun initialPaletteMatchesMissingStoredPreference() {
+        assertEquals(KolorStyle.fromStorage(null), AppearanceSettings().kolorStyle)
+    }
+
+    @Test
+    fun appearanceOffersOnlyMiuix() {
+        assertEquals(listOf(UiStyle.MIUIX), UiStyle.entries.toList())
+        assertEquals(UiStyle.MIUIX, AppearanceSettings().uiStyle)
     }
 }

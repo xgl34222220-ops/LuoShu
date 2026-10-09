@@ -9,6 +9,7 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -60,6 +61,7 @@ import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.luoShuGlassHighlight
 
 private enum class CompactPreviewScenario(val label: String) {
     MIXED("混排"), BODY("正文"), INTERFACE("界面"), WECHAT("微信"), PLAY("Play"), STATUS("状态栏"),
@@ -78,7 +80,6 @@ internal fun StudioCompositePreviewDialogCompact(
         CompactPreviewScenario.entries.firstOrNull { it.name == scenarioName } ?: CompactPreviewScenario.MIXED
     }
     val tokens = LocalMiuixTokens.current
-    val miuix = style == UiStyle.MIUIX
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -88,10 +89,12 @@ internal fun StudioCompositePreviewDialogCompact(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 18.dp, vertical = 28.dp)
-                .heightIn(max = 820.dp),
-            shape = RoundedCornerShape(if (miuix) 36.dp else 30.dp),
-            color = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 18.dp,
+                .heightIn(max = 820.dp)
+                .luoShuGlassHighlight(LuoShuSmoothShape(32.dp)),
+            shape = LuoShuSmoothShape(32.dp),
+            color = tokens.glassDialogColor,
+            shadowElevation = tokens.cardShadowElevation,
+            border = BorderStroke(1.dp, tokens.glassOutlineBrush),
         ) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -123,7 +126,6 @@ internal fun StudioCompositePreviewDialogCompact(
                         CompactPreviewCard(
                             title = "A · 当前系统字体",
                             subtitle = "作为视觉比例和基线参考",
-                            style = style,
                         ) {
                             SystemPreviewCompact(scenario)
                         }
@@ -132,7 +134,6 @@ internal fun StudioCompositePreviewDialogCompact(
                         CompactPreviewCard(
                             title = "B · 当前组合方案",
                             subtitle = "中文、英文和数字分别使用所选槽位",
-                            style = style,
                         ) {
                             CandidatePreviewCompact(state, scenario)
                         }
@@ -156,7 +157,7 @@ internal fun StudioCompositePreviewDialogCompact(
                     }
                     item {
                         Surface(
-                            shape = RoundedCornerShape(18.dp),
+                            shape = LuoShuSmoothShape(18.dp),
                             color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
                         ) {
                             Text(
@@ -173,7 +174,7 @@ internal fun StudioCompositePreviewDialogCompact(
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(19.dp),
+                    shape = LuoShuSmoothShape(19.dp),
                 ) {
                     Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(7.dp))
@@ -217,9 +218,9 @@ private fun CompactScenarioSelector(
             modifier = Modifier
                 .offset(x = indicatorOffset)
                 .width(72.dp)
-                .height(44.dp)
+                .height(48.dp)
                 .graphicsLayer { scaleX = indicatorStretch.value }
-                .clip(RoundedCornerShape(15.dp))
+                .clip(LuoShuSmoothShape(15.dp))
                 .background(MaterialTheme.colorScheme.primary),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -236,19 +237,20 @@ private fun CompactScenarioSelector(
                 )
                 Surface(
                     onClick = { onSelect(scenario) },
-                    modifier = Modifier.width(72.dp).height(44.dp),
-                    shape = RoundedCornerShape(15.dp),
+                    modifier = Modifier.width(72.dp).height(48.dp),
+                    shape = LuoShuSmoothShape(15.dp),
                     color = Color.Transparent,
                     contentColor = textColor,
                 ) {
-                    Text(
-                        scenario.label,
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        color = textColor,
-                        textAlign = TextAlign.Center,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            scenario.label,
+                            color = textColor,
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }
@@ -259,18 +261,17 @@ private fun CompactScenarioSelector(
 private fun CompactPreviewCard(
     title: String,
     subtitle: String,
-    style: UiStyle,
     content: @Composable () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 27.dp else 22.dp),
-        color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
-        shadowElevation = if (style == UiStyle.MIUIX) 4.dp else 0.dp,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(24.dp)),
+        shape = LuoShuSmoothShape(24.dp),
+        color = tokens.glassCardColor,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = tokens.textPrimary)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             Spacer(Modifier.height(9.dp))
             content()
@@ -280,10 +281,11 @@ private fun CompactPreviewCard(
 
 @Composable
 private fun SystemPreviewCompact(scenario: CompactPreviewScenario) {
+    val tokens = LocalMiuixTokens.current
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(19.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(19.dp)),
+        shape = LuoShuSmoothShape(19.dp),
+        color = tokens.glassCardColor,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp)) {
             when (scenario) {
@@ -337,6 +339,7 @@ private fun SystemPreviewCompact(scenario: CompactPreviewScenario) {
 
 @Composable
 private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactPreviewScenario) {
+    val tokens = LocalMiuixTokens.current
     val cjk = state.slots.firstOrNull { it.slot == MixSlot.Cjk }
     val latin = state.slots.firstOrNull { it.slot == MixSlot.Latin }
     val digit = state.slots.firstOrNull { it.slot == MixSlot.Digit }
@@ -345,7 +348,7 @@ private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactP
     if (missing > 0 || cjk == null || latin == null || digit == null) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
+            shape = LuoShuSmoothShape(18.dp),
             color = MaterialTheme.colorScheme.errorContainer,
         ) {
             Text(
@@ -359,9 +362,9 @@ private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactP
     }
 
     Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(19.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(19.dp)),
+        shape = LuoShuSmoothShape(19.dp),
+        color = tokens.glassCardColor,
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)) {
             when (scenario) {
@@ -381,29 +384,50 @@ private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactP
                 CompactPreviewScenario.INTERFACE -> {
                     NativeFontPreview(cjk.font, "字体设置", cjk.axes, Modifier.fillMaxWidth().height(37.dp), 20f, maxLines = 1)
                     NativeFontPreview(latin.font, "System typography and fallback", latin.axes, Modifier.fillMaxWidth().height(27.dp), 12f, maxLines = 1)
-                    NativeFontPreview(cjk.font, "已验证 · 3 个字体槽位", cjk.axes, Modifier.fillMaxWidth().height(30.dp), 13f, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().height(30.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NativeFontPreview(cjk.font, "已验证 · ", cjk.axes, Modifier.weight(.42f).height(30.dp), 13f, Gravity.END or Gravity.CENTER_VERTICAL, 1)
+                        NativeFontPreview(digit.font, "3", digit.axes, Modifier.width(20.dp).height(30.dp), 13f, Gravity.CENTER, 1)
+                        NativeFontPreview(cjk.font, " 个字体槽位", cjk.axes, Modifier.weight(.58f).height(30.dp), 13f, Gravity.START or Gravity.CENTER_VERTICAL, 1)
+                    }
                 }
                 CompactPreviewScenario.WECHAT -> {
                     NativeFontPreview(cjk.font, "公众号文章标题", cjk.axes, Modifier.fillMaxWidth().height(38.dp), 20f, maxLines = 1)
                     NativeFontPreview(cjk.font, "正文排版：中文阅读与", cjk.axes, Modifier.fillMaxWidth().height(29.dp), 14f, maxLines = 1)
-                    NativeFontPreview(latin.font, "English 2026", latin.axes, Modifier.fillMaxWidth().height(29.dp), 14f, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().height(29.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NativeFontPreview(latin.font, "English ", latin.axes, Modifier.width(60.dp).height(29.dp), 14f, maxLines = 1)
+                        NativeFontPreview(digit.font, "2026", digit.axes, Modifier.weight(1f).height(29.dp), 14f, maxLines = 1)
+                    }
                 }
                 CompactPreviewScenario.PLAY -> {
                     NativeFontPreview(latin.font, "Google Play", latin.axes, Modifier.fillMaxWidth().height(36.dp), 19f, maxLines = 1)
                     NativeFontPreview(cjk.font, "应用与游戏", cjk.axes, Modifier.fillMaxWidth().height(28.dp), 13f, maxLines = 1)
-                    NativeFontPreview(digit.font, "4.8 ★ · 12 MB", digit.axes, Modifier.fillMaxWidth().height(28.dp), 12f, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NativeFontPreview(digit.font, "4.8 ★ · 12 ", digit.axes, Modifier.width(90.dp).height(28.dp), 12f, maxLines = 1)
+                        NativeFontPreview(latin.font, "MB", latin.axes, Modifier.weight(1f).height(28.dp), 12f, maxLines = 1)
+                    }
                 }
                 CompactPreviewScenario.STATUS -> {
-                    NativeFontPreview(digit.font, "09:41   5G   88%", digit.axes, Modifier.fillMaxWidth().height(34.dp), 15f, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NativeFontPreview(digit.font, "09:41   5", digit.axes, Modifier.width(82.dp).height(34.dp), 15f, maxLines = 1)
+                        NativeFontPreview(latin.font, "G   ", latin.axes, Modifier.width(28.dp).height(34.dp), 15f, maxLines = 1)
+                        NativeFontPreview(digit.font, "88%", digit.axes, Modifier.weight(1f).height(34.dp), 15f, maxLines = 1)
+                    }
                     NativeFontPreview(cjk.font, "状态栏数字、符号与紧凑字宽", cjk.axes, Modifier.fillMaxWidth().height(26.dp), 11f, maxLines = 1)
                 }
                 CompactPreviewScenario.SMALL -> {
-                    NativeFontPreview(latin.font, "Secondary text · 12:45", latin.axes, Modifier.fillMaxWidth().height(25.dp), 10f, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().height(25.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NativeFontPreview(cjk.font, "辅助说明 · ", cjk.axes, Modifier.weight(.30f).height(25.dp), 10f, maxLines = 1)
+                        NativeFontPreview(latin.font, "Secondary text · ", latin.axes, Modifier.weight(.49f).height(25.dp), 10f, maxLines = 1)
+                        NativeFontPreview(digit.font, "12:45", digit.axes, Modifier.weight(.21f).height(25.dp), 10f, maxLines = 1)
+                    }
                     NativeFontPreview(cjk.font, "小字号仍应保持清晰、字腔不过度拥挤。", cjk.axes, Modifier.fillMaxWidth().height(26.dp), 11f, maxLines = 1)
                 }
                 CompactPreviewScenario.HEADLINE -> {
                     NativeFontPreview(cjk.font, "洛书字体引擎", cjk.axes, Modifier.fillMaxWidth().height(48.dp), 27f, maxLines = 1)
-                    NativeFontPreview(latin.font, "LuoShu Typography 2026", latin.axes, Modifier.fillMaxWidth().height(34.dp), 16f, maxLines = 1)
+                    Row(Modifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NativeFontPreview(latin.font, "LuoShu Typography ", latin.axes, Modifier.weight(.78f).height(34.dp), 16f, maxLines = 1)
+                        NativeFontPreview(digit.font, "2026", digit.axes, Modifier.weight(.22f).height(34.dp), 16f, maxLines = 1)
+                    }
                 }
                 CompactPreviewScenario.NUMBERS -> {
                     NativeFontPreview(cjk.font, "本月用量", cjk.axes, Modifier.fillMaxWidth().height(27.dp), 12f, maxLines = 1)
@@ -421,12 +445,14 @@ private fun CompactPresetRow(
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
+    val tokens = LocalMiuixTokens.current
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(19.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(LuoShuSmoothShape(19.dp)),
+        shape = LuoShuSmoothShape(19.dp),
+        color = tokens.glassCardColor,
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
@@ -434,7 +460,7 @@ private fun CompactPresetRow(
         ) {
             Surface(
                 modifier = Modifier.size(38.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = LuoShuSmoothShape(14.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -448,10 +474,11 @@ private fun CompactPresetRow(
                     preset.description,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            Spacer(Modifier.width(8.dp))
             Text(
                 "${preset.cjkWeight} · ${preset.latinWeight} · ${preset.digitWeight}",
                 color = MaterialTheme.colorScheme.primary,

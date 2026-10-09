@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.theme
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -14,6 +15,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -79,21 +81,24 @@ internal fun LuoShuHeaderAction(
     } else {
         contentColor
     }
+    val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier.size(LuoShuIconTokens.HeaderTouchTarget),
         contentAlignment = Alignment.Center,
     ) {
         Surface(
-            modifier = Modifier.size(LuoShuIconTokens.HeaderContainer),
+            modifier = Modifier.size(LuoShuIconTokens.HeaderContainer)
+                .luoShuPressScale(interactionSource, enabled = enabled && !loading),
             shape = CircleShape,
             color = containerColor,
             contentColor = resolvedContentColor,
             tonalElevation = 0.dp,
-            shadowElevation = 1.dp,
+            shadowElevation = 0.dp,
         ) {
             IconButton(
                 onClick = onClick,
                 enabled = enabled && !loading,
+                interactionSource = interactionSource,
                 modifier = Modifier.fillMaxSize().semantics { this.contentDescription = contentDescription },
                 colors = IconButtonDefaults.iconButtonColors(
                     contentColor = resolvedContentColor,

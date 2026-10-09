@@ -42,6 +42,16 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
+# Timing is optional and cannot replace a business operation.
+_mix_phase_helper="$MODDIR/common/mix_phase_timing.sh"
+[ -f "$_mix_phase_helper" ] || _mix_phase_helper="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/legacy_v14_4/mix_phase_timing.sh"
+if [ -f "$_mix_phase_helper" ]; then . "$_mix_phase_helper"
+else
+    luoshu_mix_phase_begin() { return 0; }
+    luoshu_mix_phase_end() { return 0; }
+    luoshu_mix_phase_run() { shift 4; "$@"; }
+fi
+
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 clean_spec() { printf '%s' "$1" | tr -d '\r\n'; }
@@ -203,7 +213,7 @@ find_best_source() {
     fi
 }
 
-run_instance() {
+run_instance() (
     _source="$1"
     _destination="$2"
     _role="$3"
@@ -220,9 +230,11 @@ run_instance() {
     [ "$_code" -eq 0 ] && [ -s "$_destination" ] || return 1
     rm -f "${_destination}.err" 2>/dev/null || true
     chmod 0644 "$_destination" 2>/dev/null || true
-}
+)
 
-prepare_source() {
+prepare_source() (
+    # Helpers have private shell variables: _family/_role/_weight also belong
+    # to the nine-weight worker. A global assignment corrupts its next slot.
     _role="$1"
     _family="$2"
     _axes="$3"
@@ -232,23 +244,97 @@ prepare_source() {
     _effective="$_axes"
     [ "$_mode" != auto ] || _effective=$(with_weight "$_axes" "$_target")
     _lookup=$(safe_weight "$_effective")
-    _source=$(find_best_source "$_family" "$_lookup")
-    [ -f "$_source" ] || return 1
-    font_validate "$_source" text || return 1
-    if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_source" "$_destination" "$_role" "$_effective"
-    else
-        mkdir -p "${_destination%/*}" 2>/dev/null || return 1
-        cp -f "$_source" "$_destination" 2>/dev/null || return 1
-        chmod 0644 "$_destination" 2>/dev/null || true
+
+    # Snapshot each selected public source once per task. The fixed slots of a
+    # mixed auto/fixed task then share an exact instance across all nine weights
+    # without repeatedly hashing a large public font or trusting its mtime.
+    # Replacements in public storage belong to the next task, never half a font
+    # family. A real worker keeps these caches in its supervisor-owned temporary
+    # directory, which is retired after descendants exit even on timeout/KILL.
+    [ -n "${_root:-}" ] && [ -d "$_root" ] || return 1
+    _prepare_root="${LUOSHU_TASK_SCOPE_TMPDIR:-$_root}"
+    [ -d "$_prepare_root" ] || return 1
+    _snapshot_dir="$_prepare_root/source-snapshots"
+    _prepared_dir="$_prepare_root/prepared-cache"
+    mkdir -p "$_snapshot_dir" "$_prepared_dir" 2>/dev/null || return 1
+    # Pin source selection too: deleting/renaming the public file or adding a
+    # preferred face must not change an already selected slot halfway through.
+    _selection_key=$(printf '%s\000%s\000%s' "$_role" "$_family" "$_lookup" | hash_text)
+    [ -n "$_selection_key" ] || return 1
+    _selection="$_snapshot_dir/selection-${_selection_key}"
+    _snapshot_key=$(cat "$_selection" 2>/dev/null)
+    if [ -z "$_snapshot_key" ]; then
+        _source=$(find_best_source "$_family" "$_lookup")
+        [ -f "$_source" ] || return 1
+        _snapshot_key=$(printf '%s\000%s' "$_role" "$_source" | hash_text)
     fi
-}
+    [ -n "$_snapshot_key" ] || return 1
+    _snapshot="$_snapshot_dir/${_snapshot_key}.font"
+    _snapshot_digest_file="${_snapshot}.sha256"
+    _source_digest=$(cat "$_snapshot_digest_file" 2>/dev/null)
+    if [ ! -s "$_snapshot" ] || [ -z "$_source_digest" ]; then
+        # Publish only a copy matching stable public content on both sides of
+        # cp; header validation alone cannot reject a mixed in-place rewrite.
+        [ -n "${_source:-}" ] && [ -f "$_source" ] || return 1
+        _before_digest=$(hash_file "$_source")
+        [ -n "$_before_digest" ] || return 1
+        _snapshot_tmp="${_snapshot}.tmp.$$"
+        cp -f "$_source" "$_snapshot_tmp" 2>/dev/null || return 1
+        font_validate "$_snapshot_tmp" text || { rm -f "$_snapshot_tmp"; return 1; }
+        _source_digest=$(hash_file "$_snapshot_tmp")
+        _after_digest=$(hash_file "$_source")
+        [ -n "$_source_digest" ] && [ "$_before_digest" = "$_source_digest" ] &&
+            [ "$_after_digest" = "$_source_digest" ] || { rm -f "$_snapshot_tmp"; return 1; }
+        chmod 0444 "$_snapshot_tmp" 2>/dev/null || true
+        mv -f "$_snapshot_tmp" "$_snapshot" 2>/dev/null || return 1
+        printf '%s\n' "$_source_digest" > "${_snapshot_digest_file}.tmp.$$" &&
+            mv -f "${_snapshot_digest_file}.tmp.$$" "$_snapshot_digest_file" || return 1
+    fi
+    [ -s "$_selection" ] || {
+        printf '%s\n' "$_snapshot_key" > "${_selection}.tmp.$$" &&
+            mv -f "${_selection}.tmp.$$" "$_selection" || return 1
+    }
+    _generator_digest=$(hash_file "$INSTANCE_PY")
+    [ -n "$_generator_digest" ] || return 1
+    _prepared_key=$(printf '%s\000%s\000%s\000%s' \
+        "$_source_digest" "$_role" "$_effective" "$_generator_digest" | hash_text)
+    [ -n "$_prepared_key" ] || return 1
+    _prepared="$_prepared_dir/${_prepared_key}.font"
+    if [ -s "$_prepared" ] && font_validate "$_prepared" text; then
+        [ "$(hash_file "$INSTANCE_PY")" = "$_generator_digest" ] || return 1
+        mkdir -p "${_destination%/*}" 2>/dev/null || return 1
+        link_or_copy "$_prepared" "$_destination"
+        return $?
+    fi
+    _prepared_tmp="${_prepared}.tmp.$$"
+    rm -f "$_prepared_tmp" "${_prepared_tmp}.err" 2>/dev/null || true
+    font_validate "$_snapshot" text || return 1
+    if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
+        run_instance "$_snapshot" "$_prepared_tmp" "$_role" "$_effective" || {
+            rm -f "$_prepared_tmp" "${_prepared_tmp}.err"; return 1;
+        }
+    else
+        cp -f "$_snapshot" "$_prepared_tmp" 2>/dev/null || return 1
+    fi
+    font_validate "$_prepared_tmp" text || { rm -f "$_prepared_tmp"; return 1; }
+    # A generator replaced while Python was running cannot publish under the
+    # identity captured before the call.
+    [ "$(hash_file "$INSTANCE_PY")" = "$_generator_digest" ] || {
+        rm -f "$_prepared_tmp"; return 1;
+    }
+    chmod 0644 "$_prepared_tmp" 2>/dev/null || true
+    mv -f "$_prepared_tmp" "$_prepared" 2>/dev/null || return 1
+    mkdir -p "${_destination%/*}" 2>/dev/null || return 1
+    link_or_copy "$_prepared" "$_destination"
+)
 
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" 2>/dev/null | awk '{print $1}'
+        _hf_result=$(sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_hf_result%% *}"
     elif command -v toybox >/dev/null 2>&1; then
-        toybox sha256sum "$1" 2>/dev/null | awk '{print $1}'
+        _hf_result=$(toybox sha256sum "$1" 2>/dev/null) || return 1
+        printf '%s\n' "${_hf_result%% *}"
     else
         cksum "$1" 2>/dev/null | awk '{print $1 "-" $2}'
     fi
@@ -256,9 +342,9 @@ hash_file() {
 
 hash_text() {
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum | awk '{print $1}'
+        sha256sum | { IFS=' ' read -r _ht_digest _ht_rest && printf '%s\n' "$_ht_digest"; }
     elif command -v toybox >/dev/null 2>&1; then
-        toybox sha256sum | awk '{print $1}'
+        toybox sha256sum | { IFS=' ' read -r _ht_digest _ht_rest && printf '%s\n' "$_ht_digest"; }
     else
         cksum | awk '{print $1 "-" $2}'
     fi
@@ -274,44 +360,126 @@ prune_composite_cache() {
     for _old in $(ls -1t "$COMPOSITE_CACHE"/*.font 2>/dev/null); do
         _count=$((_count + 1))
         [ "$_count" -le 24 ] && continue
-        rm -f "$_old" "${_old}.json" 2>/dev/null || true
+        rm -f "$_old" "${_old}.json" "${_old}.receipt" 2>/dev/null || true
     done
 }
 
-build_composite_cached() {
+. "$MODDIR/common/composite_cache_proof.sh" || exit 126
+
+build_composite_cached() (
+    luoshu_mix_phase_begin composite cache_lookup "${LUOSHU_MIX_PHASE_UNIT:-fixed}" probe
+    _mix_build_composite_cached "$@"
+    _luompt_build_rc=$?
+    luoshu_mix_phase_end "$_luompt_build_rc"
+    exit "$_luompt_build_rc"
+)
+
+_mix_build_composite_cached() {
+    # The worker retains family names in _cjk/_latin/_digit for the next weight
+    # and its saved public config; only this call uses prepared file paths.
     _cjk="$1"
     _latin="$2"
     _digit="$3"
     _output="$4"
     _progress="$5"
     mkdir -p "$COMPOSITE_CACHE" "${_output%/*}" 2>/dev/null || return 1
-    _key=$(printf '%s|%s|%s|auto-multiweight-v3-metrics' \
-        "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
+    _engine_identity=$(composite_cache_identity) || return 1
+    _validator_identity=$(hash_file "$MODDIR/common/font_check.sh")
+    _cjk_digest=$(hash_file "$_cjk")
+    _latin_digest=$(hash_file "$_latin")
+    _digit_digest=$(hash_file "$_digit")
+    [ -n "$_engine_identity" ] && [ -n "$_validator_identity" ] &&
+        [ -n "$_cjk_digest" ] && [ -n "$_latin_digest" ] && [ -n "$_digit_digest" ] || return 1
+    _key=$(printf '%s\000%s\000%s\000%s\000auto-multiweight-v4-content-identity' \
+        "$_cjk_digest" "$_latin_digest" "$_digit_digest" "$_engine_identity" | hash_text)
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"
-    if [ -s "$_cached" ]; then
-        link_or_copy "$_cached" "$_output" || return 1
-        chmod 0644 "$_output" 2>/dev/null || true
-        return 0
+    _receipt="${_cached}.receipt"
+    # The supervisor retires this entire task-private tree after descendants
+    # exit, including KILL/timeout. Never generate partial files in the shared
+    # persistent cache, where cancellation cannot prove which files it owns.
+    _build_tmp=''
+    trap '[ -z "$_build_tmp" ] || rm -rf "$_build_tmp" 2>/dev/null || true' EXIT
+    _composite_tmp_init() {
+        _temporary_root="${LUOSHU_TASK_SCOPE_TMPDIR:-${_root:-}}"
+        [ -n "$_temporary_root" ] && [ -d "$_temporary_root" ] || return 1
+        _build_tmp=$(mktemp -d "$_temporary_root/composite.XXXXXX") || return 1
+        _tmp="$_build_tmp/composite.font"
+        _tmp_report="$_build_tmp/composite.json"
+        _tmp_error="$_build_tmp/composite.err"
+        _tmp_receipt="$_build_tmp/receipt"
+    }
+    if [ -s "$_cached" ] && [ ! -L "$_cached" ]; then
+        _payload_digest=$(hash_file "$_cached")
+        _cache_valid=false
+        _luompt_cache_method=receipt-hit
+        if [ -n "$_payload_digest" ] && composite_receipt_matches "$_receipt" \
+            "$_payload_digest" "$_engine_identity" "$_validator_identity"; then
+            _cache_valid=true
+        elif [ ! -e "$_receipt" ] && [ ! -L "$_receipt" ] && {
+            luoshu_mix_phase_end 0 miss
+            luoshu_mix_phase_run composite validate "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit composite_validate_cached_output "$_cached"
+        }; then
+            # Interrupted publication/old entries without evidence must run the
+            # actual validator once. An existing mismatched receipt instead
+            # requires rebuilding, even if altered bytes still look like SFNT.
+            luoshu_mix_phase_begin composite cache_publish "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit
+            [ -n "$_payload_digest" ] && [ "$(hash_file "$_cached")" = "$_payload_digest" ] || return 1
+            [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+                [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || return 1
+            _composite_tmp_init || return 1
+            write_composite_receipt "$_receipt" "$_tmp_receipt" "$_payload_digest" \
+                "$_engine_identity" "$_validator_identity" || return 1
+            luoshu_mix_phase_end 0
+            _cache_valid=true
+            _luompt_cache_method=legacy-validated-hit
+            luoshu_mix_phase_begin composite cache_lookup "${LUOSHU_MIX_PHASE_UNIT:-fixed}" legacy-validated-hit
+        fi
+        if [ "$_cache_valid" = true ]; then
+            [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+                [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || return 1
+            luoshu_mix_phase_end 0 "$_luompt_cache_method"
+            luoshu_mix_phase_run composite reuse_output "${LUOSHU_MIX_PHASE_UNIT:-fixed}" copy link_or_copy "$_cached" "$_output" || return 1
+            chmod 0644 "$_output" 2>/dev/null || true
+            return 0
+        fi
+        rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || return 1
+    elif [ -L "$_cached" ]; then
+        rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || return 1
     fi
-    _tmp="$COMPOSITE_CACHE/.${_key}.$$.tmp.font"
-    _tmp_report="${_tmp}.json"
-    _tmp_error="${_tmp}.err"
-    rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
+    luoshu_mix_phase_end 0 miss
+    [ -n "$_build_tmp" ] || _composite_tmp_init || return 1
+    luoshu_mix_phase_begin composite cold_composite_runner "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold
     MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_cjk" --latin "$_latin" --digit "$_digit" \
         --output "$_tmp" --progress "$_progress" >"$_tmp_report" 2>"$_tmp_error"
     _code=$?
+    luoshu_mix_phase_end "$_code"
     [ "$_code" -eq 0 ] && [ -s "$_tmp" ] || {
         [ ! -s "$_tmp_error" ] || cat "$_tmp_error" >>"$LOG_FILE" 2>/dev/null || true
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
         return 1
     }
-    font_validate "$_tmp" text || {
+    luoshu_mix_phase_run composite validate "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold font_validate "$_tmp" text || {
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" 2>/dev/null || true
         return 1
     }
+    luoshu_mix_phase_begin composite cache_publish "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold
+    _payload_digest=$(hash_file "$_tmp")
+    [ -n "$_payload_digest" ] && [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+        [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] &&
+        [ "$(hash_file "$_cjk")" = "$_cjk_digest" ] && [ "$(hash_file "$_latin")" = "$_latin_digest" ] &&
+        [ "$(hash_file "$_digit")" = "$_digit_digest" ] || return 1
     chmod 0644 "$_tmp" "$_tmp_report" 2>/dev/null || true
     mv -f "$_tmp" "$_cached" 2>/dev/null || return 1
+    # The publication itself can race an engine replacement. Do not leave a
+    # proven entry or hand its bytes to the worker if that identity changed.
+    write_composite_receipt "$_receipt" "$_tmp_receipt" "$_payload_digest" \
+        "$_engine_identity" "$_validator_identity" || return 1
+    [ "$(composite_cache_identity)" = "$_engine_identity" ] &&
+        [ "$(hash_file "$MODDIR/common/font_check.sh")" = "$_validator_identity" ] || {
+        rm -f "$_cached" "${_cached}.json" "$_receipt" 2>/dev/null || true; return 1;
+    }
+    luoshu_mix_phase_end 0
     mv -f "$_tmp_report" "${_cached}.json" 2>/dev/null || true
     rm -f "$_tmp_error" 2>/dev/null || true
     link_or_copy "$_cached" "$_output" || return 1
@@ -340,6 +508,7 @@ save_mix_config() {
 worker() {
     trap '' HUP
     _wanted="$1"
+    export LUOSHU_MIX_PHASE_OUTER_TASK="$_wanted"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
     _latin=$(read_value "$TASK_FILE" latin)
@@ -351,6 +520,17 @@ worker() {
     _latin_mode=$(normalize_mode "$(read_value "$TASK_FILE" latinMode)")
     _digit_mode=$(normalize_mode "$(read_value "$TASK_FILE" digitMode)")
     _root=$(read_value "$TASK_FILE" root)
+    if [ -n "${LUOSHU_TASK_SCOPE_TMPDIR:-}" ]; then
+        [ "${LUOSHU_TASK_SCOPE_TASK:-}" = "$_wanted" ] && [ -d "$LUOSHU_TASK_SCOPE_TMPDIR" ] || exit 126
+        _queued_root="$_root"
+        _root="$LUOSHU_TASK_SCOPE_TMPDIR/auto-multiweight"
+        # Retire only our known empty queue placeholder. The shared task record
+        # must never authorize deleting an arbitrary old/external root.
+        [ "$_queued_root" != "$CACHE_ROOT/$_wanted" ] || rmdir "$_queued_root" 2>/dev/null || true
+        write_task "$_wanted" running '正在准备自动多字重任务' "$_cjk" "$_latin" "$_digit" \
+            "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode" \
+            "$_root" '' "$(read_value "$TASK_FILE" started)" '' 1 || exit 1
+    fi
     _family=LuoShuAutoMix
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
         update_task "$_wanted" failed '无法创建自动多字重缓存' 100 "$(date +%s)"
@@ -359,21 +539,22 @@ worker() {
 
     _index=0
     for _weight in 100 200 300 400 500 600 700 800 900; do
+        export LUOSHU_MIX_PHASE_UNIT="w$_weight" LUOSHU_MIX_PHASE_WEIGHT="$_weight"
         _index=$((_index + 1))
         _percent=$((4 + _index * 8))
         _role=$(weight_role "$_weight")
         update_task "$_wanted" running "正在生成 ${_weight} 字重复合字体" "$_percent" ''
         _dir="$_root/prepared/$_weight"
         mkdir -p "$_dir" 2>/dev/null || exit 1
-        prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_mode" "$_weight" "$_dir/cjk.ttf" || {
+        luoshu_mix_phase_run prepare prepare cjk prepare prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_mode" "$_weight" "$_dir/cjk.ttf" || {
             update_task "$_wanted" failed "中文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
-        prepare_source latin "$_latin" "$_latin_axes" "$_latin_mode" "$_weight" "$_dir/latin.ttf" || {
+        luoshu_mix_phase_run prepare prepare latin prepare prepare_source latin "$_latin" "$_latin_axes" "$_latin_mode" "$_weight" "$_dir/latin.ttf" || {
             update_task "$_wanted" failed "英文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
-        prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
+        luoshu_mix_phase_run prepare prepare digit prepare prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
             update_task "$_wanted" failed "数字字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
@@ -389,21 +570,30 @@ worker() {
         rm -rf "$_dir" 2>/dev/null || true
     done
 
+    unset LUOSHU_MIX_PHASE_UNIT LUOSHU_MIX_PHASE_WEIGHT
     update_task "$_wanted" running '正在应用自动多字重字体族' 88 ''
+    luoshu_mix_phase_begin worker safe_apply fixed apply
     _result=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$FONT_MANAGER" action switch "$_family" 2>&1)
+    _luompt_safe_rc=$?
     printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
+    luoshu_mix_phase_end "$_luompt_safe_rc"
     printf '%s\n' "$_result" | grep -q '"status":"ok"' || {
         update_task "$_wanted" failed '自动多字重字体族应用失败' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
+    luoshu_mix_phase_begin worker worker_finalize fixed finalize
     save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
         "$_cjk_mode" "$_latin_mode" "$_digit_mode" || {
+        luoshu_mix_phase_end 1
         update_task "$_wanted" failed '组合配置保存失败' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" success '自动多字重复合字体已准备，完整重启后生效' 100 "$(date +%s)"
     rm -rf "$_root" 2>/dev/null || true
     clear_auto_worker_pid "$_wanted"
+    _luompt_finalize_rc=$?
+    luoshu_mix_phase_end "$_luompt_finalize_rc"
+    return "$_luompt_finalize_rc"
 }
 
 precheck_mix() {

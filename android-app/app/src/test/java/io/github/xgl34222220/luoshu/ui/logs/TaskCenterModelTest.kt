@@ -7,6 +7,40 @@ import org.junit.Test
 
 class TaskCenterModelTest {
     @Test
+    fun serviceTemplateErrorDoesNotInventAUserApplyFailure() {
+        val task = parseTaskLogItems(
+            "[2026-10-07 20:49:13] [SERVICE] [ERROR] 原厂字体槽位模板刷新失败；明确应用会保持旧负载并返回错误",
+        ).single()
+        assertEquals(TaskKind.TEMPLATE, task.kind)
+        assertEquals(TaskPhase.FAILED, task.phase)
+        assertEquals("原厂槽位检查失败", task.title)
+        assertFalse(task.completed)
+    }
+
+    @Test
+    fun awaitingMountConfirmationIsNotACompletedReboot() {
+        val task = parseTaskLogItems(
+            "[1970-10-07 13:05:33] [INFO] 当前文字=mix | 等待主命名空间挂载确认后完成重启事务",
+        ).single()
+        assertEquals(TaskKind.REBOOT, task.kind)
+        assertEquals(TaskPhase.WAITING_CONFIRMATION, task.phase)
+        assertEquals("设备重启等待挂载确认", task.title)
+        assertEquals("开机早期，时间未同步", task.timeLabel)
+        assertFalse(task.completed)
+        assertFalse(task.active)
+    }
+
+    @Test
+    fun actualApplyFailuresAndConfirmedRebootsKeepTheirOutcome() {
+        assertEquals(TaskKind.APPLY, taskKindFor("字体应用失败：负载校验错误"))
+        assertEquals(TaskKind.APPLY, taskKindFor("字体应用失败：原厂模板不可用"))
+        assertEquals(TaskKind.APPLY, taskKindFor("原厂模板不可用", "switch"))
+        assertEquals(TaskKind.MIX, taskKindFor("原厂模板不可用", "mix"))
+        assertEquals(TaskPhase.FAILED, taskPhaseFor("ERROR", "字体应用失败：负载校验错误"))
+        assertEquals(TaskPhase.SUCCESS, taskPhaseFor("INFO", "设备重启已完成，主命名空间挂载确认成功"))
+    }
+
+    @Test
     fun structuredLogsBecomeNewestFirstTaskTimeline() {
         val tasks = parseTaskLogItems(
             """
@@ -111,5 +145,54 @@ class TaskCenterModelTest {
         assertEquals(0, mergeTaskItems(listOf(cancelled), emptyList()).count { it.active })
         assertFalse(pending.copy(phase = TaskPhase.FAILED).active)
         assertFalse(pending.copy(phase = TaskPhase.SUCCESS).active)
+    }
+
+    @Test
+    fun missingRootNoticeIsAPreconditionNotACompletedReboot() {
+        val message = "未找到 Root 命令 su。请先在 Root 管理器中完成待生效变更并完整重启，然后为洛书授予 Root 权限。"
+        val kind = taskKindFor(message)
+        val phase = taskPhaseFor("", message)
+        assertEquals(TaskKind.PRECONDITION, kind)
+        assertEquals(TaskPhase.INFO, phase)
+        assertEquals("运行前提未满足", taskTitle(kind, phase))
+        val item = TaskCenterItem(id = "notice", kind = kind, phase = phase, title = taskTitle(kind, phase), message = message)
+        assertFalse(item.completed)
+        assertFalse(item.active)
+
+        val history = parseTaskLogItems("[2026-09-28 22:40:00] [INFO] $message").single()
+        assertEquals(TaskKind.PRECONDITION, history.kind)
+        assertEquals(TaskPhase.INFO, history.phase)
+        assertFalse(history.completed)
+    }
+
+    @Test
+    fun rootPermissionHintsNeverCountAsSuccess() {
+        listOf(
+            "请先连接洛书模块并授予 Root 权限",
+            "请先授予 Root 权限",
+            "安装模块并授予 Root 权限后才能应用全局字体",
+        ).forEach { message ->
+            assertEquals(message, TaskKind.PRECONDITION, taskKindFor(message))
+            assertFalse(message, taskPhaseFor("", message) == TaskPhase.SUCCESS)
+        }
+    }
+
+    @Test
+    fun negatedCompletionWordingIsNotSuccess() {
+        listOf(
+            "请先完成待生效变更",
+            "字体导入未完成",
+            "复合字体尚未完成",
+            "字体扫描没有完成",
+        ).forEach { message ->
+            assertFalse(message, taskPhaseFor("INFO", message) == TaskPhase.SUCCESS)
+        }
+        assertEquals(TaskPhase.SUCCESS, taskPhaseFor("INFO", "字体扫描已完成"))
+    }
+
+    @Test
+    fun explicitPersistedStateStillWinsOverPreconditionWording() {
+        assertEquals(TaskPhase.SUCCESS, taskPhaseFor("", "请先授予 Root 权限", "success"))
+        assertEquals(TaskPhase.FAILED, taskPhaseFor("ERROR", "Root 授权失败或 su 不可用"))
     }
 }

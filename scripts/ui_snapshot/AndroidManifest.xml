@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.xgl34222220.luoshu.uisnapshot"
+    android:versionCode="1"
+    android:versionName="1">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36" />
+    <application android:allowBackup="false" android:debuggable="true"
+        android:label="LuoShu UI snapshot test helper" />
+    <!-- Instrument the helper itself. The production App stays running and its
+         current foreground window is read through Android's public test API. -->
+    <instrumentation
+        android:name=".SnapshotInstrumentation"
+        android:targetPackage="io.github.xgl34222220.luoshu.uisnapshot"
+        android:functionalTest="true"
+        android:handleProfiling="false" />
+</manifest>
