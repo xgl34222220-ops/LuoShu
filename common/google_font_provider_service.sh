@@ -40,6 +40,9 @@ provider_restore() {
     if [ -f "$THEME_BRIDGE" ]; then
         provider_run "$THEME_BRIDGE" restore || _provider_restore_rc=1
     fi
+    if [ -f "$MODDIR/common/hyperos_webview_route.sh" ]; then
+        provider_run "$MODDIR/common/hyperos_webview_route.sh" restore || _provider_restore_rc=1
+    fi
     return "$_provider_restore_rc"
 }
 
