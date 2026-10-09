@@ -3,7 +3,7 @@
   "sha256": {
     "post-fs-data.sh": "cc020643e7cfeadbf0379a171f7ac68fe59aa99231b157f545110c5a3a950349",
     "post-mount.sh": "0b6c85c002278d3b74c1fc6831689c392436d37ef6fde351e7f23bc8ede779e3",
-    "service.sh": "018c5ba7dad155ed14b81783ae2015f38659620443e0865de3335471484d1426",
+    "service.sh": "a53e9c913530bb087a0f72f41f18215ad13e8583e6029710536bfdfbd7a4d097",
     "boot-completed.sh": "9b29a846c3f0cf821a9355a4553a32cf548e419788d2dfc5d9c5475f0c95f431",
     "common/private_payload.sh": "74bffb9c2086505495ed73f316d8b8b4f0c8db9e857d059ac2c8fa34b98858fb",
     "common/private_mount_policy.sh": "30335757d318402eef6286dca14ee3894ab0042768072a96dd4a1f3464159df8",

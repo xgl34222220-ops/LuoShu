@@ -52,6 +52,12 @@ fi
 
 DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
 [ -f "$PROP" ] || exit 0
+# Unchanged status: do not rewrite module.prop (avoids a flash write and a
+# root-manager module rescan on every boot).
+if [ "$(sed -n 's/^description=//p' "$PROP" 2>/dev/null | head -n1)" = "$DESCRIPTION" ]; then
+    printf '%s\n' "$DESCRIPTION"
+    exit 0
+fi
 TMP="$PROP.tmp.$$"
 awk -v description="$DESCRIPTION" '
 BEGIN { replaced=0 }
