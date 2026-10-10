@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ splash icon: the same 108dp adaptive foreground artwork, drawn from a
+     1024px nodpi source so the 240dp splash canvas never upscales a density bitmap.
+     Glyph and seal sit inside the platform's 2/3 (160dp) icon circle. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/ic_luoshu_splash_foreground"
+    android:gravity="fill"
+    android:filter="true"
+    android:mipMap="true"
+    android:antialias="true" />

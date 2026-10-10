@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- API 28–30 starting window: mirrors the Android 12+ splash (opaque launch color,
+     cream 160dp icon circle, centered foreground). The Activity replaces this window
+     background before its first Compose/native frame. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/launch_background" />
+        </shape>
+    </item>
+    <item android:width="160dp" android:height="160dp" android:gravity="center">
+        <shape android:shape="oval">
+            <solid android:color="@color/launch_icon_background" />
+        </shape>
+    </item>
+    <item android:width="240dp" android:height="240dp" android:gravity="center"
+        android:drawable="@drawable/ic_luoshu_splash" />
+</layer-list>

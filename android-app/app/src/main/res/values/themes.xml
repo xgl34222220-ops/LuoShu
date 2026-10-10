@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The platform splash accepts one color. Match the diffuse backdrop's centre
-         instead of showing a pale blank sheet before the first real App frame. -->
-    <color name="launch_background">#D7DAEE</color>
+    <!-- Launcher icon paper and guide tone (same in both themes; the icon is a cream tile). -->
+    <color name="luoshu_icon_paper">#F6EFDD</color>
+    <color name="luoshu_icon_guide">#C9A98A</color>
+    <!-- The platform splash accepts one opaque color. Light uses the icon's cream paper. -->
+    <color name="launch_background">#F6EFDD</color>
+    <!-- Cream circle behind the splash glyph, so dark mode still shows the paper tile. -->
+    <color name="launch_icon_background">#F6EFDD</color>
     <color name="launch_gradient_start">#CDDDF4</color>
     <color name="launch_gradient_center">#E2DDF3</color>
     <color name="launch_gradient_end">#D1E8ED</color>
     <color name="launch_ink">#435B80</color>
-    <color name="launch_gold">#8F733F</color>
-    <color name="launch_glass_top">#ECF2FF</color>
-    <color name="launch_glass_center">#D5D7F0</color>
-    <color name="launch_glass_bottom">#B8DFE5</color>
-    <color name="launch_glass_edge">#FFFFFF</color>
-    <color name="launch_glass_shadow">#526D99</color>
     <bool name="launch_light_system_bars">true</bool>
 
     <style name="Theme.LuoShuHybrid" parent="android:style/Theme.Material.Light.NoActionBar">
@@ -27,8 +25,9 @@
         <item name="android:fontFamily">sans</item>
     </style>
 
-    <!-- API 28–30 draw this same gradient while the real Activity prepares. -->
+    <!-- API 28–30 starting window mirrors the Android 12+ splash: launch color plus the
+         centered 书 emblem. The Activity swaps in its real backdrop before content. -->
     <style name="Theme.LuoShuLaunch" parent="Theme.LuoShuHybrid">
-        <item name="android:windowBackground">@drawable/luoshu_launch_background</item>
+        <item name="android:windowBackground">@drawable/luoshu_launch_splash</item>
     </style>
 </resources>
