@@ -122,6 +122,13 @@ CJK_BOX_PROBES = "中国田日口目四回永"
 CJK_BASELINE_RATIO = 0.08
 CJK_BASELINE_TOLERANCE = 0.05
 CJK_BASELINE_SHIFT_LIMIT_RATIO = 0.15
+# Latin cap height against the ideographic box in the same pairings (MiSans,
+# Noto/Source Han Sans, LXGW WenKai all measure 0.87-0.88). A CJK font whose own
+# Latin is small next to large, full-bodied ideographs (round/cute designs) made
+# imported Latin and digits look shrunken beside Han ("36岁").
+CJK_CAP_RATIO = 0.88
+CJK_CAP_TOLERANCE = 0.05
+CJK_CAP_FACTOR_LIMITS = (0.85, 1.18)
 
 
 def _median_flat_extents(font: TTFont, glyph_set, role: str):
@@ -159,15 +166,46 @@ def cjk_baseline_shift(base: TTFont, base_glyph_set=None) -> float:
     return max(-limit, min(limit, shift))
 
 
+def _cjk_box_height(base: TTFont, glyph_set) -> float | None:
+    boxes = [box for box in (_bounds_for_codepoint(base, glyph_set, ord(char))
+                             for char in CJK_BOX_PROBES) if box and box[3] > box[1]]
+    if len(boxes) < 2:
+        return None
+    height = float(statistics.median(box[3] - box[1] for box in boxes))
+    return height if height >= base["head"].unitsPerEm * 0.5 else None
+
+
+def cjk_cap_correction(base: TTFont, base_glyph_set=None) -> tuple[float, float]:
+    """(size factor, vertical shift) that sizes Latin to the CJK ideographs.
+
+    (1.0, 0.0) for conventional pairings. When the base font's own Latin caps
+    are far from 0.88 of its ideograph box, Latin is resized to that ratio
+    around its current centre, so it stays vertically centred on Han.
+    """
+    glyph_set = base_glyph_set if base_glyph_set is not None else base.getGlyphSet()
+    cjk_h = _cjk_box_height(base, glyph_set)
+    cap = _median_flat_extents(base, glyph_set, "latin")
+    if not cjk_h or not cap or cap[1] <= cap[0]:
+        return 1.0, 0.0
+    cap_h = cap[1] - cap[0]
+    if abs(cap_h / cjk_h - CJK_CAP_RATIO) <= CJK_CAP_TOLERANCE:
+        return 1.0, 0.0
+    lo, hi = CJK_CAP_FACTOR_LIMITS
+    factor = max(lo, min(hi, CJK_CAP_RATIO * cjk_h / cap_h))
+    return factor, cap_h * (1.0 - factor) / 2.0
+
+
 def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
     base_glyph_set = base.getGlyphSet()
     upem_scale = base["head"].unitsPerEm / src["head"].unitsPerEm
     cjk_shift = cjk_baseline_shift(base, base_glyph_set)
+    cap_factor, cap_shift = cjk_cap_correction(base, base_glyph_set)
     base_box = _median_flat_extents(base, base_glyph_set, role)
     src_box = _median_flat_extents(src, src_glyph_set, role)
     if not base_box or not src_box:
         return upem_scale, cjk_shift
-    ratio = (base_box[1] - base_box[0]) / ((src_box[1] - src_box[0]) * upem_scale)
+    cjk_shift += cap_shift
+    ratio = cap_factor * (base_box[1] - base_box[0]) / ((src_box[1] - src_box[0]) * upem_scale)
     scale = upem_scale * max(0.82, min(1.18, ratio))
     # OpenType baseline is y=0. Never inherit the CJK base font's potentially vertically
     # centered ASCII bottom; only correct genuine source-font vertical displacement.

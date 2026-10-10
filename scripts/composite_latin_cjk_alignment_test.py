@@ -79,8 +79,9 @@ class CompositeLatinCjkAlignmentTest(unittest.TestCase):
         self.base = self.root / 'cjk.ttf'
         self.latin = self.root / 'latin.ttf'
         self.digit = self.root / 'digit.ttf'
-        # MiSans-like companion: caps/digits 740 with round overshoot, Han -71..847.
-        make_font(self.base, cap=740, xh=530, digit=740, overshoot=14, cjk=(-71, 847), family='Base')
+        # MiSans-like companion: caps/digits 740 with round overshoot, Han -62..782
+        # (caps = 0.88 of the ideograph box, as measured on MiSans/Noto/WenKai).
+        make_font(self.base, cap=740, xh=530, digit=740, overshoot=14, cjk=(-62, 782), family='Base')
         # Geometric "tech" Latin: flat everywhere, small caps, tall x-height.
         make_font(self.latin, cap=643, xh=510, digit=643, overshoot=0, cjk=None, family='Tech')
         shutil.copyfile(self.latin, self.digit)  # the app passes separate copies
@@ -123,10 +124,10 @@ class CompositeLatinCjkAlignmentTest(unittest.TestCase):
                 font = self.build(engine)
                 self.assertEqual(round(box(font, 'H')[1]), 0)
                 self.assertEqual(round(box(font, '1')[1]), 0)
-                self.assertEqual(tuple(round(v) for v in box(font, '中')[1::2]), (-71, 847))
+                self.assertEqual(tuple(round(v) for v in box(font, '中')[1::2]), (-62, 782))
 
     def test_han_seated_on_baseline_lifts_latin_and_digits_together(self):
-        make_font(self.base, cap=740, xh=530, digit=740, overshoot=14, cjk=(0, 918), family='High')
+        make_font(self.base, cap=740, xh=530, digit=740, overshoot=14, cjk=(0, 844), family='High')
         for engine in ENGINES:
             with self.subTest(engine=engine):
                 font = self.build(engine)
@@ -135,10 +136,10 @@ class CompositeLatinCjkAlignmentTest(unittest.TestCase):
                 for char in 'H1x':
                     self.assertLessEqual(abs(box(font, char)[1] - expected), 2, char)
                 self.assertLessEqual(abs(box(font, '1')[3] - box(font, 'H')[3]), 2)
-                self.assertEqual(tuple(round(v) for v in han[1::2]), (0, 918))
+                self.assertEqual(tuple(round(v) for v in han[1::2]), (0, 844))
 
     def test_han_far_below_baseline_lowers_latin_within_limit(self):
-        make_font(self.base, cap=740, xh=530, digit=740, overshoot=14, cjk=(-300, 618), family='Low')
+        make_font(self.base, cap=740, xh=530, digit=740, overshoot=14, cjk=(-300, 544), family='Low')
         for engine in ENGINES:
             with self.subTest(engine=engine):
                 font = self.build(engine)
@@ -146,6 +147,23 @@ class CompositeLatinCjkAlignmentTest(unittest.TestCase):
                 self.assertLess(bottom, -100)
                 self.assertGreaterEqual(bottom, -150)  # never more than 0.15 em
                 self.assertLessEqual(abs(box(font, 'H')[1] - bottom), 1)
+
+    def test_small_latin_next_to_full_bodied_han_is_resized_and_centred(self):
+        # Round/cute CJK (e.g. 花轮丸): own caps 707 next to a -100..810 ideograph
+        # box (ratio 0.78) made imported Latin and digits look shrunken by Han.
+        make_font(self.base, cap=707, xh=520, digit=707, overshoot=10, cjk=(-100, 810), family='Round')
+        make_font(self.latin, cap=700, xh=520, digit=682, overshoot=0, cjk=None, family='Wide')
+        shutil.copyfile(self.latin, self.digit)
+        for engine in ENGINES:
+            with self.subTest(engine=engine):
+                font = self.build(engine)
+                han, cap, digit = box(font, '中'), box(font, 'H'), box(font, '1')
+                self.assertAlmostEqual((cap[3] - cap[1]) / (han[3] - han[1]), 0.88, delta=0.01)
+                # Stays centred on the ideographs where the stock Latin was centred.
+                self.assertLessEqual(abs((cap[1] + cap[3]) / 2 - 707 / 2), 2)
+                self.assertAlmostEqual((digit[3] - digit[1]) / (cap[3] - cap[1]), 682 / 700, delta=0.01)
+                self.assertLessEqual(abs(digit[1] - cap[1]), 1)
+                self.assertEqual(tuple(round(v) for v in han[1::2]), (-100, 810))
 
 
 if __name__ == '__main__':
