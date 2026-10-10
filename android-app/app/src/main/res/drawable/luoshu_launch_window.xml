@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 28–30 starting window = the launch shell's first frame without text:
+  the full-screen diffuse bitmap (stretched like LuoShuLaunchArtwork), tiled grain against
+  banding, and the pre-rendered glass card at 288dp x 0.955 (CARD_START_SCALE), centred.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <bitmap
+            android:src="@drawable/luoshu_launch_backdrop"
+            android:gravity="fill"
+            android:filter="true"
+            android:dither="true" />
+    </item>
+    <item>
+        <bitmap
+            android:src="@drawable/luoshu_launch_grain"
+            android:tileMode="repeat" />
+    </item>
+    <item
+        android:width="275dp"
+        android:height="275dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@drawable/luoshu_launch_card"
+            android:filter="true" />
+    </item>
+</layer-list>

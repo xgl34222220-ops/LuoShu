@@ -53,9 +53,17 @@ class MainActivity : ComponentActivity() {
     private var shellDrawListener: ViewTreeObserver.OnPreDrawListener? = null
     private var shellHandoffCallback: Runnable? = null
     private var pendingAppearance: AppearanceSettings? = null
+    // Cold launch only: the diffuse glass shell drawn above the already composed home.
+    private var launchShellVisible by mutableStateOf(false)
+    private var launchShellTextVisible = false
     // One composition call site on both paths preserves rememberSaveable keys on recreation.
     private val appContent: @Composable () -> Unit = {
-        if (openTaskCenter) TaskCenterHost() else LuoShuHost(firstFrameCommitted)
+        if (openTaskCenter) TaskCenterHost() else LuoShuHost(
+            firstFrameCommitted = firstFrameCommitted,
+            launchShellVisible = launchShellVisible,
+            launchShellTextVisible = launchShellTextVisible,
+            onLaunchShellFinished = ::finishLaunchShell,
+        )
     }
     private val launchController by lazy(LazyThreadSafetyMode.NONE) {
         LuoShuLaunchController(this)
@@ -79,6 +87,9 @@ class MainActivity : ComponentActivity() {
             Build.VERSION.SDK_INT, savedInstanceState != null, openTaskCenter,
         )
         if (useNativeShell) nativeShellPolicy = LuoShuNativeShellPolicy()
+        // Same eligibility as the native shell, on every API: never on restore or task entry.
+        launchShellVisible = savedInstanceState == null && !openTaskCenter
+        launchShellTextVisible = useNativeShell
         launchController.install(
             startedAt = activityStartedAt,
             onComplete = ::requestImportNotificationPermissionWhenReady,
@@ -293,8 +304,17 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
-        if (openTaskCenter) launchController.finishForTaskEntry()
+        if (openTaskCenter) {
+            launchShellVisible = false
+            launchController.finishForTaskEntry()
+        }
         requestImportNotificationPermissionWhenReady()
+    }
+
+    private fun finishLaunchShell() {
+        if (!launchShellVisible) return
+        launchShellVisible = false
+        Log.i("LuoShuStartup", "event=launch_shell_finished")
     }
 
     private fun requestImportNotificationPermissionWhenReady() {

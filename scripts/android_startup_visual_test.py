@@ -14,7 +14,8 @@ from unittest.mock import Mock, patch
 import numpy as np
 from PIL import Image, ImageDraw
 
-from android_startup_visual import FrameClassifier, edges, inspect_recording, match_score, original_timestamps, timeline_verdict
+from android_startup_visual import (SHELL_CARD_BOUNDS, SHELL_TEXT_BOUNDS, FrameClassifier, edges, inspect_recording,
+                                    match_score, original_timestamps, timeline_verdict)
 
 
 class StartupVisualTest(unittest.TestCase):
@@ -43,16 +44,36 @@ class StartupVisualTest(unittest.TestCase):
     def test_shell_fixture_provenance_hashes_and_scope(self):
         folder = Path(__file__).with_name("startup_visual_fixtures")
         provenance = json.loads((folder / "native-shell-provenance.json").read_text())
-        self.assertEqual({"light", "dark"}, {x["theme"] for x in provenance["references"]})
+        self.assertEqual([list(bounds) for bounds in SHELL_TEXT_BOUNDS], provenance["textBounds360x780"])
+        self.assertEqual(list(SHELL_CARD_BOUNDS), provenance["cardBounds360x780"])
+        kinds = {(x["theme"], x["kind"]) for x in provenance["references"]}
+        self.assertEqual({(t, k) for t in ("light", "dark") for k in ("shell", "splash")}, kinds)
         for item in provenance["references"]:
             self.assertEqual(item["sha256"],hashlib.sha256((folder/item["fixture"]).read_bytes()).hexdigest())
-            self.assertEqual(37896812363,item["runId"])
             self.assertIn("not home",item["scope"])
-            self.assertGreater(item["ptsSeconds"],0)
+            with Image.open(folder / item["fixture"]) as image:
+                self.assertEqual((360, 780), image.size)
+            if item["origin"] == "emulator":
+                self.assertIsInstance(item["runId"], int)
+                self.assertGreater(item["ptsSeconds"],0)
+            else:
+                # Design render used only until the first real emulator recording exists.
+                self.assertEqual("design-render", item["origin"])
+                self.assertIn("build_launch_assets.py", item["derivation"])
 
     def shell_reference(self, theme):
         with Image.open(Path(__file__).with_name("startup_visual_fixtures") / f"native-shell-{theme}.png") as image:
             return image.convert("RGB").copy()
+
+    @staticmethod
+    def erase(image, bounds, fraction=0.0):
+        """Replace (or fade) text with its own local background colour."""
+        source = np.asarray(image).astype(np.float32).copy()
+        for x1, y1, x2, y2 in bounds:
+            crop = source[y1:y2, x1:x2]
+            background = np.median(crop.reshape(-1, 3), axis=0)
+            source[y1:y2, x1:x2] = background + (crop - background) * fraction
+        return Image.fromarray(np.clip(source, 0, 255).astype(np.uint8))
 
     def test_preparation_shell_is_distinct_from_home_and_requires_both_texts(self):
         for theme in ("light", "dark"):
@@ -62,17 +83,31 @@ class StartupVisualTest(unittest.TestCase):
             self.assertEqual([f["state"] for f in frames], ["prelaunch", "native-logo", "startup-shell", "home"])
             self.assertTrue(timeline_verdict(frames)["passed"])
             self.assertFalse(timeline_verdict(frames[:-1])["passed"])
-            background = shell.getpixel((180,390))
-            for missing in ((10,53,63,84),(10,97,92,118)):
-                image = shell.copy()
-                ImageDraw.Draw(image).rectangle(missing, fill=background)
+            for missing in SHELL_TEXT_BOUNDS:
+                image = self.erase(shell, (missing,))
                 self.assertEqual("unclassified", classifier.classify(np.asarray(image))["state"])
+
+    def test_shell_tolerates_drift_and_card_motion_but_not_other_surfaces(self):
+        for theme in ("light", "dark"):
+            classifier, home, baseline, splash = self.reference(theme)
+            shell = np.asarray(self.shell_reference(theme)).astype(np.int16)
+            drifted = shell.copy()
+            drifted[600:740, 200:360] += 9      # accent glow drifting in a corner
+            drifted[60:200, 0:150] -= 6
+            x1, y1, x2, _ = SHELL_CARD_BOUNDS
+            y2 = SHELL_TEXT_BOUNDS[0][1] - 1  # the wordmark never moves with the card
+            card = Image.fromarray(np.clip(shell, 0, 255).astype(np.uint8)).crop((x1, y1, x2, y2))
+            scaled = Image.fromarray(np.clip(drifted, 0, 255).astype(np.uint8))
+            scaled.paste(card.resize((round((x2 - x1) * .955), round((y2 - y1) * .955))),
+                         (x1 + round((x2 - x1) * .0225), y1 + round((y2 - y1) * .0225)))
+            for image in (np.clip(drifted, 0, 255).astype(np.uint8), np.asarray(scaled)):
+                self.assertEqual("startup-shell", classifier.classify(image)["state"])
 
     def test_shell_cannot_accept_blank_wrong_background_shifted_title_or_extra_content(self):
         for theme in ("light", "dark"):
             classifier, home, baseline, splash = self.reference(theme)
             shell = self.shell_reference(theme)
-            background = shell.getpixel((180,390))
+            background = shell.getpixel((180,700))
             variants = [Image.new("RGB", shell.size, background), Image.fromarray(np.roll(np.asarray(shell), 12, axis=1))]
             wrong = shell.copy()
             ImageDraw.Draw(wrong).rectangle((0,130,359,730),fill=(70,80,90))
@@ -80,6 +115,10 @@ class StartupVisualTest(unittest.TestCase):
             content = shell.copy()
             ImageDraw.Draw(content).rectangle((40,180,320,500),fill=(180,70,90))
             variants.append(content)
+            flat_field = shell.copy()
+            ImageDraw.Draw(flat_field).rectangle((0, 47, 359, 497), fill=background)
+            ImageDraw.Draw(flat_field).rectangle((0, 564, 359, 733), fill=background)
+            variants.append(flat_field)
             for image in variants:
                 self.assertEqual("unclassified", classifier.classify(np.asarray(image))["state"])
             self.assertEqual("black-blank",classifier.classify(np.zeros((780,360,3),dtype=np.uint8))["state"])
@@ -87,14 +126,40 @@ class StartupVisualTest(unittest.TestCase):
     def test_nearly_erased_shell_text_cannot_pass_normalized_correlation(self):
         for theme in ("light","dark"):
             classifier, _, _, _ = self.reference(theme)
-            source = np.asarray(self.shell_reference(theme)).astype(np.float32)
-            background = source[390,180]
+            shell = self.shell_reference(theme)
             for fraction in (0,.025,.10,.50):
-                for bounds in (((10,53,63,84),),((10,97,92,118),),((10,53,63,84),(10,97,92,118))):
-                    faded = source.copy()
-                    for x1,y1,x2,y2 in bounds:
-                        faded[y1:y2,x1:x2] = background + (faded[y1:y2,x1:x2]-background)*fraction
-                    self.assertEqual("unclassified",classifier.classify(faded.astype(np.uint8))["state"])
+                for bounds in ((SHELL_TEXT_BOUNDS[0],),(SHELL_TEXT_BOUNDS[1],),SHELL_TEXT_BOUNDS):
+                    faded = self.erase(shell, bounds, fraction)
+                    self.assertEqual("unclassified",classifier.classify(np.asarray(faded))["state"])
+
+    def test_splash_dissolve_and_home_crossfade_are_recognized_transitions(self):
+        for theme in ("light", "dark"):
+            classifier, home, baseline, splash = self.reference(theme)
+            shell = np.asarray(self.shell_reference(theme)).astype(np.float32)
+            native = classifier.splash_reference.astype(np.float32)
+            target = np.asarray(home).astype(np.float32)
+            def mix(first, second, weight):
+                return np.clip(first * (1 - weight) + second * weight, 0, 255).astype(np.uint8)
+            dissolve = [classifier.classify(mix(native, shell, w))["state"] for w in (.3, .5, .7)]
+            crossfade = [classifier.classify(mix(shell, target, w))["state"] for w in (.3, .5, .7)]
+            for state in dissolve + crossfade:
+                self.assertNotEqual("unclassified", state)
+            self.assertIn("shell-transition", dissolve + crossfade)
+            sequence = [np.asarray(baseline), np.asarray(splash), mix(native, shell, .5), shell.astype(np.uint8),
+                        mix(shell, target, .4), np.asarray(home)]
+            frames = [{"frame": i, "seconds": i * .001, **classifier.classify(image)} for i, image in enumerate(sequence)]
+            self.assertTrue(timeline_verdict(frames)["passed"], timeline_verdict(frames)["errors"])
+
+    def test_shell_transition_is_forbidden_after_home_warm_or_without_logo(self):
+        for frames, warm, error in (
+            ([{"state": "native-logo"}, {"state": "home"}, {"state": "shell-transition"}, {"state": "home"}], False, "returned after visible home"),
+            ([{"state": "shell-transition"}, {"state": "home"}], True, "Warm same-process"),
+            ([{"state": "prelaunch"}, {"state": "shell-transition"}, {"state": "home"}], False, "lacked preceding native-logo"),
+        ):
+            stamped = [{"frame": i, "seconds": i * .01, **frame} for i, frame in enumerate(frames)]
+            result = timeline_verdict(stamped, warm=warm)
+            self.assertFalse(result["passed"])
+            self.assertIn(error, " ".join(result["errors"]))
 
     def test_shell_is_forbidden_on_warm_before_logo_and_after_home(self):
         classifier, home, baseline, splash = self.reference()
