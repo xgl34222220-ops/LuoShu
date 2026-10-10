@@ -6,3 +6,4 @@ versionSeries=refactor
 author=惜故里丶
 description=Android 全局字体引擎：保留 1.1.1 挂载核心，组合字体英数与中文对齐并支持英数微调
 updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json
+actionIcon=branding/luoshu-app-icon.webp
