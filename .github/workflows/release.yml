@@ -166,6 +166,17 @@ jobs:
             sh ./scripts/prepare_composite_runtime.sh
           fi
 
+      - name: Prepare host source-check dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # check.sh runs the screenshot-helper regressions (android_ui_smoke_test.py),
+          # which import Pillow. Match check.yml/test-candidate.yml's isolated host venv.
+          python3 -m venv "$RUNNER_TEMP/luoshu-release-host-tests"
+          timeout 180s "$RUNNER_TEMP/luoshu-release-host-tests/bin/python" -m pip install --timeout 30 --retries 2 Pillow==12.3.0
+          "$RUNNER_TEMP/luoshu-release-host-tests/bin/python" -c 'import PIL; assert PIL.__version__ == "12.3.0"; print("Verified host Pillow", PIL.__version__)'
+          echo "$RUNNER_TEMP/luoshu-release-host-tests/bin" >> "$GITHUB_PATH"
+
       # Keep the layout verifier on the same FreeType as the original Ubuntu
       # 24.04 build. Jammy's 2.11.1 lacks the HVAR no-variation sentinel support
       # required by the existing variable-font layout gate.
