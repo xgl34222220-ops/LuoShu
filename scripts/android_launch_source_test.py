@@ -76,7 +76,7 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         self.assertIn("setBackgroundColor(context.getColor(R.color.launch_background))", shell)
         self.assertIn('text = "洛书"', shell)
         self.assertIn('text = "正在准备界面"', shell)
-        for forbidden in ("ic_luoshu_splash", "LuoShuGlassBackdropDrawable", "Shader", "animate", "postDelayed"):
+        for forbidden in ("ic_luoshu_launch", "LuoShuGlassBackdropDrawable", "Shader", "animate", "postDelayed"):
             self.assertNotIn(forbidden, shell)
         install = method(self.controller, "fun install(")
         self.assertIn("if (nativeShell)", install)
@@ -171,10 +171,11 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         for guard in ("!firstContentDrawn", "!launchController.isComplete", "openTaskCenter", "Lifecycle.State.RESUMED"):
             self.assertIn(guard, ready)
 
-    def test_real_theme_keeps_the_unbranded_gradient_backdrop(self):
+    def test_legacy_starting_window_and_real_theme_share_an_unbranded_gradient(self):
         resources = MAIN / "res"
-        self.assertEqual(style_items(resources / "values/themes.xml", "Theme.LuoShuHybrid")["android:windowBackground"],
-                         "@drawable/luoshu_launch_background")
+        for theme in ("Theme.LuoShuHybrid", "Theme.LuoShuLaunch"):
+            self.assertEqual(style_items(resources / "values/themes.xml", theme)["android:windowBackground"],
+                             "@drawable/luoshu_launch_background")
         root = ET.parse(resources / "drawable/luoshu_launch_background.xml").getroot()
         self.assertEqual(root.tag, "shape")
         self.assertEqual(root.attrib[ANDROID + "shape"], "rectangle")
@@ -188,71 +189,49 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
             for stop in ("start", "center", "end"):
                 self.assertRegex(colors["launch_gradient_" + stop], r"^#[0-9A-Fa-f]{6}$")
 
-    def test_legacy_starting_window_mirrors_the_platform_splash(self):
-        # API 28-30 have no platform splash; the starting window shows a deep navy
-        # vertical gradient and the original icon art centered at 240dp, nothing else.
-        resources = MAIN / "res"
-        launch = style_items(resources / "values/themes.xml", "Theme.LuoShuLaunch")
-        self.assertEqual(launch["android:windowBackground"], "@drawable/luoshu_launch_splash")
-        self.assertEqual((launch["android:windowLightStatusBar"], launch["android:windowLightNavigationBar"]),
-                         ("false", "false"))
-        root = ET.parse(resources / "drawable/luoshu_launch_splash.xml").getroot()
-        self.assertEqual(root.tag, "layer-list")
-        items = root.findall("item")
-        self.assertEqual(len(items), 2)
-        gradient = items[0].find("shape/gradient")
-        self.assertEqual(gradient.get(ANDROID + "angle"), "270")
-        self.assertEqual(gradient.get(ANDROID + "startColor"), "@color/launch_splash_gradient_top")
-        self.assertEqual(gradient.get(ANDROID + "endColor"), "@color/launch_splash_gradient_bottom")
-        self.assertEqual(items[1].get(ANDROID + "drawable"), "@drawable/ic_luoshu_splash")
-        self.assertEqual((items[1].get(ANDROID + "width"), items[1].get(ANDROID + "height")), ("240dp", "240dp"))
-        self.assertEqual(items[1].get(ANDROID + "gravity"), "center")
-
     def test_android_twelve_keeps_a_supported_single_opaque_system_splash(self):
         items = style_items(MAIN / "res/values-v31/launch.xml", "Theme.LuoShuLaunch")
-        self.assertEqual(items["android:windowSplashScreenBackground"], "@color/launch_splash_background")
-        self.assertEqual(items["android:windowBackground"], "@color/launch_splash_background")
-        self.assertEqual(items["android:windowSplashScreenAnimatedIcon"], "@drawable/ic_luoshu_splash")
-        self.assertEqual(items["android:windowSplashScreenIconBackgroundColor"], "@color/launch_splash_background")
-        self.assertEqual((items["android:windowLightStatusBar"], items["android:windowLightNavigationBar"]),
-                         ("false", "false"))
+        self.assertEqual(items["android:windowSplashScreenBackground"], "@color/launch_background")
+        self.assertEqual(items["android:windowBackground"], "@color/launch_background")
+        self.assertEqual(items["android:windowSplashScreenAnimatedIcon"], "@drawable/ic_luoshu_launch")
         self.assertNotIn("android:windowSplashScreenBrandingImage", items)
-        self.assertNotIn("android:windowSplashScreenAnimationDuration", items)
 
-    def test_splash_emblem_is_one_static_high_resolution_bitmap(self):
-        icon = ET.parse(MAIN / "res/drawable/ic_luoshu_splash.xml").getroot()
-        self.assertEqual(icon.tag, "bitmap")
-        self.assertEqual(icon.get(ANDROID + "src"), "@drawable/ic_luoshu_splash_art")
-        self.assertEqual(icon.get(ANDROID + "gravity"), "fill")
-        source = MAIN / "res/drawable-nodpi/ic_luoshu_splash_art.webp"
-        self.assertTrue(source.is_file())
-        # RIFF/WEBP header; width/height of a lossless VP8L bitstream.
-        data = source.read_bytes()
-        self.assertEqual((data[:4], data[8:12], data[12:16]), (b"RIFF", b"WEBP", b"VP8L"))
-        bits = int.from_bytes(data[21:25], "little")
-        width, height = (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
-        # 240dp at xxxhdpi (4x) is 960px: never upscale on any density.
-        self.assertGreaterEqual(min(width, height), 960)
-        self.assertEqual(width, height)
-        # Feathered circular alpha: transparent corners keep the platform circle mask invisible.
-        self.assertTrue((bits >> 28) & 1, "splash art must carry an alpha channel")
-        self.assertFalse(list((MAIN / "res").rglob("ic_luoshu_launch*")))
-        self.assertFalse(list((MAIN / "res").rglob("ic_luoshu_splash_foreground*")))
+    def test_native_glass_emblem_uses_two_static_native_gradients(self):
+        icon = ET.parse(MAIN / "res/drawable/ic_luoshu_launch.xml").getroot()
+        self.assertEqual(icon.tag, "vector")
+        for key, value in (("width", "288dp"), ("height", "288dp"),
+                           ("viewportWidth", "108"), ("viewportHeight", "108")):
+            self.assertEqual(icon.get(ANDROID + key), value)
+        fills = icon.findall(".//" + AAPT + "attr")
+        self.assertEqual(len(fills), 2)
+        for fill in fills:
+            self.assertEqual(fill.get("name"), "android:fillColor")
+            gradient = fill.find("gradient")
+            self.assertEqual(gradient.get(ANDROID + "type"), "linear")
+            stops = gradient.findall("item")
+            self.assertEqual([stop.get(ANDROID + "offset") for stop in stops], ["0", "0.48", "1"])
+            self.assertEqual([stop.get(ANDROID + "color") for stop in stops],
+                             ["@color/launch_glass_top", "@color/launch_glass_center", "@color/launch_glass_bottom"])
+        self.assertIsNone(icon.find(".//animated-vector"))
+        self.assertIsNone(icon.find(".//bitmap"))
 
-    def test_launcher_icon_is_the_original_raster_icon(self):
-        resources = MAIN / "res"
-        manifest = ET.parse(MAIN / "AndroidManifest.xml").getroot().find("application")
-        self.assertEqual(manifest.get(ANDROID + "icon"), "@mipmap/ic_luoshu")
-        self.assertEqual(manifest.get(ANDROID + "roundIcon"), "@mipmap/ic_luoshu")
-        data = (resources / "mipmap-xxxhdpi/ic_luoshu.webp").read_bytes()
-        self.assertEqual((data[:4], data[8:12]), (b"RIFF", b"WEBP"))
-        # No adaptive wrapper or layers that would shadow the original artwork.
-        self.assertFalse((resources / "mipmap-anydpi-v26/ic_luoshu.xml").exists())
-        self.assertFalse(list(resources.rglob("ic_luoshu_foreground*")))
-        self.assertFalse(list(resources.rglob("ic_luoshu_monochrome*")))
-        self.assertFalse((resources / "drawable/ic_luoshu_background.xml").exists())
+    def test_glass_lens_fits_platform_safe_circle_without_enlarging_the_brand(self):
+        icon = ET.parse(MAIN / "res/drawable/ic_luoshu_launch.xml").getroot()
+        paths = {node.get(ANDROID + "name"): node for node in icon.findall(".//path")}
+        # 288dp canvas / 108 viewport: a 35-unit radius is 186.7dp across,
+        # inside the platform's 192dp safe circle. Rim adds only 0.375 units.
+        self.assertEqual(paths["diffuse_lens"].get(ANDROID + "pathData"),
+                         "M54,19a35,35 0,1 0,0 70a35,35 0,1 0,0 -70")
+        self.assertEqual(paths["glass_lens_rim"].get(ANDROID + "strokeWidth"), "0.75")
+        self.assertLessEqual(35 * 2 * 288 / 108, 192)
+        group = icon.find("group")
+        self.assertEqual(group.get(ANDROID + "scaleX"), "0.8")
+        self.assertEqual(group.get(ANDROID + "scaleY"), "0.8")
+        self.assertLessEqual(float(paths["glass_lens_rim"].get(ANDROID + "strokeAlpha")), .25)
+        self.assertLessEqual(float(paths["diffuse_lens"].get(ANDROID + "fillAlpha")), .24)
+        self.assertLessEqual(float(paths["glass_core_highlight"].get(ANDROID + "strokeAlpha")), .10)
 
-    def test_light_and_dark_launch_colors_resolve_with_legible_ink(self):
+    def test_light_and_dark_native_glass_colors_resolve_with_legible_gold(self):
         def luminance(rgb):
             values = [int(rgb[index:index + 2], 16) / 255 for index in (1, 3, 5)]
             linear = [value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
@@ -260,28 +239,14 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
             return sum(a * b for a, b in zip(linear, (.2126, .7152, .0722)))
 
         resources = MAIN / "res"
-        light = {node.get("name"): node.text.strip()
-                 for node in ET.parse(resources / "values/themes.xml").getroot().findall("color")}
-        # Splash is the original icon's deep navy in both modes; defined once, never overridden.
-        self.assertEqual(light["launch_splash_background"].upper(), "#09213E")
-        self.assertEqual(light["launch_splash_gradient_top"].upper(), "#0E2E54")
-        self.assertEqual(light["launch_splash_gradient_bottom"].upper(), "#021022")
         for relative in ("values/themes.xml", "values-night/launch.xml"):
             colors = {node.get("name"): node.text.strip()
                       for node in ET.parse(resources / relative).getroot().findall("color")}
-            for name in ("launch_background", "launch_ink"):
+            for name in ("launch_background", "launch_ink", "launch_gold", "launch_glass_top",
+                         "launch_glass_center", "launch_glass_bottom", "launch_glass_edge", "launch_glass_shadow"):
                 self.assertRegex(colors[name], r"^#[0-9A-Fa-f]{6}$")
-            first, second = sorted((luminance(colors["launch_ink"]), luminance(colors["launch_background"])))
-            self.assertGreaterEqual((second + .05) / (first + .05), 4.5)
-        night = {node.get("name"): node.text.strip()
-                 for node in ET.parse(resources / "values-night/launch.xml").getroot().findall("color")}
-        for name in ("launch_splash_background", "launch_splash_gradient_top", "launch_splash_gradient_bottom"):
-            self.assertNotIn(name, night)
-        bools = {node.get("name"): node.text.strip()
-                 for folder, file in (("values", "themes.xml"),) for node in ET.parse(resources / folder / file).getroot().findall("bool")}
-        night_bools = {node.get("name"): node.text.strip()
-                       for node in ET.parse(resources / "values-night/launch.xml").getroot().findall("bool")}
-        self.assertEqual((bools["launch_light_system_bars"], night_bools["launch_light_system_bars"]), ("true", "false"))
+            first, second = sorted((luminance(colors["launch_gold"]), luminance(colors["launch_background"])))
+            self.assertGreaterEqual((second + .05) / (first + .05), 3)
 
     def test_single_launcher_activity_and_platform_api_are_preserved(self):
         manifest = ET.parse(MAIN / "AndroidManifest.xml").getroot()

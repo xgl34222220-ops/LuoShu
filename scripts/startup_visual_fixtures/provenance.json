@@ -1,19 +1,14 @@
 {
-  "workflow_run": 38084442845,
-  "commit": "71f15869a18f5a6e0a3553c0c187ab1b8bccb188",
-  "artifact": "LuoShu-Startup-Visual-API-36-<theme>",
-  "artifact_ids": {
-    "light": 11682500788,
-    "dark": 11682715482
-  },
-  "notes": "Unmodified crops from real recorded native splash frames (2026-10 \u300c\u4e66\u300d icon redesign, PR #275 first CI run). These are recognition references, never inserted into emulator recordings. Frames decoded with ffmpeg rgb24 at original 720x1560, -vsync 0, original PTS.",
+  "workflow_run": 37658629186,
+  "commit": "17888663a0fb64a7a63ed96c56f423d94a36a76d",
+  "artifact": "LuoShu-Startup-Visual-API-36",
+  "notes": "Unmodified crops from real recorded native splash frames. These are recognition references, never inserted into emulator recordings. Negative baseline contains a logo returning after visible home in both themes.",
   "references": [
     {
       "file": "native-logo-light.png",
-      "source": "light-cold-start.mp4",
-      "source_sha256": "c0ee721f2efb89e555c61a5dffd843e006d73c85de73eb7a0f11cddf614196bb",
-      "frame": 17,
-      "time_seconds": 1.995922,
+      "source": "cold-start.mp4",
+      "source_sha256": "c9df890b08f57f714b910cb0d912a6f0f2a3730e5a176b73244536538f97c7cc",
+      "time_seconds": 2.0,
       "crop_pixels": [
         192,
         612,
@@ -23,10 +18,9 @@
     },
     {
       "file": "native-logo-dark.png",
-      "source": "dark-cold-start.mp4",
-      "source_sha256": "988e43be597a0b93d055d8eb0bbc47cfd94f2f8a5b7d22480270305524f5c693",
-      "frame": 18,
-      "time_seconds": 1.938633,
+      "source": "repeat-cold-start.mp4",
+      "source_sha256": "bea4cc58137fa4e2a84e368a6c1c0f59df109198802709c430e471761c80833f",
+      "time_seconds": 2.0,
       "crop_pixels": [
         192,
         612,

@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Splash emblem: the original launcher icon art (glass Lo Shu tile, gold ribbons) on a
-     deep navy field, drawn from one 960px nodpi source with a feathered circular alpha,
-     so Android 12+'s icon circle mask has no visible edge. It fills the 240dp icon box. -->
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/ic_luoshu_splash_art"
-    android:gravity="fill"
-    android:filter="true"
-    android:antialias="true" />

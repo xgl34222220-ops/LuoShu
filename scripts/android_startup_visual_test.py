@@ -46,7 +46,7 @@ class StartupVisualTest(unittest.TestCase):
         self.assertEqual({"light", "dark"}, {x["theme"] for x in provenance["references"]})
         for item in provenance["references"]:
             self.assertEqual(item["sha256"],hashlib.sha256((folder/item["fixture"]).read_bytes()).hexdigest())
-            self.assertEqual(38084442845,item["runId"])
+            self.assertEqual(37896812363,item["runId"])
             self.assertIn("not home",item["scope"])
             self.assertGreater(item["ptsSeconds"],0)
 

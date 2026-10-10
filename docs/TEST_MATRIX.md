@@ -61,10 +61,9 @@
 
 ## 单层启动视觉回归（2026-10-07）
 
-- Android 12+ 的最早系统 Splash 只支持不透明单色背景与中央图标；不以图片塞进背景、不添加第二品牌页或人为停留。2026-10 起启动页沿用原 App 图标画面（深海军蓝底、玻璃九宫、金色飘带）：系统底色亮暗统一 `#09213E`，图标为原图标放大并做羽化圆形透明边（`drawable-nodpi/ic_luoshu_splash_art.webp`，960px），使系统圆形遮罩无可见边；Splash 期间系统条为浅色文字。App 图标本身保持不变。
-- API 28–30 没有系统 Splash，启动窗口 `windowBackground` 为 `#0E2E54`→`#021022` 竖向渐变＋居中 240dp 同一图标画面；Activity 在首个内容帧前换上真实背景，不形成第二品牌页。
+- Android 12+ 的最早系统 Splash 只支持不透明单色背景与中央图标；不以图片塞进背景、不添加第二品牌页或人为停留。系统底色取接近真实 App 弥散背景的中间色，静态玻璃徽标保留蓝金九宫与飘带。
 - 第一帧由 App 控制的 Window 与真实首页继续共用 `LuoShuGlassBackdropDrawable` 全屏弥散渐变。启动图标资源调整不改变此 Drawable、首页配色、退出时序、前台维护或 Root 操作。
-- `python3 scripts/android_launch_source_test.py` 校验单页接线、无额外动画/等待、平台安全圆、原图标未被替换、亮暗资源完整性及准备页文字对比度。SVG/Inkscape 源资源合成图仅用于静态设计审查，不充当 Android 截图或性能通过证据。
+- `python3 scripts/android_launch_source_test.py` 校验单页接线、无额外动画/等待、平台安全圆、亮暗资源完整性及徽标基础对比度。SVG/Inkscape 源资源合成图仅用于静态设计审查，不充当 Android 截图或性能通过证据。
 - 真实冷启动仍需分别观察亮/暗系统屏、系统条文字、首内容帧、退场、重复冷启动及崩溃/ANR；一次静态资源调整不代表手机启动速度或 Google 字体复发已解决。
 
 平台边界依据：[Android Splash screens](https://developer.android.com/develop/ui/views/launch/splash-screen)。
