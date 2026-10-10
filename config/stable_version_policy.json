@@ -3,9 +3,9 @@
   "authorizedAt": "2026-10-06T13:36:26Z",
   "series": "refactor",
   "effectiveFrom": "v1.0.0",
-  "currentStable": "v2.2.2",
+  "currentStable": "v3.0.0",
   "firstRelease": "v1.0.0",
-  "nextStable": "v3.0.0",
+  "nextStable": "v3.3.3",
   "rule": "n.0.0 -> n.n.n -> (n+1).0.0; n is a positive integer",
   "examples": [
     "v1.0.0",
@@ -21,7 +21,7 @@
   "moduleVersionCode": "50000 + major*10000 + minor*100 + patch",
   "appVersionCode": "moduleVersionCode*100 + 1",
   "releaseTag": "refactor-v<major>.<minor>.<patch>",
-  "releaseHistoryPolicy": "Refactor series starts at refactor-v1.0.0; v2.0.0 remains withdrawn and unchanged; current stable release target is refactor-v2.2.2",
+  "releaseHistoryPolicy": "Refactor series starts at refactor-v1.0.0; v2.0.0 remains withdrawn and unchanged; refactor-v2.2.2 superseded; current stable is refactor-v3.0.0",
   "sourceCommitHistoryPreserved": true,
   "releaseRequiresUserRequest": true,
   "cleanupAuthorization": "Historical cleanup authorization applied only to the refactor-v1.0.0 reset"

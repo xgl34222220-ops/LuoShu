@@ -27,7 +27,7 @@
   "publishedMetadataSha256": {
     "update.json": "b31c8b63f7673bf6a2efc716afdc5053697508bc2faadcce82d9a9d96db19446",
     "update-prerelease.json": "b31c8b63f7673bf6a2efc716afdc5053697508bc2faadcce82d9a9d96db19446",
-    "config/stable_version_policy.json": "56e1d2707ddb1973aa620198e1144eb1535822a3d5319ac2bfb9da74dadf5244"
+    "config/stable_version_policy.json": "dffa7d2463fef9899050a601b4e743a579969e68e8a7462092b71b658eaf39d1"
   },
   "authorizedPublishedMetadataSha256": {
     "version": "v2.2.2",
