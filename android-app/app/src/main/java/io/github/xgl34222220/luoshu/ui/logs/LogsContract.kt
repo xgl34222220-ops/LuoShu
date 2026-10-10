@@ -159,12 +159,7 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
     return LogsUiState(
         content = normalized,
         lineCount = lines.count { it.isNotBlank() },
-        errorCount = lines.count { line ->
-            line.contains("error", ignoreCase = true) ||
-                line.contains("failed", ignoreCase = true) ||
-                line.contains("失败") ||
-                line.contains("错误")
-        },
+        errorCount = lines.count { line -> isLogErrorLine(line) },
         warningCount = lines.count { line ->
             line.contains("warn", ignoreCase = true) || line.contains("警告")
         },
@@ -214,3 +209,9 @@ internal fun LogsUiState.withNativeImport(state: NativeImportState): LogsUiState
         failedTaskCount = merged.count { it.phase == TaskPhase.FAILED },
     )
 }
+
+// 只匹配独立的 error/errors/failed 单词，避免 cleanupErrors 这类字段名被误判为错误。
+internal const val LOG_ERROR_PATTERN = "(?<![A-Za-z])(errors?|failed)(?![A-Za-z])|失败|错误"
+private val logErrorRegex = Regex(LOG_ERROR_PATTERN, RegexOption.IGNORE_CASE)
+
+internal fun isLogErrorLine(line: String): Boolean = logErrorRegex.containsMatchIn(line)

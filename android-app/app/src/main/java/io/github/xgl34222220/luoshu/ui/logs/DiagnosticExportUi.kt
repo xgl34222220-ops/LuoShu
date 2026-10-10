@@ -148,7 +148,7 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             fi
         fi
         warningCount="${'$'}(tail -n 500 "${'$'}LOG" 2>/dev/null | grep -Eic 'warn|警告' 2>/dev/null)"
-        errorCount="${'$'}(tail -n 500 "${'$'}LOG" 2>/dev/null | grep -Eic 'error|failed|失败|错误' 2>/dev/null)"
+        errorCount="${'$'}(tail -n 500 "${'$'}LOG" 2>/dev/null | grep -Eic '(^|[^A-Za-z])(errors?|failed)([^A-Za-z]|$)|失败|错误' 2>/dev/null)"
         [ -n "${'$'}warningCount" ] || warningCount=0
         [ -n "${'$'}errorCount" ] || errorCount=0
         {
