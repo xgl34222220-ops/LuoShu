@@ -199,7 +199,40 @@ def cjk_cap_correction(base: TTFont, base_glyph_set=None) -> tuple[float, float]
     return factor, 0.0
 
 
-def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
+# Manual fine-tuning chosen in the App (英数大小 / 英数上下位置), whole percent.
+# Applied after the automatic alignment; (0, 0) leaves it exactly untouched.
+MANUAL_SIZE_LIMITS = (-15, 15)
+MANUAL_OFFSET_LIMITS = (-10, 10)
+
+
+def manual_tune(size_percent=0, offset_percent=0) -> tuple[int, int]:
+    """Clamp the App's Latin/digit size and vertical offset to whole percents."""
+    def clamp(value, limits):
+        try:
+            value = int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+        return max(limits[0], min(limits[1], value))
+    return clamp(size_percent, MANUAL_SIZE_LIMITS), clamp(offset_percent, MANUAL_OFFSET_LIMITS)
+
+
+def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str,
+                    tune: tuple[int, int] = (0, 0)) -> tuple[float, float]:
+    scale, shift = _auto_role_transform(base, src, src_glyph_set, role)
+    size, offset = manual_tune(*tune)
+    if not size and not offset:
+        return scale, shift
+    upem = base["head"].unitsPerEm
+    # Resize around the imported cap centre (like cjk_cap_correction), so a size
+    # change does not move Latin/digits up or down; then apply the plain offset
+    # (percent of the em, positive = up).
+    box = _median_flat_extents(src, src_glyph_set, role)
+    centre = ((box[0] + box[1]) / 2.0 * scale + shift) if box and box[1] > box[0] else upem * 0.35
+    factor = 1.0 + size / 100.0
+    return scale * factor, shift * factor + centre * (1.0 - factor) + upem * offset / 100.0
+
+
+def _auto_role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
     base_glyph_set = base.getGlyphSet()
     upem_scale = base["head"].unitsPerEm / src["head"].unitsPerEm
     cjk_shift = cjk_baseline_shift(base, base_glyph_set)

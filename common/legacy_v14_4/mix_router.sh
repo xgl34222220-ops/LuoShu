@@ -111,10 +111,16 @@ mix_config_json_fast() {
     [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
     _enabled=false
     [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] && _enabled=true
-    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s"}}\n' \
+    # Latin/digit fine-tuning of the last successful mix (whole percent).
+    _latin_size=$(read_value "$REALMOD/config/mix_tune.conf" latinSize)
+    _latin_offset=$(read_value "$REALMOD/config/mix_tune.conf" latinOffset)
+    case "$_latin_size" in [0-9]|[1-9][0-9]|-[1-9]|-[1-9][0-9]) ;; *) _latin_size=0 ;; esac
+    case "$_latin_offset" in [0-9]|[1-9][0-9]|-[1-9]|-[1-9][0-9]) ;; *) _latin_offset=0 ;; esac
+    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","latinSize":%s,"latinOffset":%s}}\n' \
         "$_enabled" "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
         "$_cjk_weight" "$_latin_weight" "$_digit_weight" \
-        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
+        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
+        "$_latin_size" "$_latin_offset"
 }
 
 # Only fixed, bounded labels enter the App task card. Supervisor stderr can
@@ -481,10 +487,16 @@ prepare_mix_stage() {
         [ "$_queued_legacy" = true ] && _previous_legacy=true || _previous_legacy=false
     fi
     _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$$"
+    # App fine-tuning (英数大小 / 英数上下位置), whole percent; anything else is 0.
+    case "${7:-0}" in [0-9]|[1-9][0-9]|-[1-9]|-[1-9][0-9]) _pms_size="${7:-0}" ;; *) _pms_size=0 ;; esac
+    case "${8:-0}" in [0-9]|[1-9][0-9]|-[1-9]|-[1-9][0-9]) _pms_offset="${8:-0}" ;; *) _pms_offset=0 ;; esac
+    [ "$_pms_size" -le 15 ] || _pms_size=15; [ "$_pms_size" -ge -15 ] || _pms_size=-15
+    [ "$_pms_offset" -le 10 ] || _pms_offset=10; [ "$_pms_offset" -ge -10 ] || _pms_offset=-10
     {
         printf 'requestId=%s\n' "$_request"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
+        printf 'latinSize=%s\nlatinOffset=%s\n' "$_pms_size" "$_pms_offset"
         printf 'previousFont=%s\n' "$_previous"
         printf 'previousLegacy=%s\n' "$_previous_legacy"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -609,6 +621,20 @@ mark_mix_request_committed() {
     return 0
 }
 
+persist_mix_tune() {
+    # Remember the committed request's fine-tuning so the App shows it again.
+    [ -s "$MIX_STAGE_STATE" ] || return 0
+    _pmt_tmp="$REALMOD/config/mix_tune.conf.tmp.$$"
+    {
+        printf 'latinSize=%s\n' "$(read_value "$MIX_STAGE_STATE" latinSize)"
+        printf 'latinOffset=%s\n' "$(read_value "$MIX_STAGE_STATE" latinOffset)"
+    } >"$_pmt_tmp" 2>/dev/null && mv -f "$_pmt_tmp" "$REALMOD/config/mix_tune.conf" 2>/dev/null || {
+        rm -f "$_pmt_tmp" 2>/dev/null || true; return 0;
+    }
+    chmod 0644 "$REALMOD/config/mix_tune.conf" 2>/dev/null || true
+    return 0
+}
+
 commit_mix_stage_if_needed() {
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
@@ -619,6 +645,7 @@ commit_mix_stage_if_needed() {
         if [ "$_next_font" = mix ]; then
             if [ ! -s "$MIX_STAGE_STATE" ] || { [ -n "$_stage_request" ] && [ "$_next_request" = "$_stage_request" ]; }; then
                 mark_mix_request_committed || return 1
+                persist_mix_tune
                 rm -rf "$MIX_STAGE" 2>/dev/null || true
                 rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
                 return 0
@@ -658,6 +685,7 @@ commit_mix_stage_if_needed() {
         return 1
     fi
     mark_mix_request_committed || return 1
+    persist_mix_tune
     luoshu_mix_phase_end 0
     rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
     printf '[%s] legacy composite staged for next boot: mix\n' \
@@ -928,7 +956,7 @@ case "$_cmd" in
             printf '{"status":"error","message":"上一字体组合任务清理尚未确认：%s请保留此任务卡"}\n' \
                 "$(json_escape_router "$_start_detail")"; exit 1 ;;
         esac
-        prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
+        prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-0}" "${9:-0}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'
             exit 1
         }
@@ -954,6 +982,8 @@ export LUOSHU_MIX_MANIFEST="$MIX_MANIFEST"
 export LUOSHU_MIX_EXPECTED_CJK="$(read_value "$MIX_STAGE_STATE" cjk)"
 export LUOSHU_MIX_EXPECTED_LATIN="$(read_value "$MIX_STAGE_STATE" latin)"
 export LUOSHU_MIX_EXPECTED_DIGIT="$(read_value "$MIX_STAGE_STATE" digit)"
+export LUOSHU_MIX_LATIN_SIZE="$(read_value "$MIX_STAGE_STATE" latinSize)"
+export LUOSHU_MIX_LATIN_OFFSET="$(read_value "$MIX_STAGE_STATE" latinOffset)"
 export MODDIR="$RUNTIME"
 export MODULE_DIR="$RUNTIME"
 

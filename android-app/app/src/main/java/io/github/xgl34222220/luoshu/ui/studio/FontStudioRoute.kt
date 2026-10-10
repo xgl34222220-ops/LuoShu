@@ -50,6 +50,7 @@ internal fun FontStudioRoute(
             inspectCoverage = { latestActions.inspectCoverage(it) },
             startMix = { latestActions.startMix() },
             applyDirect = { latestActions.applyDirect(it) },
+            updateTune = { size, offset -> latestActions.updateTune(size, offset) },
         )
     }
 

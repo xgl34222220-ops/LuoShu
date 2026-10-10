@@ -140,7 +140,14 @@ internal data class MixState(
     val message: String = "请选择中文、英文和数字字体",
     val progress: Int = 0,
     val error: String = "",
+    /** 英数大小：在自动对齐基础上的百分比，0 = 不调整。 */
+    val latinSize: Int = 0,
+    /** 英数上下位置：字身百分比，正值上移，0 = 不调整。 */
+    val latinOffset: Int = 0,
 )
+
+internal const val MIX_LATIN_SIZE_LIMIT = 15
+internal const val MIX_LATIN_OFFSET_LIMIT = 10
 
 private data class FontFingerprint(
     val value: String,
@@ -484,6 +491,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     cjkAxes = parseAxes(data.optString("cjkAxes"), cjkWeight),
                     latinAxes = parseAxes(data.optString("latinAxes"), latinWeight),
                     digitAxes = parseAxes(data.optString("digitAxes"), digitWeight),
+                    latinSize = data.optInt("latinSize", 0).coerceIn(-MIX_LATIN_SIZE_LIMIT, MIX_LATIN_SIZE_LIMIT),
+                    latinOffset = data.optInt("latinOffset", 0).coerceIn(-MIX_LATIN_OFFSET_LIMIT, MIX_LATIN_OFFSET_LIMIT),
                     message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
                     error = "",
                 )
@@ -547,6 +556,15 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         mixState = updated
     }
 
+    fun updateMixTune(size: Int, offset: Int) {
+        val updated = mixState.copy(
+            latinSize = size.coerceIn(-MIX_LATIN_SIZE_LIMIT, MIX_LATIN_SIZE_LIMIT),
+            latinOffset = offset.coerceIn(-MIX_LATIN_OFFSET_LIMIT, MIX_LATIN_OFFSET_LIMIT),
+        )
+        if (updated != mixState) mixConfigLoadGuard.edited()
+        mixState = updated
+    }
+
     fun startMix() {
         if (mixState.busy || operationBusy) return
         if (!moduleReadyForFontOperation()) {
@@ -567,6 +585,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         val cjkAxes = serializeAxes(mixState.cjkAxes, mixState.cjkWeight)
         val latinAxes = serializeAxes(mixState.latinAxes, mixState.latinWeight)
         val digitAxes = serializeAxes(mixState.digitAxes, mixState.digitWeight)
+        val latinSize = mixState.latinSize
+        val latinOffset = mixState.latinOffset
         mixState = mixState.copy(
             busy = true,
             taskState = "queued",
@@ -584,7 +604,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     append(RootShell.quote(digit)).append(' ')
                     append(RootShell.quote(cjkAxes)).append(' ')
                     append(RootShell.quote(latinAxes)).append(' ')
-                    append(RootShell.quote(digitAxes))
+                    append(RootShell.quote(digitAxes)).append(' ')
+                    append(RootShell.quote(latinSize.toString())).append(' ')
+                    append(RootShell.quote(latinOffset.toString()))
                 }
                 val start = RootShell.exec(command, timeoutMs = 20_000L)
                 start.requireCleaned()

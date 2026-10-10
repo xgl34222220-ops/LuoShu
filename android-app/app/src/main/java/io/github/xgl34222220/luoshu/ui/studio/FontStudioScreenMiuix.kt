@@ -41,8 +41,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +56,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
+import io.github.xgl34222220.luoshu.MIX_LATIN_OFFSET_LIMIT
+import io.github.xgl34222220.luoshu.MIX_LATIN_SIZE_LIMIT
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
@@ -101,6 +105,7 @@ internal fun FontStudioScreenMiuix(
             }
         }
 
+        item { MiuixLatinTuneCard(state, state.busy || state.operationBusy, actions) }
         item { MiuixFinalAction(state, actions) }
         item { LuoShuSectionHeading("字形覆盖", "需要时查看所选中文字体包含哪些字符") }
         item { MiuixCoverageGroup(state, actions) }
@@ -354,6 +359,82 @@ private fun MiuixSlotCard(
 }
 
 @Composable
+private fun MiuixLatinTuneCard(state: FontStudioUiState, busy: Boolean, actions: FontStudioActions) {
+    val tokens = LocalMiuixTokens.current
+    val shape = LuoShuSmoothShape(24.dp)
+    Card(
+        modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = tokens.cardShadowElevation),
+        border = BorderStroke(1.dp, tokens.glassOutlineBrush),
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("英数微调", color = tokens.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text("在自动对齐的基础上，手动修正英文和数字", color = tokens.textSecondary, fontSize = 12.sp)
+                }
+                TextButton(
+                    onClick = { actions.updateTune(0, 0) },
+                    enabled = !busy && (state.latinSize != 0 || state.latinOffset != 0),
+                ) { Text("恢复默认") }
+            }
+            Spacer(Modifier.height(8.dp))
+            MiuixTuneSlider(
+                label = "英数大小",
+                value = state.latinSize,
+                limit = MIX_LATIN_SIZE_LIMIT,
+                hint = "负值缩小，正值放大",
+                enabled = !busy,
+            ) { actions.updateTune(it, state.latinOffset) }
+            Spacer(Modifier.height(6.dp))
+            MiuixTuneSlider(
+                label = "英数上下位置",
+                value = state.latinOffset,
+                limit = MIX_LATIN_OFFSET_LIMIT,
+                hint = "负值下移，正值上移",
+                enabled = !busy,
+            ) { actions.updateTune(state.latinSize, it) }
+        }
+    }
+}
+
+@Composable
+private fun MiuixTuneSlider(
+    label: String,
+    value: Int,
+    limit: Int,
+    hint: String,
+    enabled: Boolean,
+    onValue: (Int) -> Unit,
+) {
+    val tokens = LocalMiuixTokens.current
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = tokens.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f))
+            MiuixStudioPill(if (value > 0) "+$value%" else "$value%", MaterialTheme.colorScheme.primary)
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { raw -> raw.roundToInt().coerceIn(-limit, limit).let { if (it != value) onValue(it) } },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
+            valueRange = -limit.toFloat()..limit.toFloat(),
+            steps = limit * 2 - 1,
+        )
+        Row(Modifier.fillMaxWidth()) {
+            Text("-$limit%", color = tokens.textSecondary, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text(hint, color = tokens.textSecondary, fontSize = 12.sp)
+            Spacer(Modifier.weight(1f))
+            Text("+$limit%", color = tokens.textSecondary, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
 private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActions) {
     val tokens = LocalMiuixTokens.current
     val cjk = state.slots.firstOrNull { it.slot == MixSlot.Cjk }
@@ -465,7 +546,7 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
                     )
                     Text(
                         if (direct != null) "三个部分使用同一款字体，可直接应用。"
-                        else "按上面的字体和字重生成组合，然后应用到系统。",
+                        else "按上面的字体、字重和英数微调生成组合，然后应用到系统。",
                         color = tokens.textSecondary,
                         fontSize = 12.sp,
                     )
