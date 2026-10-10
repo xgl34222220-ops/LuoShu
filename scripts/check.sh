@@ -32,6 +32,7 @@ python3 -m py_compile \
   "$ROOT/common/font_inventory.py"
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py" "$ROOT/common/font_live_payload.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
+python3 "$ROOT/scripts/stable111_rework_gate_test.py"
 python3 "$ROOT/scripts/apk_packaging_metadata_test.py"
 python3 "$ROOT/scripts/android_launch_source_test.py"
 sh "$ROOT/scripts/font_next_transaction_test.sh"
