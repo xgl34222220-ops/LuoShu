@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+ splash icon: the same 108dp adaptive foreground artwork, drawn from a
-     1024px nodpi source so the 240dp splash canvas never upscales a density bitmap.
-     Glyph and seal sit inside the platform's 2/3 (160dp) icon circle. -->
+<!-- Splash emblem: the original launcher icon art (glass Lo Shu tile, gold ribbons) on a
+     deep navy field, drawn from one 960px nodpi source with a feathered circular alpha,
+     so Android 12+'s icon circle mask has no visible edge. It fills the 240dp icon box. -->
 <bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/ic_luoshu_splash_foreground"
+    android:src="@drawable/ic_luoshu_splash_art"
     android:gravity="fill"
     android:filter="true"
-    android:mipMap="true"
     android:antialias="true" />

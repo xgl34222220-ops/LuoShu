@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- minSdk 28: this adaptive icon covers every supported launcher (icon and roundIcon). -->
-<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@drawable/ic_luoshu_background" />
-    <foreground android:drawable="@mipmap/ic_luoshu_foreground" />
-    <monochrome android:drawable="@mipmap/ic_luoshu_monochrome" />
-</adaptive-icon>

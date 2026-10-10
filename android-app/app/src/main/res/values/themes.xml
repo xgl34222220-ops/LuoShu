@@ -1,17 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Launcher icon paper and guide tone (same in both themes; the icon is a cream tile). -->
-    <color name="luoshu_icon_paper">#F6EFDD</color>
-    <color name="luoshu_icon_guide">#C9A98A</color>
-    <!-- The platform splash accepts one opaque color. Light uses the icon's cream paper. -->
-    <color name="launch_background">#F6EFDD</color>
-    <!-- Cream circle behind the splash glyph, so dark mode still shows the paper tile. -->
-    <color name="launch_icon_background">#F6EFDD</color>
+    <!-- After-launch App backdrop: the diffuse glass gradient's centre color. -->
+    <color name="launch_background">#D7DAEE</color>
     <color name="launch_gradient_start">#CDDDF4</color>
     <color name="launch_gradient_center">#E2DDF3</color>
     <color name="launch_gradient_end">#D1E8ED</color>
     <color name="launch_ink">#435B80</color>
     <bool name="launch_light_system_bars">true</bool>
+    <!-- Splash only: the original icon's deep navy, identical in light and dark mode. -->
+    <color name="launch_splash_background">#09213E</color>
+    <color name="launch_splash_gradient_top">#0E2E54</color>
+    <color name="launch_splash_gradient_bottom">#021022</color>
 
     <style name="Theme.LuoShuHybrid" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowNoTitle">true</item>
@@ -25,9 +24,11 @@
         <item name="android:fontFamily">sans</item>
     </style>
 
-    <!-- API 28–30 starting window mirrors the Android 12+ splash: launch color plus the
-         centered 书 emblem. The Activity swaps in its real backdrop before content. -->
+    <!-- API 28–30 starting window mirrors the Android 12+ splash: deep navy gradient plus
+         the centered original icon art. MainActivity switches to Theme.LuoShuHybrid. -->
     <style name="Theme.LuoShuLaunch" parent="Theme.LuoShuHybrid">
         <item name="android:windowBackground">@drawable/luoshu_launch_splash</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>
