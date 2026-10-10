@@ -32,7 +32,7 @@ def fixture(path, bottom=0, height=700, accent=800, cff=False, upem=1000, empty_
     for name in order:
         lo, hi = bottom, bottom + height
         if name in [cmap[ord(c)] for c in '中永国']:
-            lo, hi = -80, 880
+            lo, hi = -80, 715  # caps = 0.88 of the ideograph box, like MiSans/Noto
         elif name == cmap[ord('À')]:
             lo, hi = bottom, accent
         pen = T2CharStringPen(620, None) if cff else TTGlyphPen(None)
