@@ -54,3 +54,27 @@ write_composite_receipt() (
         printf 'engineIdentity=%s\nvalidatorIdentity=%s\n' "$4" "$5"
     } >"$_wcr_tmp" && chmod 0644 "$_wcr_tmp" && mv -f "$_wcr_tmp" "$_wcr_target"
 )
+
+# App fine-tuning for imported Latin/digits (英数大小 / 英数上下位置), whole
+# percent, carried by the mix request environment. 0/0 keeps the automatic
+# layout and the historical cache key; any other value is part of the key.
+composite_tune_clamp() {
+    _ctc_value="$1"; _ctc_digits="${1#-}"
+    case "$_ctc_digits" in ''|*[!0-9]*) printf '0\n'; return 0 ;; esac
+    _ctc_digits=${_ctc_digits#"${_ctc_digits%%[!0]*}"}
+    [ -n "$_ctc_digits" ] || _ctc_digits=0
+    [ "${#_ctc_digits}" -le 3 ] || _ctc_digits=999
+    [ "$_ctc_digits" -le "$2" ] || _ctc_digits="$2"
+    case "$_ctc_value" in -*) [ "$_ctc_digits" = 0 ] || _ctc_digits="-$_ctc_digits" ;; esac
+    printf '%s\n' "$_ctc_digits"
+}
+
+composite_tune_load() {
+    COMPOSITE_TUNE_SIZE=$(composite_tune_clamp "${LUOSHU_MIX_LATIN_SIZE:-0}" 15)
+    COMPOSITE_TUNE_OFFSET=$(composite_tune_clamp "${LUOSHU_MIX_LATIN_OFFSET:-0}" 10)
+}
+
+composite_tune_key_suffix() {
+    [ "${COMPOSITE_TUNE_SIZE:-0}" = 0 ] && [ "${COMPOSITE_TUNE_OFFSET:-0}" = 0 ] && return 0
+    printf -- '-latin-tune-size=%s-offset=%s' "$COMPOSITE_TUNE_SIZE" "$COMPOSITE_TUNE_OFFSET"
+}

@@ -119,6 +119,7 @@ internal fun selectedAxes(state: MixState, slot: MixSlot): Map<String, Float> = 
 internal fun directApplyFontId(state: MixState): String? {
     val ids = listOf(state.cjk, state.latin, state.digit)
     if (ids.any { it.isBlank() } || ids.distinct().size != 1) return null
+    if (state.latinSize != 0 || state.latinOffset != 0) return null
     if (listOf(state.cjkWeight, state.latinWeight, state.digitWeight).any { it != 400 }) return null
     val standard = listOf(state.cjkAxes, state.latinAxes, state.digitAxes).all { axes ->
         axes.all { (tag, value) -> tag == "wght" && abs(value - 400f) < .5f }

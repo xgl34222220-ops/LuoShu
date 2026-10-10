@@ -398,7 +398,7 @@ case "${1:-status}" in
     font-switch-cancel|switch_cancel) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" cancel "${2:-}"; exit $? ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
     mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
-    mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
+    mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-0}" "${9:-0}" ;;
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
     font-mix-cancel|mix_cancel) mix_ready || exit 1; sh "$MIX_ENGINE" cancel "${2:-}"; exit $? ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;

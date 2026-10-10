@@ -441,6 +441,7 @@ _mix_build_composite_file() {
     [ -n "$_fc_validator_identity" ] && type font_validate >/dev/null 2>&1 || { set_mix_error '复合字体验证器缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
+    composite_tune_load
     _fc_cache="$LUOSHU_CACHE_DIR/full-composite-v7"
     mkdir -p "$_fc_cache" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
     COMPOSITE_CJK_HASH=$(hash_file "$_fc_cjk_src")
@@ -449,8 +450,9 @@ _mix_build_composite_file() {
     [ -n "$COMPOSITE_CJK_HASH" ] && [ -n "$COMPOSITE_LATIN_HASH" ] && [ -n "$COMPOSITE_DIGIT_HASH" ] || {
         set_mix_error '无法读取复合字体源文件身份'; return 1;
     }
-    _fc_key=$(printf '%s\000%s\000%s\000%s\000full-composite-v8-content-identity' \
-        "$COMPOSITE_CJK_HASH" "$COMPOSITE_LATIN_HASH" "$COMPOSITE_DIGIT_HASH" "$_fc_engine_identity" | hash_text)
+    _fc_key=$(printf '%s\000%s\000%s\000%s\000full-composite-v8-content-identity%s' \
+        "$COMPOSITE_CJK_HASH" "$COMPOSITE_LATIN_HASH" "$COMPOSITE_DIGIT_HASH" "$_fc_engine_identity" \
+        "$(composite_tune_key_suffix)" | hash_text)
     [ -n "$_fc_key" ] || { set_mix_error '无法计算复合字体缓存身份'; return 1; }
     _fc_cached="$_fc_cache/${_fc_key}.otf"; _fc_report="$_fc_cache/${_fc_key}.json"
     _fc_receipt="${_fc_cached}.receipt"; _fc_schema=fixed-composite-receipt-v1
@@ -482,7 +484,7 @@ _mix_build_composite_file() {
     _fc_progress="$CONFIG_DIR/composite_progress.json"
     luoshu_mix_phase_begin composite cold_composite_runner fixed cold
     if [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_LATIN_HASH" ] && [ "$COMPOSITE_CJK_HASH" = "$COMPOSITE_DIGIT_HASH" ] &&
-       [ "$(font_detect_format "$_fc_cjk_src")" != TTC ]; then
+       [ -z "$(composite_tune_key_suffix)" ] && [ "$(font_detect_format "$_fc_cjk_src")" != TTC ]; then
         # Selecting one complete font for all three roles needs no glyph rewrite.
         # Reuse a validated single face instead of rewriting the CJK font. A TTC
         # still needs the real generator's role-aware face selection; copying a
@@ -505,13 +507,13 @@ _mix_build_composite_file() {
     else
         rm -f "$_fc_progress" 2>/dev/null || true
         if command -v timeout >/dev/null 2>&1; then
-            MODDIR="$MODDIR" timeout 480 sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
+            MODDIR="$MODDIR" timeout 480 sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" --latin-size "$COMPOSITE_TUNE_SIZE" --latin-offset "$COMPOSITE_TUNE_OFFSET" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
             _run_rc=$?
         elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-            MODDIR="$MODDIR" toybox timeout 480 sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
+            MODDIR="$MODDIR" toybox timeout 480 sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" --latin-size "$COMPOSITE_TUNE_SIZE" --latin-offset "$COMPOSITE_TUNE_OFFSET" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
             _run_rc=$?
         else
-            MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
+            MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_fc_cjk_src" --latin "$_fc_latin_src" --digit "$_fc_digit_src" --output "$_fc_tmp" --progress "$_fc_progress" --latin-size "$COMPOSITE_TUNE_SIZE" --latin-offset "$COMPOSITE_TUNE_OFFSET" > "$_fc_tmp_report" 2> "$_fc_tmp_error"
             _run_rc=$?
         fi
         luoshu_mix_phase_end "$_run_rc"

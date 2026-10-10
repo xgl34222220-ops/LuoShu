@@ -28,7 +28,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 
 from composite_layout import (_role_transform, clear_imported_metric_variations,
-                              enclose_imported_bounds, validate_required_ink)
+                              enclose_imported_bounds, manual_tune, validate_required_ink)
 
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
@@ -208,7 +208,7 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
     enclose_imported_bounds(base, char_string.calcBounds(top.CharStrings))
 
 
-def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None, transform: tuple[float, float] | None = None) -> tuple[int, list[int], tuple[float, float]]:
+def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None, transform: tuple[float, float] | None = None, tune: tuple[int, int] = (0, 0)) -> tuple[int, list[int], tuple[float, float]]:
     required = required or set()
     base_cmap = base.getBestCmap() or {}
     src_cmap = src.getBestCmap() or {}
@@ -216,7 +216,7 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], ro
     base_kind = _outline_kind(base)
     # One font chosen for both letters and digits keeps one transform, so its own
     # digit/letter proportions and shared baseline survive the import.
-    scale, y_shift = transform or _role_transform(base, src, src_glyph_set, role)
+    scale, y_shift = transform or _role_transform(base, src, src_glyph_set, role, tune)
     replaced = 0
     missing: list[int] = []
     already: set[str] = set()
@@ -295,6 +295,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             raise CompositeError(f"{label}字体文件不可用：{path}")
     _progress(args.progress, "load-cjk", "正在读取中文基底", 5)
     base, cjk_face, _cjk_location = _load_font(cjk_path, "cjk", args.weight, args.cjk_face)
+    tune = manual_tune(getattr(args, "latin_size", 0), getattr(args, "latin_offset", 0))
     latin = digit = None
     latin_face = digit_face = -1
     try:
@@ -302,13 +303,13 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
         _progress(args.progress, "latin", "正在导入英文字形", 20)
         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
-        latin_replaced, latin_missing, latin_transform = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)
+        latin_replaced, latin_missing, latin_transform = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN, tune=tune)
         latin.close(); latin = None; gc.collect()
         _progress(args.progress, "digit", "正在导入数字字形", 52)
         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
         shared = latin_transform if (digit_face == latin_face and digit_path.stat().st_size == latin_path.stat().st_size
                                          and _sha256(digit_path) == _sha256(latin_path)) else None
-        digit_replaced, digit_missing, _digit_transform = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS, shared)
+        digit_replaced, digit_missing, _digit_transform = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS, shared, tune)
         digit.close(); digit = None; gc.collect()
         if latin_replaced < 52:
             raise CompositeError(f"英文替换数量异常（仅 {latin_replaced} 个）")
@@ -331,7 +332,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             _progress(args.progress, "done", "完整复合字体已生成", 100)
         finally:
             temp_path.unlink(missing_ok=True)
-        return {
+        result = {
             "status": "ok",
             "output": str(output),
             "sha256": _sha256(output),
@@ -341,6 +342,9 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "missingCounts": {"latin": len(latin_missing), "digit": len(digit_missing)},
             "validation": validation,
         }
+        if any(tune):
+            result["manualTune"] = {"latinSizePercent": tune[0], "latinOffsetPercent": tune[1]}
+        return result
     finally:
         base.close()
         if latin is not None: latin.close()
@@ -358,6 +362,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--latin-face", type=int)
     parser.add_argument("--digit-face", type=int)
     parser.add_argument("--progress")
+    # App fine-tuning (英数大小 / 英数上下位置), whole percent; 0 keeps the automatic layout.
+    parser.add_argument("--latin-size", type=int, default=0)
+    parser.add_argument("--latin-offset", type=int, default=0)
     return parser.parse_args()
 
 

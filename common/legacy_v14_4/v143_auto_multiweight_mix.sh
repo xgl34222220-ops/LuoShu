@@ -390,8 +390,10 @@ _mix_build_composite_cached() {
     _digit_digest=$(hash_file "$_digit")
     [ -n "$_engine_identity" ] && [ -n "$_validator_identity" ] &&
         [ -n "$_cjk_digest" ] && [ -n "$_latin_digest" ] && [ -n "$_digit_digest" ] || return 1
-    _key=$(printf '%s\000%s\000%s\000%s\000auto-multiweight-v4-content-identity' \
-        "$_cjk_digest" "$_latin_digest" "$_digit_digest" "$_engine_identity" | hash_text)
+    composite_tune_load
+    _key=$(printf '%s\000%s\000%s\000%s\000auto-multiweight-v4-content-identity%s' \
+        "$_cjk_digest" "$_latin_digest" "$_digit_digest" "$_engine_identity" \
+        "$(composite_tune_key_suffix)" | hash_text)
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"
     _receipt="${_cached}.receipt"
@@ -451,7 +453,8 @@ _mix_build_composite_cached() {
     [ -n "$_build_tmp" ] || _composite_tmp_init || return 1
     luoshu_mix_phase_begin composite cold_composite_runner "${LUOSHU_MIX_PHASE_UNIT:-fixed}" cold
     MODDIR="$MODDIR" sh "$COMPOSITE_RUNNER" --cjk "$_cjk" --latin "$_latin" --digit "$_digit" \
-        --output "$_tmp" --progress "$_progress" >"$_tmp_report" 2>"$_tmp_error"
+        --output "$_tmp" --progress "$_progress" \
+        --latin-size "$COMPOSITE_TUNE_SIZE" --latin-offset "$COMPOSITE_TUNE_OFFSET" >"$_tmp_report" 2>"$_tmp_error"
     _code=$?
     luoshu_mix_phase_end "$_code"
     [ "$_code" -eq 0 ] && [ -s "$_tmp" ] || {

@@ -243,6 +243,7 @@ internal fun LuoShuAppShell(
             inspectCoverage = features::inspectCoverage,
             startMix = viewModel::startMix,
             applyDirect = viewModel::applyFont,
+            updateTune = viewModel::updateMixTune,
         )
     }
     val logsActions = remember(viewModel) { LogsActions(refresh = viewModel::refreshLogs) }
