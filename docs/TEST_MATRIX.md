@@ -112,3 +112,7 @@
 ## 2.2.2 的单次发布例外
 
 维护者于 2026-10-06T13:36:26Z 明确确认将当前测试线以 2.2.2 合入 main、发布新包并更新 OTA，同时在发布说明保留手机组合与全覆盖仍未验完的限制。既有 `config/stable_release_authorization.conf` 仅为 v2.2.2 设置 `allowPendingDeviceMatrix=true`，不改变上方实际测试状态，也不免除源码、签名和最终成品门禁。下一版本须重新完成真机矩阵或取得独立授权。
+
+## 3.0.0 的单次发布例外
+
+维护者于 Sun 2026-10-11 1:26 AM CST (UTC+08:00) 明确授权合并组合字体对齐、英数微调、实例缓存与日志修复，并以 3.0.0 正式发布（非预发行）。`config/stable_release_authorization.conf` 仅为 v3.0.0 设置 `allowPendingDeviceMatrix=true`，不改变上方实际测试状态，也不免除源码、签名和最终成品门禁。下一版本须重新完成真机矩阵或取得独立授权。
