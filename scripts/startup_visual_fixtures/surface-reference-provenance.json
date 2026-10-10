@@ -3,14 +3,14 @@
   "commit": "6af650c388d966f3bb242f4c7241c9012bdd79bb",
   "artifact": "LuoShu-Startup-Visual-API-36",
   "artifact_id": 11507365772,
-  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes.",
+  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes. Logo-transition entries carry their own workflow_run/commit/artifact (2026-10 icon redesign); other entries use the top-level run.",
   "references": [
     {
-      "file": "native-dark-enter-008.png",
+      "file": "native-dark-enter-012.png",
       "source": "dark-cold-start.mp4",
-      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
-      "frame": 8,
-      "time_seconds": 0.685956,
+      "source_sha256": "988e43be597a0b93d055d8eb0bbc47cfd94f2f8a5b7d22480270305524f5c693",
+      "frame": 12,
+      "time_seconds": 1.440889,
       "crop_pixels": [
         0,
         0,
@@ -18,16 +18,20 @@
         1560
       ],
       "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
-      "file_sha256": "3c076d67f80ccdb512066f432c7906d7146f6f0325cec33d3d013bf60be87369",
+      "file_sha256": "baa389b4bd3f49be0ef9ae4f154b5db36965af88439e0a174b7f109d867f10f6",
       "theme": "dark",
-      "expected_state": "logo-transition"
+      "expected_state": "logo-transition",
+      "workflow_run": 38084442845,
+      "commit": "71f15869a18f5a6e0a3553c0c187ab1b8bccb188",
+      "artifact": "LuoShu-Startup-Visual-API-36-dark",
+      "artifact_id": 11682715482
     },
     {
-      "file": "native-dark-enter-009.png",
+      "file": "native-dark-enter-013.png",
       "source": "dark-cold-start.mp4",
-      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
-      "frame": 9,
-      "time_seconds": 0.752944,
+      "source_sha256": "988e43be597a0b93d055d8eb0bbc47cfd94f2f8a5b7d22480270305524f5c693",
+      "frame": 13,
+      "time_seconds": 1.495911,
       "crop_pixels": [
         0,
         0,
@@ -35,16 +39,20 @@
         1560
       ],
       "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
-      "file_sha256": "cdcbb1492937dba2234713e5cfa6a8fe7b7330e6da61fd18fdc1369fefade601",
+      "file_sha256": "7d39478285c204b4977893c3be1fa1746fc656677f5cbd8fd3498f42be3f60a4",
       "theme": "dark",
-      "expected_state": "logo-transition"
+      "expected_state": "logo-transition",
+      "workflow_run": 38084442845,
+      "commit": "71f15869a18f5a6e0a3553c0c187ab1b8bccb188",
+      "artifact": "LuoShu-Startup-Visual-API-36-dark",
+      "artifact_id": 11682715482
     },
     {
-      "file": "native-light-enter-000.png",
+      "file": "native-light-enter-013.png",
       "source": "light-cold-start.mp4",
-      "source_sha256": "cc40d8490a83e0a9ac276c0a30dfe013677d18af0b7eb8a74eaf6330e730728e",
-      "frame": 0,
-      "time_seconds": 0.0,
+      "source_sha256": "c0ee721f2efb89e555c61a5dffd843e006d73c85de73eb7a0f11cddf614196bb",
+      "frame": 13,
+      "time_seconds": 1.5594,
       "crop_pixels": [
         0,
         0,
@@ -52,9 +60,13 @@
         1560
       ],
       "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
-      "file_sha256": "6c67e3403b53f947de2ce12bfd8300230bb6de85311c229c46ee7538f580af59",
+      "file_sha256": "5e5be457a86b2d65b2feb29d4c6f261b1ef2cefd2d9cfac587e9e5b6e93fe961",
       "theme": "light",
-      "expected_state": "logo-transition"
+      "expected_state": "logo-transition",
+      "workflow_run": 38084442845,
+      "commit": "71f15869a18f5a6e0a3553c0c187ab1b8bccb188",
+      "artifact": "LuoShu-Startup-Visual-API-36-light",
+      "artifact_id": 11682500788
     },
     {
       "file": "home-light-resume-001.png",
