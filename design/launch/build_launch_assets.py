@@ -43,7 +43,7 @@ THEMES = {
         ],
         "splash": None,  # computed from backdrop centre
         "shadow": ((84, 88, 178), 0.58),
-        "fill_top": 0.52, "fill_bottom": 0.22,
+        "fill_top": 0.46, "fill_bottom": 0.20,
         "rim": (1.0, 0.28),
         "highlight": 0.55,
         "tile_shadow": ((22, 36, 92), 0.50),

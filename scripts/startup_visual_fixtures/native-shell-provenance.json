@@ -25,37 +25,51 @@
       "theme": "light",
       "kind": "shell",
       "fixture": "native-shell-light.png",
-      "sha256": "c0bf66f891faa1a2221c9985991fd1fb0a52db8b1fd337c2c21b840b8e2a6805",
-      "origin": "design-render",
-      "derivation": "design/launch/build_launch_assets.py --preview render (720x1560 @1.75 px/dp, LANCZOS to 360x780); bootstrap reference until the first real emulator recording of this launch shell",
-      "scope": "Launch shell / platform splash recognition reference, not home"
+      "sha256": "4470fc5793f50c58b58c3974980138b9ae147dfd11158cfeaa322396b2b5e1f5",
+      "origin": "emulator",
+      "video": "light-cold-start.mp4",
+      "videoSha256": "17e9c38e745198c7e71adf083b00f2da88a8c6bf7a08a22d88d10ec7f49b92c7",
+      "frameIndex": 28,
+      "ptsSeconds": 5.454689,
+      "artifactId": 11685160811,
+      "runId": 38092197157,
+      "commit": "40209dc",
+      "derivation": "Original video frame decoded with ffmpeg scale=360:780, original timestamps and RGB24, same normalization as classifier; no drawn or removed content",
+      "scope": "Diffuse glass launch shell (wordmark + subtitle), not home"
     },
     {
       "theme": "light",
       "kind": "splash",
       "fixture": "native-splash-light.png",
-      "sha256": "49457d8b30202f9597ec42e8e8a370d236998ca0cba98c645a8e4fd6075bf83f",
+      "sha256": "deebe2753524d2317477ffd2680b5c59566b34ce1781c69e1de36b07df153a9b",
       "origin": "design-render",
-      "derivation": "design/launch/build_launch_assets.py --preview render (720x1560 @1.75 px/dp, LANCZOS to 360x780); bootstrap reference until the first real emulator recording of this launch shell",
-      "scope": "Launch shell / platform splash recognition reference, not home"
+      "derivation": "build_launch_assets.py luoshu_splash_orb.webp at 288dp (504px @1.75 px/dp) on launch_background #D4D5F3, centred (360,786) in 720x1560 with the platform 192dp circle, uniform offset (-4,-2,-4) measured from run 38092197157 splash background; LANCZOS to 360x780. Bootstrap until a real recording of the corrected (gravity fill) icon exists",
+      "scope": "Android 12+ platform splash recognition reference (dissolve fits), not home"
     },
     {
       "theme": "dark",
       "kind": "shell",
       "fixture": "native-shell-dark.png",
-      "sha256": "9ff936efeee6c435d4cc0ea4c2d5daf8e8146139e409704952c5125788bc9cef",
-      "origin": "design-render",
-      "derivation": "design/launch/build_launch_assets.py --preview render (720x1560 @1.75 px/dp, LANCZOS to 360x780); bootstrap reference until the first real emulator recording of this launch shell",
-      "scope": "Launch shell / platform splash recognition reference, not home"
+      "sha256": "b925f6c9d92f744424cafa581438be104e1f363014fce5a09fd7d5692f0281ce",
+      "origin": "emulator",
+      "video": "dark-cold-start.mp4",
+      "videoSha256": "e43bc63917f1828c7ec6724f0a10031eb2c502df1e78f43434f3f846a80774e1",
+      "frameIndex": 28,
+      "ptsSeconds": 4.869844,
+      "artifactId": 11684468748,
+      "runId": 38092197157,
+      "commit": "40209dc",
+      "derivation": "Original video frame decoded with ffmpeg scale=360:780, original timestamps and RGB24, same normalization as classifier; no drawn or removed content",
+      "scope": "Diffuse glass launch shell (wordmark + subtitle), not home"
     },
     {
       "theme": "dark",
       "kind": "splash",
       "fixture": "native-splash-dark.png",
-      "sha256": "0e54ae453ed808469130655d1093c8583b8c214278981b5e80cb838537cb1723",
+      "sha256": "a76c9d3f4fc5336b2ed22a2dd7b08a13ee8e6beb357ba503a607b38cf5accd09",
       "origin": "design-render",
-      "derivation": "design/launch/build_launch_assets.py --preview render (720x1560 @1.75 px/dp, LANCZOS to 360x780); bootstrap reference until the first real emulator recording of this launch shell",
-      "scope": "Launch shell / platform splash recognition reference, not home"
+      "derivation": "build_launch_assets.py luoshu_splash_orb.webp at 288dp (504px @1.75 px/dp) on launch_background #292C61, centred (360,786) in 720x1560 with the platform 192dp circle, uniform offset (-4,-2,-4) measured from run 38092197157 splash background; LANCZOS to 360x780. Bootstrap until a real recording of the corrected (gravity fill) icon exists",
+      "scope": "Android 12+ platform splash recognition reference (dissolve fits), not home"
     }
   ]
 }

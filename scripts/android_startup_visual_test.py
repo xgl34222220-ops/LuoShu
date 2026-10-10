@@ -295,6 +295,25 @@ class RealSurfaceReferenceTest(unittest.TestCase):
                 self.assertIn("Warm same-process", " ".join(warm["errors"]))
                 self.assertFalse(verdict["native_logo_seen"])
 
+    def test_real_launch_shell_and_dissolve_frames_are_recognized(self):
+        shell_references = [reference for reference in self.provenance["references"]
+                            if reference["expected_state"] in ("startup-shell", "shell-transition")]
+        self.assertEqual({"light", "dark"}, {reference["theme"] for reference in shell_references})
+        for reference in shell_references:
+            with self.subTest(file=reference["file"]):
+                result = self.classify(reference)
+                self.assertEqual(reference["expected_state"], result["state"])
+                # A launch shell frame must never pass as home or as the platform logo.
+                self.assertNotIn(result["state"], ("home", "native-logo", "logo-transition"))
+                warm = timeline_verdict([{"frame": 0, "seconds": 0, **result},
+                                         {"frame": 1, "seconds": .01, "state": "home"}], warm=True)
+                self.assertFalse(warm["passed"])
+                late = timeline_verdict([{"frame": 0, "seconds": 0, "state": "native-logo"},
+                                         {"frame": 1, "seconds": .01, "state": "home"},
+                                         {"frame": 2, "seconds": .02, **result},
+                                         {"frame": 3, "seconds": .03, "state": "home"}])
+                self.assertIn("returned after visible home", " ".join(late["errors"]))
+
     def test_real_frozen_fixture_hashes_and_original_frame_provenance(self):
         for reference in self.provenance["references"] + self.provenance["home_references"]:
             with self.subTest(file=reference["file"]):

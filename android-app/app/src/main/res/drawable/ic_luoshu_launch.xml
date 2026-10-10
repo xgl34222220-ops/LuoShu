@@ -1,14 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   Android 12+ splash icon: a static glass orb holding the launch backdrop's diffuse colours
-  and the original icon tile (design/launch/build_launch_assets.py). 288dp canvas; the orb
-  stays inside the platform's 192dp safe circle, its edge feathered into launch_background.
-  The tile matches the launch shell's first-frame tile size and position exactly.
+  and the original icon tile (design/launch/build_launch_assets.py). Like a vector icon it
+  fills the platform's 288dp icon bounds (gravity fill; an explicit item size is scaled
+  again by the platform). The orb stays inside the 192dp safe circle, its edge feathered
+  into launch_background, and the tile matches the launch shell's first-frame tile exactly.
 -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="288dp"
-        android:height="288dp"
-        android:gravity="center"
-        android:drawable="@drawable/luoshu_splash_orb" />
-</layer-list>
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/luoshu_splash_orb"
+    android:gravity="fill"
+    android:filter="true" />

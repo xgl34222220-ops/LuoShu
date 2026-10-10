@@ -280,13 +280,13 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
 
     def test_splash_icon_is_one_static_orb_on_the_platform_icon_canvas(self):
         icon = ET.parse(MAIN / "res/drawable/ic_luoshu_launch.xml").getroot()
-        self.assertEqual(icon.tag, "layer-list")
-        items = icon.findall("item")
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].get(ANDROID + "drawable"), "@drawable/luoshu_splash_orb")
-        self.assertEqual(items[0].get(ANDROID + "width"), "288dp")
-        self.assertEqual(items[0].get(ANDROID + "height"), "288dp")
-        self.assertIsNone(icon.find(".//animated-vector"))
+        # Fill the platform's icon bounds like a vector; an explicit item size is scaled
+        # again by the platform (seen as a ~1.75x oversized tile in run 38092197157).
+        self.assertEqual(icon.tag, "bitmap")
+        self.assertEqual(icon.get(ANDROID + "src"), "@drawable/luoshu_splash_orb")
+        self.assertEqual(icon.get(ANDROID + "gravity"), "fill")
+        self.assertIsNone(icon.get(ANDROID + "width"))
+        self.assertEqual(list(icon), [])
 
     def test_light_and_dark_launch_colors_resolve_with_legible_wordmark(self):
         def luminance(rgb):

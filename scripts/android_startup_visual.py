@@ -41,10 +41,19 @@ FIELD_CELL_TOLERANCE = 18.0
 FIELD_CELL_FRACTION = .98
 BLEND_MIN = .08
 BLEND_MAX = .92
-BLEND_MEAN_RESIDUAL = 8.0
-BLEND_P98_RESIDUAL = 22.0
-BLEND_IMPROVEMENT = .6
+BLEND_MEAN_RESIDUAL = 5.0
+BLEND_P98_RESIDUAL = 16.0
+BLEND_IMPROVEMENT = .45
 BLEND_MIN_ENDPOINT_DIFFERENCE = 10.0
+# Wordmark text crops may sit a few pixels off between the native preparation View, the
+# Compose shell and window animations; search this far around each crop.
+SHELL_TEXT_SEARCH = 3
+# The platform splash never shows the wordmark. While it is even partly visible, the shared
+# icon tile in the glass card is not the native logo.
+WORDMARK_PARTIAL_SCORE = .8
+WORDMARK_PARTIAL_CONTRAST = .2
+# A steady native logo sits on the opaque splash colour (low-res field, card area excluded).
+SPLASH_FIELD_TOLERANCE = 12.0
 SURFACE_SCALES = tuple(index / 200 for index in range(130, 211))
 SURFACE_SHIFT = (20, 80)
 
@@ -221,7 +230,8 @@ class FrameClassifier:
         return {"score": float(scores[y, x]), "scale": scale, "dx": int(x + dx1), "dy": int(y + dy1)}
 
     def shell_match(self, frame: np.ndarray, edge_frame: np.ndarray, frame_field: np.ndarray) -> dict:
-        scores = [match_score(edge_frame[y1:y2, x1:x2], template)
+        pad = SHELL_TEXT_SEARCH
+        scores = [match_score(edge_frame[max(0, y1 - pad):y2 + pad, max(0, x1 - pad):x2 + pad], template)
                   for (x1, y1, x2, y2), template, _ in self.shell_patches]
         # Normalized edge correlation is contrast invariant. Also require
         # visible ink, or almost-erased words could pass as a nonblank shell.
@@ -238,7 +248,9 @@ class FrameClassifier:
         difference = np.abs(frame_field - self.shell_field).max(axis=2)[self.shell_field_mask]
         field_mean = float(difference.mean())
         field_fraction = float(np.mean(difference <= FIELD_CELL_TOLERANCE))
+        wordmark = min(scores) >= WORDMARK_PARTIAL_SCORE and min(contrast_ratios) >= WORDMARK_PARTIAL_CONTRAST
         return {"text_scores": scores, "text_contrast_ratios": contrast_ratios, "text_ink_ratios": ink_ratios,
+                "wordmark_visible": bool(wordmark),
                 "field_mean_difference": round(field_mean, 3), "field_cell_fraction": round(field_fraction, 4),
                 "matched": min(scores) >= SHELL_TEXT_MATCH and min(contrast_ratios) >= .75
                     and min(ink_ratios) >= .75 and field_mean <= FIELD_MEAN_TOLERANCE
@@ -258,6 +270,11 @@ class FrameClassifier:
         frame_field = field(frame)
         shell = self.shell_match(frame, edge_frame, frame_field)
         blend = {"matched": False}
+        # The glass card carries the same icon tile as the splash orb. The platform splash is
+        # an opaque single colour without the wordmark; the launch shell's diffuse field or
+        # its wordmark rule the logo states out.
+        splash_field_mean = float(np.abs(frame_field - self.splash_field).max(axis=2)[self.blend_mask].mean())
+        logo_excluded = shell["wordmark_visible"] or shell["field_mean_difference"] <= FIELD_MEAN_TOLERANCE
         logo_score = match_score(edge_frame[int(height * .32):int(height * .69), int(width * .20):int(width * .80)], self.logo)
         home_match = self.home_transform_match(edge_frame, self.full_home_transform)
         logo_transform = {"score": logo_score, "scale": 1.0}
@@ -272,16 +289,17 @@ class FrameClassifier:
             # Wordmark text only exists in the launch shell; its card holds the same icon
             # tile as the splash orb, so the shell is recognized before logo matching.
             state = "startup-shell"
-        elif logo_score >= LOGO_MATCH:
+        elif logo_score >= LOGO_MATCH and not logo_excluded and splash_field_mean <= SPLASH_FIELD_TOLERANCE:
             state = "native-logo"
         else:
             # Logo search precedes home, including transformed logos returning
             # over already-visible content or on a same-process warm resume.
-            for scale, artwork in self.logo_transforms:
-                match = self.logo_transform_match(edge_frame, scale, artwork)
-                if match["score"] > logo_transform["score"]:
-                    logo_transform = match
-            if logo_transform["score"] >= TRANSITION_MATCH:
+            if not logo_excluded:
+                for scale, artwork in self.logo_transforms:
+                    match = self.logo_transform_match(edge_frame, scale, artwork)
+                    if match["score"] > logo_transform["score"]:
+                        logo_transform = match
+            if logo_transform["score"] >= TRANSITION_MATCH and not logo_excluded:
                 state = "logo-transition"
             elif home_match["score"] >= HOME_MATCH:
                 state = "home"
@@ -295,9 +313,12 @@ class FrameClassifier:
                 elif baseline_score >= .95:
                     state = "prelaunch"
                 else:
+                    # A dissolve/crossfade frame still shows the (partly faded) wordmark;
+                    # blank or flat frames cannot qualify through the colour fit alone.
                     blend = self.blend_match(frame_field)
-                    state = "shell-transition" if blend["matched"] else "unclassified"
-        return {"state": state, "shell_match": shell, "blend_match": blend, "logo_score": round(logo_score, 5),
+                    state = "shell-transition" if blend["matched"] and shell["wordmark_visible"] else "unclassified"
+        return {"state": state, "shell_match": shell, "blend_match": blend,
+                "splash_field_mean_difference": round(splash_field_mean, 3), "logo_excluded": bool(logo_excluded), "logo_score": round(logo_score, 5),
                 "home_scores": {key: round(value, 5) for key, value in home_match["scores"].items()},
                 "home_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in home_match.items() if key != "scores"},
                 "logo_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in logo_transform.items()},
@@ -385,7 +406,10 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
                              "shell_field_cell_pixels": FIELD_CELL, "shell_field_mean_tolerance": FIELD_MEAN_TOLERANCE,
                              "shell_field_cell_tolerance": FIELD_CELL_TOLERANCE, "shell_field_cell_fraction": FIELD_CELL_FRACTION,
                              "blend_weight_range": [BLEND_MIN, BLEND_MAX], "blend_mean_residual": BLEND_MEAN_RESIDUAL,
-                             "blend_p98_residual": BLEND_P98_RESIDUAL, "blend_improvement": BLEND_IMPROVEMENT},
+                             "blend_p98_residual": BLEND_P98_RESIDUAL, "blend_improvement": BLEND_IMPROVEMENT,
+                             "shell_text_search_pixels": SHELL_TEXT_SEARCH, "wordmark_partial_score": WORDMARK_PARTIAL_SCORE,
+                             "wordmark_partial_contrast": WORDMARK_PARTIAL_CONTRAST,
+                             "splash_field_tolerance": SPLASH_FIELD_TOLERANCE},
               "surface_transform_bounds": {"scale_min": min(SURFACE_SCALES), "scale_max": max(SURFACE_SCALES),
                                            "scale_step": .005, "shared_home_translation_pixels": list(SURFACE_SHIFT)}}
     try:
