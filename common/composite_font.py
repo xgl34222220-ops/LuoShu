@@ -209,13 +209,15 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
     enclose_imported_bounds(base, char_string.calcBounds(top.CharStrings))
 
 
-def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
+def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None, transform: tuple[float, float] | None = None) -> tuple[int, list[int], tuple[float, float]]:
     required = required or set()
     base_cmap = base.getBestCmap() or {}
     src_cmap = src.getBestCmap() or {}
     src_glyph_set = src.getGlyphSet(location=location) if location else src.getGlyphSet()
     base_kind = _outline_kind(base)
-    scale, y_shift = _role_transform(base, src, src_glyph_set, role)
+    # One font chosen for both letters and digits keeps one transform, so its own
+    # digit/letter proportions and shared baseline survive the import.
+    scale, y_shift = transform or _role_transform(base, src, src_glyph_set, role)
     replaced = 0
     missing: list[int] = []
     already: set[str] = set()
@@ -254,7 +256,7 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], ro
         base["hmtx"].metrics[base_name] = (advance, lsb)
         clear_imported_metric_variations(base, base_name)
         replaced += 1
-    return replaced, missing
+    return replaced, missing, (scale, y_shift)
 
 
 def _set_names(font: TTFont) -> None:
@@ -301,11 +303,13 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
         _progress(args.progress, "latin", "正在导入英文字形", 18)
         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
-        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)
+        latin_replaced, latin_missing, latin_transform = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)
         latin.close(); latin = None; gc.collect()
         _progress(args.progress, "digit", "正在导入数字字形", 42)
         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
-        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS)
+        shared = latin_transform if (digit_face == latin_face and digit_path.stat().st_size == latin_path.stat().st_size
+                                         and _sha256(digit_path) == _sha256(latin_path)) else None
+        digit_replaced, digit_missing, _digit_transform = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS, shared)
         digit.close(); digit = None; gc.collect()
         if latin_replaced < 52:
             raise CompositeError(f"英文替换数量异常（仅 {latin_replaced} 个）")
