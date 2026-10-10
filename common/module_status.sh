@@ -13,6 +13,15 @@ if [ -z "$MODDIR" ]; then
 fi
 
 PROP="$MODDIR/module.prop"
+BOOT_GUARD="$MODDIR/common/boot_loop_guard.sh"
+SAFE_MODE=false
+if [ -f "$BOOT_GUARD" ]; then
+    . "$BOOT_GUARD"
+    # service.sh runs this only after sys.boot_completed=1, which is also the
+    # Magisk boot-completed point for the boot-loop counter.
+    [ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] && luoshu_bootloop_complete
+    luoshu_bootloop_safe_mode_active && SAFE_MODE=true
+fi
 ACTIVE="${1:-}"
 [ -n "$ACTIVE" ] || ACTIVE=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE" ] || ACTIVE="default"
@@ -51,6 +60,9 @@ if [ "$ACTIVE" != default ]; then
 fi
 
 DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
+if [ "$SAFE_MODE" = true ]; then
+    DESCRIPTION="⚠ 卡开机保护：连续启动未完成，已跳过洛书挂载（点“操作”重新启用）；当前选择：$DISPLAY"
+fi
 [ -f "$PROP" ] || exit 0
 # Unchanged status: do not rewrite module.prop (avoids a flash write and a
 # root-manager module rescan on every boot).

@@ -19,6 +19,7 @@ on:
       - service.sh
       - uninstall.sh
       - action.sh
+      - late-load.sh
       - android-app/**
       - magic
       - README.md
