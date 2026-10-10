@@ -5,6 +5,7 @@ common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
 common/boot_housekeeping.sh
+common/system_ota_guard.sh
 common/task_scope.py
 common/task_scope.sh
 common/runtime_paths.sh
@@ -136,6 +137,7 @@ README.md
 CHANGELOG.md
 customize.sh
 module.prop
+branding/luoshu-app-icon.webp
 post-fs-data.sh
 post-mount.sh
 service.sh

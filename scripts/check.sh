@@ -53,6 +53,7 @@ sh "$ROOT/scripts/uninstall_safety_test.sh"
 sh "$ROOT/scripts/uninstall_cleanup_test.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 sh "$ROOT/scripts/boot_housekeeping_test.sh"
+sh "$ROOT/scripts/ksu_metadata_ota_test.sh"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
