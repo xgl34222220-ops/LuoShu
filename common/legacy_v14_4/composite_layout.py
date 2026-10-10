@@ -180,8 +180,9 @@ def cjk_cap_correction(base: TTFont, base_glyph_set=None) -> tuple[float, float]
     """(size factor, vertical shift) that sizes Latin to the CJK ideographs.
 
     (1.0, 0.0) for conventional pairings. When the base font's own Latin caps
-    are far from 0.88 of its ideograph box, Latin is resized to that ratio
-    around its current centre, so it stays vertically centred on Han.
+    are far below 0.88 of its ideograph box, Latin is enlarged to that ratio
+    and grows upward from the baseline; growing around the centre dropped the
+    digits below the Han they sit beside ("36岁" read low on 花轮丸).
     """
     glyph_set = base_glyph_set if base_glyph_set is not None else base.getGlyphSet()
     cjk_h = _cjk_box_height(base, glyph_set)
@@ -195,7 +196,7 @@ def cjk_cap_correction(base: TTFont, base_glyph_set=None) -> tuple[float, float]
     factor = max(lo, min(hi, CJK_CAP_RATIO * cjk_h / cap_h))
     if factor == 1.0:
         return 1.0, 0.0
-    return factor, cap_h * (1.0 - factor) / 2.0
+    return factor, 0.0
 
 
 def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:

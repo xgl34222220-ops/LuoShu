@@ -148,7 +148,7 @@ class CompositeLatinCjkAlignmentTest(unittest.TestCase):
                 self.assertGreaterEqual(bottom, -150)  # never more than 0.15 em
                 self.assertLessEqual(abs(box(font, 'H')[1] - bottom), 1)
 
-    def test_small_latin_next_to_full_bodied_han_is_resized_and_centred(self):
+    def test_small_latin_next_to_full_bodied_han_is_enlarged_on_baseline(self):
         # Round/cute CJK (e.g. 花轮丸): own caps 707 next to a -100..810 ideograph
         # box (ratio 0.78) made imported Latin and digits look shrunken by Han.
         make_font(self.base, cap=707, xh=520, digit=707, overshoot=10, cjk=(-100, 810), family='Round')
@@ -159,8 +159,8 @@ class CompositeLatinCjkAlignmentTest(unittest.TestCase):
                 font = self.build(engine)
                 han, cap, digit = box(font, '中'), box(font, 'H'), box(font, '1')
                 self.assertAlmostEqual((cap[3] - cap[1]) / (han[3] - han[1]), 0.88, delta=0.01)
-                # Stays centred on the ideographs where the stock Latin was centred.
-                self.assertLessEqual(abs((cap[1] + cap[3]) / 2 - 707 / 2), 2)
+                # Grows upward from the baseline: dropping it read as digits sitting low.
+                self.assertLessEqual(abs(cap[1]), 1)
                 self.assertAlmostEqual((digit[3] - digit[1]) / (cap[3] - cap[1]), 682 / 700, delta=0.01)
                 self.assertLessEqual(abs(digit[1] - cap[1]), 1)
                 self.assertEqual(tuple(round(v) for v in han[1::2]), (-100, 810))
