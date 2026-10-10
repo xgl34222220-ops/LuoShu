@@ -90,8 +90,7 @@ private enum class LogFilter(val label: String) {
 private fun logMatchesFilter(line: String, filter: LogFilter): Boolean = when (filter) {
     LogFilter.ALL -> true
     LogFilter.WARNING -> line.contains("warn", true) || line.contains("警告")
-    LogFilter.ERROR -> line.contains("error", true) || line.contains("failed", true) ||
-        line.contains("失败") || line.contains("错误")
+    LogFilter.ERROR -> isLogErrorLine(line)
 }
 
 @Composable

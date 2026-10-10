@@ -369,6 +369,7 @@ python3 "$ROOT/scripts/android_ui_smoke_test.py"
 python3 "$ROOT/scripts/dump_ui_original_media_test.py"
 python3 "$ROOT/scripts/ui_snapshot_session_test.py"
 python3 "$ROOT/scripts/ui_snapshot_java_test.py"
+python3 "$ROOT/scripts/log_error_classifier_test.py"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
 echo 'LuoShu App-only source checks passed.'
