@@ -27,7 +27,24 @@ LOGO_MATCH = .92
 HOME_MATCH = .92
 TRANSITION_MATCH = .72
 SHELL_TEXT_MATCH = .92
-SHELL_TEXT_BOUNDS = ((10, 53, 63, 84), (10, 97, 92, 118))
+# Launch shell wordmark 「洛书」 and subtitle 「LuoShu · 字体管理」 below the centred glass card
+# (LuoShuLaunchArtwork geometry on the 360x780 normalized frame).
+SHELL_TEXT_BOUNDS = ((140, 498, 220, 540), (112, 541, 248, 563))
+# The glass card (with shadow) settles and scales during the shell; its area is checked by
+# neither the background comparison nor blend fits. Text crops and the field around it are.
+SHELL_CARD_BOUNDS = (48, 258, 312, 524)
+# Low-resolution comparison of the diffuse field: slow drift and accent glows are tolerated,
+# a blank, flat, shifted or different surface is not.
+FIELD_CELL = 10
+FIELD_MEAN_TOLERANCE = 8.0
+FIELD_CELL_TOLERANCE = 18.0
+FIELD_CELL_FRACTION = .98
+BLEND_MIN = .08
+BLEND_MAX = .92
+BLEND_MEAN_RESIDUAL = 8.0
+BLEND_P98_RESIDUAL = 22.0
+BLEND_IMPROVEMENT = .6
+BLEND_MIN_ENDPOINT_DIFFERENCE = 10.0
 SURFACE_SCALES = tuple(index / 200 for index in range(130, 211))
 SURFACE_SHIFT = (20, 80)
 
@@ -65,6 +82,45 @@ def resized(image: Image.Image, size: tuple[int, int]) -> np.ndarray:
     return np.asarray(image.convert("RGB").resize(size, Image.Resampling.LANCZOS))
 
 
+def field(rgb: np.ndarray) -> np.ndarray:
+    """Box-averaged low-resolution colour field (cells of FIELD_CELL pixels)."""
+    height, width, _ = rgb.shape
+    rows, cols = height // FIELD_CELL, width // FIELD_CELL
+    cropped = rgb[:rows * FIELD_CELL, :cols * FIELD_CELL].astype(np.float32)
+    return cropped.reshape(rows, FIELD_CELL, cols, FIELD_CELL, 3).mean(axis=(1, 3))
+
+
+def field_mask(size: tuple[int, int], exclude: tuple[tuple[int, int, int, int], ...]) -> np.ndarray:
+    """Cells inside the content area (status/navigation bars excluded) and outside exclusions."""
+    width, height = size
+    rows, cols = height // FIELD_CELL, width // FIELD_CELL
+    mask = np.zeros((rows, cols), dtype=bool)
+    mask[int(np.ceil(height * .06 / FIELD_CELL)):int(height * .94 // FIELD_CELL), :] = True
+    for x1, y1, x2, y2 in exclude:
+        mask[max(0, y1 // FIELD_CELL):min(rows, -(-y2 // FIELD_CELL)),
+             max(0, x1 // FIELD_CELL):min(cols, -(-x2 // FIELD_CELL))] = False
+    return mask
+
+
+def blend_fit(frame: np.ndarray, first: np.ndarray, second: np.ndarray, mask: np.ndarray) -> dict:
+    """Explain a low-res frame as (1-b)*first + b*second; report b and the residuals."""
+    a, b, f = first[mask], second[mask], frame[mask]
+    span = b - a
+    endpoint_difference = float(np.abs(span).max(axis=1).mean())
+    denominator = float((span * span).sum())
+    weight = float(np.clip(((f - a) * span).sum() / denominator, 0, 1)) if denominator > 0 else 0.0
+    residual = np.abs(f - (a + weight * span)).max(axis=1)
+    endpoint = min(float(np.abs(f - a).max(axis=1).mean()), float(np.abs(f - b).max(axis=1).mean()))
+    mean = float(residual.mean())
+    p98 = float(np.percentile(residual, 98))
+    matched = (BLEND_MIN <= weight <= BLEND_MAX and endpoint_difference >= BLEND_MIN_ENDPOINT_DIFFERENCE
+               and mean <= BLEND_MEAN_RESIDUAL and p98 <= BLEND_P98_RESIDUAL
+               and mean <= BLEND_IMPROVEMENT * endpoint)
+    return {"weight": round(weight, 4), "mean_residual": round(mean, 3), "p98_residual": round(p98, 3),
+            "endpoint_residual": round(endpoint, 3), "endpoint_difference": round(endpoint_difference, 3),
+            "matched": bool(matched)}
+
+
 class FrameClassifier:
     def __init__(self, home: Image.Image, hierarchy: ET.Element, theme: str,
                  size: tuple[int, int], baseline: Image.Image | None = None):
@@ -95,21 +151,30 @@ class FrameClassifier:
             self.logo = edges(resized(artwork, (168, 168)))
             self.logo_transforms = [(scale, edges(resized(artwork, (round(168 * scale), round(168 * scale)))))
                                     for scale in SURFACE_SCALES if scale != 1]
-        # Separate preparation UI, never a home reference. Two independent
-        # visible text crops plus the opaque remainder prevent blank/title-only
-        # surfaces or a home screenshot from qualifying as this stage.
+        # Separate preparation UI (the diffuse glass launch shell), never a home reference.
+        # Two independent visible text crops plus the surrounding diffuse field prevent
+        # blank, flat, title-only or home surfaces from qualifying as this stage.
         with Image.open(fixtures / f"native-shell-{theme}.png") as shell:
             self.shell_reference = resized(shell, size)
+        with Image.open(fixtures / f"native-splash-{theme}.png") as splash:
+            self.splash_reference = resized(splash, size)
         self.shell_patches = []
         shell_edges = edges(self.shell_reference)
-        self.shell_background_mask = np.zeros((size[1], size[0]), dtype=bool)
-        self.shell_background_mask[round(size[1] * .06):round(size[1] * .94), :] = True
+        scaled_text = []
         for bounds in SHELL_TEXT_BOUNDS:
             x1, y1, x2, y2 = (round(value * size[index % 2] / (360 if index % 2 == 0 else 780))
                               for index, value in enumerate(bounds))
-            self.shell_patches.append(((x1, y1, x2, y2), shell_edges[y1:y2, x1:x2]))
-            self.shell_background_mask[y1-2:y2+2, x1-2:x2+2] = False
-        self.shell_background = self.shell_reference[size[1] // 2, size[0] // 2].astype(np.int16)
+            scaled_text.append((x1, y1, x2, y2))
+            reference_crop = self.shell_reference[y1:y2, x1:x2].astype(np.int16)
+            background = np.median(reference_crop.reshape(-1, 3), axis=0).astype(np.int16)
+            self.shell_patches.append(((x1, y1, x2, y2), shell_edges[y1:y2, x1:x2], background))
+        card = tuple(round(value * size[index % 2] / (360 if index % 2 == 0 else 780))
+                     for index, value in enumerate(SHELL_CARD_BOUNDS))
+        self.shell_field_mask = field_mask(size, (card, *scaled_text))
+        self.blend_mask = field_mask(size, (card,))
+        self.shell_field = field(self.shell_reference)
+        self.splash_field = field(self.splash_reference)
+        self.home_field = field(self.reference)
         self.home_transforms = []
         for scale in SURFACE_SCALES:
             scaled_size = tuple(round(value * scale) for value in size)
@@ -155,34 +220,44 @@ class FrameClassifier:
         y, x = np.unravel_index(scores.argmax(), scores.shape)
         return {"score": float(scores[y, x]), "scale": scale, "dx": int(x + dx1), "dy": int(y + dy1)}
 
-    def shell_match(self, frame: np.ndarray, edge_frame: np.ndarray) -> dict:
+    def shell_match(self, frame: np.ndarray, edge_frame: np.ndarray, frame_field: np.ndarray) -> dict:
         scores = [match_score(edge_frame[y1:y2, x1:x2], template)
-                  for (x1, y1, x2, y2), template in self.shell_patches]
+                  for (x1, y1, x2, y2), template, _ in self.shell_patches]
         # Normalized edge correlation is contrast invariant. Also require
         # visible ink, or almost-erased words could pass as a nonblank shell.
         contrast_ratios = []
         ink_ratios = []
-        for (x1, y1, x2, y2), _ in self.shell_patches:
-            reference_contrast = np.max(np.abs(self.shell_reference[y1:y2,x1:x2].astype(np.int16) - self.shell_background), axis=2)
-            actual_contrast = np.max(np.abs(frame[y1:y2,x1:x2].astype(np.int16) - self.shell_background), axis=2)
+        for (x1, y1, x2, y2), _, background in self.shell_patches:
+            reference_contrast = np.max(np.abs(self.shell_reference[y1:y2,x1:x2].astype(np.int16) - background), axis=2)
+            actual_contrast = np.max(np.abs(frame[y1:y2,x1:x2].astype(np.int16) - background), axis=2)
             reference_peak = float(np.percentile(reference_contrast, 95))
             contrast_ratios.append(float(np.percentile(actual_contrast,95)) / max(reference_peak,1))
             ink_threshold = max(12, reference_peak * .25)
             reference_ink = int(np.sum(reference_contrast >= ink_threshold))
             ink_ratios.append(int(np.sum(actual_contrast >= ink_threshold)) / max(reference_ink,1))
-        background_pixels = frame[self.shell_background_mask].astype(np.int16)
-        matching_background = float(np.mean(np.max(np.abs(background_pixels - self.shell_background), axis=1) <= 8))
+        difference = np.abs(frame_field - self.shell_field).max(axis=2)[self.shell_field_mask]
+        field_mean = float(difference.mean())
+        field_fraction = float(np.mean(difference <= FIELD_CELL_TOLERANCE))
         return {"text_scores": scores, "text_contrast_ratios": contrast_ratios, "text_ink_ratios": ink_ratios,
-                "background_fraction": matching_background,
+                "field_mean_difference": round(field_mean, 3), "field_cell_fraction": round(field_fraction, 4),
                 "matched": min(scores) >= SHELL_TEXT_MATCH and min(contrast_ratios) >= .75
-                    and min(ink_ratios) >= .75 and matching_background >= .999}
+                    and min(ink_ratios) >= .75 and field_mean <= FIELD_MEAN_TOLERANCE
+                    and field_fraction >= FIELD_CELL_FRACTION}
+
+    def blend_match(self, frame_field: np.ndarray) -> dict:
+        """Platform splash dissolving into the shell, or the shell crossfading into home."""
+        fits = {"splash_to_shell": blend_fit(frame_field, self.splash_field, self.shell_field, self.blend_mask),
+                "shell_to_home": blend_fit(frame_field, self.shell_field, self.home_field, self.blend_mask)}
+        return {**fits, "matched": any(fit["matched"] for fit in fits.values())}
 
     def classify(self, frame: np.ndarray) -> dict:
         height, width, _ = frame.shape
         interior = frame[int(height * .06):int(height * .94), int(width * .04):int(width * .96)]
         black_fraction = float(np.mean(interior.max(axis=2) < 8))
         edge_frame = edges(frame)
-        shell = self.shell_match(frame, edge_frame)
+        frame_field = field(frame)
+        shell = self.shell_match(frame, edge_frame, frame_field)
+        blend = {"matched": False}
         logo_score = match_score(edge_frame[int(height * .32):int(height * .69), int(width * .20):int(width * .80)], self.logo)
         home_match = self.home_transform_match(edge_frame, self.full_home_transform)
         logo_transform = {"score": logo_score, "scale": 1.0}
@@ -193,6 +268,10 @@ class FrameClassifier:
             baseline_score = match_score(area, template)
         if black_fraction >= .995:
             state = "black-blank"
+        elif shell["matched"]:
+            # Wordmark text only exists in the launch shell; its card holds the same icon
+            # tile as the splash orb, so the shell is recognized before logo matching.
+            state = "startup-shell"
         elif logo_score >= LOGO_MATCH:
             state = "native-logo"
         else:
@@ -215,11 +294,10 @@ class FrameClassifier:
                     state = "home-transition"
                 elif baseline_score >= .95:
                     state = "prelaunch"
-                elif shell["matched"]:
-                    state = "startup-shell"
                 else:
-                    state = "unclassified"
-        return {"state": state, "shell_match": shell, "logo_score": round(logo_score, 5),
+                    blend = self.blend_match(frame_field)
+                    state = "shell-transition" if blend["matched"] else "unclassified"
+        return {"state": state, "shell_match": shell, "blend_match": blend, "logo_score": round(logo_score, 5),
                 "home_scores": {key: round(value, 5) for key, value in home_match["scores"].items()},
                 "home_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in home_match.items() if key != "scores"},
                 "logo_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in logo_transform.items()},
@@ -229,6 +307,7 @@ class FrameClassifier:
 def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
     errors = []
     home_seen = False
+    full_home_seen = False
     logo_seen = False
     native_logo_seen = False
     shell_seen = False
@@ -252,8 +331,16 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
             if not native_logo_seen:
                 errors.append(f"Preparation shell lacked preceding native-logo coverage: {stamp}")
             shell_seen = True
+        if state == "shell-transition":
+            if warm:
+                errors.append(f"Warm same-process resume displayed launch shell transition: {stamp}")
+            if full_home_seen:
+                errors.append(f"Preparation shell returned after visible home: {stamp}")
+            if not native_logo_seen:
+                errors.append(f"Launch shell transition lacked preceding native-logo coverage: {stamp}")
         if state in ("home", "home-transition"):
             home_seen = True
+            full_home_seen |= state == "home"
         if state == "black-blank":
             errors.append(f"Black blank screen: {stamp}")
         if state == "unclassified":
@@ -295,7 +382,10 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
               "theme": theme, "warm_same_process": warm,
               "thresholds": {"logo": LOGO_MATCH, "home": HOME_MATCH, "recognized_transition": TRANSITION_MATCH, "shell_text": SHELL_TEXT_MATCH,
                              "shell_min_text_contrast_ratio": .75, "shell_min_text_ink_ratio": .75,
-                             "shell_background_fraction": .999, "shell_background_rgb_tolerance": 8},
+                             "shell_field_cell_pixels": FIELD_CELL, "shell_field_mean_tolerance": FIELD_MEAN_TOLERANCE,
+                             "shell_field_cell_tolerance": FIELD_CELL_TOLERANCE, "shell_field_cell_fraction": FIELD_CELL_FRACTION,
+                             "blend_weight_range": [BLEND_MIN, BLEND_MAX], "blend_mean_residual": BLEND_MEAN_RESIDUAL,
+                             "blend_p98_residual": BLEND_P98_RESIDUAL, "blend_improvement": BLEND_IMPROVEMENT},
               "surface_transform_bounds": {"scale_min": min(SURFACE_SCALES), "scale_max": max(SURFACE_SCALES),
                                            "scale_step": .005, "shared_home_translation_pixels": list(SURFACE_SHIFT)}}
     try:

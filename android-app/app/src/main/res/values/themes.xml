@@ -1,18 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The platform splash accepts one color. Match the diffuse backdrop's centre
-         instead of showing a pale blank sheet before the first real App frame. -->
-    <color name="launch_background">#D7DAEE</color>
+    <!-- The platform splash accepts one color: the centre of the diffuse launch backdrop
+         (design/launch/build_launch_assets.py prints it), so the system splash dissolves
+         into the full-screen diffuse launch shell without a colour jump. -->
+    <color name="launch_background">#D4D5F3</color>
+    <!-- Theme.LuoShuHybrid real-page window gradient (unchanged App backdrop colours). -->
     <color name="launch_gradient_start">#CDDDF4</color>
     <color name="launch_gradient_center">#E2DDF3</color>
     <color name="launch_gradient_end">#D1E8ED</color>
-    <color name="launch_ink">#435B80</color>
-    <color name="launch_gold">#8F733F</color>
-    <color name="launch_glass_top">#ECF2FF</color>
-    <color name="launch_glass_center">#D5D7F0</color>
-    <color name="launch_glass_bottom">#B8DFE5</color>
-    <color name="launch_glass_edge">#FFFFFF</color>
-    <color name="launch_glass_shadow">#526D99</color>
+    <!-- Launch shell wordmark 「洛书」 and subtitle. -->
+    <color name="launch_ink">#27365C</color>
+    <color name="launch_ink_secondary">#46557C</color>
     <bool name="launch_light_system_bars">true</bool>
 
     <style name="Theme.LuoShuHybrid" parent="android:style/Theme.Material.Light.NoActionBar">
@@ -27,8 +25,9 @@
         <item name="android:fontFamily">sans</item>
     </style>
 
-    <!-- API 28–30 draw this same gradient while the real Activity prepares. -->
+    <!-- API 28–30 starting window: full-screen diffuse bitmap + grain + the glass card
+         emblem at the launch shell's first-frame size; the Compose shell continues it. -->
     <style name="Theme.LuoShuLaunch" parent="Theme.LuoShuHybrid">
-        <item name="android:windowBackground">@drawable/luoshu_launch_background</item>
+        <item name="android:windowBackground">@drawable/luoshu_launch_window</item>
     </style>
 </resources>
