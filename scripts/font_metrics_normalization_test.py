@@ -44,7 +44,7 @@ def make_font(path: Path, latin_bottom: int, latin_top: int, digit_bottom: int, 
     for name in digit_names.values():
         glyphs[name] = rectangle(90, digit_bottom, 510, digit_top)
     for name in cjk_names.values():
-        glyphs[name] = rectangle(40, -80, 960, 880)
+        glyphs[name] = rectangle(40, -80, 960, 715)  # caps = 0.88 of the ideograph box, like MiSans/Noto
     cmap = {ord(character): name for character, name in {**letter_names, **digit_names, **cjk_names}.items()}
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(glyph_order)

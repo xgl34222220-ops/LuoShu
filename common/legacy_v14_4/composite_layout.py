@@ -128,7 +128,8 @@ CJK_BASELINE_SHIFT_LIMIT_RATIO = 0.15
 # imported Latin and digits look shrunken beside Han ("36岁").
 CJK_CAP_RATIO = 0.88
 CJK_CAP_TOLERANCE = 0.05
-CJK_CAP_FACTOR_LIMITS = (0.85, 1.18)
+# Only enlarge: shrinking Latin a CJK font ships oversized is not this fix.
+CJK_CAP_FACTOR_LIMITS = (1.0, 1.18)
 
 
 def _median_flat_extents(font: TTFont, glyph_set, role: str):
@@ -192,6 +193,8 @@ def cjk_cap_correction(base: TTFont, base_glyph_set=None) -> tuple[float, float]
         return 1.0, 0.0
     lo, hi = CJK_CAP_FACTOR_LIMITS
     factor = max(lo, min(hi, CJK_CAP_RATIO * cjk_h / cap_h))
+    if factor == 1.0:
+        return 1.0, 0.0
     return factor, cap_h * (1.0 - factor) / 2.0
 
 
