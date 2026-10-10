@@ -402,6 +402,20 @@ case "${1:-status}" in
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
     font-mix-cancel|mix_cancel) mix_ready || exit 1; sh "$MIX_ENGINE" cancel "${2:-}"; exit $? ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
+    boot_guard_status|boot_guard_reset)
+        if [ ! -f "$MODDIR/common/boot_loop_guard.sh" ]; then
+            printf '{"status":"error","message":"卡开机保护组件不可用"}\n'
+            exit 0
+        fi
+        . "$MODDIR/common/boot_loop_guard.sh"
+        [ "$1" != boot_guard_reset ] || luoshu_bootloop_reset
+        _bg_state=normal
+        luoshu_bootloop_safe_mode_active && _bg_state=safe-mode
+        _bg_count=$(luoshu_bootloop_get count)
+        case "$_bg_count" in ''|*[!0-9]*) _bg_count=0 ;; esac
+        printf '{"status":"ok","data":{"bootGuard":"%s","counter":%s,"limit":%s}}\n' \
+            "$_bg_state" "$_bg_count" "$LUOSHU_BOOTLOOP_LIMIT"
+        ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac

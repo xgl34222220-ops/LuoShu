@@ -5,6 +5,7 @@ common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
 common/boot_housekeeping.sh
+common/boot_loop_guard.sh
 common/task_scope.py
 common/task_scope.sh
 common/runtime_paths.sh
@@ -142,6 +143,7 @@ service.sh
 uninstall.sh
 action.sh
 boot-completed.sh
+late-load.sh
 magic
 common/font_next_transaction.sh
 common/font_live_switch.sh

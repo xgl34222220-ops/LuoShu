@@ -343,3 +343,17 @@ luoshu_font_lock_busy() {
     fi
     return 1
 }
+
+# Boot-loop guard (卡开机保护). The frozen boot routers source this file before
+# mount_compat.sh; the guard only acts for those router basenames and exits
+# the router before any LuoShu mount while safe mode is active.
+for _luof_guard in "${MODULE_DIR:-}/common/boot_loop_guard.sh" "${MODDIR:-}/common/boot_loop_guard.sh"; do
+    [ "$_luof_guard" != "/common/boot_loop_guard.sh" ] || continue
+    [ -f "$_luof_guard" ] || continue
+    . "$_luof_guard"
+    case "${0##*/}" in
+        post-fs-data.sh|post-mount.sh|boot-completed.sh) luoshu_bootloop_stage_hook ;;
+    esac
+    break
+done
+unset _luof_guard
