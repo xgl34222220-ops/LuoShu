@@ -55,11 +55,14 @@ internal class LuoShuLaunchArtwork private constructor(
     private val backdrop = decode(resources, R.drawable.luoshu_launch_backdrop)
     private val backdropBlur = decode(resources, R.drawable.luoshu_launch_backdrop_blur)
     private val card = decode(resources, R.drawable.luoshu_launch_card)
+    private val cardShadow = decode(resources, R.drawable.luoshu_launch_card_shadow)
     private val grain = decode(resources, R.drawable.luoshu_launch_grain)
 
     private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     private val grainPaint = Paint().apply {
         shader = BitmapShader(grain, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        // One tile for both themes; quieter on the dark field.
+        alpha = if (dark) 190 else 255
     }
     private val accentPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
     private val shimmerPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.DITHER_FLAG)
@@ -102,6 +105,9 @@ internal class LuoShuLaunchArtwork private constructor(
         val cy = h / 2f
         val edge = CARD_DP * density * frame.cardScale
         updatePath(cx, cy, edge)
+        val canvasEdge = CARD_CANVAS_DP * density * frame.cardScale
+        cardRect.set(cx - canvasEdge / 2f, cy - canvasEdge / 2f, cx + canvasEdge / 2f, cy + canvasEdge / 2f)
+        canvas.drawBitmap(cardShadow, null, cardRect, bitmapPaint)
         cardRect.set(cx - edge / 2f, cy - edge / 2f, cx + edge / 2f, cy + edge / 2f)
 
         // Frosted interior: what is behind, blurred. RenderEffect where the canvas supports it,
@@ -117,7 +123,6 @@ internal class LuoShuLaunchArtwork private constructor(
         }
         canvas.restoreToCount(save)
 
-        val canvasEdge = CARD_CANVAS_DP * density * frame.cardScale
         cardRect.set(cx - canvasEdge / 2f, cy - canvasEdge / 2f, cx + canvasEdge / 2f, cy + canvasEdge / 2f)
         canvas.drawBitmap(card, null, cardRect, bitmapPaint)
 

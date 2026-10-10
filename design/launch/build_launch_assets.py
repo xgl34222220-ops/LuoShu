@@ -26,7 +26,7 @@ CARD_CANVAS_DP = 288.0   # card bitmap canvas (shadow margin included)
 TILE_DP = 104.0          # icon tile edge at scale 1
 CARD_START_SCALE = 0.955 # first frame (system splash / starting window hand-off)
 SQUIRCLE_N = 4.2         # superellipse exponent of card and tile
-CARD_PX_PER_DP = 4       # card bitmap resolution
+CARD_PX_PER_DP = 3       # card bitmap resolution (module ZIP size budget)
 ORB_CANVAS_PX = 720      # Android 12+ icon canvas = 288dp
 ORB_PX_PER_DP = ORB_CANVAS_PX / 288.0
 
@@ -93,7 +93,7 @@ def squircle_mask(size: int, edge: float, n: float = SQUIRCLE_N, supersample: in
     return to_image(inside * 255.0, "L").resize((size, size), Image.Resampling.LANCZOS)
 
 
-def grain_tile(theme: str, size: int = 128, seed: int = 1729) -> Image.Image:
+def grain_tile(theme: str, size: int = 64, seed: int = 1729) -> Image.Image:
     rng = np.random.default_rng(seed)
     noise = rng.normal(0, 1, (size, size))
     amount = THEMES[theme]["grain"]
@@ -102,7 +102,22 @@ def grain_tile(theme: str, size: int = 128, seed: int = 1729) -> Image.Image:
     return to_image(np.dstack([rgb, alpha]), "RGBA")
 
 
-def card_overlay(theme: str, icon: Image.Image) -> Image.Image:
+def card_shadow(theme: str, px_per_dp: int = 1) -> Image.Image:
+    """Soft coloured card shadow (outside the glass only); low resolution, lossless alpha."""
+    spec = THEMES[theme]
+    size = int(CARD_CANVAS_DP * px_per_dp * 2)
+    edge = CARD_DP * px_per_dp * 2
+    mask = squircle_mask(size, edge)
+    shadow_rgb, shadow_alpha = spec["shadow"]
+    shadow = Image.new("L", (size, size), 0)
+    shadow.paste(mask, (0, int(16 * px_per_dp * 2)))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(14 * px_per_dp * 2))
+    alpha = np.asarray(shadow, dtype=np.float64) / 255 * shadow_alpha * (1 - np.asarray(mask, dtype=np.float64) / 255)
+    image = to_image(np.dstack([np.broadcast_to(np.array(shadow_rgb, dtype=np.float64), (size, size, 3)), alpha * 255]), "RGBA")
+    return image.resize((size // 2, size // 2), Image.Resampling.LANCZOS)
+
+
+def card_overlay(theme: str, icon: Image.Image, include_shadow: bool = False) -> Image.Image:
     spec = THEMES[theme]
     size = int(CARD_CANVAS_DP * CARD_PX_PER_DP)
     edge = CARD_DP * CARD_PX_PER_DP
@@ -118,8 +133,10 @@ def card_overlay(theme: str, icon: Image.Image) -> Image.Image:
         canvas[..., :3] = out_rgb
         canvas[..., 3:4] = out_a
 
-    # 1. soft coloured shadow, outside the glass only.
+    # 1. soft coloured shadow, outside the glass only (shipped separately: card_shadow).
     shadow_rgb, shadow_alpha = spec["shadow"]
+    if not include_shadow:
+        shadow_alpha = 0.0
     offset = int(16 * CARD_PX_PER_DP)
     shadow = Image.new("L", (size, size), 0)
     shadow.paste(mask, (0, offset))
@@ -229,12 +246,13 @@ def splash_orb(theme: str, icon: Image.Image, splash_rgb: tuple[int, int, int]) 
     return image.convert("RGB")
 
 
-def save_webp(image: Image.Image, path: Path, *, lossless: bool = False, quality: int = 92) -> None:
+def save_webp(image: Image.Image, path: Path, *, lossless: bool = False, quality: int = 92,
+              alpha_quality: int = 100) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if lossless:
         image.save(path, "WEBP", lossless=True, quality=100, method=6)
     else:
-        image.save(path, "WEBP", quality=quality, method=6, alpha_quality=100)
+        image.save(path, "WEBP", quality=quality, method=6, alpha_quality=alpha_quality)
 
 
 def splash_color(theme: str) -> tuple[int, int, int]:
@@ -255,10 +273,12 @@ def render_shell(theme: str, width: int, height: int, density: float, icon: Imag
     overlay = card_overlay(theme, icon)
     edge = int(round(CARD_CANVAS_DP * density * card_scale))
     overlay = overlay.resize((edge, edge), Image.Resampling.LANCZOS)
+    shadow = card_shadow(theme).resize((edge, edge), Image.Resampling.BILINEAR)
     blurred = to_image(backdrop(theme, 54, 120)).resize((width, height), Image.Resampling.BILINEAR)
     card_px = int(round(CARD_DP * density * card_scale))
     mask = squircle_mask(card_px, card_px)
     cx, cy = width // 2, height // 2
+    frame.alpha_composite(shadow, (cx - edge // 2, cy - edge // 2))
     frame.paste(blurred.crop((cx - card_px // 2, cy - card_px // 2, cx - card_px // 2 + card_px, cy - card_px // 2 + card_px)),
                 (cx - card_px // 2, cy - card_px // 2), mask)
     frame.alpha_composite(overlay, (cx - edge // 2, cy - edge // 2))
@@ -286,10 +306,14 @@ def main() -> None:
     icon = Image.open(args.icon).convert("RGBA")
     for theme, folder in (("light", "drawable-nodpi"), ("dark", "drawable-night-nodpi")):
         out = RES / folder
-        save_webp(to_image(backdrop(theme, 540, 1200)), out / "luoshu_launch_backdrop.webp", lossless=True)
+        save_webp(to_image(backdrop(theme, 270, 600)), out / "luoshu_launch_backdrop.webp", lossless=True)
         save_webp(to_image(backdrop(theme, 54, 120)), out / "luoshu_launch_backdrop_blur.webp", lossless=True)
-        grain_tile(theme).save(out / "luoshu_launch_grain.png", optimize=True)
-        save_webp(card_overlay(theme, icon), out / "luoshu_launch_card.webp")
+        if theme == "light":  # one tile; LuoShuLaunchArtwork softens it on dark
+            grain_tile(theme, size=64).save(RES / "drawable-nodpi/luoshu_launch_grain.png", optimize=True)
+        # Lossy colour, lossless alpha (no contouring); the soft shadow ships as its own small
+        # bitmap. Keeps the module ZIP inside scripts/build.sh MAX_ZIP_BYTES.
+        save_webp(card_overlay(theme, icon), out / "luoshu_launch_card.webp", quality=85)
+        save_webp(card_shadow(theme), out / "luoshu_launch_card_shadow.webp", lossless=True)
         rgb = splash_color(theme)
         save_webp(splash_orb(theme, icon, rgb), out / "luoshu_splash_orb.webp")
         print(theme, "splash/background colour", "#%02X%02X%02X" % rgb)

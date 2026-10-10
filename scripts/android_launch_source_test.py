@@ -228,7 +228,8 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         self.assertEqual(root.tag, "layer-list")
         bitmaps = [item.find("bitmap") for item in root.findall("item")]
         self.assertEqual([bitmap.get(ANDROID + "src") for bitmap in bitmaps],
-                         ["@drawable/luoshu_launch_backdrop", "@drawable/luoshu_launch_grain", "@drawable/luoshu_launch_card"])
+                         ["@drawable/luoshu_launch_backdrop", "@drawable/luoshu_launch_grain",
+                          "@drawable/luoshu_launch_card_shadow", "@drawable/luoshu_launch_card"])
         self.assertEqual(bitmaps[0].get(ANDROID + "gravity"), "fill")
         self.assertEqual(bitmaps[1].get(ANDROID + "tileMode"), "repeat")
         # The real App page keeps its own unbranded gradient (TaskCenter, rotation, recreation).
@@ -239,12 +240,18 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
             self.assertTrue(gradient.attrib[ANDROID + stop].startswith("@color/launch_gradient_"))
 
     def test_launch_bitmaps_exist_for_both_themes(self):
+        total = 0
         for folder in ("drawable-nodpi", "drawable-night-nodpi"):
             for name in ("luoshu_launch_backdrop.webp", "luoshu_launch_backdrop_blur.webp", "luoshu_launch_card.webp",
-                         "luoshu_launch_grain.png", "luoshu_splash_orb.webp"):
+                         "luoshu_launch_card_shadow.webp", "luoshu_splash_orb.webp"):
                 path = MAIN / "res" / folder / name
                 self.assertTrue(path.is_file(), path)
-                self.assertLess(path.stat().st_size, 200_000, path)
+                total += path.stat().st_size
+        grain = MAIN / "res/drawable-nodpi/luoshu_launch_grain.png"
+        self.assertTrue(grain.is_file())
+        self.assertFalse((MAIN / "res/drawable-night-nodpi/luoshu_launch_grain.png").exists())
+        # Module ZIP budget (scripts/build.sh MAX_ZIP_BYTES): keep launch bitmaps small.
+        self.assertLess(total + grain.stat().st_size, 230_000)
         # The launcher icon is not part of the launch redesign.
         self.assertTrue((MAIN / "res/mipmap-xxxhdpi/ic_luoshu.webp").is_file())
         manifest = (MAIN / "AndroidManifest.xml").read_text()
