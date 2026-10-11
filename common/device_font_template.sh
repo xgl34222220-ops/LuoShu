@@ -14,6 +14,7 @@ KEY="$MODDIR/config/device-font-template.key"
 STATE="$MODDIR/config/device-font-template.state"
 PENDING="$MODDIR/config/device-font-template-pending.conf"
 XML_SOURCE_ROOT="$MODDIR/config/device-font-template-source"
+XML_LINKS="$MODDIR/config/device-font-xml-links.conf"
 LOG="$MODDIR/logs/device-font-template.log"
 LOCK="$MODDIR/.device-font-template.lock"
 CAPTURE_REVISION=2
@@ -73,7 +74,60 @@ collect_xml() {
     done
     [ -f /data/fonts/config/config.xml ] && printf '%s\n' /data/fonts/config/config.xml >> "$_dft_out"
     awk 'NF && !seen[$0]++' "$_dft_out" > "$_dft_out.unique" 2>/dev/null && mv -f "$_dft_out.unique" "$_dft_out"
+    collect_hyperos_seed_xml "$_dft_out.hyperos" || true
     [ -s "$_dft_out" ]
+}
+
+# HyperOS/MIUI seed XML (same names as font_inventory_scan.py::XML_PATTERNS).
+# init copies these to /data/system/fonts/theme_webview/ at post-fs-data and the
+# framework switches between hyper_* and miui_*. They are recorded and frozen
+# with the stock snapshot, but deliberately NOT passed to the slot template:
+# only the experimental, default-off hyperos_source_xml step rewrites them.
+collect_hyperos_seed_xml() {
+    _dft_seed_out="$1"
+    : > "$_dft_seed_out" || return 1
+    for _dft_base in ${LUOSHU_HYPEROS_SEED_ETC_ROOT:-} /system_ext/etc /system/system_ext/etc; do
+        [ -d "$_dft_base" ] || continue
+        find "$_dft_base" -maxdepth 1 -type f \( \
+            -name 'hyper_fonts*.xml' -o -name 'hyper_font_fallback*.xml' -o \
+            -name 'miui_fonts*.xml' -o -name 'miui_font_fallback*.xml' \
+        \) -print 2>/dev/null >> "$_dft_seed_out"
+        break
+    done
+    [ -s "$_dft_seed_out" ]
+}
+
+# One line per XML: path|kind|link|resolved|dataSeeded. /system/etc/fonts.xml is a
+# symlink to /data/system/fonts/theme_webview/ on HyperOS 2+, which find -type f
+# above never reports.
+record_xml_links() {
+    _dft_links_out="$1"
+    _dft_links_seeds="$2"
+    _dft_links_tmp="${_dft_links_out}.tmp.$$"
+    : > "$_dft_links_tmp" 2>/dev/null || return 1
+    {
+        printf '%s\n' "${LUOSHU_HYPEROS_SYSTEM_ETC_ROOT:-/system/etc}/fonts.xml" \
+            "${LUOSHU_HYPEROS_SYSTEM_ETC_ROOT:-/system/etc}/font_fallback.xml"
+        [ -s "$_dft_links_seeds" ] && cat "$_dft_links_seeds"
+    } | while IFS= read -r _dft_link_path; do
+        [ -n "$_dft_link_path" ] || continue
+        _dft_link_kind=missing
+        _dft_link_hop=''
+        _dft_link_real=''
+        if [ -L "$_dft_link_path" ]; then
+            _dft_link_kind=symlink
+            _dft_link_hop=$(readlink "$_dft_link_path" 2>/dev/null)
+            _dft_link_real=$(readlink -f "$_dft_link_path" 2>/dev/null)
+        elif [ -f "$_dft_link_path" ]; then
+            _dft_link_kind=file
+            _dft_link_real="$_dft_link_path"
+        fi
+        _dft_link_data=0
+        case "${_dft_link_real:-$_dft_link_hop}" in /data/system/fonts/theme_webview/*) _dft_link_data=1 ;; esac
+        printf '%s|%s|%s|%s|%s\n' "$_dft_link_path" "$_dft_link_kind" "$_dft_link_hop" "$_dft_link_real" "$_dft_link_data"
+    done >> "$_dft_links_tmp"
+    mv -f "$_dft_links_tmp" "$_dft_links_out" 2>/dev/null || { rm -f "$_dft_links_tmp"; return 1; }
+    chmod 0600 "$_dft_links_out" 2>/dev/null || true
 }
 
 source_key() {
@@ -183,7 +237,7 @@ capture_template() {
 
     _dft_xml_list="$MODDIR/config/.device-font-xml.$$"
     collect_xml "$_dft_xml_list" || {
-        rm -f "$_dft_xml_list" 2>/dev/null || true
+        rm -f "$_dft_xml_list" "$_dft_xml_list.hyperos" 2>/dev/null || true
         log_template '没有找到可读取的系统字体 XML'
         return 1
     }
@@ -203,6 +257,18 @@ capture_template() {
         cp -f "$_dft_xml" "$_dft_xml_source_stage/$_dft_xml_relative" 2>/dev/null || return 1
         chmod 0600 "$_dft_xml_source_stage/$_dft_xml_relative" 2>/dev/null || true
     done < "$_dft_xml_list"
+    # Freeze stock HyperOS seeds next to the template snapshot (not template input).
+    if [ -s "$_dft_xml_list.hyperos" ]; then
+        while IFS= read -r _dft_xml; do
+            [ -f "$_dft_xml" ] || continue
+            case "$_dft_xml" in /system/system_ext/etc/*) _dft_xml_relative="system_ext/etc/${_dft_xml##*/}" ;; *) _dft_xml_relative=${_dft_xml#/} ;; esac
+            mkdir -p "$_dft_xml_source_stage/${_dft_xml_relative%/*}" 2>/dev/null || continue
+            cp -f "$_dft_xml" "$_dft_xml_source_stage/$_dft_xml_relative" 2>/dev/null || continue
+            chmod 0600 "$_dft_xml_source_stage/$_dft_xml_relative" 2>/dev/null || true
+        done < "$_dft_xml_list.hyperos"
+    fi
+    record_xml_links "$XML_LINKS" "$_dft_xml_list.hyperos" || true
+    rm -f "$_dft_xml_list.hyperos" 2>/dev/null || true
 
     set -- --output "$OUT.tmp" --fingerprint "$_dft_rom" --capture-revision "$CAPTURE_REVISION" \
         --xml-source-root "$XML_SOURCE_ROOT"
@@ -271,7 +337,15 @@ case "${1:-ensure}" in
     invalidate)
         rm -f "$STATE" "$PENDING" 2>/dev/null || true
         ;;
+    links)
+        _dft_seed_list="${TMPDIR:-/data/local/tmp}/.luoshu-seed.$$"
+        collect_hyperos_seed_xml "$_dft_seed_list" >/dev/null 2>&1 || true
+        record_xml_links "$XML_LINKS" "$_dft_seed_list"
+        _dft_rc=$?
+        rm -f "$_dft_seed_list" 2>/dev/null || true
+        [ "$_dft_rc" -eq 0 ] && cat "$XML_LINKS"
+        ;;
     path) printf '%s\n' "$OUT" ;;
     key) cat "$KEY" 2>/dev/null ;;
-    *) echo "Usage: $0 {ensure|refresh|trusted|status|invalidate|path|key}" >&2; exit 2 ;;
+    *) echo "Usage: $0 {ensure|refresh|trusted|status|invalidate|links|path|key}" >&2; exit 2 ;;
 esac

@@ -16,8 +16,11 @@ _luoshu_font_config_emit_partition() {
     done
 }
 
+# HyperOS/MIUI seed names mirror font_inventory_scan.py::XML_PATTERNS. The
+# *font*.xml discovery below already found them when present; listing them keeps
+# the three name sources aligned (scripts/hyperos_source_xml_test.py checks it).
 _luoshu_font_config_xml_names() {
-    printf '%s\n' 'fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml mi_fonts_customization.xml oplus_fonts_customization.xml oplus_font_customization.xml oppo_fonts_customization.xml coloros_fonts_customization.xml vivo_fonts.xml vivo_fonts_customization.xml vivo_font_customization.xml origin_fonts.xml originos_fonts.xml iqoo_fonts.xml flyme_fonts.xml flyme_fonts_customization.xml flyme_font_customization.xml meizu_fonts.xml meizu_fonts_customization.xml mz_fonts.xml fonts_vendor.xml fonts_overlay.xml'
+    printf '%s\n' 'fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml mi_fonts_customization.xml oplus_fonts_customization.xml oplus_font_customization.xml oppo_fonts_customization.xml coloros_fonts_customization.xml vivo_fonts.xml vivo_fonts_customization.xml vivo_font_customization.xml origin_fonts.xml originos_fonts.xml iqoo_fonts.xml flyme_fonts.xml flyme_fonts_customization.xml flyme_font_customization.xml meizu_fonts.xml meizu_fonts_customization.xml mz_fonts.xml fonts_vendor.xml fonts_overlay.xml hyper_fonts.xml hyper_font_fallback.xml miui_fonts.xml miui_font_fallback.xml'
 }
 
 _luoshu_font_config_resolve_etc() {

@@ -318,6 +318,7 @@ python3 "$ROOT/scripts/device_font_slot_build_test.py" --font "$FONT_INVENTORY_T
 python3 "$ROOT/scripts/device_font_payload_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/clock_glyph_gate_test.py"
 python3 "$ROOT/scripts/device_font_payload_overlay_test.py"
+python3 "$ROOT/scripts/hyperos_source_xml_test.py"
 python3 "$ROOT/scripts/device_font_payload_verify_test.py"
 python3 "$ROOT/scripts/device_font_load_verify_test.py"
 python3 "$ROOT/scripts/device_font_xml_parity_test.py"

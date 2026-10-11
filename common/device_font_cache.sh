@@ -95,6 +95,11 @@ _dfcache_source_key() {
     [ -n "$_dfc_files" ] || return 1
     {
         printf 'source-contract-v5-content\n'
+        # Experimental HyperOS seed-XML rewrite changes the rendered overlay, so a
+        # cache built with it off must not be reused with it on. Flag off adds
+        # nothing, keeping existing cache identities unchanged.
+        grep -qx 'enabled=1' "$_dfc_module/config/hyperos_source_xml.conf" 2>/dev/null && \
+            printf 'hyperos-source-xml-v1\n'
         while IFS= read -r _dfc_file; do
             [ -f "$_dfc_file" ] || continue
             _dfc_digest=$(_dfcache_file_digest "$_dfc_file") || exit 1
