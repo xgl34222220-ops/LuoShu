@@ -8,6 +8,8 @@ from pathlib import Path
 
 from fontTools.ttLib import TTCollection, TTFont
 
+import font_role_check
+
 LATIN_BASIC = [*range(ord('A'), ord('Z') + 1), *range(ord('a'), ord('z') + 1)]
 DIGIT = list(range(ord('0'), ord('9') + 1))
 PUNCTUATION_TEXT = '，。！？；：、（）【】《》“”‘’…—,.!?;:()[]{}<>+-=*/_%@#&'
@@ -89,6 +91,13 @@ def recommendation(groups: dict[str, dict[str, int | float]]) -> str:
     return '建议仅在组合模式中使用'
 
 
+def clock_report(path: Path, face: int) -> dict[str, object]:
+    try:
+        return font_role_check.inspect_clock(path, face)
+    except Exception as error:
+        return {'error': str(error) or error.__class__.__name__}
+
+
 def inspect(path: Path) -> dict[str, object]:
     cmap, face, faces = load_best_cmap(path)
     groups = {
@@ -128,6 +137,7 @@ def inspect(path: Path) -> dict[str, object]:
             'missingSample': common_missing,
             'missingByGroup': missing_by_group,
             'recommendation': recommendation(groups),
+            'clock': clock_report(path, face),
         },
     }
 
