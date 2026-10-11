@@ -19,6 +19,7 @@ import time
 import unittest
 
 import fontTools
+from fontTools.fontBuilder import FontBuilder
 from fontTools.ttLib import TTFont, TTCollection
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
@@ -41,6 +42,28 @@ def ink(path, char='A'):
     with TTFont(path, recalcTimestamp=False) as font:
         glyph = font['glyf'][font.getBestCmap()[ord(char)]]
         return (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax)
+
+
+def stock_face(path, index):
+    """Original wide-frame stock face: only the collection frame/metrics matter."""
+    points = sorted(set(range(32, 256)) | set(map(ord, "中文字体系统默认洛书汉字国一的。")))
+    cmap = {cp: f"s{index}u{cp:X}" for cp in points}
+    order = [".notdef", *cmap.values()]
+    glyphs = {}
+    for name in order:
+        pen = TTGlyphPen(None)
+        pen.moveTo((-200, -300)); pen.lineTo((1200, -300))
+        pen.lineTo((1200, 1000)); pen.lineTo((-200, 1000)); pen.closePath()
+        glyphs[name] = pen.glyph()
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder(order); builder.setupCharacterMap(cmap)
+    builder.setupGlyf(glyphs)
+    builder.setupHorizontalMetrics({name: (1000, -200) for name in order})
+    builder.setupHorizontalHeader(ascent=1000, descent=-300)
+    builder.setupOS2(sTypoAscender=1000, sTypoDescender=-300, usWinAscent=1000, usWinDescent=300)
+    builder.setupNameTable({"familyName": f"StockFixture{index}", "styleName": "Regular"})
+    builder.setupPost(); builder.setupMaxp()
+    builder.save(path)
 
 
 class FixedCompositeCacheIdentity(unittest.TestCase):
@@ -101,6 +124,20 @@ if [ "${FIXED_HOLD:-0}" = 1 ]; then printf '%s\\n' "$$" > "$FIXED_HOLD_READY"; e
             self.sources.append(path)
         self.scope_tmp = self.root / 'direct-owned-temp'
         self.scope_tmp.mkdir()
+        # A composite request compiles NotoSansCJK-Regular.ttc against the
+        # device's own collection; give host router runs an original stock one.
+        stock_root = self.root / 'stock-root'
+        stock = stock_root / 'system/fonts/NotoSansCJK-Regular.ttc'
+        stock.parent.mkdir(parents=True)
+        collection = TTCollection(); collection.fonts = []
+        for index in range(2):
+            face = self.root / f'stock-face-{index}.ttf'
+            stock_face(face, index)
+            collection.fonts.append(TTFont(face))
+        try:
+            collection.save(stock)
+        finally:
+            collection.close()
         self.env = {**os.environ, 'MODDIR': str(self.module), 'LUOSHU_REAL_MODDIR': str(self.module),
                     'LUOSHU_PUBLIC_DIR': str(self.public), 'LUOSHU_TASK_SCOPE_TMPDIR': str(self.scope_tmp),
                     'LUOSHU_TASK_SCOPE_PYTHON': sys.executable, 'LUOSHU_RUNTIME_PATHS_PYTHON': sys.executable,
@@ -108,7 +145,8 @@ if [ "${FIXED_HOLD:-0}" = 1 ]; then printf '%s\\n' "$$" > "$FIXED_HOLD_READY"; e
                     'FIXED_GENERATOR_CALLS': str(self.calls), 'FIXED_VALIDATOR_CALLS': str(self.validations),
                     'FIXED_INK_CHECKS': str(self.ink_checks),
                     'FIXED_HOLD_READY': str(self.ready), 'PYTHONDONTWRITEBYTECODE': '1',
-                    'LUOSHU_MIX_TASK_TIMEOUT': '15', 'LUOSHU_MIX_MONITOR_TIMEOUT': '20'}
+                    'LUOSHU_MIX_TASK_TIMEOUT': '15', 'LUOSHU_MIX_MONITOR_TIMEOUT': '20',
+                    'LUOSHU_COLLECTION_STOCK_ROOT': str(stock_root)}
         self.cache = self.module / '.luoshu-state/cache/full-composite-v7'
         definitions = (common / 'legacy_v14_4/font_mix_engine.sh').read_text().split('case "${1:-status}" in', 1)[0]
         (common / 'fixed-definitions.sh').write_text(definitions)
