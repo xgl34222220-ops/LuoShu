@@ -59,12 +59,13 @@
 - 中文、英文和数字角色缺失时，在任务入队前直接拒绝；
 - 模块内 App 与独立正式 APK 使用相同签名和字节内容。
 
-## 单层启动视觉回归（2026-10-07）
+## 弥散渐变 + 玻璃拟态启动（2026-10-11，替代 2026-10-07 单层方案）
 
-- Android 12+ 的最早系统 Splash 只支持不透明单色背景与中央图标；不以图片塞进背景、不添加第二品牌页或人为停留。系统底色取接近真实 App 弥散背景的中间色，静态玻璃徽标保留蓝金九宫与飘带。
-- 第一帧由 App 控制的 Window 与真实首页继续共用 `LuoShuGlassBackdropDrawable` 全屏弥散渐变。启动图标资源调整不改变此 Drawable、首页配色、退出时序、前台维护或 Root 操作。
-- `python3 scripts/android_launch_source_test.py` 校验单页接线、无额外动画/等待、平台安全圆、亮暗资源完整性及徽标基础对比度。SVG/Inkscape 源资源合成图仅用于静态设计审查，不充当 Android 截图或性能通过证据。
-- 真实冷启动仍需分别观察亮/暗系统屏、系统条文字、首内容帧、退场、重复冷启动及崩溃/ANR；一次静态资源调整不代表手机启动速度或 Google 字体复发已解决。
+- Android 12+ 系统 Splash 仍按平台规则只用不透明单色底（取弥散背景中心色 `launch_background`）＋中央静态玻璃球图标（内含同色弥散与原图标画面，`design/launch/build_launch_assets.py` 生成）。系统 Splash 以默认退出尽早露出原生准备帧＝启动壳第一帧（全屏弥散＋玻璃卡片＋「洛书」字标），无自定义退出监听、无 core-splashscreen。
+- Android 9–11：启动窗口 `luoshu_launch_window`（全屏弥散位图＋颗粒＋首帧尺寸玻璃卡片），随后同一 Compose 启动壳。
+- 启动壳 `LuoShuLaunchShell` 叠在已组合完成的真实首页之上（同一帧），色块缓慢漂移、玻璃上一次性高光扫过、卡片轻微落定，约 1.35 s 内淡出到首页；首帧交付、权限请求、模糊初始化均不等待它。系统动画缩放为 0 时静态显示并在首帧提交后立即移除。仅冷启动（非恢复、非任务入口）。
+- `python3 scripts/android_launch_source_test.py` 校验接线、冷启动限定、不阻塞就绪、几何常量与生成脚本一致、亮暗资源、Splash 色与背景中心一致、字标对比度。`scripts/android_startup_visual.py` 逐帧识别：原生 Logo → Splash 溶解（混合拟合）→ 启动壳（字标裁剪＋低分辨率弥散场，容忍漂移）→ 首页交叉淡化 → 首页；启动壳回到首页之后、暖启动出现、黑帧和未识别帧均失败。
+- 真实冷启动仍需分别观察亮/暗系统屏、Splash→启动壳衔接、淡出到首页、重复冷启动及崩溃/ANR。
 
 平台边界依据：[Android Splash screens](https://developer.android.com/develop/ui/views/launch/splash-screen)。
 

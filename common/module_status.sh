@@ -53,7 +53,46 @@ if [ "$ACTIVE" != default ]; then
     fi
 fi
 
+# System OTA: compare the ROM build with the one recorded at the last successful
+# apply and, when it changed, request the existing stock rescan/validation.
+if [ -f "$MODDIR/common/system_ota_guard.sh" ]; then
+    . "$MODDIR/common/system_ota_guard.sh"
+    luoshu_system_ota_check "$MODDIR" "$ACTIVE" \
+        "$(sed -n 's/^state=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)" || true
+fi
+
 DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
+
+# KernelSU: publish the status through the documented module config key
+# override.description (https://kernelsu.org/guide/module-config.html) instead
+# of rewriting module.prop. Magisk/APatch, or a ksud without module config,
+# keep the module.prop path below unchanged.
+# KSU=true is only exported to module scripts (service.sh). In-app font
+# switches run this script through su (font_switch_task.sh) without it, so
+# KernelSU is also recognised by /data/adb/ksu; otherwise the boot-time
+# override would keep showing the previous font after a switch.
+luoshu_status_ksud() {
+    _lsk_adb="${LUOSHU_ADB_DIR:-/data/adb}"
+    [ "${KSU:-}" = true ] || [ -d "$_lsk_adb/ksu" ] || return 1
+    [ -z "${APATCH:-}" ] && [ ! -d "$_lsk_adb/ap" ] && [ ! -d "$_lsk_adb/apatch" ] || return 1
+    for _lsk in "${LUOSHU_KSUD:-}" "$_lsk_adb/ksud" "$(command -v ksud 2>/dev/null)"; do
+        [ -n "$_lsk" ] && [ -x "$_lsk" ] || continue
+        KSU_MODULE="$KSU_ID" "$_lsk" module config list >/dev/null 2>&1 || return 1
+        printf '%s\n' "$_lsk"
+        return 0
+    done
+    return 1
+}
+KSU_ID="${KSU_MODULE:-$(sed -n 's/^id=//p' "$PROP" 2>/dev/null | head -n1 | tr -d '\r\n')}"
+[ -n "$KSU_ID" ] || KSU_ID=LuoShu
+if KSUD=$(luoshu_status_ksud); then
+    if [ "$(KSU_MODULE="$KSU_ID" "$KSUD" module config get override.description 2>/dev/null)" = "$DESCRIPTION" ] || \
+       KSU_MODULE="$KSU_ID" "$KSUD" module config set override.description "$DESCRIPTION" >/dev/null 2>&1; then
+        printf '%s\n' "$DESCRIPTION"
+        exit 0
+    fi
+fi
+
 [ -f "$PROP" ] || exit 0
 # Unchanged status: do not rewrite module.prop (avoids a flash write and a
 # root-manager module rescan on every boot).

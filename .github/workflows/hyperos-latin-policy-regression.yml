@@ -7,6 +7,8 @@ on:
       - common/legacy_v14_4/hyperos_full_coverage.sh
       - common/font_inventory_scan.py
       - scripts/hyperos_latin_policy_regression_test.py
+      - common/hyperos_webview_route.sh
+      - scripts/hyperos_webview_route_test.py
       - .github/workflows/hyperos-latin-policy-regression.yml
   workflow_dispatch:
 permissions:
@@ -19,8 +21,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install font test dependency
+        run: python3 -m pip install --disable-pip-version-check 'fonttools>=4.50,<5'
       - name: Compile source and run focused policy regressions
         run: |
           sh -n common/legacy_v14_4/hyperos_full_coverage.sh
-          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py scripts/hyperos_latin_policy_regression_test.py
+          sh -n common/hyperos_webview_route.sh
+          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py
           python3 scripts/hyperos_latin_policy_regression_test.py
+          python3 scripts/hyperos_webview_route_test.py
