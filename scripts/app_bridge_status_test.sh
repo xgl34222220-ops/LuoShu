@@ -138,6 +138,23 @@ assert_enabled false false
 mv "$MODULE/kept-module.prop" "$MODULE/module.prop"
 assert_enabled true true
 
+# App refresh reports other font modules and FontLoader as separate fields.
+cp "$ROOT/common/foreign_font_modules.sh" "$MODULE/common/"
+FAKE_MODULES="$TMP/adb-modules"
+mkdir -p "$FAKE_MODULES/otherfont/system/fonts" "$FAKE_MODULES/fontloader/zygisk"
+printf 'id=otherfont\nname=Other "Font"\n' > "$FAKE_MODULES/otherfont/module.prop"
+printf 'x' > "$FAKE_MODULES/otherfont/system/fonts/A.ttf"
+printf 'id=fontloader\nname=FontLoader\n' > "$FAKE_MODULES/fontloader/module.prop"
+printf 'x' > "$FAKE_MODULES/fontloader/zygisk/arm64-v8a.so"
+LUOSHU_MODULES_ROOT="$FAKE_MODULES" MODDIR="$MODULE" sh "$MODULE/common/app_bridge.sh" status \
+    2>>"$TMP/request-cleanup.stderr" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)["data"]
+assert data["foreignFontModules"] == "otherfont", data
+assert data["foreignFontModuleNames"] == "otherfont:Other \"Font\"", data
+assert data["fontLoaderPresent"] is True, data
+'
+
 [ "$(readlink "$CONFIG")" = '.luoshu-state/config' ]
 "$HOST_PYTHON" - "$MODULE/.luoshu-state/tasks" <<'PY'
 import json
@@ -146,7 +163,7 @@ import sys
 
 tasks = Path(sys.argv[1])
 proofs = list(tasks.glob('request-*.pid.cleanup.json'))
-assert len(proofs) == 25, proofs
+assert len(proofs) == 26, proofs
 for path in proofs:
     proof = json.loads(path.read_text())
     assert proof['cleaned'] and not proof['leftoverPids'] and proof['result'] == 0, proof

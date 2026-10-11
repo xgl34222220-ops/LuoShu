@@ -149,6 +149,8 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
                 mountEngine="${'$'}(luoshu_detect_mount_engine 2>/dev/null)"
             fi
         fi
+        foreignFontModules="${'$'}(read_value "${'$'}CFG/foreign-font-modules.conf" foreignFontModules)"
+        fontLoaderPresent="${'$'}(read_value "${'$'}CFG/foreign-font-modules.conf" fontLoaderPresent)"
         warningCount="${'$'}(tail -n 500 "${'$'}LOG" 2>/dev/null | grep -Eic 'warn|警告' 2>/dev/null)"
         errorCount="${'$'}(tail -n 500 "${'$'}LOG" 2>/dev/null | grep -Eic '(^|[^A-Za-z])(errors?|failed)([^A-Za-z]|$)|失败|错误' 2>/dev/null)"
         [ -n "${'$'}warningCount" ] || warningCount=0
@@ -191,6 +193,8 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'cachePending=%s\n' "${'$'}cachePending"
             printf 'rootManager=%s\n' "${'$'}rootManager"
             printf 'mountEngine=%s\n' "${'$'}mountEngine"
+            printf 'foreignFontModules=%s\n' "${'$'}{foreignFontModules:-none}"
+            printf 'fontLoaderPresent=%s\n' "${'$'}{fontLoaderPresent:-unknown}"
             printf 'androidSdk=%s\n' "${'$'}(getprop ro.build.version.sdk 2>/dev/null)"
             printf 'recentWarningCount=%s\n' "${'$'}warningCount"
             printf 'recentErrorCount=%s\n' "${'$'}errorCount"
