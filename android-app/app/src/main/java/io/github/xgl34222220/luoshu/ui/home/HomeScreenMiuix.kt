@@ -228,6 +228,30 @@ internal fun HomeScreenMiuix(
                 }
             }
         }
+        if (state.foreignFontModules.isNotEmpty()) {
+            item(key = "foreign-font-modules") {
+                Surface(
+                    color = cardColor,
+                    shape = shape,
+                    border = BorderStroke(1.dp, tokens.warning.copy(alpha = .28f)),
+                    shadowElevation = tokens.cardShadowElevation,
+                    modifier = Modifier.fillMaxWidth().luoShuGlassHighlight(shape),
+                ) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            LuoShuGlyph(Icons.Rounded.Warning, null, LuoShuIconTokens.StatusGlyph, tint = tokens.warning)
+                            Text(foreignFontWarningTitle(state.foreignFontModules.size),
+                                modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                                color = textPrimary)
+                        }
+                        Text(state.foreignFontModules.joinToString("、") { it.label },
+                            color = textPrimary, style = MaterialTheme.typography.bodySmall)
+                        Text(foreignFontWarningHint(state.fontLoaderPresent),
+                            color = textSecondary, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
         item(key = "font-actions") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 LuoShuSectionHeading("我的字体", "从挑选到组合，让每一处文字更合心意")

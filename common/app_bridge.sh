@@ -230,14 +230,24 @@ status_json() {
         case "$_font_effect_state" in system|verified) _activation=boot-verified ;; *) _activation=unverified ;; esac
     fi
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"enabled":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"liveApplied":%s,"activation":"%s","rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    # App refresh rescans other root modules for font payloads (read-only).
+    _foreign_file="$MODDIR/config/foreign-font-modules.conf"
+    [ -f "$MODDIR/common/foreign_font_modules.sh" ] && \
+        MODDIR="$MODDIR" sh "$MODDIR/common/foreign_font_modules.sh" scan >/dev/null 2>&1 || true
+    _foreign_ids="$(read_prop "$_foreign_file" foreignFontModules)"
+    _foreign_names="$(read_prop "$_foreign_file" foreignFontModuleNames)"
+    _font_loader=false
+    [ "$(read_prop "$_foreign_file" fontLoaderPresent)" = yes ] && _font_loader=true
+
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"enabled":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"liveApplied":%s,"activation":"%s","rootManager":"%s","mountEngine":"%s","moduleDir":"%s","foreignFontModules":"%s","foreignFontModuleNames":"%s","fontLoaderPresent":%s}}\n' \
         "$_installed" "$_enabled" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
         "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
         "$(json_escape "$_verification_state")" "$(json_escape "$_verification_mode")" \
         "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" "$(json_escape "$_mount_failed")" \
         "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
         "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" "$_live_applied" "$_activation" \
-        "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"
+        "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")" \
+        "$(json_escape "$_foreign_ids")" "$(json_escape "$_foreign_names")" "$_font_loader"
 }
 
 manager_ready() {

@@ -20,6 +20,8 @@ data class HomeUiState(
     val taskProgress: Int = 0,
     val rebootRequired: Boolean = false,
     val liveApplied: Boolean = false,
+    val foreignFontModules: List<ForeignFontModule> = emptyList(),
+    val fontLoaderPresent: Boolean = false,
     val error: String = "",
 )
 
@@ -68,6 +70,12 @@ internal fun ModuleSnapshot.toHomeUiState(): HomeUiState {
         taskProgress = taskProgress,
         rebootRequired = verifiedConnection && rebootRequired,
         liveApplied = verifiedConnection && liveApplied,
+        foreignFontModules = if (verifiedConnection && installed) {
+            parseForeignFontModules(foreignFontModules, foreignFontModuleNames)
+        } else {
+            emptyList()
+        },
+        fontLoaderPresent = verifiedConnection && installed && fontLoaderPresent,
         error = error,
     )
 }
