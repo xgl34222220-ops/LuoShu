@@ -46,6 +46,9 @@ case "$3" in
 esac
 EOF
 chmod 0755 "$BIN/getprop" "$BIN/ksud"
+ADB="$TMP/adb"
+mkdir -p "$ADB"
+export LUOSHU_ADB_DIR="$ADB"
 export PATH="$BIN:$PATH" FIXTURE_KSU_CONFIG="$KSUCFG" FIXTURE_FP=brand/dev:16/A1/100:user/release-keys FIXTURE_INC=100
 unset KSU APATCH KSU_MODULE LUOSHU_KSUD 2>/dev/null || true
 
@@ -62,6 +65,20 @@ KSU=true KSU_MODULE=LuoShu LUOSHU_KSUD="$BIN/ksud" status
 # KSU_MODULE absent (e.g. manual run): module id comes from module.prop.
 KSU=true LUOSHU_KSUD="$BIN/ksud" status Other
 override | grep -q '当前字体：Other' || fail 'override not set without KSU_MODULE'
+
+# In-app switch (font_switch_task.sh via su): no KSU env, KernelSU found by
+# /data/adb/ksu, so the override follows the new font and module.prop stays.
+mkdir -p "$ADB/ksu"
+LUOSHU_KSUD="$BIN/ksud" status Switched
+override | grep -q '当前字体：Switched' || fail 'in-app switch on KernelSU left override stale'
+[ "$(cat "$MOD/module.prop")" = "$PROP_TEXT" ] || fail 'in-app switch on KernelSU rewrote module.prop'
+# APatch (its /data/adb/ap dir present) keeps the module.prop path.
+mkdir -p "$ADB/ap"
+LUOSHU_KSUD="$BIN/ksud" status ApApp
+override | grep -q 'ApApp' && fail 'APatch dir still used KernelSU override'
+grep -q '当前字体：ApApp' "$MOD/module.prop" || fail 'APatch dir did not write module.prop'
+rm -rf "$ADB/ksu" "$ADB/ap"
+printf '%s\n' "$PROP_TEXT" > "$MOD/module.prop"
 
 # 2. ksud without module config -> unchanged module.prop behavior.
 FIXTURE_KSUD_NO_CONFIG=1 KSU=true KSU_MODULE=LuoShu LUOSHU_KSUD="$BIN/ksud" status

@@ -67,10 +67,15 @@ DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
 # override.description (https://kernelsu.org/guide/module-config.html) instead
 # of rewriting module.prop. Magisk/APatch, or a ksud without module config,
 # keep the module.prop path below unchanged.
+# KSU=true is only exported to module scripts (service.sh). In-app font
+# switches run this script through su (font_switch_task.sh) without it, so
+# KernelSU is also recognised by /data/adb/ksu; otherwise the boot-time
+# override would keep showing the previous font after a switch.
 luoshu_status_ksud() {
-    [ "${KSU:-}" = true ] || return 1
-    [ -z "${APATCH:-}" ] && [ ! -d /data/adb/ap ] && [ ! -d /data/adb/apatch ] || return 1
-    for _lsk in "${LUOSHU_KSUD:-}" /data/adb/ksud "$(command -v ksud 2>/dev/null)"; do
+    _lsk_adb="${LUOSHU_ADB_DIR:-/data/adb}"
+    [ "${KSU:-}" = true ] || [ -d "$_lsk_adb/ksu" ] || return 1
+    [ -z "${APATCH:-}" ] && [ ! -d "$_lsk_adb/ap" ] && [ ! -d "$_lsk_adb/apatch" ] || return 1
+    for _lsk in "${LUOSHU_KSUD:-}" "$_lsk_adb/ksud" "$(command -v ksud 2>/dev/null)"; do
         [ -n "$_lsk" ] && [ -x "$_lsk" ] || continue
         KSU_MODULE="$KSU_ID" "$_lsk" module config list >/dev/null 2>&1 || return 1
         printf '%s\n' "$_lsk"
