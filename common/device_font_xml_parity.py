@@ -9,7 +9,11 @@ Different renderers read different configuration files:
   `/product/etc/fonts_customization.xml`.
 
 This helper compares the first font chosen for `sans-serif` and `zh-Hans` in each
-view and reports `xmlParity=ok|mismatch:<detail>|unknown:<reason>`.  It also lists
+view and reports `xmlParity=ok|mismatch:<detail>|unknown:<reason>`.  Names are not
+enough: each chosen file is also resolved to its identity (`stat -L` dev:ino, sha256
+fallback for overlay views) so two same-named files that are different inodes report
+`identity:`, and a slot LuoShu replaced that still resolves to a non-LuoShu inode
+reports `stock-inode:` instead of `ok`.  It also lists
 FontManagerService updatable fonts under `/data/fonts/files` (PostScript name and
 fontRevision when FontTools is available) and marks
 `shadowedByUpdatableFont=<names>` when one carries the same PostScript name as a slot
@@ -44,15 +48,24 @@ def _font_key(path: str, index: int = 0) -> str:
     return f"{name}#{index}" if index else name
 
 
-def _pick(fonts: list[dict[str, Any]]) -> str:
+def _pick_font(fonts: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Prefer the regular upright face; otherwise the first listed font."""
     if not fonts:
-        return ""
+        return None
     for font in fonts:
         if font.get("weight") == 400 and not font.get("italic"):
-            return _font_key(font["path"], font.get("index", 0))
-    first = fonts[0]
-    return _font_key(first["path"], first.get("index", 0))
+            return font
+    return fonts[0]
+
+
+def _pick(fonts: list[dict[str, Any]]) -> str:
+    font = _pick_font(fonts)
+    return _font_key(font["path"], font.get("index", 0)) if font else ""
+
+
+def _pick_path(fonts: list[dict[str, Any]]) -> str:
+    font = _pick_font(fonts)
+    return str(font["path"]) if font else ""
 
 
 # ---------------------------------------------------------------- cmd font dump
@@ -113,6 +126,7 @@ def parse_font_dump(text: str) -> dict[str, Any]:
     return {
         "sans-serif": _pick(named.get("sans-serif", [])),
         "zh-Hans": _pick(zh_hans),
+        "paths": {"sans-serif": _pick_path(named.get("sans-serif", [])), "zh-Hans": _pick_path(zh_hans)},
         "updatedFrom": updated_from,
         "available": bool(named or zh_hans),
     }
@@ -213,6 +227,7 @@ def parse_font_xml(root: ET.Element | None, font_dir: str = "/system/fonts") -> 
     return {
         "sans-serif": _pick(named.get("sans-serif", [])),
         "zh-Hans": _pick(zh_hans),
+        "paths": {"sans-serif": _pick_path(named.get("sans-serif", [])), "zh-Hans": _pick_path(zh_hans)},
         "available": True,
     }
 
@@ -223,6 +238,7 @@ def apply_customization(view: dict[str, Any], root: ET.Element | None,
     if root is None or not view.get("available"):
         return view
     result = dict(view)
+    result["paths"] = dict(view.get("paths") or {})
     for element in root.iter():
         if _local(element.tag) != "family":
             continue
@@ -232,15 +248,75 @@ def apply_customization(view: dict[str, Any], root: ET.Element | None,
             continue
         if kind == "new-named-family" and element.get("name") == "sans-serif":
             result["sans-serif"] = _pick(fonts)
+            result["paths"]["sans-serif"] = _pick_path(fonts)
         elif kind == "new-locale-family" and "zh-Hans" in _lang_tags(element):
             operation = (element.get("operation") or "").lower()
             if operation in ("prepend", "replace") or not result.get("zh-Hans"):
                 result["zh-Hans"] = _pick(fonts)
+                result["paths"]["zh-Hans"] = _pick_path(fonts)
     return result
 
 
+class IdentityCheck:
+    """Resolve chosen font paths to file identity and compare with LuoShu payload inodes."""
+
+    def __init__(self, payload: Any, visible_root: str = "/", stat: Any = os.stat) -> None:
+        self.payload = payload
+        self.visible_root = visible_root or "/"
+        self._stat = stat
+
+    def _visible(self, path: str) -> Path:
+        if self.visible_root == "/":
+            return Path(path)
+        return Path(self.visible_root.rstrip("/")) / path.lstrip("/")
+
+    def ident(self, path: str) -> tuple[int, int] | None:
+        if not path:
+            return None
+        try:
+            st = self._stat(str(self._visible(path)))
+        except OSError:
+            return None
+        return (st.st_dev, st.st_ino)
+
+    def label(self, path: str) -> str:
+        identity = self.ident(path)
+        if not identity:
+            return "missing"
+        return f"{os.major(identity[0])}.{os.minor(identity[0])}:{identity[1]}"
+
+    def is_luoshu(self, path: str) -> bool:
+        identity = self.ident(path)
+        if identity is not None and identity in self.payload.ids:
+            return True
+        return self.payload.same_content(path, self._visible(path))
+
+    def stock_inode(self, path: str) -> bool:
+        """LuoShu replaced this slot, the file exists, but it is not a LuoShu inode/content."""
+        if not path or self.payload.slot_for(path) is None or self.ident(path) is None:
+            return False
+        return not self.is_luoshu(path)
+
+
+def _identity_detail(target: str, views: list[tuple[str, dict[str, Any]]], identity: IdentityCheck) -> str:
+    paths = [(key, str((view.get("paths") or {}).get(target) or "")) for key, view in views]
+    stock = [(key, path) for key, path in paths if identity.stock_inode(path)]
+    if stock:
+        body = ",".join(f"{key}={safe_token(os.path.basename(path))}@{identity.label(path)}" for key, path in stock)
+        return f"{target}(stock-inode:{body})"
+    labelled = [(key, path, identity.ident(path)) for key, path in paths if path]
+    ids = {ident for _, _, ident in labelled if ident is not None}
+    if len(ids) > 1:
+        luoshu = {key for key, path, _ in labelled if identity.is_luoshu(path)}
+        if luoshu and len(luoshu) == len(labelled):
+            return ""  # different views of the same LuoShu content (overlay/bind)
+        body = ",".join(f"{key}={identity.label(path)}" for key, path, _ in labelled)
+        return f"{target}(identity:{body})"
+    return ""
+
+
 def compare(font_manager: dict[str, Any], fonts_xml: dict[str, Any],
-            fallback_xml: dict[str, Any]) -> str:
+            fallback_xml: dict[str, Any], identity: IdentityCheck | None = None) -> str:
     if not font_manager.get("available"):
         return "unknown:font-manager-dump-unavailable"
     if not fonts_xml.get("available"):
@@ -254,6 +330,13 @@ def compare(font_manager: dict[str, Any], fonts_xml: dict[str, Any],
         if len(values) > 1:
             body = ",".join(f"{key}={safe_token(value) or 'none'}" for key, value in views)
             details.append(f"{target}({body})")
+        elif identity is not None:
+            named = [("fm", font_manager), ("fontsXml", fonts_xml)]
+            if fallback_xml.get("available"):
+                named.append(("fallbackXml", fallback_xml))
+            detail = _identity_detail(target, named, identity)
+            if detail:
+                details.append(detail)
     return "ok" if not details else "mismatch:" + ";".join(details)
 
 
@@ -391,13 +474,28 @@ def _read_text(path: Path | None) -> str:
         return ""
 
 
+def _identity_check(args: argparse.Namespace) -> IdentityCheck | None:
+    if not args.module:
+        return None
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from device_font_process_audit import PayloadIndex  # type: ignore
+    except Exception:
+        return None
+    payload = PayloadIndex(args.module)
+    if not len(payload):
+        return None
+    return IdentityCheck(payload, args.visible_root)
+
+
 def build_report(args: argparse.Namespace) -> dict[str, str]:
     dump = parse_font_dump(_read_text(args.font_dump))
     fonts_xml = parse_font_xml(_read_xml(args.fonts_xml))
     fallback = parse_font_xml(_read_xml(args.fallback_xml))
     customization_root = _read_xml(args.customization_xml)
     fallback = apply_customization(fallback, customization_root)
-    parity = compare(dump, fonts_xml, fallback)
+    identity = _identity_check(args)
+    parity = compare(dump, fonts_xml, fallback, identity)
 
     tools = _fonttools()
     entries = scan_updatable_fonts(args.data_fonts, tools)
@@ -417,6 +515,8 @@ def build_report(args: argparse.Namespace) -> dict[str, str]:
         "zhHansFontsXml": safe_token(fonts_xml["zh-Hans"]) or "none",
         "zhHansFallbackXml": safe_token(fallback["zh-Hans"]) or ("none" if fallback["available"] else "absent"),
         "fallbackXml": "present" if fallback["available"] else "absent",
+        "identityCheck": ("dev-ino+sha256" if identity is not None else "unavailable"),
+        "payloadFiles": str(len(identity.payload)) if identity is not None else "0",
         "customizationXml": "present" if customization_root is not None else "absent",
         "fontStatus": "available" if status_text.strip() else "unavailable",
         "updatableFontNameSource": "fonttools" if tools is not None else "filename",
