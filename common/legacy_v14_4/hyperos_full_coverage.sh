@@ -109,6 +109,23 @@ _lhcc_names_for_root() {
 luoshu_hyperos_full_payload_ensure() {
     type luoshu_hyperos_clock_payload_ensure >/dev/null 2>&1 || return 0
     luoshu_hyperos_clock_payload_ensure "$@"
+    _hfc_rc=$?
+    _hfc_webview_route_ensure
+    return "$_hfc_rc"
+}
+
+# HyperOS default sans-serif (MiSansVF_Overlay) reads a /data route that early
+# boot seeds with a copy of ROM Roboto. Cover that stock copy before zygote and
+# system_server load the font map; see common/hyperos_webview_route.sh.
+_hfc_webview_route_ensure() {
+    _hfc_module="${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-}}}"
+    [ -n "$_hfc_module" ] && [ -f "$_hfc_module/common/hyperos_webview_route.sh" ] || return 0
+    [ ! -f "$_hfc_module/config/hyperos-webview-route.disable" ] || return 0
+    type _lhcc_is_hyperos >/dev/null 2>&1 && _lhcc_is_hyperos || return 0
+    [ -L "${LUOSHU_WEBVIEW_ROUTE_ALIAS:-/system/fonts/MiSansVF_Overlay.ttf}" ] || return 0
+    ( . "$_hfc_module/common/hyperos_webview_route.sh"
+      luoshu_hyperos_webview_route_ensure ) >/dev/null 2>&1 || true
+    return 0
 }
 
 # Keep the compatibility API used by existing routers, now backed by full discovery.
