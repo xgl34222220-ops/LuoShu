@@ -148,6 +148,23 @@ device_font_runtime_report_collect() {
     else
         cp -f "$_dfr_stage/device-font-manager-dump.txt" "$_dfr_stage/font-manager-dump.txt" 2>/dev/null || true
     fi
+    # Read-only FontManagerService updatable-font evidence (P1-10). Never clears /data/fonts.
+    if command -v cmd >/dev/null 2>&1; then
+        cmd font status > "$_dfr_stage/font-manager-status.txt" 2>&1 || true
+    fi
+    {
+        printf '%s\n' '--- /data/fonts/files (read-only listing) ---'
+        find "${LUOSHU_DATA_FONTS_DIR:-/data/fonts/files}" -type f 2>/dev/null | while IFS= read -r _dfr_font; do
+            printf '%s|%s\n' "$_dfr_font" "$(stat -c '%s' "$_dfr_font" 2>/dev/null || echo unknown)"
+        done
+    } > "$_dfr_stage/data-fonts-files.txt" 2>/dev/null || true
+    _device_font_report_copy "$_dfr_config/device-font-xml-parity.conf" "$_dfr_stage/device-font-xml-parity.conf" || true
+    _dfr_parity=$(sed -n 's/^xmlParity=//p' "$_dfr_config/device-font-xml-parity.conf" 2>/dev/null | head -n1)
+    _dfr_shadow=$(sed -n 's/^shadowedByUpdatableFont=//p' "$_dfr_config/device-font-xml-parity.conf" 2>/dev/null | head -n1)
+    {
+        printf 'xmlParity=%s\n' "${_dfr_parity:-not-collected}"
+        printf 'shadowedByUpdatableFont=%s\n' "${_dfr_shadow:-not-collected}"
+    } >> "$_dfr_stage/summary.txt" 2>/dev/null || true
     grep -E '/data/fonts|/(fonts|font_fallback)\.xml' /proc/self/mountinfo 2>/dev/null \
         > "$_dfr_stage/font-mounts.txt" || true
     {

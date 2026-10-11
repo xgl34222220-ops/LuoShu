@@ -318,6 +318,7 @@ python3 "$ROOT/scripts/device_font_payload_build_test.py" --font "$FONT_INVENTOR
 python3 "$ROOT/scripts/device_font_payload_overlay_test.py"
 python3 "$ROOT/scripts/device_font_payload_verify_test.py"
 python3 "$ROOT/scripts/device_font_load_verify_test.py"
+python3 "$ROOT/scripts/device_font_xml_parity_test.py"
 sh "$ROOT/scripts/device_font_payload_bridge_test.sh"
 sh "$ROOT/scripts/device_font_payload_policy_test.sh"
 sh "$ROOT/scripts/device_font_cache_test.sh"

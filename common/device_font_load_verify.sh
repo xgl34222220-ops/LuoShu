@@ -260,10 +260,71 @@ device_font_load_verify() {
     return 2
 }
 
+# Read-only three-way parity: FontManagerService vs mounted fonts.xml (Chromium/WebView)
+# vs font_fallback.xml (+ OEM fonts_customization.xml), plus /data/fonts updatable-font
+# listing.  Manual deep diagnostics only; never clears /data/fonts or touches mounts.
+_dfload_python_exec() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_pyroot="$_dfload_module_dir/common/python"
+    if [ -x "$_dfload_pyroot/bin/luoshu-python" ]; then
+        PYTHONHOME="$_dfload_pyroot" \
+        PYTHONPATH="$_dfload_module_dir/common:$_dfload_pyroot/lib/python3.14:$_dfload_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_dfload_pyroot/lib:$_dfload_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_dfload_pyroot/bin/luoshu-python" "$@"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 "$@"
+    else
+        return 127
+    fi
+}
+
+device_font_xml_parity() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_conf="$_dfload_module_dir/config/device-font-xml-parity.conf"
+    _dfload_helper="$_dfload_module_dir/common/device_font_xml_parity.py"
+    _dfload_dump="$_dfload_module_dir/config/.xml-parity-dump.$$"
+    _dfload_status="$_dfload_module_dir/config/.xml-parity-status.$$"
+    mkdir -p "$_dfload_module_dir/config" 2>/dev/null || return 1
+    : > "$_dfload_dump" 2>/dev/null || return 1
+    : > "$_dfload_status" 2>/dev/null || true
+    if command -v cmd >/dev/null 2>&1; then
+        cmd font dump > "$_dfload_dump" 2>/dev/null || true
+        cmd font status > "$_dfload_status" 2>/dev/null || true
+    fi
+    if [ -f "$_dfload_helper" ] && _dfload_python_exec "$_dfload_helper" \
+        --font-dump "$_dfload_dump" \
+        --font-status "$_dfload_status" \
+        --fonts-xml "$(_dfload_visible_path system/etc/fonts.xml)" \
+        --fallback-xml "$(_dfload_visible_path system/etc/font_fallback.xml)" \
+        --customization-xml "$(_dfload_visible_path product/etc/fonts_customization.xml)" \
+        --data-fonts "${LUOSHU_DATA_FONTS_DIR:-/data/fonts/files}" \
+        --module "$_dfload_module_dir" \
+        --visible-root "${LUOSHU_VISIBLE_ROOT:-/}" \
+        --output "$_dfload_conf" >/dev/null 2>&1; then
+        :
+    else
+        {
+            printf 'schema=luoshu-xml-parity-v1\n'
+            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+            printf 'xmlParity=unknown:python-unavailable\n'
+            printf 'shadowedByUpdatableFont=unknown\n'
+        } > "$_dfload_conf" 2>/dev/null || true
+    fi
+    rm -f "$_dfload_dump" "$_dfload_status" 2>/dev/null || true
+    chmod 0644 "$_dfload_conf" 2>/dev/null || true
+    _dfload_parity=$(_dfload_state_value "$_dfload_conf" xmlParity)
+    _dfload_shadow=$(_dfload_state_value "$_dfload_conf" shadowedByUpdatableFont)
+    _dfload_log "三路字体配置一致性：xmlParity=${_dfload_parity:-unknown} shadowedByUpdatableFont=${_dfload_shadow:-unknown}"
+    printf 'xmlParity=%s\n' "${_dfload_parity:-unknown}"
+    printf 'shadowedByUpdatableFont=%s\n' "${_dfload_shadow:-unknown}"
+    return 0
+}
+
 if [ "${0##*/}" = device_font_load_verify.sh ]; then
     case "${1:-status}" in
         status|auto) device_font_load_status ;;
         verify|deep) device_font_load_verify ;;
-        *) printf 'usage: %s {status|verify}\n' "$0" >&2; exit 2 ;;
+        parity|xml-parity) device_font_xml_parity ;;
+        *) printf 'usage: %s {status|verify|parity}\n' "$0" >&2; exit 2 ;;
     esac
 fi
