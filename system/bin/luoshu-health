@@ -16,6 +16,22 @@ bool_file() {
     [ -s "$1" ] && printf 'true\n' || printf 'false\n'
 }
 
+# Read-only effective cache state (none | pending | failed:<reason>); an expired pending marker is
+# reported as failed so the App never shows "still waiting" forever (#199).
+cache_state() {
+    _cs_pending="$MOD/config/device-font-cache-pending.conf"
+    [ -s "$_cs_pending" ] || { printf 'none\n'; return 0; }
+    _cs_state=
+    if [ -f "$MOD/common/device_font_cache.sh" ]; then
+        _cs_state=$(MODDIR="$MOD" MODULE_DIR="$MOD" sh "$MOD/common/device_font_cache.sh" state 2>/dev/null | sed -n 's/^cacheState=//p' | head -n1)
+    fi
+    if [ -z "$_cs_state" ]; then
+        _cs_state=$(read_value "$_cs_pending" cacheState)
+        case "$_cs_state" in failed:*) ;; *) _cs_state=pending ;; esac
+    fi
+    printf '%s\n' "$_cs_state"
+}
+
 safe_count() {
     _sc_value="$1"
     case "$_sc_value" in ''|*[!0-9]*) printf '0\n' ;; *) printf '%s\n' "$_sc_value" ;; esac
@@ -195,7 +211,11 @@ report() {
     printf 'selfMountState=%s\n' "$(read_value "$MOD/config/self-mount.conf" state)"
     printf 'selfMountBackend=%s\n' "$(read_value "$MOD/config/self-mount.conf" backend)"
     printf 'mountEngine=%s\n' "$(mount_engine)"
-    printf 'cachePending=%s\n' "$(bool_file "$MOD/config/device-font-cache-pending.conf")"
+    _r_cache_state=$(cache_state)
+    _r_cache_pending=false
+    [ "$_r_cache_state" != pending ] || _r_cache_pending=true
+    printf 'cachePending=%s\n' "$_r_cache_pending"
+    printf 'cacheState=%s\n' "$_r_cache_state"
     printf 'rebootRequired=%s\n' "$_r_reboot"
     printf 'recentWarnings=%s\n' "$_r_warnings"
     printf 'recentErrors=%s\n' "$_r_errors"

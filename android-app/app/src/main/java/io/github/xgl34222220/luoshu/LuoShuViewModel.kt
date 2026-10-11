@@ -49,6 +49,9 @@ internal data class ModuleSnapshot(
     val rebootRequired: Boolean = false,
     val rootManager: String = "未知",
     val mountEngine: String = "未知",
+    val foreignFontModules: String = "",
+    val foreignFontModuleNames: String = "",
+    val fontLoaderPresent: Boolean = false,
     val error: String = "",
 ) {
     val activeLabel: String
@@ -1189,6 +1192,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 rebootRequired = data.optBoolean("rebootRequired", false),
                 rootManager = data.optString("rootManager", "Root"),
                 mountEngine = data.optString("mountEngine", "原生模块挂载"),
+                foreignFontModules = data.optString("foreignFontModules", ""),
+                foreignFontModuleNames = data.optString("foreignFontModuleNames", ""),
+                fontLoaderPresent = data.optBoolean("fontLoaderPresent", false),
             )
         } catch (error: Throwable) {
             ModuleSnapshot(

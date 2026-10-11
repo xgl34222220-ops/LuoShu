@@ -488,6 +488,7 @@ private fun OverviewPage(model: SystemCenterViewModel) = pageList {
                 if (h.rebootRequired) add("存在等待重启后生效的字体变更")
                 if (h.lockState == "stale") add("检测到失效字体切换锁，可在安全页一键清理")
                 if (h.cachePending) add("设备字体缓存仍在等待完成")
+                if (h.cacheFailure.isNotBlank()) add("设备字体缓存生成失败，可在首页设备状态中重新扫描或导出诊断")
                 if (h.selfMountState == "degraded") add("洛书自挂载正在使用 OverlayFS + Bind 降级路径")
                 if (h.conflicts.isNotEmpty()) add("发现 ${h.conflicts.size} 个其它模块字体覆盖目标")
                 if (h.recentErrors > 0) add("最近日志中有 ${h.recentErrors} 条错误记录")

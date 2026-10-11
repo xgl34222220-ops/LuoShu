@@ -28,6 +28,7 @@ internal data class CoverageMetrics(
     val groups: Map<String, CoverageGroupMetrics> = emptyMap(),
     val missingByGroup: Map<String, String> = emptyMap(),
     val recommendation: String = "",
+    val clock: ClockGlyphMetrics? = null,
 ) {
     val cjkRatio: Float get() = ratio(cjkPresent, cjkTotal)
     val latinRatio: Float get() = ratio(latinPresent, latinTotal)
@@ -37,6 +38,12 @@ internal data class CoverageMetrics(
     private fun ratio(present: Int, total: Int): Float =
         if (total <= 0) 0f else (present.toFloat() / total.toFloat()).coerceIn(0f, 1f)
 }
+
+internal data class ClockGlyphMetrics(
+    val missing: String = "",
+    val tabularDigits: Boolean = true,
+    val warning: String = "",
+)
 
 internal data class CoverageProbeState(
     val loading: Boolean = false,
@@ -80,6 +87,7 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                         groups = parseCoverageGroups(data.optJSONObject("groups")),
                         missingByGroup = parseMissingGroups(data.optJSONObject("missingByGroup")),
                         recommendation = data.optString("recommendation", ""),
+                        clock = parseClockGlyphs(data.optJSONObject("clock")),
                     ),
                 )
             } catch (error: Throwable) {
@@ -90,6 +98,15 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    private fun parseClockGlyphs(root: JSONObject?): ClockGlyphMetrics? {
+        if (root == null || !root.has("tabularDigits")) return null
+        return ClockGlyphMetrics(
+            missing = root.optString("missingText", ""),
+            tabularDigits = root.optBoolean("tabularDigits", true),
+            warning = root.optString("warning", ""),
+        )
     }
 
     private fun parseCoverageGroups(root: JSONObject?): Map<String, CoverageGroupMetrics> {

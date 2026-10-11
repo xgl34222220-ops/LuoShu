@@ -39,9 +39,10 @@ ok grep -qx 'count=2' "$FAILURES"
 CASE='用完预算后必须停止重试'
 device_font_cache_build_pending || true
 ok grep -qx 'count=3' "$FAILURES"
-# The pending marker is what service.sh keys on at every boot. Once the budget is spent it has to
-# be gone, otherwise the build is relaunched forever.
-no test -e "$PENDING"
+# Once the budget is spent the marker becomes a terminal failed state: it is never rebuilt again
+# (build_pending skips failed markers) but stays visible so the App can offer 重扫/导出诊断 (#199).
+ok grep -qx 'cacheState=failed:build-retry-exhausted' "$PENDING"
+ok grep -qx 'failures=3' "$PENDING"
 
 CASE='rc=2 表示本轮跳过，不能消耗预算'
 rm -f "$FAILURES"

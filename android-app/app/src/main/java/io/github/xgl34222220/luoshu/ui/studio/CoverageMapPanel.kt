@@ -25,9 +25,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ClockGlyphMetrics
 import io.github.xgl34222220.luoshu.CoverageGroupMetrics
 import io.github.xgl34222220.luoshu.CoverageProbeState
 
@@ -96,6 +98,7 @@ internal fun CoverageMapPanel(
                         }
                     }
                     coverageLabels.forEach { item -> metrics.groups[item.key]?.let { CoverageGroupRow(item.label, it) } }
+                    metrics.clock?.let { ClockGlyphRow(it) }
                     val missing = metrics.missingByGroup.filterValues { it.isNotBlank() }
                     if (missing.isNotEmpty()) {
                         Spacer(Modifier.height(2.dp))
@@ -122,6 +125,27 @@ private fun CoverageGroupRow(label: String, value: CoverageGroupMetrics) {
         }
         Spacer(Modifier.height(3.dp))
         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(5.dp))
+    }
+}
+
+@Composable
+private fun ClockGlyphRow(value: ClockGlyphMetrics) {
+    val notes = buildList {
+        if (value.missing.isNotBlank()) add("缺 ${value.missing.map { "U+%04X".format(it.code) }.joinToString(" ")}，时钟保留原厂字形")
+        if (!value.tabularDigits) add(value.warning.ifBlank { "数字非等宽，状态栏秒数可能抖动" })
+    }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("时钟字符", fontSize = 9.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (notes.isEmpty()) "完整 · 数字等宽" else notes.joinToString("；"),
+            color = if (notes.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.End,
+            fontSize = 8.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
