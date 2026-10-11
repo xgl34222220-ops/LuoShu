@@ -252,6 +252,24 @@ def build_postscript_index(roots: Sequence[Path]) -> dict[str, tuple[Path, int]]
     return index
 
 
+class LazyPostScriptIndex:
+    """Build the name-table index only when a ref actually needs it.
+
+    Most stock XML refs declare a file path and never consult the index, yet
+    building it opens every face of every font under the roots. Lookups return the
+    same matches as the eager dict because the index itself is unchanged.
+    """
+
+    def __init__(self, roots: Sequence[Path]) -> None:
+        self._roots = tuple(roots)
+        self._index: dict[str, tuple[Path, int]] | None = None
+
+    def get(self, key: str, default: tuple[Path, int] | None = None) -> tuple[Path, int] | None:
+        if self._index is None:
+            self._index = build_postscript_index(self._roots)
+        return self._index.get(key, default)
+
+
 def parse_xml(path: Path) -> list[FontRef]:
     tree = ET.parse(path)
     dynamic = "/data/fonts/" in str(path).replace("\\", "/")
@@ -288,7 +306,7 @@ def parse_xml(path: Path) -> list[FontRef]:
     return refs
 
 
-def resolve_ref(ref: FontRef, postscript_index: dict[str, tuple[Path, int]]) -> tuple[Path | None, int]:
+def resolve_ref(ref: FontRef, postscript_index: "dict[str, tuple[Path, int]] | LazyPostScriptIndex") -> tuple[Path | None, int]:
     if ref.declared:
         declared = Path(ref.declared)
         if declared.is_absolute() and declared.is_file():
@@ -370,8 +388,14 @@ def glyph_group(font: TTFont, codepoints: Sequence[int]) -> dict[str, float | in
     }
 
 
+# Tables are decompiled on first access; the template only reads head/hhea/OS/2,
+# name, cmap, hmtx and a few dozen outlines, so eager decoding of glyf/gvar/GSUB
+# of every referenced font (CJK TTCs included) was pure cost. Output is identical.
+INSPECT_LAZY = True
+
+
 def inspect_font(path: Path, face_index: int, hash_fonts: bool) -> dict[str, object]:
-    kwargs: dict[str, object] = {"lazy": False, "recalcTimestamp": False, "recalcBBoxes": False}
+    kwargs: dict[str, object] = {"lazy": INSPECT_LAZY, "recalcTimestamp": False, "recalcBBoxes": False}
     try:
         with path.open("rb") as stream:
             magic = stream.read(4)
@@ -439,7 +463,7 @@ def build_template(
         raise TemplateError("没有找到可读取的 Android 字体 XML")
     if capture_revision != CAPTURE_REVISION:
         raise TemplateError(f"不支持的模板采集修订：{capture_revision}")
-    postscript_index = build_postscript_index(font_roots)
+    postscript_index = LazyPostScriptIndex(font_roots)
     slots: list[dict[str, object]] = []
     failures: list[dict[str, str]] = []
     cache: dict[tuple[str, int], dict[str, object]] = {}
