@@ -15,6 +15,8 @@ mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/cache" "$MODULE/logs" "$PUBL
 cp "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh" "$MODULE/common/v142_weighted_mix.sh"
 cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
 cp "$ROOT/common/mix_task_handoff.sh" "$MODULE/common/mix_task_handoff.sh"
+cp "$ROOT/common/json_error_message.sh" "$MODULE/common/json_error_message.sh"
+cp "$ROOT/common/json_error_message.py" "$MODULE/common/json_error_message.py"
 for helper in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py; do
     cp "$ROOT/common/$helper" "$MODULE/common/$helper"
 done

@@ -248,7 +248,9 @@ stock_scan_json() {
             rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
             stock_scan_lock_release
             trap - EXIT HUP INT TERM
-            printf '%s\n' "$(printf '%s\n' "$_stock_out" | tail -n1)"
+            tail -n1 <<LUOSHU_STOCK_OUTPUT
+$_stock_out
+LUOSHU_STOCK_OUTPUT
             return 0
         fi
     fi
@@ -263,7 +265,10 @@ stock_scan_json() {
                 --output "$STOCK_SCAN_OUTPUT" 2>&1
     )
     _stock_rc=$?
-    _stock_last=$(printf '%s\n' "$_stock_out" | tail -n1)
+    _stock_last=$(tail -n1 <<LUOSHU_STOCK_OUTPUT
+$_stock_out
+LUOSHU_STOCK_OUTPUT
+    )
     if [ "$_stock_rc" -eq 0 ] && [ -s "$STOCK_SCAN_OUTPUT" ]; then
         [ -n "${LUOSHU_BOOT_STOCK_SCAN_STAGE:-}" ] || \
             rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
@@ -272,7 +277,21 @@ stock_scan_json() {
         printf '%s\n' "$_stock_last"
         return 0
     fi
-    _stock_message=$(printf '%s\n' "$_stock_last" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
+    # Bounded top-level JSON decoding of the captured scanner output. Redirect
+    # it through stdin: Android printf is an external executable and cannot take
+    # one argument larger than the kernel argv limit. Variable contents are
+    # data, never a second round of shell expansion; no Android libc regex.
+    _stock_message=''
+    if [ -f "$MODDIR/common/json_error_message.py" ]; then
+        _stock_message=$(
+            PYTHONHOME="$PYROOT" \
+            PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                "$PYBIN" "$MODDIR/common/json_error_message.py" - 2>/dev/null <<LUOSHU_STOCK_OUTPUT
+$_stock_out
+LUOSHU_STOCK_OUTPUT
+        ) || _stock_message=''
+    fi
     [ -n "$_stock_message" ] || _stock_message="$_stock_out"
     [ -n "$_stock_message" ] || _stock_message='原厂字体扫描失败'
     stock_scan_lock_release

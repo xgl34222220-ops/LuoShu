@@ -107,6 +107,8 @@ common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
 common/mix_task_handoff.sh
+common/json_error_message.sh
+common/json_error_message.py
 common/mix_weight_mode.sh
 common/module_status.sh
 common/module_update_hotfix_v4.sh

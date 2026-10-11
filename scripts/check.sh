@@ -38,6 +38,7 @@ python3 "$ROOT/scripts/android_launch_source_test.py"
 sh "$ROOT/scripts/font_next_transaction_test.sh"
 python3 "$ROOT/scripts/font_live_switch_test.py"
 python3 "$ROOT/scripts/inventory_output_contract_test.py" >/dev/null
+python3 "$ROOT/scripts/stock_error_contract_test.py" >/dev/null
 sh "$ROOT/scripts/runtime_paths_test.sh"
 sh "$ROOT/scripts/installer_bootstrap_test.sh"
 python3 "$ROOT/scripts/task_scope_legacy_test.py"
@@ -170,7 +171,7 @@ grep -q 'common/font_mix_controller.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'preview_source)' "$ROOT/common/app_bridge.sh"
 grep -q 'find_preview_source' "$ROOT/common/app_bridge.sh"
-python3 "$ROOT/scripts/preview_source_contract_test.py"
+python3 "$ROOT/scripts/preview_source_contract_test.py" >/dev/null
 grep -q 'sha256' "$ROOT/common/app_bridge.sh"
 grep -q 'rebootRequired' "$ROOT/common/app_bridge.sh"
 grep -q 'effectiveActive' "$ROOT/common/app_bridge.sh"
@@ -374,6 +375,8 @@ python3 "$ROOT/scripts/font_axis_info_test.py"
 sh "$ROOT/scripts/app_installer_test.sh"
 sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
 sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
+python3 "$ROOT/scripts/mix_handoff_contract_test.py" >/dev/null
+python3 "$ROOT/scripts/composite_error_contract_test.py" >/dev/null
 # The prior module-build rerun exited inside this gate without identifying the
 # failing command. Trace its isolated fixture; preserve every assertion.
 sh -x "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
