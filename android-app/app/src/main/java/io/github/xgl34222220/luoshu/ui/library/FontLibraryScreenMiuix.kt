@@ -480,7 +480,7 @@ private fun MiuixFontRow(
 
 private fun fontMetadataSummary(font: FontItem): String {
     val weight = when {
-        font.variable -> "可变字重"
+        font.variable -> "可变字体"
         font.weights.size > 1 -> "${font.weights.size} 档字重"
         else -> "单字重"
     }

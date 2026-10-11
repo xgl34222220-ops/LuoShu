@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSmoothShape
@@ -77,9 +78,19 @@ internal fun MiuixStudioAxisControls(
     val tokens = LocalMiuixTokens.current
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
-        font.variable && axisInfo.axes.isNotEmpty() -> {
+        font.variable && axisInfo.error.isNotBlank() -> Text(
+            "字体轴读取失败：${axisInfo.error}",
+            color = MaterialTheme.colorScheme.error,
+            fontSize = 12.sp,
+        )
+        font.variable && axisInfo.axes.isNotEmpty() && axisInfo.visibleAxes.isEmpty() -> Text(
+            "此字体的设计轴由字体内部管理，无需调节。",
+            color = tokens.textSecondary,
+            fontSize = 12.sp,
+        )
+        font.variable && axisInfo.visibleAxes.isNotEmpty() -> {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                axisInfo.axes.forEach { axis ->
+                axisInfo.visibleAxes.forEach { axis ->
                     val minimum = axis.min
                     val maximum = axis.max.coerceAtLeast(minimum)
                     val isWeight = axis.tag == "wght"
@@ -102,11 +113,13 @@ internal fun MiuixStudioAxisControls(
                         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    fontAxisDisplayName(axis.tag),
+                                    fontAxisDisplayName(axis.tag, axis.name),
                                     color = tokens.textPrimary,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(axis.tag, color = tokens.textSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.width(8.dp))
