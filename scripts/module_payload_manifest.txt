@@ -14,6 +14,9 @@ common/coloros_global.sh
 common/coloros_metrics_batch.py
 common/coloros_stage_complete.sh
 common/composite_font.py
+common/composite_collection_build.py
+common/composite_collection_build.sh
+common/composite_collection_contract.py
 common/device_font_boot_verify.sh
 common/device_font_cache.sh
 common/device_font_dynamic_guard.sh

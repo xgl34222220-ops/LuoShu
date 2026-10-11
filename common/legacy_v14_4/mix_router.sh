@@ -658,6 +658,28 @@ persist_mix_tune() {
     return 0
 }
 
+validate_mix_collections() (
+    # The legacy generic mapper aliases the composite to collection filenames
+    # (e.g. NotoSansCJK-Regular.ttc). AOSP references several collection
+    # indexes; publishing a single face there can stop the next boot. Reject
+    # before any previous next-boot payload is replaced.
+    _collection_payload="${1:-$MIX_STAGE}"
+    find "$_collection_payload" -type f \( -iname '*.ttc' -o -iname '*.otc' \) -print 2>/dev/null | grep -q . || return 0
+    _vmc_python="${LUOSHU_TASK_SCOPE_PYTHON:-}"
+    if [ -z "$_vmc_python" ]; then
+        _vmc_root="$REALMOD/common/python"
+        _vmc_python="$_vmc_root/bin/luoshu-python"
+        [ -x "$_vmc_python" ] || return 1
+        export PYTHONHOME="$_vmc_root"
+        export PYTHONPATH="$_vmc_root/lib/python3.14:$_vmc_root/lib/python3.14/site-packages"
+        export LD_LIBRARY_PATH="$_vmc_root/lib:$_vmc_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+    exec "$_vmc_python" "$REALMOD/common/composite_collection_contract.py" \
+        --payload "$_collection_payload" --request "$(read_value "$MIX_STAGE_STATE" requestId)" \
+        --stock-root "${LUOSHU_COLLECTION_STOCK_ROOT:-/}" \
+        --output "$REALMOD/config/composite-font-contract.json"
+)
+
 commit_mix_stage_if_needed() {
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
@@ -667,6 +689,7 @@ commit_mix_stage_if_needed() {
         _next_request=$(read_value "$NEXT_STATE" requestId)
         if [ "$_next_font" = mix ]; then
             if [ ! -s "$MIX_STAGE_STATE" ] || { [ -n "$_stage_request" ] && [ "$_next_request" = "$_stage_request" ]; }; then
+                validate_mix_collections "$NEXT_PAYLOAD" >> "$LOG_FILE" 2>&1 || return 1
                 mark_mix_request_committed || return 1
                 persist_mix_tune
                 rm -rf "$MIX_STAGE" 2>/dev/null || true
@@ -696,6 +719,7 @@ commit_mix_stage_if_needed() {
         complete_hyperos_stage || return 1
         complete_coloros_stage || return 1
     fi
+    validate_mix_collections >> "$LOG_FILE" 2>&1 || return 1
     luoshu_mix_phase_begin finalize next_commit fixed finalize
     write_next_state || return 1
     if ! luoshu_next_transaction_begin "$REALMOD" "$MIX_STAGE" "$STAGED_NEXT_STATE"; then
