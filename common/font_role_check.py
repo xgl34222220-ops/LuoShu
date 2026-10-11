@@ -11,6 +11,10 @@ from fontTools.ttLib import TTCollection, TTFont
 CJK = tuple(map(ord, "中文字体系统默认洛书汉字"))
 LATIN = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGITS = tuple(map(ord, "0123456789"))
+# Lock-screen / status-bar clock separators and spacing. A clock slot rendered
+# from a font without them shows tofu, so such fonts keep the stock clock glyphs.
+CLOCK_REQUIRED = (0x003A, 0x2236, 0xFF1A, 0x2007, 0x202F)
+CLOCK_TABULAR_WARNING = "数字非等宽，状态栏秒数可能抖动"
 
 
 class RoleCheckError(RuntimeError):
@@ -43,6 +47,43 @@ def required(role: str) -> tuple[int, ...]:
     return DIGITS
 
 
+def clock_glyph_report(font: TTFont) -> dict[str, object]:
+    """Clock gate: required separators/spaces present and 0-9 tabular."""
+    cmap = font.getBestCmap() or {}
+    missing = [codepoint for codepoint in CLOCK_REQUIRED if codepoint not in cmap]
+    widths: list[int] = []
+    try:
+        metrics = font["hmtx"].metrics if "hmtx" in font else {}
+    except Exception:
+        metrics = {}
+    for codepoint in DIGITS:
+        glyph = cmap.get(codepoint)
+        if glyph is None or glyph not in metrics:
+            widths = []
+            break
+        widths.append(int(metrics[glyph][0]))
+    tabular = bool(widths) and len(set(widths)) == 1
+    return {
+        "clockSafe": not missing,
+        "missing": [f"U+{codepoint:04X}" for codepoint in missing],
+        "missingText": "".join(chr(codepoint) for codepoint in missing),
+        "tabularDigits": tabular,
+        "digitAdvances": sorted(set(widths)),
+        "warning": "" if tabular else CLOCK_TABULAR_WARNING,
+    }
+
+
+def inspect_clock(path: Path, index: int = -1) -> dict[str, object]:
+    kwargs: dict[str, object] = {"lazy": True, "recalcTimestamp": False}
+    if is_collection(path):
+        kwargs["fontNumber"] = max(0, index)
+    font = TTFont(str(path), **kwargs)
+    try:
+        return clock_glyph_report(font)
+    finally:
+        font.close()
+
+
 def inspect_face(path: Path, index: int, role: str) -> dict[str, object]:
     kwargs: dict[str, object] = {"lazy": True, "recalcTimestamp": False}
     if is_collection(path):
@@ -66,6 +107,10 @@ def inspect_face(path: Path, index: int, role: str) -> dict[str, object]:
 def check(path: Path, role: str) -> dict[str, object]:
     if not path.is_file() or path.stat().st_size < 4096:
         raise RoleCheckError("字体文件不存在或文件过小")
+    if role == "clock":
+        report = inspect_clock(path, 0)
+        return {"status": "ok" if report["clockSafe"] else "error", "role": role, "path": str(path),
+                "valid": report["clockSafe"], **report}
     results = [inspect_face(path, index, role) for index in faces(path)]
     best = max(results, key=lambda item: int(item["present"]), default=None)
     if best is None:
@@ -81,7 +126,7 @@ def check(path: Path, role: str) -> dict[str, object]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("font")
-    parser.add_argument("role", choices=("cjk", "latin", "digit"))
+    parser.add_argument("role", choices=("cjk", "latin", "digit", "clock"))
     args = parser.parse_args()
     try:
         result = check(Path(args.font), args.role)

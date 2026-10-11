@@ -3,6 +3,8 @@
 """Coverage-aware policy for Android fallback font slots."""
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 import device_font_slot_plan_base as _base
@@ -35,9 +37,54 @@ def source_supports_slot(slot: dict[str, Any], source_profile: dict[str, Any]) -
     return True
 
 
+_CLOCK_REPORTS: dict[tuple[str, int, str], dict[str, Any] | None] = {}
+
+
+def _clock_log(message: str) -> None:
+    print(f"[clock-glyph-gate] {message}", file=sys.stderr)
+
+
+def source_clock_report(source_profile: dict[str, Any]) -> dict[str, Any] | None:
+    """Clock glyph gate for the selected source; None when it cannot be read."""
+    path = str(source_profile.get("path") or "")
+    try:
+        face = int(source_profile.get("faceIndex", -1))
+    except (TypeError, ValueError):
+        face = -1
+    key = (path, face, str(source_profile.get("sha256") or ""))
+    if key in _CLOCK_REPORTS:
+        return _CLOCK_REPORTS[key]
+    report: dict[str, Any] | None = None
+    if path and Path(path).is_file():
+        try:
+            import font_role_check
+
+            report = font_role_check.inspect_clock(Path(path), face)
+        except Exception as exc:  # unreadable source: keep the existing plan
+            _clock_log(f"无法读取源字体，跳过时钟字符检查：{Path(path).name}：{exc.__class__.__name__}")
+    _CLOCK_REPORTS[key] = report
+    if report is not None:
+        name = Path(path).name
+        if not report.get("tabularDigits"):
+            _clock_log(f"{report.get('warning')}：{name} 数字前进宽度 {report.get('digitAdvances')}")
+        if report.get("missing"):
+            _clock_log(f"源字体缺少时钟字符 {' '.join(report['missing'])}，时钟槽位保留原厂字形：{name}")
+    return report
+
+
 def slot_plan(slot: dict[str, Any], source_profile: dict[str, Any]) -> dict[str, Any]:
     result = _ORIGINAL_SLOT_PLAN(slot, source_profile)
     roles = set(slot.get("roles") or [])
+    if "clock" in roles and result.get("status") == "ready":
+        report = source_clock_report(source_profile)
+        if report is not None and report.get("missing"):
+            # Keep the stock clock face: the payload builder skips this slot and
+            # leaves the ROM file in place. Fonts that pass keep the plan unchanged.
+            result["status"] = "skipped"
+            result["reason"] = "source-clock-glyphs-missing"
+            result["clockGlyphsMissing"] = list(report["missing"])
+            result["transforms"] = {}
+        return result
     if "protected" in roles or not roles.intersection(("fallback-cjk", "fallback-latin")):
         return result
 
