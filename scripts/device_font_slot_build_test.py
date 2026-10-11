@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "common"))
 import device_font_slot_build as builder
 import device_font_slot_plan as planner
 import device_font_template as template_engine
+from clock_fixture import with_clock_glyphs
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,6 +34,9 @@ def shifted_probe(probe: dict, *, shift_y: float = 0.0, advance_delta: float = 0
 
 def main() -> None:
     args = parse_args()
+    fixture_dir = tempfile.TemporaryDirectory()
+    # The clock slot gate requires U+FF1A etc.; keep DejaVu's outlines, add the cmap entries.
+    args.font = with_clock_glyphs(args.font, Path(fixture_dir.name) / "source-clock.ttf")
     source = template_engine.inspect_font(args.font, -1, hash_fonts=True)
     assert source["probes"]["digits"]["hits"] >= 10
     target = copy.deepcopy(source)

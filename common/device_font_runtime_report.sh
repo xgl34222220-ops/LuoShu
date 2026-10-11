@@ -71,8 +71,13 @@ device_font_runtime_report_collect() {
     _dfr_template=$(sed -n 's/^state=//p' "$_dfr_config/device-font-template.state" 2>/dev/null | head -n1)
     _dfr_alignment=$(sed -n 's/^state=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
     _dfr_mode=$(sed -n 's/^mode=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    _dfr_cache_state=none
+    if [ -s "$_dfr_config/device-font-cache-pending.conf" ]; then
+        _dfr_cache_state=$(MODDIR="$_dfr_module" MODULE_DIR="$_dfr_module" sh "$_dfr_module/common/device_font_cache.sh" state 2>/dev/null | sed -n 's/^cacheState=//p' | head -n1)
+        [ -n "$_dfr_cache_state" ] || _dfr_cache_state=pending
+    fi
     _dfr_cache_pending=no
-    [ -s "$_dfr_config/device-font-cache-pending.conf" ] && _dfr_cache_pending=yes
+    [ "$_dfr_cache_state" != pending ] || _dfr_cache_pending=yes
 
     _dfr_stage="${_dfr_root}.tmp.$$"
     rm -rf "$_dfr_stage" 2>/dev/null || true
@@ -92,6 +97,7 @@ device_font_runtime_report_collect() {
         printf 'alignmentState=%s\n' "${_dfr_alignment:-missing}"
         printf 'alignmentMode=%s\n' "${_dfr_mode:-compatibility}"
         printf 'cachePending=%s\n' "$_dfr_cache_pending"
+        printf 'cacheState=%s\n' "$_dfr_cache_state"
         printf 'fingerprint=%s\n' "$(getprop ro.build.fingerprint 2>/dev/null)"
         printf 'incremental=%s\n' "$(getprop ro.build.version.incremental 2>/dev/null)"
         printf 'sdk=%s\n' "$(getprop ro.build.version.sdk 2>/dev/null)"
@@ -148,6 +154,23 @@ device_font_runtime_report_collect() {
     else
         cp -f "$_dfr_stage/device-font-manager-dump.txt" "$_dfr_stage/font-manager-dump.txt" 2>/dev/null || true
     fi
+    # Read-only FontManagerService updatable-font evidence (P1-10). Never clears /data/fonts.
+    if command -v cmd >/dev/null 2>&1; then
+        cmd font status > "$_dfr_stage/font-manager-status.txt" 2>&1 || true
+    fi
+    {
+        printf '%s\n' '--- /data/fonts/files (read-only listing) ---'
+        find "${LUOSHU_DATA_FONTS_DIR:-/data/fonts/files}" -type f 2>/dev/null | while IFS= read -r _dfr_font; do
+            printf '%s|%s\n' "$_dfr_font" "$(stat -c '%s' "$_dfr_font" 2>/dev/null || echo unknown)"
+        done
+    } > "$_dfr_stage/data-fonts-files.txt" 2>/dev/null || true
+    _device_font_report_copy "$_dfr_config/device-font-xml-parity.conf" "$_dfr_stage/device-font-xml-parity.conf" || true
+    _dfr_parity=$(sed -n 's/^xmlParity=//p' "$_dfr_config/device-font-xml-parity.conf" 2>/dev/null | head -n1)
+    _dfr_shadow=$(sed -n 's/^shadowedByUpdatableFont=//p' "$_dfr_config/device-font-xml-parity.conf" 2>/dev/null | head -n1)
+    {
+        printf 'xmlParity=%s\n' "${_dfr_parity:-not-collected}"
+        printf 'shadowedByUpdatableFont=%s\n' "${_dfr_shadow:-not-collected}"
+    } >> "$_dfr_stage/summary.txt" 2>/dev/null || true
     grep -E '/data/fonts|/(fonts|font_fallback)\.xml' /proc/self/mountinfo 2>/dev/null \
         > "$_dfr_stage/font-mounts.txt" || true
     {

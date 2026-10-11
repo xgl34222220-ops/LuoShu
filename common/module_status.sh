@@ -22,6 +22,9 @@ if [ -f "$BOOT_GUARD" ]; then
     [ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] && luoshu_bootloop_complete
     luoshu_bootloop_safe_mode_active && SAFE_MODE=true
 fi
+# 开机 service 阶段经此刷新：只读扫描其他字体模块，结果供 App 首页告警与诊断导出。
+[ -f "$MODDIR/common/foreign_font_modules.sh" ] && \
+    MODDIR="$MODDIR" sh "$MODDIR/common/foreign_font_modules.sh" scan >/dev/null 2>&1 || true
 ACTIVE="${1:-}"
 [ -n "$ACTIVE" ] || ACTIVE=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE" ] || ACTIVE="default"

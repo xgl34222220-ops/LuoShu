@@ -28,6 +28,7 @@ common/device_font_payload_runtime.sh
 common/device_font_payload_verify.py
 common/device_font_runtime_report.sh
 common/device_font_transaction_guard.sh
+common/device_font_xml_parity.py
 common/device_font_slot_build.py
 common/device_font_slot_build_base.py
 common/device_font_slot_plan.py
@@ -37,6 +38,7 @@ common/device_font_template.py
 common/device_font_template_base.py
 common/device_font_template.sh
 common/font_archive_export.sh
+common/foreign_font_modules.sh
 common/font_active_state.sh
 common/font_boot_state.sh
 common/font_axis_info.py
