@@ -48,6 +48,10 @@ BLEND_MIN_ENDPOINT_DIFFERENCE = 10.0
 # Wordmark text crops may sit a few pixels off between the native preparation View, the
 # Compose shell and window animations; search this far around each crop.
 SHELL_TEXT_SEARCH = 3
+# The integer search above runs on the 360px normalized frame. A real offset that lands
+# between two normalized pixels (e.g. 3px on the 720px recording) blurs the edges and drops
+# correlation to ~0.90, so also match templates rendered at half-pixel phases.
+SHELL_TEXT_SUBPIXEL = (-.5, 0.0, .5)
 # The platform splash never shows the wordmark. While it is even partly visible, the shared
 # icon tile in the glass card is not the native logo.
 WORDMARK_PARTIAL_SCORE = .8
@@ -168,7 +172,15 @@ class FrameClassifier:
         with Image.open(fixtures / f"native-splash-{theme}.png") as splash:
             self.splash_reference = resized(splash, size)
         self.shell_patches = []
-        shell_edges = edges(self.shell_reference)
+        shell_phases = [edges(self.shell_reference)]
+        shell_image = Image.fromarray(self.shell_reference)
+        for dy in SHELL_TEXT_SUBPIXEL:
+            for dx in SHELL_TEXT_SUBPIXEL:
+                if dx or dy:
+                    shifted = shell_image.transform(size, Image.Transform.AFFINE, (1, 0, -dx, 0, 1, -dy),
+                                                    resample=Image.Resampling.BICUBIC)
+                    shell_phases.append(edges(np.asarray(shifted)))
+        self.shell_text_phases = []
         scaled_text = []
         for bounds in SHELL_TEXT_BOUNDS:
             x1, y1, x2, y2 = (round(value * size[index % 2] / (360 if index % 2 == 0 else 780))
@@ -176,7 +188,8 @@ class FrameClassifier:
             scaled_text.append((x1, y1, x2, y2))
             reference_crop = self.shell_reference[y1:y2, x1:x2].astype(np.int16)
             background = np.median(reference_crop.reshape(-1, 3), axis=0).astype(np.int16)
-            self.shell_patches.append(((x1, y1, x2, y2), shell_edges[y1:y2, x1:x2], background))
+            self.shell_patches.append(((x1, y1, x2, y2), shell_phases[0][y1:y2, x1:x2], background))
+            self.shell_text_phases.append([phase[y1:y2, x1:x2] for phase in shell_phases])
         card = tuple(round(value * size[index % 2] / (360 if index % 2 == 0 else 780))
                      for index, value in enumerate(SHELL_CARD_BOUNDS))
         self.shell_field_mask = field_mask(size, (card, *scaled_text))
@@ -231,8 +244,9 @@ class FrameClassifier:
 
     def shell_match(self, frame: np.ndarray, edge_frame: np.ndarray, frame_field: np.ndarray) -> dict:
         pad = SHELL_TEXT_SEARCH
-        scores = [match_score(edge_frame[max(0, y1 - pad):y2 + pad, max(0, x1 - pad):x2 + pad], template)
-                  for (x1, y1, x2, y2), template, _ in self.shell_patches]
+        scores = [max(match_score(edge_frame[max(0, y1 - pad):y2 + pad, max(0, x1 - pad):x2 + pad], template)
+                      for template in phases)
+                  for ((x1, y1, x2, y2), _, _), phases in zip(self.shell_patches, self.shell_text_phases)]
         # Normalized edge correlation is contrast invariant. Also require
         # visible ink, or almost-erased words could pass as a nonblank shell.
         contrast_ratios = []
@@ -407,7 +421,7 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
                              "shell_field_cell_tolerance": FIELD_CELL_TOLERANCE, "shell_field_cell_fraction": FIELD_CELL_FRACTION,
                              "blend_weight_range": [BLEND_MIN, BLEND_MAX], "blend_mean_residual": BLEND_MEAN_RESIDUAL,
                              "blend_p98_residual": BLEND_P98_RESIDUAL, "blend_improvement": BLEND_IMPROVEMENT,
-                             "shell_text_search_pixels": SHELL_TEXT_SEARCH, "wordmark_partial_score": WORDMARK_PARTIAL_SCORE,
+                             "shell_text_search_pixels": SHELL_TEXT_SEARCH, "shell_text_subpixel_phases": list(SHELL_TEXT_SUBPIXEL), "wordmark_partial_score": WORDMARK_PARTIAL_SCORE,
                              "wordmark_partial_contrast": WORDMARK_PARTIAL_CONTRAST,
                              "splash_field_tolerance": SPLASH_FIELD_TOLERANCE},
               "surface_transform_bounds": {"scale_min": min(SURFACE_SCALES), "scale_max": max(SURFACE_SCALES),

@@ -103,6 +103,18 @@ class StartupVisualTest(unittest.TestCase):
             for image in (np.clip(drifted, 0, 255).astype(np.uint8), np.asarray(scaled)):
                 self.assertEqual("startup-shell", classifier.classify(image)["state"])
 
+    def test_shell_tolerates_half_pixel_offset_between_native_view_and_compose(self):
+        # Real API 36 recording: the native preparation View sat 3px (720px recording) off the
+        # Compose shell, i.e. 1.5px on the normalized frame, between integer search positions.
+        for theme in ("light", "dark"):
+            classifier, _, _, _ = self.reference(theme)
+            shell = self.shell_reference(theme)
+            for dy in (-3, 3):
+                upscaled = np.asarray(shell.resize((720, 1560), Image.Resampling.LANCZOS))
+                moved = Image.fromarray(np.roll(upscaled, dy, axis=0)).resize(shell.size, Image.Resampling.LANCZOS)
+                result = classifier.classify(np.asarray(moved))
+                self.assertEqual("startup-shell", result["state"], result["shell_match"])
+
     def test_shell_cannot_accept_blank_wrong_background_shifted_title_or_extra_content(self):
         for theme in ("light", "dark"):
             classifier, home, baseline, splash = self.reference(theme)
