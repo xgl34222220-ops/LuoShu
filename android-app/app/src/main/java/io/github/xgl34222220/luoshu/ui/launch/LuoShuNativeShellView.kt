@@ -1,37 +1,26 @@
 package io.github.xgl34222220.luoshu.ui.launch
 
 import android.content.Context
-import android.graphics.Typeface
-import android.widget.LinearLayout
-import android.widget.TextView
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
-import io.github.xgl34222220.luoshu.R
+import android.graphics.Canvas
+import android.view.View
 
-/** A cheap, noninteractive preparation frame, never home or a copied splash logo. */
-internal class LuoShuNativeShellView(context: Context) : LinearLayout(context) {
+/**
+ * API 31+ preparation frame shown the moment the system splash exits: the static first
+ * frame of the launch shell (same [LuoShuLaunchArtwork] drawing the Compose shell continues),
+ * never home and never a copied splash icon. Noninteractive.
+ */
+internal class LuoShuNativeShellView(context: Context) : View(context) {
+    private val artwork = LuoShuLaunchArtwork.obtain(context)
+    private val firstFrame = LuoShuLaunchShellTimeline.first(textVisible = true)
+
     init {
-        orientation = VERTICAL
-        setBackgroundColor(context.getColor(R.color.launch_background))
-        val inset = (16 * resources.displayMetrics.density).toInt()
-        setPadding(inset, inset, inset, inset)
-        addView(TextView(context).apply {
-            text = "洛书"
-            textSize = 26f
-            setTextColor(context.getColor(R.color.launch_ink))
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
-        })
-        addView(TextView(context).apply {
-            text = "正在准备界面"
-            textSize = 14f
-            setTextColor(context.getColor(R.color.launch_ink))
-            setPadding(0, inset, 0, 0)
-        })
-        ViewCompat.setOnApplyWindowInsetsListener(this) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            view.setPadding(inset + bars.left, inset + bars.top, inset + bars.right, inset + bars.bottom)
-            insets
-        }
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        contentDescription = "洛书"
+        isClickable = false
+        isFocusable = false
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        artwork.draw(canvas, width, height, firstFrame)
     }
 }

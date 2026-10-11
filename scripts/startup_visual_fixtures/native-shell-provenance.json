@@ -1,47 +1,75 @@
 {
-  "schema": 1,
+  "schema": 2,
   "textBounds360x780": [
     [
-      10,
-      53,
-      63,
-      84
+      140,
+      498,
+      220,
+      540
     ],
     [
-      10,
-      97,
-      92,
-      118
+      112,
+      541,
+      248,
+      563
     ]
+  ],
+  "cardBounds360x780": [
+    48,
+    258,
+    312,
+    524
   ],
   "references": [
     {
       "theme": "light",
+      "kind": "shell",
       "fixture": "native-shell-light.png",
-      "sha256": "ee3010bf3e43c5e8ffa2993f1cf0b7ede569f547f5df30138dd024a7ecb16047",
+      "sha256": "4470fc5793f50c58b58c3974980138b9ae147dfd11158cfeaa322396b2b5e1f5",
+      "origin": "emulator",
       "video": "light-cold-start.mp4",
-      "videoSha256": "718312a3d2fd4848761485e5411d610786b647243db5541b01903a977a8574c4",
-      "frameIndex": 26,
-      "ptsSeconds": 4.392256,
-      "artifactId": 11601660278,
-      "runId": 37896812363,
-      "commit": "3ef9306dff2feff90972d23c5b8f7e957a146bd2",
+      "videoSha256": "17e9c38e745198c7e71adf083b00f2da88a8c6bf7a08a22d88d10ec7f49b92c7",
+      "frameIndex": 28,
+      "ptsSeconds": 5.454689,
+      "artifactId": 11685160811,
+      "runId": 38092197157,
+      "commit": "40209dc",
       "derivation": "Original video frame decoded with ffmpeg scale=360:780, original timestamps and RGB24, same normalization as classifier; no drawn or removed content",
-      "scope": "Noninteractive native preparation UI, not home; display between recorded frames remains unobserved"
+      "scope": "Diffuse glass launch shell (wordmark + subtitle), not home"
+    },
+    {
+      "theme": "light",
+      "kind": "splash",
+      "fixture": "native-splash-light.png",
+      "sha256": "deebe2753524d2317477ffd2680b5c59566b34ce1781c69e1de36b07df153a9b",
+      "origin": "design-render",
+      "derivation": "build_launch_assets.py luoshu_splash_orb.webp at 288dp (504px @1.75 px/dp) on launch_background #D4D5F3, centred (360,786) in 720x1560 with the platform 192dp circle, uniform offset (-4,-2,-4) measured from run 38092197157 splash background; LANCZOS to 360x780. Bootstrap until a real recording of the corrected (gravity fill) icon exists",
+      "scope": "Android 12+ platform splash recognition reference (dissolve fits), not home"
     },
     {
       "theme": "dark",
+      "kind": "shell",
       "fixture": "native-shell-dark.png",
-      "sha256": "75b965cdce2c4142e5ed91d093eafc0ee6d4b32859ec36355917f857e152650b",
+      "sha256": "b925f6c9d92f744424cafa581438be104e1f363014fce5a09fd7d5692f0281ce",
+      "origin": "emulator",
       "video": "dark-cold-start.mp4",
-      "videoSha256": "091e4b73d20fe1da84edbe53bbc9a44ee176c5ffefe19abba8b480b329457469",
-      "frameIndex": 17,
-      "ptsSeconds": 3.114589,
-      "artifactId": 11601261883,
-      "runId": 37896812363,
-      "commit": "3ef9306dff2feff90972d23c5b8f7e957a146bd2",
+      "videoSha256": "e43bc63917f1828c7ec6724f0a10031eb2c502df1e78f43434f3f846a80774e1",
+      "frameIndex": 28,
+      "ptsSeconds": 4.869844,
+      "artifactId": 11684468748,
+      "runId": 38092197157,
+      "commit": "40209dc",
       "derivation": "Original video frame decoded with ffmpeg scale=360:780, original timestamps and RGB24, same normalization as classifier; no drawn or removed content",
-      "scope": "Noninteractive native preparation UI, not home; display between recorded frames remains unobserved"
+      "scope": "Diffuse glass launch shell (wordmark + subtitle), not home"
+    },
+    {
+      "theme": "dark",
+      "kind": "splash",
+      "fixture": "native-splash-dark.png",
+      "sha256": "a76c9d3f4fc5336b2ed22a2dd7b08a13ee8e6beb357ba503a607b38cf5accd09",
+      "origin": "design-render",
+      "derivation": "build_launch_assets.py luoshu_splash_orb.webp at 288dp (504px @1.75 px/dp) on launch_background #292C61, centred (360,786) in 720x1560 with the platform 192dp circle, uniform offset (-4,-2,-4) measured from run 38092197157 splash background; LANCZOS to 360x780. Bootstrap until a real recording of the corrected (gravity fill) icon exists",
+      "scope": "Android 12+ platform splash recognition reference (dissolve fits), not home"
     }
   ]
 }
