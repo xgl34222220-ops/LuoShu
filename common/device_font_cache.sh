@@ -246,12 +246,165 @@ _dfcache_failure_record() {
         printf 'reason=%s\n' "$_dfcr_reason"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$(_dfcache_failure_file)" 2>/dev/null || true
+    _dfcache_pending_set_field failures "$_dfcr_count"
     if [ "$_dfcr_count" -ge "$LUOSHU_CACHE_FAILURE_LIMIT" ]; then
-        rm -f "$(_dfcache_module)/config/device-font-cache-pending.conf" 2>/dev/null || true
+        # Keep the marker as an explicit terminal state. A failed marker never relaunches a build
+        # (build_pending skips it) but lets the App show a way out instead of waiting forever.
+        _dfcache_pending_mark_failed build-retry-exhausted
         _dfcache_log "设备对齐缓存连续失败 ${_dfcr_count} 次，已放弃并停止重试（reason=${_dfcr_reason}）；字体本身已由物理槽映射生效，此项仅为增强"
     else
         _dfcache_log "设备对齐缓存失败 ${_dfcr_count}/${LUOSHU_CACHE_FAILURE_LIMIT}（reason=${_dfcr_reason}）"
     fi
+}
+
+# The pending marker used to have no exit: when the foreground build never finished (killed task,
+# ROM change, HyperOS 4 / Android 17 in #199) it stayed `pending` forever and the App waited on it
+# indefinitely. Every marker now carries started/deadline/failures, and a marker past its deadline
+# is turned into the terminal `cacheState=failed:<reason>`. A failed marker is never rebuilt in the
+# background; the next explicit apply (device_font_cache_schedule) replaces it with a fresh intent.
+LUOSHU_CACHE_PENDING_TIMEOUT="${LUOSHU_CACHE_PENDING_TIMEOUT:-600}"
+case "$LUOSHU_CACHE_PENDING_TIMEOUT" in ''|*[!0-9]*) LUOSHU_CACHE_PENDING_TIMEOUT=600 ;; esac
+[ "$LUOSHU_CACHE_PENDING_TIMEOUT" -ge 60 ] 2>/dev/null || LUOSHU_CACHE_PENDING_TIMEOUT=60
+
+_dfcache_pending_file() {
+    printf '%s/config/device-font-cache-pending.conf\n' "$(_dfcache_module)"
+}
+
+_dfcache_now() {
+    _dfcn_now=$(date +%s 2>/dev/null)
+    case "$_dfcn_now" in ''|*[!0-9]*) _dfcn_now=0 ;; esac
+    printf '%s\n' "$_dfcn_now"
+}
+
+_dfcache_pending_field() {
+    sed -n "s/^$1=//p" "$(_dfcache_pending_file)" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+# Replace (or append) one key in the marker atomically. No-op when there is no marker.
+_dfcache_pending_set_field() {
+    _dfcsf_file="$(_dfcache_pending_file)"
+    [ -s "$_dfcsf_file" ] || return 0
+    {
+        grep -v "^$1=" "$_dfcsf_file" 2>/dev/null
+        printf '%s=%s\n' "$1" "$2"
+    } > "${_dfcsf_file}.tmp.$$" 2>/dev/null || { rm -f "${_dfcsf_file}.tmp.$$" 2>/dev/null; return 1; }
+    mv -f "${_dfcsf_file}.tmp.$$" "$_dfcsf_file" 2>/dev/null || { rm -f "${_dfcsf_file}.tmp.$$" 2>/dev/null; return 1; }
+    chmod 0600 "$_dfcsf_file" 2>/dev/null || true
+}
+
+_dfcache_pending_failed() {
+    case "$(_dfcache_pending_field cacheState)" in failed:*) return 0 ;; esac
+    return 1
+}
+
+_dfcache_pending_mark_failed() {
+    _dfcmf_reason=$(printf '%s' "${1:-unknown}" | tr -c 'A-Za-z0-9._-' '-')
+    [ -s "$(_dfcache_pending_file)" ] || return 0
+    _dfcache_pending_set_field state failed || return 1
+    _dfcache_pending_set_field cacheState "failed:$_dfcmf_reason" || return 1
+    _dfcache_pending_set_field failedAt "$(_dfcache_now)" || return 1
+    _dfcache_log "设备对齐缓存已标记失败（cacheState=failed:${_dfcmf_reason}），不再无限等待；可重新扫描原厂字体或导出诊断"
+}
+
+_dfcache_build_active() {
+    _dfcba_module="$(_dfcache_module)"
+    [ -e "$_dfcba_module/.device-font-cache.lock" ] && return 0
+    _dfcache_foreground_idle && return 1
+    return 0
+}
+
+# Read-only verdict for a marker that is not already failed: prints the failure reason when it is
+# past its deadline or out of retries, prints nothing while it is still legitimately pending.
+_dfcache_pending_expiry_reason() {
+    _dfcper_failures=$(_dfcache_pending_field failures)
+    case "$_dfcper_failures" in ''|*[!0-9]*) _dfcper_failures=$(_dfcache_failure_count) ;; esac
+    if [ "$_dfcper_failures" -ge "$LUOSHU_CACHE_FAILURE_LIMIT" ] 2>/dev/null; then
+        printf 'build-retry-exhausted\n'
+        return 0
+    fi
+    _dfcper_deadline=$(_dfcache_pending_field deadline)
+    case "$_dfcper_deadline" in
+        ''|*[!0-9]*)
+            # Markers written before this contract (e.g. v4.0.0) only carry time=.
+            _dfcper_started=$(_dfcache_pending_field started)
+            case "$_dfcper_started" in ''|*[!0-9]*|0) _dfcper_started=$(_dfcache_pending_field time) ;; esac
+            case "$_dfcper_started" in ''|*[!0-9]*|0) return 0 ;; esac
+            _dfcper_deadline=$((_dfcper_started + LUOSHU_CACHE_PENDING_TIMEOUT))
+            ;;
+    esac
+    _dfcper_now=$(_dfcache_now)
+    [ "$_dfcper_now" -gt 0 ] && [ "$_dfcper_now" -ge "$_dfcper_deadline" ] 2>/dev/null || return 0
+    if [ "$_dfcper_failures" -gt 0 ] 2>/dev/null; then
+        printf 'build-failed\n'
+    else
+        printf 'timeout\n'
+    fi
+}
+
+# Print the effective cache state without modifying anything: none | pending | failed:<reason>.
+# Read-only callers (luoshu-health, runtime report, diagnostic export) use this.
+device_font_cache_state() {
+    if [ ! -s "$(_dfcache_pending_file)" ]; then
+        printf 'cacheState=none\n'
+        return 0
+    fi
+    _dfcst_state=$(_dfcache_pending_field cacheState)
+    case "$_dfcst_state" in
+        failed:*) ;;
+        *)
+            _dfcst_state=pending
+            if ! _dfcache_build_active; then
+                _dfcst_reason=$(_dfcache_pending_expiry_reason)
+                [ -z "$_dfcst_reason" ] || _dfcst_state="failed:$_dfcst_reason"
+            fi
+            ;;
+    esac
+    printf 'cacheState=%s\n' "$_dfcst_state"
+    printf 'started=%s\n' "$(_dfcache_pending_field started)"
+    printf 'deadline=%s\n' "$(_dfcache_pending_field deadline)"
+    printf 'failures=%s\n' "$(_dfcache_pending_field failures)"
+}
+
+# Persist the transition of an expired pending marker into failed:<reason>. Called by the App when
+# it reads the trust state. It never touches a marker while a cache build or a foreground font
+# transaction is running.
+device_font_cache_check_deadline() {
+    [ -s "$(_dfcache_pending_file)" ] || { device_font_cache_state; return 0; }
+    _dfcache_pending_failed && { device_font_cache_state; return 0; }
+    _dfccd_module="$(_dfcache_module)"
+    if [ -e "$_dfccd_module/.device-font-cache.lock" ]; then
+        # Reap a lock left by a dead worker; an alive one means a build is genuinely running.
+        _dfcache_lock_reap_stale "$_dfccd_module/.device-font-cache.lock" >/dev/null 2>&1 || {
+            device_font_cache_state
+            return 0
+        }
+    fi
+    _dfcache_foreground_idle || { device_font_cache_state; return 0; }
+    _dfccd_deadline=$(_dfcache_pending_field deadline)
+    case "$_dfccd_deadline" in
+        ''|*[!0-9]*)
+            # Stamp a deadline onto a legacy marker; without any start time, the clock starts now.
+            _dfccd_started=$(_dfcache_pending_field started)
+            case "$_dfccd_started" in ''|*[!0-9]*|0) _dfccd_started=$(_dfcache_pending_field time) ;; esac
+            case "$_dfccd_started" in ''|*[!0-9]*|0) _dfccd_started=$(_dfcache_now) ;; esac
+            _dfcache_pending_set_field started "$_dfccd_started"
+            _dfcache_pending_set_field deadline "$((_dfccd_started + LUOSHU_CACHE_PENDING_TIMEOUT))"
+            _dfcache_pending_set_field cacheState pending
+            ;;
+    esac
+    _dfccd_reason=$(_dfcache_pending_expiry_reason)
+    [ -z "$_dfccd_reason" ] || _dfcache_pending_mark_failed "$_dfccd_reason"
+    device_font_cache_state
+}
+
+# Used by the App's 重新扫描 action after a successful stock scan: drop only a failed marker (and
+# its failure budget) so the next explicit apply starts clean. A live pending intent is kept.
+device_font_cache_clear_failed() {
+    _dfcache_pending_failed || { device_font_cache_state; return 0; }
+    rm -f "$(_dfcache_pending_file)" 2>/dev/null || true
+    _dfcache_failure_reset
+    _dfcache_log '已清除失败的设备对齐缓存待办；下次明确应用字体时重新生成'
+    device_font_cache_state
 }
 
 # Both launchers must run the builder at the lowest priority available. One of them did not, so
@@ -373,7 +526,12 @@ device_font_cache_schedule() {
         printf 'cacheId=%s\n' "$_dfc_id"
         printf 'templateKey=%s\n' "$_dfc_template_key"
         printf 'sourceKey=%s\n' "$_dfc_source_key"
-        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+        _dfc_started=$(_dfcache_now)
+        printf 'time=%s\n' "$_dfc_started"
+        printf 'cacheState=pending\n'
+        printf 'started=%s\n' "$_dfc_started"
+        printf 'deadline=%s\n' "$((_dfc_started + LUOSHU_CACHE_PENDING_TIMEOUT))"
+        printf 'failures=0\n'
     } > "${_dfc_pending}.tmp.$$" 2>/dev/null || return 1
     mv -f "${_dfc_pending}.tmp.$$" "$_dfc_pending" 2>/dev/null || return 1
     chmod 0600 "$_dfc_pending" 2>/dev/null || true
@@ -460,6 +618,10 @@ _dfcache_build_pending_inner() {
     _dfc_pending="$_dfc_module/config/device-font-cache-pending.conf"
     _dfc_lock="$_dfc_module/.device-font-cache.lock"
     [ -s "$_dfc_pending" ] || return 2
+    if _dfcache_pending_failed; then
+        _dfcache_log '设备对齐缓存待办已标记失败，等待重新扫描或下次明确应用'
+        return 2
+    fi
     [ "${LUOSHU_CACHE_FOREGROUND:-0}" = 1 ] || _dfcache_foreground_idle || {
         _dfcache_log '前台字体事务尚未结束，后台缓存本轮跳过并保留待办'
         return 2
@@ -605,6 +767,9 @@ if [ "${0##*/}" = device_font_cache.sh ]; then
         activate) device_font_cache_activate "${2:-custom}" ;;
         lookup) device_font_cache_lookup "${2:-custom}" ;;
         source-key) _dfcache_source_key ;;
-        *) echo 'Usage: device_font_cache.sh {service|schedule FONT|activate FONT|lookup FONT|source-key}' >&2; exit 2 ;;
+        state) device_font_cache_state ;;
+        check-deadline) device_font_cache_check_deadline ;;
+        clear-failed) device_font_cache_clear_failed ;;
+        *) echo 'Usage: device_font_cache.sh {service|schedule FONT|activate FONT|lookup FONT|source-key|state|check-deadline|clear-failed}' >&2; exit 2 ;;
     esac
 fi

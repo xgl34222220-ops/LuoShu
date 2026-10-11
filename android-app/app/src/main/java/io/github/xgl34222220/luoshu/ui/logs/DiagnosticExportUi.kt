@@ -132,8 +132,13 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         [ -d /data/adb/modules_update/LuoShu ] && pendingModuleDirectory=present
         postMountScript=missing
         [ -f "${'$'}MOD/post-mount.sh" ] && postMountScript=present
+        cacheState=none
+        if [ -s "${'$'}CFG/device-font-cache-pending.conf" ]; then
+            cacheState="${'$'}(MODDIR="${'$'}MOD" MODULE_DIR="${'$'}MOD" sh "${'$'}MOD/common/device_font_cache.sh" state 2>/dev/null | sed -n 's/^cacheState=//p' | head -n1)"
+            [ -n "${'$'}cacheState" ] || cacheState=pending
+        fi
         cachePending=no
-        [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
+        [ "${'$'}cacheState" = pending ] && cachePending=yes
         rootManager=Root
         if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
             rootManager=APatch
@@ -191,6 +196,7 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'pendingModuleDirectory=%s\n' "${'$'}pendingModuleDirectory"
             printf 'postMountScript=%s\n' "${'$'}postMountScript"
             printf 'cachePending=%s\n' "${'$'}cachePending"
+            printf 'cacheState=%s\n' "${'$'}cacheState"
             printf 'rootManager=%s\n' "${'$'}rootManager"
             printf 'mountEngine=%s\n' "${'$'}mountEngine"
             printf 'foreignFontModules=%s\n' "${'$'}{foreignFontModules:-none}"

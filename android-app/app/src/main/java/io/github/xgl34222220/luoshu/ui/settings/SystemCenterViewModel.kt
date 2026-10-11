@@ -65,6 +65,8 @@ internal data class SystemHealthSnapshot(
     val selfMountBackend: String = "",
     val mountEngine: String = "unknown",
     val cachePending: Boolean = false,
+    /** Reason from `cacheState=failed:<reason>`; blank while pending or absent (#199). */
+    val cacheFailure: String = "",
     val rebootRequired: Boolean = false,
     val recentWarnings: Int = 0,
     val recentErrors: Int = 0,
@@ -75,7 +77,7 @@ internal data class SystemHealthSnapshot(
             error.isNotBlank() || !modulePresent -> HealthLevel.ERROR
             activeFont != "default" && payloadFonts <= 0 -> HealthLevel.ERROR
             lockState == "stale" -> HealthLevel.WARNING
-            conflicts.isNotEmpty() || recentErrors > 0 || cachePending -> HealthLevel.WARNING
+            conflicts.isNotEmpty() || recentErrors > 0 || cachePending || cacheFailure.isNotBlank() -> HealthLevel.WARNING
             alignmentState.isNotBlank() && alignmentState !in setOf("verified", "ready", "ok", "passed") -> HealthLevel.WARNING
             else -> HealthLevel.HEALTHY
         }
@@ -341,7 +343,11 @@ internal fun parseHealthReport(raw: String): SystemHealthSnapshot {
         selfMountState = values["selfMountState"].orEmpty(),
         selfMountBackend = values["selfMountBackend"].orEmpty(),
         mountEngine = values["mountEngine"].orEmpty().ifBlank { "unknown" },
-        cachePending = values.bool("cachePending"),
+        cachePending = values.bool("cachePending") &&
+            !values["cacheState"].orEmpty().startsWith("failed"),
+        cacheFailure = values["cacheState"].orEmpty().let { state ->
+            if (state.startsWith("failed")) state.substringAfter(':', "").ifBlank { "unknown" } else ""
+        },
         rebootRequired = values.bool("rebootRequired"),
         recentWarnings = values.int("recentWarnings"),
         recentErrors = values.int("recentErrors"),

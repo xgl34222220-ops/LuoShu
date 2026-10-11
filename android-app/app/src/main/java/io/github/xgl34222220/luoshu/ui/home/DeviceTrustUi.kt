@@ -17,6 +17,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -78,6 +79,8 @@ internal data class DeviceTrustState(
     val mountState: String = "unknown",
     val mountFailure: String = "",
     val cachePending: Boolean = false,
+    /** Reason from `cacheState=failed:<reason>`; blank while the cache is pending or absent. */
+    val cacheFailure: String = "",
     val reapplyPending: Boolean = false,
     val reapplyReason: String = "",
     val error: String = "",
@@ -88,6 +91,7 @@ internal data class DeviceTrustState(
             activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
             mountState == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
+            cacheFailure.isNotBlank() && alignment != "verified" -> DeviceTrustLevel.ISSUE
             reapplyPending -> DeviceTrustLevel.PENDING
             alignment == "verified" && mode in setOf("aligned", "mount-verified", "mount-confirmed") -> DeviceTrustLevel.VERIFIED
             alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
@@ -128,16 +132,28 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
                 reason=stale-verification
             fi
         fi
+        # An expired pending marker becomes cacheState=failed:<reason> (#199); never wait forever.
+        cacheState=none
+        if [ -s "${'$'}CFG/device-font-cache-pending.conf" ]; then
+            cacheState=""
+            if [ -f "${'$'}MOD/common/device_font_cache.sh" ]; then
+                cacheState="${'$'}(MODDIR="${'$'}MOD" MODULE_DIR="${'$'}MOD" sh "${'$'}MOD/common/device_font_cache.sh" check-deadline 2>/dev/null | sed -n 's/^cacheState=//p' | head -n1)"
+            fi
+            if [ -z "${'$'}cacheState" ]; then
+                cacheState="${'$'}(read_value "${'$'}CFG/device-font-cache-pending.conf" cacheState)"
+                case "${'$'}cacheState" in failed:*) ;; *) cacheState=pending ;; esac
+            fi
+        fi
         cachePending=no
-        [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
+        [ "${'$'}cacheState" = pending ] && cachePending=yes
         reapplyState="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" state)"
         reapplyReason="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" reason)"
         reapplyPending=no
         [ "${'$'}reapplyState" = awaiting-explicit-apply ] && reapplyPending=yes
-        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\nmountFailure=%s\ncachePending=%s\nreapplyPending=%s\nreapplyReason=%s\n' \
+        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\nmountFailure=%s\ncachePending=%s\ncacheState=%s\nreapplyPending=%s\nreapplyReason=%s\n' \
             "${'$'}active" "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
             "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" \
-            "${'$'}{mountState:-missing}" "${'$'}mountFailure" "${'$'}cachePending" \
+            "${'$'}{mountState:-missing}" "${'$'}mountFailure" "${'$'}cachePending" "${'$'}cacheState" \
             "${'$'}reapplyPending" "${'$'}reapplyReason"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 12_000L)
@@ -169,10 +185,44 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
         reason = values["reason"].orEmpty(),
         mountState = values["mountState"].orEmpty().ifBlank { "unknown" },
         mountFailure = values["mountFailure"].orEmpty(),
-        cachePending = values["cachePending"] == "yes",
+        cachePending = values["cachePending"] == "yes" && cacheFailureReason(values["cacheState"]).isBlank(),
+        cacheFailure = cacheFailureReason(values["cacheState"]),
         reapplyPending = values["reapplyPending"] == "yes",
         reapplyReason = values["reapplyReason"].orEmpty(),
     )
+}
+
+/** `failed:<reason>` → `<reason>` (falls back to `unknown`); anything else → blank. */
+internal fun cacheFailureReason(cacheState: String?): String {
+    val value = cacheState?.trim().orEmpty()
+    if (!value.startsWith("failed")) return ""
+    return value.substringAfter(':', "").trim().ifBlank { "unknown" }
+}
+
+internal enum class DeviceCacheStatus { NONE, PENDING, FAILED }
+
+internal fun deviceCacheStatus(state: DeviceTrustState): DeviceCacheStatus = when {
+    state.cacheFailure.isNotBlank() -> DeviceCacheStatus.FAILED
+    state.cachePending -> DeviceCacheStatus.PENDING
+    else -> DeviceCacheStatus.NONE
+}
+
+/** The two recovery actions (重新扫描 / 导出诊断) are offered whenever the cache has failed. */
+internal fun deviceCacheRecoveryAvailable(state: DeviceTrustState): Boolean =
+    !state.loading && deviceCacheStatus(state) == DeviceCacheStatus.FAILED
+
+internal fun friendlyCacheFailure(reason: String): String = when (reason) {
+    "" -> ""
+    "timeout" -> "等待超时，生成任务没有完成"
+    "build-failed" -> "生成失败后等待超时"
+    "build-retry-exhausted" -> "连续多次生成失败，已停止重试"
+    else -> "生成失败（$reason）"
+}
+
+internal fun deviceCacheRowText(state: DeviceTrustState): String = when (deviceCacheStatus(state)) {
+    DeviceCacheStatus.FAILED -> friendlyCacheFailure(state.cacheFailure)
+    DeviceCacheStatus.PENDING -> "等待生成"
+    DeviceCacheStatus.NONE -> "无待处理任务"
 }
 
 @Composable
@@ -217,6 +267,9 @@ internal fun DeviceTrustDialog(
     state: DeviceTrustState,
     onDismiss: () -> Unit,
     onOpenAcceptance: () -> Unit = {},
+    onRescan: () -> Unit = {},
+    onExportDiagnostic: () -> Unit = {},
+    recoveryBusy: Boolean = false,
 ) {
     val presentation = deviceTrustPresentation(state)
     val tokens = LocalMiuixTokens.current
@@ -251,7 +304,29 @@ internal fun DeviceTrustDialog(
                 if (state.reason.isNotBlank()) {
                     DeviceTrustRow("验证说明", friendlyTrustReason(state.reason))
                 }
-                DeviceTrustRow("后台对齐缓存", if (state.cachePending) "等待生成" else "无待处理任务")
+                DeviceTrustRow("后台对齐缓存", deviceCacheRowText(state))
+                if (deviceCacheRecoveryAvailable(state)) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        "旧字体已保留。可以重新扫描原厂字体后再应用一次，或导出诊断报告反馈。",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Row(Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = onRescan,
+                            enabled = !recoveryBusy,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("重新扫描", fontWeight = FontWeight.Bold) }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = onExportDiagnostic,
+                            enabled = !recoveryBusy,
+                            modifier = Modifier.weight(1f),
+                        ) { Text("导出诊断", fontWeight = FontWeight.Bold) }
+                    }
+                }
                 if (state.reapplyPending) {
                     DeviceTrustRow("负载升级", "应用一次当前字体后，完整重启一次")
                 }
@@ -337,6 +412,13 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             "已生成兼容映射，但没有系统实际加载证据",
             Icons.Rounded.Info,
             scheme.tertiary,
+        )
+        state.level == DeviceTrustLevel.ISSUE && state.cacheFailure.isNotBlank() &&
+            state.mountFailure.isBlank() && state.reason !in failedTrustReasons && state.alignment != "failed" -> DeviceTrustPresentation(
+            "设备字体缓存生成失败",
+            "${friendlyCacheFailure(state.cacheFailure)}；可重新扫描或导出诊断",
+            Icons.Rounded.Warning,
+            scheme.error,
         )
         state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation(
             "字体应用失败",
