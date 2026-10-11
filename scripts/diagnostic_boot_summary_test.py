@@ -115,6 +115,21 @@ class BootSummaryTest(unittest.TestCase):
         report, _ = self.report({'device-font-xml-parity.conf': 'xmlParity=/private/path\n'})
         self.assertEqual('unknown', report['xmlParity'])
 
+    def test_font_audit_section_is_exported_and_sanitized(self):
+        report, body = self.report()
+        self.assertEqual('not-collected', report['fontAudit'])
+        self.assertIn('[font-audit]', body)
+        report, body = self.report({'device-font-process-audit.conf':
+                                    'schema=luoshu-font-audit-v1\nfontAudit=gap:systemui=2/1$(id)\n'
+                                    'systemui.stockHits=2\nsystemui.otherFiles=brand.ttf $(reboot)\n'
+                                    'evil key=/data/user/0/x\n'})
+        self.assertEqual('gap:systemui=2/1id', report['fontAudit'])
+        self.assertEqual('2', report['systemui.stockHits'])
+        self.assertNotIn('$(', body)
+        self.assertNotIn('/data/user', body)
+        report, _ = self.report({'device-font-process-audit.conf': 'fontAudit=/private\n'})
+        self.assertEqual('unknown', report['fontAudit'])
+
 
 if __name__ == '__main__':
     unittest.main()

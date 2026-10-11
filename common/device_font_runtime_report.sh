@@ -167,9 +167,12 @@ device_font_runtime_report_collect() {
     _device_font_report_copy "$_dfr_config/device-font-xml-parity.conf" "$_dfr_stage/device-font-xml-parity.conf" || true
     _dfr_parity=$(sed -n 's/^xmlParity=//p' "$_dfr_config/device-font-xml-parity.conf" 2>/dev/null | head -n1)
     _dfr_shadow=$(sed -n 's/^shadowedByUpdatableFont=//p' "$_dfr_config/device-font-xml-parity.conf" 2>/dev/null | head -n1)
+    _device_font_report_copy "$_dfr_config/device-font-process-audit.conf" "$_dfr_stage/device-font-process-audit.conf" || true
+    _dfr_audit=$(sed -n 's/^fontAudit=//p' "$_dfr_config/device-font-process-audit.conf" 2>/dev/null | head -n1)
     {
         printf 'xmlParity=%s\n' "${_dfr_parity:-not-collected}"
         printf 'shadowedByUpdatableFont=%s\n' "${_dfr_shadow:-not-collected}"
+        printf 'fontAudit=%s\n' "${_dfr_audit:-not-collected}"
     } >> "$_dfr_stage/summary.txt" 2>/dev/null || true
     grep -E '/data/fonts|/(fonts|font_fallback)\.xml' /proc/self/mountinfo 2>/dev/null \
         > "$_dfr_stage/font-mounts.txt" || true

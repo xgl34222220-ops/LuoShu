@@ -320,11 +320,75 @@ device_font_xml_parity() {
     return 0
 }
 
+# Read-only per-process font audit: which font files system_server, SystemUI, the
+# current launcher and (when running) a WebView renderer really map, by inode, versus
+# LuoShu payload inodes.  Manual deep diagnostics only; never on the boot path.
+_dfload_first_pid() {
+    for _dfload_p in $(pidof "$1" 2>/dev/null); do
+        printf '%s\n' "$_dfload_p"
+        return 0
+    done
+    return 1
+}
+
+_dfload_home_package() {
+    _dfload_home=""
+    if command -v cmd >/dev/null 2>&1; then
+        _dfload_home=$(cmd package resolve-activity --brief \
+            -a android.intent.action.MAIN -c android.intent.category.HOME 2>/dev/null \
+            | tail -n1 | tr -d '\r')
+        _dfload_home="${_dfload_home%%/*}"
+    fi
+    case "$_dfload_home" in
+        ''|android|*[!A-Za-z0-9._]*|*' '*) _dfload_home=com.miui.home ;;
+    esac
+    printf '%s\n' "$_dfload_home"
+}
+
+_dfload_webview_pid() {
+    ps -A -o PID=,NAME= 2>/dev/null | awk '
+        $2 ~ /(webview|chrome|trichrome).*:sandboxed_process/ { print $1; exit }'
+}
+
+device_font_process_audit() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_conf="$_dfload_module_dir/config/device-font-process-audit.conf"
+    _dfload_helper="$_dfload_module_dir/common/device_font_process_audit.py"
+    mkdir -p "$_dfload_module_dir/config" 2>/dev/null || return 1
+    _dfload_launcher=$(_dfload_home_package)
+    _dfload_ss=$(_dfload_first_pid system_server)
+    _dfload_sui=$(_dfload_first_pid com.android.systemui)
+    _dfload_lpid=$(_dfload_first_pid "$_dfload_launcher")
+    _dfload_wv=$(_dfload_webview_pid)
+    set -- --target "systemServer=$_dfload_ss" --target "systemui=$_dfload_sui" \
+        --target "launcher=$_dfload_lpid@$_dfload_launcher"
+    [ -n "$_dfload_wv" ] && set -- "$@" --target "webview=$_dfload_wv"
+    if [ -f "$_dfload_helper" ] && _dfload_python_exec "$_dfload_helper" "$@" \
+        --proc-root "${LUOSHU_PROC_ROOT:-/proc}" \
+        --module "$_dfload_module_dir" \
+        --visible-root "${LUOSHU_VISIBLE_ROOT:-/}" \
+        --output "$_dfload_conf" >/dev/null 2>&1; then
+        :
+    else
+        {
+            printf 'schema=luoshu-font-audit-v1\n'
+            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+            printf 'fontAudit=unknown:python-unavailable\n'
+        } > "$_dfload_conf" 2>/dev/null || true
+    fi
+    chmod 0644 "$_dfload_conf" 2>/dev/null || true
+    _dfload_audit=$(_dfload_state_value "$_dfload_conf" fontAudit)
+    _dfload_log "按进程字体审计：fontAudit=${_dfload_audit:-unknown}"
+    printf 'fontAudit=%s\n' "${_dfload_audit:-unknown}"
+    return 0
+}
+
 if [ "${0##*/}" = device_font_load_verify.sh ]; then
     case "${1:-status}" in
         status|auto) device_font_load_status ;;
         verify|deep) device_font_load_verify ;;
         parity|xml-parity) device_font_xml_parity ;;
-        *) printf 'usage: %s {status|verify|parity}\n' "$0" >&2; exit 2 ;;
+        audit|font-audit) device_font_process_audit ;;
+        *) printf 'usage: %s {status|verify|parity|audit}\n' "$0" >&2; exit 2 ;;
     esac
 fi
