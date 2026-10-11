@@ -4,6 +4,7 @@ experimental default-off per-slot rewrite of /system_ext/etc seeds."""
 from __future__ import annotations
 
 import filecmp
+import hashlib
 import json
 import os
 import re
@@ -376,12 +377,45 @@ def check_snapshot_preferred(base: Path, fx: dict) -> None:
     assert hx["status"] == "applied" and hx["seeds"][0]["input"] == "template-snapshot", hx
 
 
+def check_cache_key_flag(base: Path) -> None:
+    """Cache sourceKey: flag off == legacy key byte-for-byte; enabled=1 changes it."""
+    module = base / "cache-module"
+    store = module / "system/fonts/.luoshu-font-store"
+    store.mkdir(parents=True)
+    (module / "config").mkdir()
+    (store / "regular.font").write_bytes(b"font-data\n")
+    conf = module / "config/hyperos_source_xml.conf"
+    script = '. "$ROOT/common/device_font_cache.sh"; _dfcache_source_key'
+    env = dict(os.environ, ROOT=str(ROOT), MODULE_DIR=str(module), MODDIR=str(module),
+               LUOSHU_CACHE_AUTOSTART="0")
+
+    def key() -> str:
+        return subprocess.run(["sh", "-c", script], check=True, env=env,
+                              capture_output=True, text=True).stdout.strip()
+
+    digest = hashlib.sha256(b"font-data\n").hexdigest()
+    legacy = hashlib.sha256(f"source-contract-v5-content\nregular.font|{digest}\n".encode()).hexdigest()
+    off_keys = [key()]
+    for text in ("enabled=0\n", "enabled=true\n", " enabled=1\n", "enabled=1 \n"):
+        conf.write_text(text)
+        off_keys.append(key())
+    assert set(off_keys) == {legacy}, off_keys
+    conf.write_text("enabled=1\n")
+    on = key()
+    expected_on = hashlib.sha256(
+        f"source-contract-v5-content\nhyperos-source-xml-v1\nregular.font|{digest}\n".encode()).hexdigest()
+    assert on == expected_on and on != legacy, on
+    conf.unlink()
+    assert key() == legacy
+
+
 def main() -> None:
     check_name_parity()
     with tempfile.TemporaryDirectory() as temporary:
         base = Path(temporary)
         check_shell_discovery(base)
         check_inventory_links(base)
+        check_cache_key_flag(base)
         fx = make_fixture(base)
         reference = check_flag_off_identical(base, fx)
         check_flag_on(base, fx, reference)
