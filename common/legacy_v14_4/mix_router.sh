@@ -77,6 +77,43 @@ read_value() {
     return 0
 }
 
+# Read one open inode: a concurrent atomic task/config replacement cannot mix
+# the task ID from one generation with sources or progress from another.
+mix_read_snapshot() {
+    _task=''; _state=''; _message=''; _percent=''
+    _cjk=''; _latin=''; _digit=''
+    _cjk_axes=''; _latin_axes=''; _digit_axes=''
+    _cjk_weight=''; _latin_weight=''; _digit_weight=''
+    _snap_child=''; _snap_request=''; _snap_committed=''; _snap_started=''
+    _mrs_seen='|'
+    _mrs_cr=$(printf '\r')
+    while IFS= read -r _mrs_line || [ -n "$_mrs_line" ]; do
+        case "$_mrs_line" in *=*) ;; *) continue ;; esac
+        _mrs_key=${_mrs_line%%=*}
+        case "$_mrs_key" in
+            task|state|message|percent|cjk|latin|digit|cjkAxes|latinAxes|digitAxes|cjkWeight|latinWeight|digitWeight|\
+            childTask|requestId|committedRequestId|started) ;;
+            *) continue ;;
+        esac
+        # read_value semantics: the first occurrence of a key wins.
+        case "$_mrs_seen" in *"|$_mrs_key|"*) continue ;; esac
+        _mrs_seen="$_mrs_seen$_mrs_key|"
+        _mrs_value=${_mrs_line#*=}
+        case "$_mrs_value" in
+            *"$_mrs_cr"*) _mrs_value=$(printf '%s' "$_mrs_value" | tr -d '\r') ;;
+        esac
+        case "$_mrs_key" in
+            task) _task=$_mrs_value ;; state) _state=$_mrs_value ;;
+            message) _message=$_mrs_value ;; percent) _percent=$_mrs_value ;;
+            cjk) _cjk=$_mrs_value ;; latin) _latin=$_mrs_value ;; digit) _digit=$_mrs_value ;;
+            cjkAxes) _cjk_axes=$_mrs_value ;; latinAxes) _latin_axes=$_mrs_value ;; digitAxes) _digit_axes=$_mrs_value ;;
+            cjkWeight) _cjk_weight=$_mrs_value ;; latinWeight) _latin_weight=$_mrs_value ;; digitWeight) _digit_weight=$_mrs_value ;;
+            childTask) _snap_child=$_mrs_value ;; requestId) _snap_request=$_mrs_value ;;
+            committedRequestId) _snap_committed=$_mrs_value ;; started) _snap_started=$_mrs_value ;;
+        esac
+    done 2>/dev/null < "$1"
+}
+
 json_escape_router() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
@@ -94,18 +131,10 @@ mix_transaction_pending() {
 mix_config_json_fast() {
     _source="$REALMOD/config/axes_mix.conf"
     [ -s "$_source" ] || _source="$REALMOD/config/font_mix.conf"
-    _cjk=$(read_value "$_source" cjk)
-    _latin=$(read_value "$_source" latin)
-    _digit=$(read_value "$_source" digit)
-    _cjk_weight=$(read_value "$_source" cjkWeight)
-    _latin_weight=$(read_value "$_source" latinWeight)
-    _digit_weight=$(read_value "$_source" digitWeight)
+    mix_read_snapshot "$_source"
     case "$_cjk_weight" in ''|*[!0-9]*) _cjk_weight=400 ;; esac
     case "$_latin_weight" in ''|*[!0-9]*) _latin_weight=400 ;; esac
     case "$_digit_weight" in ''|*[!0-9]*) _digit_weight=400 ;; esac
-    _cjk_axes=$(read_value "$_source" cjkAxes)
-    _latin_axes=$(read_value "$_source" latinAxes)
-    _digit_axes=$(read_value "$_source" digitAxes)
     [ -n "$_cjk_axes" ] || _cjk_axes="wght=$_cjk_weight"
     [ -n "$_latin_axes" ] || _latin_axes="wght=$_latin_weight"
     [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
@@ -281,28 +310,25 @@ mix_status_json_fast() {
         printf '{"status":"error","message":"暂无字体组合任务"}\n'
         return 0
     }
-    _task=$(read_value "$_task_file" task)
+    mix_read_snapshot "$_task_file"
     if [ -n "$_wanted" ] && [ "$_wanted" != "$_task" ]; then
         printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'
         return 0
     fi
-    _state=$(read_value "$_task_file" state)
     _status_original_state="$_state"
     _status_scope=''
-    _status_child=$(read_value "$_task_file" childTask)
+    _status_child="$_snap_child"
     [ -n "$_status_child" ] || _status_child="$_task"
     case "$_state" in success|failed|cleanup-pending)
         mix_scope_state_fast "$_task_file"; _status_scope=$?
         case "$_status_scope" in 0) ;; 3) _state=running ;; *) _state=cleanup-pending ;; esac
         ;;
     esac
-    _message=$(read_value "$_task_file" message)
-    _percent=$(read_value "$_task_file" percent)
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
 
     if [ "$_state" = success ]; then
-        _task_request=$(read_value "$_task_file" requestId)
-        _task_committed=$(read_value "$_task_file" committedRequestId)
+        _task_request="$_snap_request"
+        _task_committed="$_snap_committed"
         _task_receipt="$REALMOD/config/mix-commit.conf"
         if [ -n "$_task_request" ] && [ "$(read_value "$_task_receipt" font)" = mix ] && \
            [ "$(read_value "$_task_receipt" requestId)" = "$_task_request" ] && ! mix_transaction_pending; then
@@ -342,7 +368,7 @@ mix_status_json_fast() {
     _live_applied=false; _activation=pending-reboot
     _live_file="$REALMOD/config/font-live.conf"
     _live_request=$(read_value "$_live_file" requestId)
-    _task_request=$(read_value "$_task_file" requestId)
+    _task_request="$_snap_request"
     _next_request=$(read_value "$NEXT_STATE" requestId)
     _current_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
     if [ "$_state" = success ] && ! mix_transaction_pending && [ -n "$_live_request" ] && \
@@ -365,7 +391,7 @@ mix_status_json_fast() {
             elif [ "$_status_scope" -eq 1 ]; then
                 # The queued record can precede supervisor registration. Keep
                 # only this original startup grace, never derived running99.
-                _status_started=$(read_value "$_task_file" started)
+                _status_started="$_snap_started"
                 _status_now=$(date +%s 2>/dev/null)
                 case "$_status_started:$_status_now" in *[!0-9:]*|:*) ;; *)
                     [ $((_status_now - _status_started)) -ge 20 ] 2>/dev/null || _status_active=true ;;
@@ -378,12 +404,9 @@ mix_status_json_fast() {
             _live_applied=false; _activation=pending-reboot
         fi
     fi
-    _cjk=$(read_value "$_task_file" cjk)
-    _latin=$(read_value "$_task_file" latin)
-    _digit=$(read_value "$_task_file" digit)
-    _cjk_axes=$(read_value "$_task_file" cjkAxes); [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
-    _latin_axes=$(read_value "$_task_file" latinAxes); [ -n "$_latin_axes" ] || _latin_axes=wght=400
-    _digit_axes=$(read_value "$_task_file" digitAxes); [ -n "$_digit_axes" ] || _digit_axes=wght=400
+    [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
+    [ -n "$_latin_axes" ] || _latin_axes=wght=400
+    [ -n "$_digit_axes" ] || _digit_axes=wght=400
     printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"rebootRequired":true,"liveApplied":%s,"activation":"%s","progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape_router "$_task")" "$(json_escape_router "$_state")" "$(json_escape_router "$_message")" \
         "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
@@ -829,6 +852,8 @@ setup_runtime() {
     force_link "$REALMOD/common/task_scope.py" "$RUNTIME/common/task_scope.py" || return 1
     force_link "$REALMOD/common/runtime_paths.sh" "$RUNTIME/common/runtime_paths.sh" || return 1
     force_link "$REALMOD/common/mix_task_handoff.sh" "$RUNTIME/common/mix_task_handoff.sh" || return 1
+    [ ! -f "$REALMOD/common/json_error_message.sh" ] || force_link "$REALMOD/common/json_error_message.sh" "$RUNTIME/common/json_error_message.sh" || return 1
+    [ ! -f "$REALMOD/common/json_error_message.py" ] || force_link "$REALMOD/common/json_error_message.py" "$RUNTIME/common/json_error_message.py" || return 1
     force_link "$REALMOD/common/python" "$RUNTIME/common/python" || return 1
     force_link "$REALMOD/common/font_manager.sh" "$RUNTIME/common/font_manager.sh" || return 1
     force_link "$REALMOD/common/legacy_v14_4_switch.sh" "$RUNTIME/common/legacy_v14_4_switch.sh" || return 1
