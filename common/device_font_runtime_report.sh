@@ -71,8 +71,13 @@ device_font_runtime_report_collect() {
     _dfr_template=$(sed -n 's/^state=//p' "$_dfr_config/device-font-template.state" 2>/dev/null | head -n1)
     _dfr_alignment=$(sed -n 's/^state=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
     _dfr_mode=$(sed -n 's/^mode=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    _dfr_cache_state=none
+    if [ -s "$_dfr_config/device-font-cache-pending.conf" ]; then
+        _dfr_cache_state=$(MODDIR="$_dfr_module" MODULE_DIR="$_dfr_module" sh "$_dfr_module/common/device_font_cache.sh" state 2>/dev/null | sed -n 's/^cacheState=//p' | head -n1)
+        [ -n "$_dfr_cache_state" ] || _dfr_cache_state=pending
+    fi
     _dfr_cache_pending=no
-    [ -s "$_dfr_config/device-font-cache-pending.conf" ] && _dfr_cache_pending=yes
+    [ "$_dfr_cache_state" != pending ] || _dfr_cache_pending=yes
 
     _dfr_stage="${_dfr_root}.tmp.$$"
     rm -rf "$_dfr_stage" 2>/dev/null || true
@@ -92,6 +97,7 @@ device_font_runtime_report_collect() {
         printf 'alignmentState=%s\n' "${_dfr_alignment:-missing}"
         printf 'alignmentMode=%s\n' "${_dfr_mode:-compatibility}"
         printf 'cachePending=%s\n' "$_dfr_cache_pending"
+        printf 'cacheState=%s\n' "$_dfr_cache_state"
         printf 'fingerprint=%s\n' "$(getprop ro.build.fingerprint 2>/dev/null)"
         printf 'incremental=%s\n' "$(getprop ro.build.version.incremental 2>/dev/null)"
         printf 'sdk=%s\n' "$(getprop ro.build.version.sdk 2>/dev/null)"

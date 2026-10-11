@@ -21,12 +21,20 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.logs.DiagnosticExportDialog
+import io.github.xgl34222220.luoshu.ui.logs.DiagnosticExportState
+import io.github.xgl34222220.luoshu.ui.logs.exportSanitizedDiagnostic
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 private const val STOCK_SCAN_COMMAND =
     "sh /data/adb/modules/LuoShu/common/font_manager.sh action stock_scan"
+
+// After a successful rescan drop only a failed cache marker (#199) so the next apply starts clean.
+private const val CACHE_CLEAR_FAILED_COMMAND =
+    "MODDIR=/data/adb/modules/LuoShu MODULE_DIR=/data/adb/modules/LuoShu " +
+        "sh /data/adb/modules/LuoShu/common/device_font_cache.sh clear-failed"
 
 private fun stockScanResultMessage(stdout: String, stderr: String, code: Int): String {
     val jsonLine = stdout.lineSequence()
@@ -61,7 +69,32 @@ fun HomeRoute(
     var stockScanMessage by remember { mutableStateOf("") }
     var stockScanError by remember { mutableStateOf(false) }
     var deviceDetailsExpanded by remember { mutableStateOf(false) }
+    var diagnosticState by remember { mutableStateOf(DiagnosticExportState()) }
     val scope = rememberCoroutineScope()
+    val runStockScan: () -> Unit = scan@{
+        if (stockScanBusy) return@scan
+        stockScanBusy = true
+        stockScanMessage = "正在扫描设备原厂字体…"
+        stockScanError = false
+        scope.launch {
+            val result = RootShell.exec(STOCK_SCAN_COMMAND, timeoutMs = 180_000L)
+            stockScanMessage = stockScanResultMessage(result.stdout, result.stderr, result.code)
+            stockScanError = result.code != 0 || stockScanMessage.contains("失败") || stockScanMessage.contains("无法")
+            if (!stockScanError) {
+                RootShell.exec(CACHE_CLEAR_FAILED_COMMAND, timeoutMs = 12_000L)
+            }
+            stockScanBusy = false
+            if (!stockScanError) {
+                actions.refresh()
+                trustRefreshGeneration += 1
+            }
+        }
+    }
+    val runDiagnosticExport: () -> Unit = export@{
+        if (diagnosticState.busy) return@export
+        diagnosticState = DiagnosticExportState(busy = true)
+        scope.launch { diagnosticState = exportSanitizedDiagnostic() }
+    }
 
     LaunchedEffect(
         state.moduleInstalled,
@@ -118,22 +151,7 @@ fun HomeRoute(
                     )
                     Spacer(Modifier.height(7.dp))
                     OutlinedButton(
-                        onClick = {
-                            if (stockScanBusy) return@OutlinedButton
-                            stockScanBusy = true
-                            stockScanMessage = "正在扫描设备原厂字体…"
-                            stockScanError = false
-                            scope.launch {
-                                val result = RootShell.exec(STOCK_SCAN_COMMAND, timeoutMs = 180_000L)
-                                stockScanMessage = stockScanResultMessage(result.stdout, result.stderr, result.code)
-                                stockScanError = result.code != 0 || stockScanMessage.contains("失败") || stockScanMessage.contains("无法")
-                                stockScanBusy = false
-                                if (!stockScanError) {
-                                    actions.refresh()
-                                    trustRefreshGeneration += 1
-                                }
-                            }
-                        },
+                        onClick = runStockScan,
                         enabled = !stockScanBusy && !state.taskRunning && state.rootGranted &&
                             !state.loading && !state.statusCached,
                         modifier = Modifier.fillMaxWidth(),
@@ -162,6 +180,19 @@ fun HomeRoute(
             state = trustState,
             onDismiss = { showTrustDetails = false },
             onOpenAcceptance = { showAcceptanceGuide = true },
+            onRescan = {
+                showTrustDetails = false
+                runStockScan()
+            },
+            onExportDiagnostic = runDiagnosticExport,
+            recoveryBusy = stockScanBusy || diagnosticState.busy || state.taskRunning,
+        )
+    }
+    if (diagnosticState.resultVisible) {
+        DiagnosticExportDialog(
+            style = style,
+            state = diagnosticState,
+            onDismiss = { diagnosticState = DiagnosticExportState() },
         )
     }
     if (showAcceptanceGuide) {

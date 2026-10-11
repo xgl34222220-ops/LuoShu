@@ -79,4 +79,19 @@ test ! -e "$MOD/config/orphan.pid.task"
 mkdir -p "$OTHER/disable"
 OUT2=$(MODDIR="$MOD" LUOSHU_ADB_ROOT="$TMP/adb" LUOSHU_MODULES_ROOT="$TMP/adb/modules" sh "$ROOT/system/bin/luoshu-health" report)
 printf '%s\n' "$OUT2" | grep -qx 'conflictCount=0'
+printf '%s\n' "$OUT2" | grep -qx 'cachePending=false'
+printf '%s\n' "$OUT2" | grep -qx 'cacheState=none'
+
+# #199: an expired cache marker is reported as failed (read-only), never "still pending" forever.
+cp "$ROOT/common/device_font_cache.sh" "$MOD/common/device_font_cache.sh"
+printf 'state=pending\nfont=custom-font\ncacheState=pending\nstarted=1\ndeadline=2\nfailures=0\n' > "$MOD/config/device-font-cache-pending.conf"
+OUT3=$(MODDIR="$MOD" LUOSHU_ADB_ROOT="$TMP/adb" LUOSHU_MODULES_ROOT="$TMP/adb/modules" sh "$ROOT/system/bin/luoshu-health" report)
+printf '%s\n' "$OUT3" | grep -qx 'cachePending=false'
+printf '%s\n' "$OUT3" | grep -qx 'cacheState=failed:timeout'
+grep -qx 'cacheState=pending' "$MOD/config/device-font-cache-pending.conf"
+NOW=$(date +%s)
+printf 'state=pending\nfont=custom-font\ncacheState=pending\nstarted=%s\ndeadline=%s\nfailures=0\n' "$NOW" "$((NOW + 600))" > "$MOD/config/device-font-cache-pending.conf"
+OUT4=$(MODDIR="$MOD" LUOSHU_ADB_ROOT="$TMP/adb" LUOSHU_MODULES_ROOT="$TMP/adb/modules" sh "$ROOT/system/bin/luoshu-health" report)
+printf '%s\n' "$OUT4" | grep -qx 'cachePending=true'
+printf '%s\n' "$OUT4" | grep -qx 'cacheState=pending'
 printf 'system health tests passed\n'
