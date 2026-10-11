@@ -134,9 +134,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 37.0 = Android 17 (#199 HyperOS 4). Published on the stable channel as
-        # system-images;android-37.0;google_apis;x86_64 + platforms;android-37.0.
-        api: [28, 36, '37.0']
+        api: [28, 36]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
