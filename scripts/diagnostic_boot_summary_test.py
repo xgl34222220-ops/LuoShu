@@ -34,7 +34,7 @@ class BootSummaryTest(unittest.TestCase):
             result = subprocess.run(['sh', '-c', command], env=dict(os.environ, PATH=str(bindir) + ':' + os.environ['PATH']),
                                     capture_output=True, text=True, timeout=5)
             self.assertEqual(0, result.returncode, result.stderr)
-            body = Path(result.stdout.strip()).read_text()
+            body = Path(result.stdout.strip().splitlines()[-1]).read_text()
             return dict(line.split('=', 1) for line in body.splitlines() if '=' in line), body
 
     def test_missing_evidence_stays_unknown(self):
@@ -100,6 +100,20 @@ class BootSummaryTest(unittest.TestCase):
         self.assertEqual('yes', report['bootScanInventoryPublished'])
         self.assertEqual('1', report['sysBootCompleted'])
         self.assertTrue(report['uptimeSeconds'].isdigit())
+
+    def test_xml_parity_is_exported_and_sanitized(self):
+        report, _ = self.report()
+        self.assertEqual('not-collected', report['xmlParity'])
+        self.assertEqual('not-collected', report['shadowedByUpdatableFont'])
+        report, body = self.report({'device-font-xml-parity.conf':
+                                    'xmlParity=mismatch:sans-serif(fm=A.ttf,fontsXml=B.ttf)/data/user/0/x $(id)\n'
+                                    'shadowedByUpdatableFont=NotoColorEmoji;rm -rf /\n'})
+        self.assertTrue(report['xmlParity'].startswith('mismatch:sans-serif(fm=A.ttf,fontsXml=B.ttf)'))
+        self.assertNotIn('/data/user', body)
+        self.assertNotIn('$(id)', body)
+        self.assertEqual('NotoColorEmojirm-rf', report['shadowedByUpdatableFont'])
+        report, _ = self.report({'device-font-xml-parity.conf': 'xmlParity=/private/path\n'})
+        self.assertEqual('unknown', report['xmlParity'])
 
 
 if __name__ == '__main__':

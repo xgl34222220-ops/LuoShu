@@ -40,6 +40,8 @@ internal data class DiagnosticExportState(
     val busy: Boolean = false,
     val path: String = "",
     val error: String = "",
+    val xmlParity: String = "",
+    val shadowedByUpdatableFont: String = "",
 ) {
     val resultVisible: Boolean get() = path.isNotBlank() || error.isNotBlank()
 }
@@ -207,7 +209,18 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         else
             printf '\nlayoutDiagnostic=module-helper-missing\n' >> "${'$'}OUT"
         fi
+        PARITY_HELPER="${'$'}MOD/common/device_font_load_verify.sh"
+        if [ -f "${'$'}PARITY_HELPER" ]; then
+            MODDIR="${'$'}MOD" MODULE_DIR="${'$'}MOD" sh "${'$'}PARITY_HELPER" parity >/dev/null 2>&1 || true
+        fi
+        xmlParity="${'$'}(read_value "${'$'}CFG/device-font-xml-parity.conf" xmlParity | tr -cd 'A-Za-z0-9._@#+:;,=()-' | cut -c1-600)"
+        case "${'$'}xmlParity" in ok|mismatch:*|unknown:*) ;; '') xmlParity=not-collected ;; *) xmlParity=unknown ;; esac
+        shadowedFont="${'$'}(read_value "${'$'}CFG/device-font-xml-parity.conf" shadowedByUpdatableFont | tr -cd 'A-Za-z0-9._@#+,-' | cut -c1-300)"
+        [ -n "${'$'}shadowedFont" ] || shadowedFont=not-collected
+        printf '\n[xml-parity]\nxmlParity=%s\nshadowedByUpdatableFont=%s\n' "${'$'}xmlParity" "${'$'}shadowedFont" >> "${'$'}OUT"
         chmod 0644 "${'$'}OUT" 2>/dev/null || true
+        printf 'xmlParity=%s\n' "${'$'}xmlParity"
+        printf 'shadowedByUpdatableFont=%s\n' "${'$'}shadowedFont"
         printf '%s\n' "${'$'}OUT"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 45_000L)
@@ -215,11 +228,27 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         return DiagnosticExportState(error = result.stderr.ifBlank { "脱敏诊断报告生成失败" })
     }
     val path = result.stdout.lineSequence().lastOrNull { it.trim().startsWith("/") }?.trim().orEmpty()
+    val lines = result.stdout.lineSequence().map { it.trim() }.toList()
+    val xmlParity = lines.lastOrNull { it.startsWith("xmlParity=") }?.substringAfter('=').orEmpty()
+    val shadowed = lines.lastOrNull { it.startsWith("shadowedByUpdatableFont=") }?.substringAfter('=').orEmpty()
     return if (path.isBlank()) {
         DiagnosticExportState(error = "报告已执行，但没有返回保存路径")
     } else {
-        DiagnosticExportState(path = path)
+        DiagnosticExportState(path = path, xmlParity = xmlParity, shadowedByUpdatableFont = shadowed)
     }
+}
+
+/** One-line conclusion for the FontManager / fonts.xml / font_fallback.xml parity check. */
+internal fun xmlParityConclusion(xmlParity: String, shadowedByUpdatableFont: String): String {
+    if (xmlParity.isBlank()) return ""
+    val parity = when {
+        xmlParity == "ok" -> "三路字体配置一致（FontManager / fonts.xml / font_fallback.xml）"
+        xmlParity.startsWith("mismatch:") -> "三路字体配置不一致：浏览器或内嵌网页可能与系统显示不同，详见报告 xmlParity"
+        else -> "三路字体配置一致性未能采集"
+    }
+    val shadow = shadowedByUpdatableFont.trim()
+    val unknown = setOf("", "none", "unknown", "not-collected")
+    return if (shadow in unknown) parity else "${parity}；被系统热更新字体遮盖：${shadow}"
 }
 
 @Composable
@@ -274,6 +303,20 @@ internal fun DiagnosticExportDialog(
                     color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )
+                val parityLine = if (failed) "" else xmlParityConclusion(state.xmlParity, state.shadowedByUpdatableFont)
+                if (parityLine.isNotBlank()) {
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        parityLine,
+                        color = if (state.xmlParity.startsWith("mismatch:") || parityLine.contains('；')) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
                 if (!failed) {
                     Spacer(Modifier.size(12.dp))
                     Surface(
