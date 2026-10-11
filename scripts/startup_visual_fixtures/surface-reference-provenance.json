@@ -3,59 +3,8 @@
   "commit": "6af650c388d966f3bb242f4c7241c9012bdd79bb",
   "artifact": "LuoShu-Startup-Visual-API-36",
   "artifact_id": 11507365772,
-  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes.",
+  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes. Launch shell references (shell-*) come from workflow run 38092197157 (commit 40209dc). Retired glass-lens icon logo-transition frames were removed with that icon.",
   "references": [
-    {
-      "file": "native-dark-enter-008.png",
-      "source": "dark-cold-start.mp4",
-      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
-      "frame": 8,
-      "time_seconds": 0.685956,
-      "crop_pixels": [
-        0,
-        0,
-        720,
-        1560
-      ],
-      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
-      "file_sha256": "3c076d67f80ccdb512066f432c7906d7146f6f0325cec33d3d013bf60be87369",
-      "theme": "dark",
-      "expected_state": "logo-transition"
-    },
-    {
-      "file": "native-dark-enter-009.png",
-      "source": "dark-cold-start.mp4",
-      "source_sha256": "0f96416f6000fd77163810d332e089ed9bdc03a390c3b8ad8f6edd5b6e5bf1ba",
-      "frame": 9,
-      "time_seconds": 0.752944,
-      "crop_pixels": [
-        0,
-        0,
-        720,
-        1560
-      ],
-      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
-      "file_sha256": "cdcbb1492937dba2234713e5cfa6a8fe7b7330e6da61fd18fdc1369fefade601",
-      "theme": "dark",
-      "expected_state": "logo-transition"
-    },
-    {
-      "file": "native-light-enter-000.png",
-      "source": "light-cold-start.mp4",
-      "source_sha256": "cc40d8490a83e0a9ac276c0a30dfe013677d18af0b7eb8a74eaf6330e730728e",
-      "frame": 0,
-      "time_seconds": 0.0,
-      "crop_pixels": [
-        0,
-        0,
-        720,
-        1560
-      ],
-      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
-      "file_sha256": "6c67e3403b53f947de2ce12bfd8300230bb6de85311c229c46ee7538f580af59",
-      "theme": "light",
-      "expected_state": "logo-transition"
-    },
     {
       "file": "home-light-resume-001.png",
       "source": "light-warm-start.mp4",
@@ -174,6 +123,82 @@
       "file_sha256": "e0a84c00764a2a1c9867c7e7ff6efc7565c24035f8dd7886857b1a3655ae7148",
       "theme": "light",
       "expected_state": "unclassified"
+    },
+    {
+      "file": "shell-light-cold-026.png",
+      "source": "light-cold-start.mp4",
+      "source_sha256": "17e9c38e745198c7e71adf083b00f2da88a8c6bf7a08a22d88d10ec7f49b92c7",
+      "frame": 26,
+      "time_seconds": 4.508111,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "dcf9600fa169f64c4034204d38879f9b1419c199c936e301834f85e84d70bb89",
+      "theme": "light",
+      "expected_state": "shell-transition",
+      "workflow_run": 38092197157,
+      "artifact_id": 11685160811
+    },
+    {
+      "file": "shell-light-cold-030.png",
+      "source": "light-cold-start.mp4",
+      "source_sha256": "17e9c38e745198c7e71adf083b00f2da88a8c6bf7a08a22d88d10ec7f49b92c7",
+      "frame": 30,
+      "time_seconds": 7.917411,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "b3efe7060c229e4d1bdbc97d824aae1f4131604dc3d0be45fd9d82a191a1d255",
+      "theme": "light",
+      "expected_state": "startup-shell",
+      "workflow_run": 38092197157,
+      "artifact_id": 11685160811
+    },
+    {
+      "file": "shell-dark-cold-023.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "e43bc63917f1828c7ec6724f0a10031eb2c502df1e78f43434f3f846a80774e1",
+      "frame": 23,
+      "time_seconds": 4.273689,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "d1d3b0d3f01ab6e7e8cbfc0ce997a82245648f3ccb58095a36328dcafa531033",
+      "theme": "dark",
+      "expected_state": "shell-transition",
+      "workflow_run": 38092197157,
+      "artifact_id": 11684468748
+    },
+    {
+      "file": "shell-dark-cold-025.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "e43bc63917f1828c7ec6724f0a10031eb2c502df1e78f43434f3f846a80774e1",
+      "frame": 25,
+      "time_seconds": 4.432811,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "e6a393fa1fbaf24158d259489f8ce19cb2740cce9de8c2402c3c3984a17659e2",
+      "theme": "dark",
+      "expected_state": "startup-shell",
+      "workflow_run": 38092197157,
+      "artifact_id": 11684468748
     }
   ],
   "home_references": [

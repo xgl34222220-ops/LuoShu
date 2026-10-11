@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -26,6 +27,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuLaunchShell
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
 import kotlinx.coroutines.flow.combine
@@ -33,7 +35,12 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 
 // Legacy inventory marker: viewModel<NativeImportViewModel>() was replaced by the Application-scoped owner.
 @Composable
-internal fun LuoShuHost(firstFrameCommitted: Boolean) {
+internal fun LuoShuHost(
+    firstFrameCommitted: Boolean,
+    launchShellVisible: Boolean = false,
+    launchShellTextVisible: Boolean = false,
+    onLaunchShellFinished: () -> Unit = {},
+) {
     val model: LuoShuViewModel = viewModel()
     val features: Alpha15FeatureViewModel = viewModel()
     val appearanceViewModel: AppearanceViewModel = viewModel()
@@ -89,10 +96,20 @@ internal fun LuoShuHost(firstFrameCommitted: Boolean) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    // While the launch shell covers it, home is composed and drawn but not yet
+                    // announced: accessibility and UI automation see it once it is visible.
+                    .then(if (launchShellVisible) Modifier.clearAndSetSemantics {} else Modifier)
                     .windowInsetsPadding(contentInsets)
                     .consumeWindowInsets(contentInsets),
             ) {
                 LuoShuAppShell(model, features, appearanceViewModel, firstFrameCommitted)
+            }
+            if (launchShellVisible) {
+                LuoShuLaunchShell(
+                    textAlreadyVisible = launchShellTextVisible,
+                    contentReady = firstFrameCommitted,
+                    onFinished = onLaunchShellFinished,
+                )
             }
         }
     }

@@ -42,6 +42,7 @@ internal data class DiagnosticExportState(
     val error: String = "",
     val xmlParity: String = "",
     val shadowedByUpdatableFont: String = "",
+    val fontAudit: String = "",
 ) {
     val resultVisible: Boolean get() = path.isNotBlank() || error.isNotBlank()
 }
@@ -228,9 +229,18 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         shadowedFont="${'$'}(read_value "${'$'}CFG/device-font-xml-parity.conf" shadowedByUpdatableFont | tr -cd 'A-Za-z0-9._@#+,-' | cut -c1-300)"
         [ -n "${'$'}shadowedFont" ] || shadowedFont=not-collected
         printf '\n[xml-parity]\nxmlParity=%s\nshadowedByUpdatableFont=%s\n' "${'$'}xmlParity" "${'$'}shadowedFont" >> "${'$'}OUT"
+        if [ -f "${'$'}PARITY_HELPER" ]; then
+            MODDIR="${'$'}MOD" MODULE_DIR="${'$'}MOD" sh "${'$'}PARITY_HELPER" audit >/dev/null 2>&1 || true
+        fi
+        fontAudit="${'$'}(read_value "${'$'}CFG/device-font-process-audit.conf" fontAudit | tr -cd 'A-Za-z0-9._:,=/-' | cut -c1-300)"
+        case "${'$'}fontAudit" in ok|gap:*|unknown:*|inactive:*) ;; '') fontAudit=not-collected ;; *) fontAudit=unknown ;; esac
+        printf '\n[font-audit]\nfontAudit=%s\n' "${'$'}fontAudit" >> "${'$'}OUT"
+        grep -E '^[A-Za-z]+[.][A-Za-z]+=' "${'$'}CFG/device-font-process-audit.conf" 2>/dev/null | head -n 80 \
+            | tr -cd 'A-Za-z0-9._@#+/:;,=()\n-' | cut -c1-1200 >> "${'$'}OUT"
         chmod 0644 "${'$'}OUT" 2>/dev/null || true
         printf 'xmlParity=%s\n' "${'$'}xmlParity"
         printf 'shadowedByUpdatableFont=%s\n' "${'$'}shadowedFont"
+        printf 'fontAudit=%s\n' "${'$'}fontAudit"
         printf '%s\n' "${'$'}OUT"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 45_000L)
@@ -241,10 +251,16 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
     val lines = result.stdout.lineSequence().map { it.trim() }.toList()
     val xmlParity = lines.lastOrNull { it.startsWith("xmlParity=") }?.substringAfter('=').orEmpty()
     val shadowed = lines.lastOrNull { it.startsWith("shadowedByUpdatableFont=") }?.substringAfter('=').orEmpty()
+    val fontAudit = lines.lastOrNull { it.startsWith("fontAudit=") }?.substringAfter('=').orEmpty()
     return if (path.isBlank()) {
         DiagnosticExportState(error = "报告已执行，但没有返回保存路径")
     } else {
-        DiagnosticExportState(path = path, xmlParity = xmlParity, shadowedByUpdatableFont = shadowed)
+        DiagnosticExportState(
+            path = path,
+            xmlParity = xmlParity,
+            shadowedByUpdatableFont = shadowed,
+            fontAudit = fontAudit,
+        )
     }
 }
 
@@ -253,12 +269,55 @@ internal fun xmlParityConclusion(xmlParity: String, shadowedByUpdatableFont: Str
     if (xmlParity.isBlank()) return ""
     val parity = when {
         xmlParity == "ok" -> "三路字体配置一致（FontManager / fonts.xml / font_fallback.xml）"
+        xmlParity.startsWith("mismatch:") && xmlParity.contains("stock-inode:") ->
+            "三路字体配置文件名一致，但仍指向原厂文件（同名不同 inode），详见报告 xmlParity"
         xmlParity.startsWith("mismatch:") -> "三路字体配置不一致：浏览器或内嵌网页可能与系统显示不同，详见报告 xmlParity"
         else -> "三路字体配置一致性未能采集"
     }
     val shadow = shadowedByUpdatableFont.trim()
     val unknown = setOf("", "none", "unknown", "not-collected")
     return if (shadow in unknown) parity else "${parity}；被系统热更新字体遮盖：${shadow}"
+}
+
+private val fontAuditProcessLabels = mapOf(
+    "systemServer" to "system_server",
+    "systemui" to "SystemUI",
+    "launcher" to "桌面",
+    "webview" to "WebView",
+)
+
+/** Processes whose stock mappings are expected (font server, Chromium per-script fonts). */
+private val fontAuditServerLike = setOf("systemServer", "webview")
+
+/**
+ * One-line conclusion for the per-process font audit (`fontAudit=ok|gap:<proc>=N/M,...`),
+ * where N = stock font files still mapped and M = of those, slots LuoShu replaced.
+ */
+internal fun fontAuditConclusion(fontAudit: String): String {
+    val value = fontAudit.trim()
+    return when {
+        value.isBlank() || value == "not-collected" -> ""
+        value == "ok" -> "按进程字体审计：SystemUI / 桌面未发现仍加载的原厂字体文件"
+        value.startsWith("inactive:") -> "按进程字体审计：当前没有洛书字体负载，已跳过"
+        value.startsWith("gap:") -> {
+            val parts = value.removePrefix("gap:").split(',').mapNotNull { item ->
+                val name = item.substringBefore('=')
+                val counts = item.substringAfter('=', "").split('/')
+                val stock = counts.getOrNull(0)?.toIntOrNull() ?: return@mapNotNull null
+                val slot = counts.getOrNull(1)?.toIntOrNull() ?: 0
+                val label = fontAuditProcessLabels[name] ?: return@mapNotNull null
+                when {
+                    name in fontAuditServerLike && slot > 0 -> "${label} 仍加载已替换槽位的原厂字体 ${slot} 个"
+                    name in fontAuditServerLike -> null
+                    slot > 0 -> "${label} 仍加载原厂字体 ${stock} 个（其中 ${slot} 个是洛书已替换的槽位）"
+                    stock > 0 -> "${label} 仍加载原厂字体 ${stock} 个"
+                    else -> null
+                }
+            }
+            if (parts.isEmpty()) "按进程字体审计：结果无法解析，详见报告 [font-audit]" else parts.joinToString("；")
+        }
+        else -> "按进程字体审计未能采集"
+    }
 }
 
 @Composable
@@ -319,6 +378,20 @@ internal fun DiagnosticExportDialog(
                     Text(
                         parityLine,
                         color = if (state.xmlParity.startsWith("mismatch:") || parityLine.contains('；')) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                val auditLine = if (failed) "" else fontAuditConclusion(state.fontAudit)
+                if (auditLine.isNotBlank()) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        auditLine,
+                        color = if (state.fontAudit.startsWith("gap:")) {
                             MaterialTheme.colorScheme.error
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant

@@ -1,31 +1,25 @@
 {
-  "workflow_run": 37658629186,
-  "commit": "17888663a0fb64a7a63ed96c56f423d94a36a76d",
-  "artifact": "LuoShu-Startup-Visual-API-36",
-  "notes": "Unmodified crops from real recorded native splash frames. These are recognition references, never inserted into emulator recordings. Negative baseline contains a logo returning after visible home in both themes.",
+  "origin": "design-render",
+  "notes": "Crop 336x336 at (192,618)-(528,954) of the native-splash design render described in native-shell-provenance.json (luoshu_splash_orb at 288dp, platform 192dp circle). The previous fixtures were real crops of the retired glass-lens icon; replace with real crops once a recording of this icon exists.",
   "references": [
     {
       "file": "native-logo-light.png",
-      "source": "cold-start.mp4",
-      "source_sha256": "c9df890b08f57f714b910cb0d912a6f0f2a3730e5a176b73244536538f97c7cc",
-      "time_seconds": 2.0,
+      "sha256": "3c7b6569509bfb1b1aff44e08010ce1998d91c02d7d342d4609bed5759d8f28a",
       "crop_pixels": [
         192,
-        612,
+        618,
         528,
-        948
+        954
       ]
     },
     {
       "file": "native-logo-dark.png",
-      "source": "repeat-cold-start.mp4",
-      "source_sha256": "bea4cc58137fa4e2a84e368a6c1c0f59df109198802709c430e471761c80833f",
-      "time_seconds": 2.0,
+      "sha256": "6204e79213f0b11e63d7c37272e322a0b576972ef19b8d97a617a4c44115c5af",
       "crop_pixels": [
         192,
-        612,
+        618,
         528,
-        948
+        954
       ]
     }
   ]

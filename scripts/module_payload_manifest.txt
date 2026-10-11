@@ -6,6 +6,7 @@ common/app_installer.sh
 common/background_task.sh
 common/boot_housekeeping.sh
 common/boot_loop_guard.sh
+common/system_ota_guard.sh
 common/task_scope.py
 common/task_scope.sh
 common/runtime_paths.sh
@@ -29,6 +30,7 @@ common/device_font_payload_verify.py
 common/device_font_runtime_report.sh
 common/device_font_transaction_guard.sh
 common/device_font_xml_parity.py
+common/device_font_process_audit.py
 common/device_font_slot_build.py
 common/device_font_slot_build_base.py
 common/device_font_slot_plan.py
@@ -76,6 +78,7 @@ common/font_name_normalize.py
 common/font_provider_cache.sh
 common/font_switch_lock.sh
 common/font_validate_fast_v4.sh
+common/google_font_deferred_restore.sh
 common/google_font_fallback_core.py
 common/google_font_fallback.py
 common/google_font_fallback.sh
@@ -98,6 +101,7 @@ common/hyperos_stage_complete.sh
 common/hyperos_metrics_batch.py
 common/hyperos_theme_font_bridge.sh
 common/hyperos_theme_font_patch.py
+common/hyperos_webview_route.sh
 common/hyperos_physical_policy.py
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
@@ -139,6 +143,7 @@ README.md
 CHANGELOG.md
 customize.sh
 module.prop
+branding/luoshu-app-icon.webp
 post-fs-data.sh
 post-mount.sh
 service.sh
