@@ -147,6 +147,46 @@ KSU_LATE_LOAD=1 LUOSHU_BOOTLOOP_BOOT_ID=boot-late FIXTURE_MANAGER=KernelSU sh "$
 KSU_LATE_LOAD=1 LUOSHU_BOOTLOOP_BOOT_ID=boot-late FIXTURE_MANAGER=KernelSU sh "$MOD/post-mount.sh" >/dev/null 2>&1
 grep -q '^mounted:post-mount.sh$' "$MOUNTS" || fail 'late-load post-mount did not mount'
 
+# 11. Default (non-legacy) route: the root routers exec the v4 core, and the
+# post-fs-data core sources a copy of the v2.2.7 initializer, which loads
+# util_functions.sh before the dynamic font view and the self-mount.
+rm -f "$MOD/config/font_runtime_legacy_v14_4.conf" "$MOD/config/boot-loop-guard.conf" \
+  "$MOD/config/boot-loop-safe-mode.conf"
+mkdir -p "$MOD/.luoshu-runtime/core" "$MOD/.luoshu-runtime/compat/v227"
+for file in post-fs-data.sh post-mount.sh; do
+  cp "$ROOT/.luoshu-runtime/core/$file" "$MOD/.luoshu-runtime/core/$file"
+done
+cp "$ROOT/.luoshu-runtime/compat/v227/post-fs-data.sh" "$MOD/.luoshu-runtime/compat/v227/post-fs-data.sh"
+cat >> "$MOD/common/mount_compat.sh" <<'EOF2'
+font_config_boot_guard() { return 0; }
+device_font_dynamic_mount_apply() { printf 'dynamic:%s\n' "${0##*/}" >> "$FIXTURE_MOUNTS"; return 0; }
+EOF2
+cp "$MOD/common/mount_compat.sh" "$MOD/common/mount_self_backend.sh"
+v4_mounted() { grep -q '^mounted:\|^dynamic:' "$MOUNTS"; }
+stage v4-a Magisk post-fs-data.sh
+grep -q '^dynamic:post-fs-data.sh$' "$MOUNTS" || fail 'v4 route: dynamic view not applied on a normal boot'
+grep -q '^mounted:post-fs-data.sh$' "$MOUNTS" || fail 'v4 route: Magisk post-fs-data did not mount'
+[ "$(counter)" = 1 ] || fail "v4 route: v4-a counter=$(counter)"
+FIXTURE_BOOT_COMPLETED=1 LUOSHU_BOOTLOOP_BOOT_ID=v4-a MODDIR="$MOD" sh "$MOD/common/module_status.sh" >/dev/null
+[ "$(counter)" = 0 ] || fail 'v4 route: completed boot did not clear counter'
+stage v4-b Magisk post-fs-data.sh
+stage v4-c Magisk post-fs-data.sh
+v4_mounted || fail 'v4 route: v4-c must still mount'
+stage v4-d Magisk post-fs-data.sh
+safe || fail 'v4 route: safe mode not entered after two unfinished boots'
+! v4_mounted || fail 'v4 route: safe mode boot still mounted (dynamic view or payload)'
+ls "$MOD"/.post-fs-data-v227.*.sh >/dev/null 2>&1 && fail 'v4 route: temporary v2.2.7 copy left behind'
+stage v4-d KernelSU post-mount.sh
+! v4_mounted || fail 'v4 route: safe mode boot still mounted in post-mount'
+LUOSHU_BOOTLOOP_BOOT_ID=v4-d sh "$MOD/action.sh" >/dev/null 2>&1 || fail 'v4 route: action.sh re-enable failed'
+stage v4-e KernelSU post-fs-data.sh
+grep -q '^hidden:post-fs-data.sh$' "$MOUNTS" || fail 'v4 route: KernelSU post-fs-data did not hide payload'
+stage v4-e KernelSU post-mount.sh
+grep -q '^mounted:post-mount.sh$' "$MOUNTS" || fail 'v4 route: re-enabled boot did not mount in post-mount'
+: > "$MOUNTS"
+KSU_LATE_LOAD=1 LUOSHU_BOOTLOOP_BOOT_ID=v4-late FIXTURE_MANAGER=KernelSU sh "$MOD/late-load.sh" >/dev/null 2>&1
+grep -q '^hidden:post-fs-data.sh$' "$MOUNTS" || fail 'v4 route: late-load did not run the post-fs-data pipeline'
+
 # 10. A host shell that merely sources util_functions.sh is never affected.
 (
   MODDIR="$MOD"; MODULE_DIR="$MOD"
