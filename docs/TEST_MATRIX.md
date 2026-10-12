@@ -64,7 +64,7 @@
 - Android 12+ 系统 Splash 仍按平台规则只用不透明单色底（取弥散背景中心色 `launch_background`）＋中央静态玻璃球图标（内含同色弥散与原图标画面，`design/launch/build_launch_assets.py` 生成）。系统 Splash 以默认退出尽早露出原生准备帧＝启动壳第一帧（全屏弥散＋玻璃卡片＋「洛书」字标），无自定义退出监听、无 core-splashscreen。
 - Android 9–11：启动窗口 `luoshu_launch_window`（全屏弥散位图＋颗粒＋首帧尺寸玻璃卡片），随后同一 Compose 启动壳。
 - 启动壳 `LuoShuLaunchShell` 叠在已组合完成的真实首页之上（同一帧），色块缓慢漂移、玻璃上一次性高光扫过、卡片轻微落定，约 1.35 s 内淡出到首页；首帧交付、权限请求、模糊初始化均不等待它。系统动画缩放为 0 时静态显示并在首帧提交后立即移除。仅冷启动（非恢复、非任务入口）。
-- `python3 scripts/android_launch_source_test.py` 校验接线、冷启动限定、不阻塞就绪、几何常量与生成脚本一致、亮暗资源、Splash 色与背景中心一致、字标对比度。`scripts/android_startup_visual.py` 逐帧识别：原生 Logo → 平台 Splash 退场合成（逐行拟合 Splash×a＋启动壳×b＋黑底，启动壳可按平台 20dp 上滑位移下移且空出带为黑；权重须物理、单一柔边、可见度≥0.2，仅限冷启动 Logo 之后且 1s 内交给启动壳，启动壳权重不回退、位移不回落）→ Splash 溶解（混合拟合）→ 启动壳（字标裁剪＋低分辨率弥散场，容忍漂移）→ 首页交叉淡化 → 首页；启动壳回到首页之后、暖启动出现、黑帧和未识别帧均失败。
+- `python3 scripts/android_launch_source_test.py` 校验接线、冷启动限定、不阻塞就绪、几何常量与生成脚本一致、亮暗资源、Splash 色与背景中心一致、字标对比度。API 31+ 准备帧先在后台线程栅格化成位图，期间以 OnPreDraw 取消遍历保留平台 Splash（上限 4s，失败/超时回退实时绘制），首个窗口帧只画位图，避免首帧渲染超过 WindowManager 约 1s 绘制同步而让默认退场露出黑窗口；仍保留平台默认退场，不注册 exit listener。`scripts/android_startup_visual.py` 逐帧识别：原生 Logo → 平台 Splash 退场合成（逐行拟合 Splash×a＋启动壳×b＋黑底，启动壳可按平台 20dp 上滑位移下移且空出带为黑；权重须物理、单一柔边、可见度≥0.2，仅限冷启动 Logo 之后且 1s 内交给启动壳，启动壳权重不回退、位移不回落）→ Splash 溶解（混合拟合）→ 启动壳（字标裁剪＋低分辨率弥散场，容忍漂移）→ 首页交叉淡化 → 首页；启动壳回到首页之后、暖启动出现、黑帧和未识别帧均失败。
 - 真实冷启动仍需分别观察亮/暗系统屏、Splash→启动壳衔接、淡出到首页、重复冷启动及崩溃/ANR。
 
 平台边界依据：[Android Splash screens](https://developer.android.com/develop/ui/views/launch/splash-screen)。

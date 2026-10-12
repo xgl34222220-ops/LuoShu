@@ -269,6 +269,9 @@ internal class LuoShuLaunchArtwork private constructor(
             return LuoShuLaunchArtwork(context.resources, dark).also { cached = it }
         }
 
+        /** Uncached instance for the background preparation raster (never shared across threads). */
+        fun standalone(context: Context): LuoShuLaunchArtwork = LuoShuLaunchArtwork(context.resources, isDark(context))
+
         /** The launch is one-shot; drop the bitmaps once the shell has left the composition. */
         fun release() {
             cached = null
