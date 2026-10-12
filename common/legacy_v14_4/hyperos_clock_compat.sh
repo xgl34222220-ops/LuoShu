@@ -46,19 +46,39 @@ _lhcc_root_for_part() {
 }
 
 _lhcc_weight_for_name() {
-    _lhcc_lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    # ExtraBold/UltraBold/SemiBold must be tested before Bold, ExtraLight/
+    # UltraLight before Light, and "Highlight" is not a Light weight.
+    _lhcc_lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d ' _-')
     case "$_lhcc_lower" in
-        100.ttf|*thin*) printf '100\n' ;;
-        200.ttf|*extralight*|*extra-light*) printf '200\n' ;;
-        300.ttf|*light*) printf '300\n' ;;
-        350.ttf) printf '350\n' ;;
-        500.ttf|*medium*) printf '500\n' ;;
-        600.ttf|*semibold*|*semi-bold*|*demibold*) printf '600\n' ;;
-        700.ttf|*bold*) printf '700\n' ;;
-        800.ttf|*extrabold*|*extra-bold*) printf '800\n' ;;
-        900.ttf|*black*|*heavy*) printf '900\n' ;;
+        100.ttf|200.ttf|300.ttf|350.ttf|400.ttf|500.ttf|600.ttf|700.ttf|800.ttf|900.ttf)
+            printf '%s\n' "${_lhcc_lower%.ttf}" ;;
+        *extrablack*|*ultrablack*) printf '900\n' ;;
+        *extrabold*|*ultrabold*) printf '800\n' ;;
+        *semibold*|*demibold*) printf '600\n' ;;
+        *extralight*|*ultralight*) printf '200\n' ;;
+        *extrathin*|*ultrathin*|*xthin*|*hairline*) printf '100\n' ;;
+        *black*|*heavy*) printf '900\n' ;;
+        *bold*) printf '700\n' ;;
+        *medium*) printf '500\n' ;;
+        *highlight*) printf '400\n' ;;
+        *light*) printf '300\n' ;;
+        *thin*) printf '100\n' ;;
         *) printf '400\n' ;;
     esac
+}
+
+# A variable slot (MiSansVF, MitypeVF, GoogleSans-VF ...) is selected by its
+# wght axis; a static 400 donor would render every weight identically.
+_lhcc_is_variable_name() {
+    case "$1" in *VF.*|*VF_*|*VF-*|*-VF*|*_VF*|*Variable*|*Flex*) return 0 ;; esac
+    return 1
+}
+
+_lhcc_has_fvar() {
+    [ -s "$1" ] || return 1
+    # The SFNT table directory sits in the first bytes; for a TTC the first
+    # face directory follows the 12+4n header and is still inside this window.
+    dd if="$1" bs=2048 count=1 2>/dev/null | grep -a -q fvar
 }
 
 _lhcc_source_for_name() {
@@ -73,8 +93,22 @@ _lhcc_source_for_name() {
         return 0
     }
 
+    _lhcc_store="$_lhcc_system/.luoshu-font-store"
+    if _lhcc_is_variable_name "$_lhcc_name"; then
+        for _lhcc_file in "$_lhcc_store/variable.font" "$_lhcc_store/mix-composite.font" \
+                          "$_lhcc_store/regular.font" "$_lhcc_system/MiSansVF.ttf" \
+                          "$_lhcc_system/400.ttf"; do
+            _lhcc_has_fvar "$_lhcc_file" || continue
+            printf '%s\n' "$_lhcc_file"
+            return 0
+        done
+        # No variable donor exists (static user font): keep the previous static
+        # choice below, which is what the full mapper staged as well.
+    fi
+
     _lhcc_weight=$(_lhcc_weight_for_name "$_lhcc_name")
     for _lhcc_file in \
+        "$_lhcc_store/wght-${_lhcc_weight}.font" \
         "$_lhcc_system/${_lhcc_weight}.ttf" \
         "$_lhcc_system/400.ttf" \
         "$_lhcc_system/Roboto-Regular.ttf" \

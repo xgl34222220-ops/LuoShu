@@ -122,8 +122,27 @@ extract_collection_faces() {
         invalidate_font_cache
         printf '%s\n' "$_json"
     else
-        fail_json "TTC 字体面拆分失败"
+        # 拆分器给出明确原因（例如集合内全部是位图/彩色字体面）时原样提示。
+        _reason=$(printf '%s' "$_json" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+        fail_json "TTC/OTC 字体集合无法导入：${_reason:-字体面拆分失败}"
     fi
+}
+
+# 彩色 Emoji 字体不能作为全局文字字体；单独保存，供可选 Emoji 槽使用。
+import_emoji_file() {
+    _src="$1"; _display="$2"; _ext="$3"
+    _emoji_dir="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/emoji"
+    mkdir -p "$_emoji_dir" 2>/dev/null || { fail_json "无法创建 Emoji 字体目录"; return; }
+    _stem=$(safe_stem "$_display")
+    _target="$_emoji_dir/${_stem}.${_ext}"
+    if [ -e "$_target" ] && ! cmp -s "$_src" "$_target" 2>/dev/null; then
+        _hash=$(file_hash "$_src")
+        _target="$_emoji_dir/${_stem}-$(printf '%s' "$_hash" | cut -c1-10).${_ext}"
+    fi
+    cp -f "$_src" "$_target" 2>/dev/null || { fail_json "无法复制 Emoji 字体"; return; }
+    chmod 0644 "$_target" 2>/dev/null || true
+    printf '{"status":"ok","data":{"kind":"emoji","name":"%s","path":"%s","duplicate":false,"message":"已作为可选 Emoji 字体导入；需在 Emoji 槽中启用后重新应用字体，默认仍使用原厂 Emoji"}}\n' \
+        "$(json_escape "$_stem")" "$(json_escape "$_target")"
 }
 
 import_font_file() {
@@ -147,6 +166,11 @@ import_font_file() {
 
     if [ "$_format" = TTC ]; then
         extract_collection_faces "$_src" "$_display"
+        return
+    fi
+
+    if [ "${FONT_CHECK_COLOR:-false}" = true ]; then
+        import_emoji_file "$_src" "$_display" "$_ext"
         return
     fi
 
@@ -240,8 +264,8 @@ case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
 [ -n "$display_name" ] || display_name=$(basename "$source_path")
 _ext=$(printf '%s' "${display_name##*.}" | tr '[:upper:]' '[:lower:]')
 case "$_ext" in
-    ttf|otf|ttc) import_font_file "$source_path" "$display_name" ;;
+    ttf|otf|ttc|otc) import_font_file "$source_path" "$display_name" ;;
     zip) import_zip_file "$source_path" "$display_name" ;;
-    *) fail_json "仅支持 TTF、OTF、TTC 和字体模块 ZIP" ;;
+    *) fail_json "仅支持 TTF、OTF、TTC/OTC 和字体模块 ZIP" ;;
 esac
 exit 0

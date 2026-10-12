@@ -195,6 +195,10 @@ _font_anchor() {
 _font_alias() {
     anchor="$1"
     dest="$2"
+    # Emoji 文件只允许由可选 Emoji 槽显式写入。
+    case "${dest##*/}" in
+        *[Ee]moji*|*EMOJI*) [ "${LUOSHU_EMOJI_SLOT_WRITE:-0}" = 1 ] || return 1 ;;
+    esac
     rm -f "$dest" 2>/dev/null || true
     ln "$anchor" "$dest" 2>/dev/null || cp -f "$anchor" "$dest" 2>/dev/null || return 1
     chmod 644 "$dest" 2>/dev/null || true
@@ -583,6 +587,7 @@ copy_as_hyperos() {
     bad_count=0
     for cfile in $(get_all_hyperos_files); do
         _rom_exact_target_exists "$cfile" || continue
+        case "$cfile" in *[Ii]talic*|*[Oo]blique*) continue ;; esac
         if _font_alias "$regular_anchor" "$dest_dir/$cfile"; then
             if _verify_font_copy "$dest_dir/$cfile"; then
                 core_count=$((core_count + 1))
@@ -623,7 +628,8 @@ copy_as_hyperos() {
                 fi
             fi
             if [ -n "$rb" ]; then
-                for dest_name in "Roboto-${rb}.ttf" "Roboto-${rb}Italic.ttf"; do
+                # 斜体槽保持原厂：正体字重不再写进 Roboto-*Italic（与 legacy 路线一致）。
+                for dest_name in "Roboto-${rb}.ttf"; do
                     _rom_exact_target_exists "$dest_name" || continue
                     if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
                         weight_count=$((weight_count + 1))
@@ -662,6 +668,8 @@ copy_as_generic() {
     bad_count=0
     for cfile in $(get_all_generic_files); do
         _rom_exact_target_exists "$cfile" || continue
+        # 用户字体没有斜体字体面可用时，斜体槽保持原厂，不再以正体替换。
+        case "$cfile" in *[Ii]talic*|*[Oo]blique*) continue ;; esac
         if _font_alias "$regular_anchor" "$dest_dir/$cfile"; then
             if _verify_font_copy "$dest_dir/$cfile"; then
                 core_count=$((core_count + 1))
