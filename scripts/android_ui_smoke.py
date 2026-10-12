@@ -39,6 +39,12 @@ HOME_BATCH_TIMING_CLOCK = (
     "remote Linux /proc/uptime seconds, including suspend; source printed decimal precision; "
     "not synchronized with native SystemClock.uptimeMillis or host time.monotonic"
 )
+# Launcher-only precondition before each recorded launch (not App startup time).
+# 10s was exhausted by the API 36 swiftshader runner itself: one hierarchy+capture
+# sample took 4.4s and Launcher's predicted-app hotseat update reset stability, so a
+# correctly stable HOME finished at 10.33s (PR #288 run 38198869251). Three identical
+# focused captures are still required; only the infrastructure wait is longer.
+HOME_BASELINE_TIMEOUT_SECONDS = 20
 HOME_BATCH_TIMING_PREFIX = b"[LUOSHU_HOME_BATCH_TIMING_V1]"
 HOME_BATCH_TIMING_SUFFIX = b"[/LUOSHU_HOME_BATCH_TIMING_V1]"
 HOME_BATCH_TIMING_HELPER = r"""_luoshu_home_mark() {
@@ -1327,8 +1333,8 @@ class SmokeRun:
         return root
 
     def wait_home_baseline(self, name: str) -> bytes:
-        """Require real Launcher content and three stable captures within 10s."""
-        return self._capture_home_baseline(name, timeout=10, role="startup-acceptance-baseline")
+        """Require real Launcher content and three stable captures within HOME_BASELINE_TIMEOUT_SECONDS."""
+        return self._capture_home_baseline(name, timeout=HOME_BASELINE_TIMEOUT_SECONDS, role="startup-acceptance-baseline")
 
     def _capture_home_baseline(self, name: str, *, timeout: float, role: str) -> bytes:
         started = time.monotonic()
