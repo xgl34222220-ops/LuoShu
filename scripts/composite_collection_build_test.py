@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'common'))
 import composite_collection_build as builder
 import composite_collection_contract as contract
+import fontTools
 from fontTools.fontBuilder import FontBuilder
 from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
 from fontTools.pens.recordingPen import DecomposingRecordingPen
@@ -458,7 +459,9 @@ class CollectionBuildTest(unittest.TestCase):
         env=dict(os.environ, MODDIR=str(module), LUOSHU_REAL_MODDIR=str(module),
                  LUOSHU_COLLECTION_STOCK_ROOT=str(stock_root), LUOSHU_MIX_REQUEST_ID='owned-request',
                  LUOSHU_TASK_SCOPE_TMPDIR=str(scope), LUOSHU_TASK_SCOPE_PYTHON=sys.executable,
-                 PYTHONPATH=str(module/'common'))
+                 # Keep the host's fontTools (check.sh may supply it via PYTHONPATH).
+                 PYTHONPATH=os.pathsep.join([str(module/'common'),
+                                             str(Path(fontTools.__file__).resolve().parent.parent)]))
         call=subprocess.run(['sh','-c','. "$1"; _font_alias "$2" "$3"','test',
                              str(ROOT/'common/legacy_v14_4/rom_adapters.sh'),str(self.source),str(dest)],
                             env=env,capture_output=True,text=True)
