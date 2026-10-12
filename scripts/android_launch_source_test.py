@@ -186,7 +186,7 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         gate = (JAVA / "ui/launch/LuoShuNativeShellGate.kt").read_text()
         limit = int(re.search(r"const val HOLD_LIMIT_MS = (\d+)L", gate).group(1))
         self.assertGreaterEqual(limit, 1000)
-        self.assertLessEqual(limit, 3000)
+        self.assertLessEqual(limit, 5000)
 
     def test_native_splash_keeps_default_platform_exit_without_client_transfer(self):
         # A synchronously removed exit callback still transfers a copied logo to

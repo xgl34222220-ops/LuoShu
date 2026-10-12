@@ -157,6 +157,7 @@ class MainActivity : ComponentActivity() {
         val width = view.width
         val height = view.height
         val main = Handler(Looper.getMainLooper())
+        Log.i("LuoShuStartup", "event=native_shell_prerender_started elapsedMs=${SystemClock.elapsedRealtime() - startedAt} size=${width}x$height")
         Thread({
             val bitmap = runCatching { LuoShuNativeShellView.prerender(this, width, height) }
                 .onFailure { Log.w("LuoShuStartup", "event=native_shell_prerender_failed", it) }

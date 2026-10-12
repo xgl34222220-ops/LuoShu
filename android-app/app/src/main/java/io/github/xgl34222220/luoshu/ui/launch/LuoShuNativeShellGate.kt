@@ -51,6 +51,6 @@ internal class LuoShuNativeShellGate(private val holdLimitMs: Long = HOLD_LIMIT_
     fun dispose() { state = State.DISPOSED }
 
     companion object {
-        const val HOLD_LIMIT_MS = 2500L
+        const val HOLD_LIMIT_MS = 4000L
     }
 }

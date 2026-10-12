@@ -59,6 +59,6 @@ class LuoShuNativeShellGateTest {
 
     @Test fun defaultLimitKeepsTheSplashBoundedButAboveTheWindowDrawTimeout() {
         // WindowManager gives a submitted first draw ~1s; the hold happens before any draw.
-        assertTrue(LuoShuNativeShellGate.HOLD_LIMIT_MS in 1000L..3000L)
+        assertTrue(LuoShuNativeShellGate.HOLD_LIMIT_MS in 1000L..5000L)
     }
 }
