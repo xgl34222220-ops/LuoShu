@@ -237,16 +237,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    private val fontFilterMemo = FontFilterMemo()
+
+    // Reads stay snapshot-observed (recomposition still tracks fonts/query); the memo only skips
+    // re-filtering the whole library when neither changed since the last read.
     val filteredFonts: List<FontItem>
-        get() {
-            val query = searchQuery.trim()
-            if (query.isEmpty()) return fonts
-            return fonts.filter { item ->
-                item.name.contains(query, ignoreCase = true) ||
-                    item.id.contains(query, ignoreCase = true) ||
-                    item.format.contains(query, ignoreCase = true)
-            }
-        }
+        get() = fontFilterMemo.filter(fonts, searchQuery)
 
     fun setSearchQuery(value: String) {
         _searchQuery = value
@@ -1093,10 +1089,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         onProgress: (JSONObject) -> Unit,
     ): JSONObject {
         var failures = 0
+        var unchangedPolls = 0
+        var lastSignature = ""
         val budget = TaskPollBudget(timeoutSeconds.toLong() * 1_000L)
         while (budget.remainingMs > 0L) {
             awaitForeground(budget)
-            val intervalMs = if (budget.elapsedMs < 30_000L) 1_000L else 2_000L
+            val intervalMs = taskPollIntervalMs(budget.elapsedMs, unchangedPolls)
             delay(minOf(intervalMs, budget.remainingMs))
             awaitForeground(budget)
             val remainingMs = budget.remainingMs
@@ -1118,6 +1116,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 continue
             }
             failures = 0
+            val signature = taskPollSignature(data)
+            unchangedPolls = if (signature == lastSignature) unchangedPolls + 1 else 0
+            lastSignature = signature
             val advertisedTimeout = data.optInt("timeout", 0)
             if (advertisedTimeout > 0) budget.extendTo((advertisedTimeout.toLong() + 30L) * 1_000L)
             onProgress(data)
@@ -1128,6 +1129,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
         error("字体任务超时，请查看日志")
     }
+
+    private fun taskPollSignature(data: JSONObject): String =
+        "${data.optString("state")}|${data.optInt("percent", -1)}|${data.optJSONObject("progress")?.optInt("percent", -1)}|${data.optString("message")}"
 
     private suspend fun awaitForeground(budget: TaskPollBudget) {
         if (foreground.value) return

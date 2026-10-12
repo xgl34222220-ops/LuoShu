@@ -37,4 +37,16 @@ class TaskPollBudgetTest {
         budget.extendTo(750_000L)
         assertEquals(10_000L, budget.remainingMs)
     }
+
+    @Test
+    fun pollCadenceBacksOffOnlyWhileTheTaskReportsNothingNew() {
+        assertEquals(1_000L, taskPollIntervalMs(elapsedMs = 5_000L, unchangedPolls = 0))
+        assertEquals(1_000L, taskPollIntervalMs(elapsedMs = 5_000L, unchangedPolls = 2))
+        assertEquals(2_000L, taskPollIntervalMs(elapsedMs = 5_000L, unchangedPolls = 3))
+        assertEquals(2_000L, taskPollIntervalMs(elapsedMs = 60_000L, unchangedPolls = 0))
+        assertEquals(4_000L, taskPollIntervalMs(elapsedMs = 60_000L, unchangedPolls = 6))
+        assertEquals(4_000L, taskPollIntervalMs(elapsedMs = 600_000L, unchangedPolls = 100))
+        // A change resets the counter, which restores the normal 1-2 s cadence.
+        assertEquals(1_000L, taskPollIntervalMs(elapsedMs = 10_000L, unchangedPolls = 0))
+    }
 }

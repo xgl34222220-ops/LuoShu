@@ -49,7 +49,23 @@ internal object RootShell {
     }
 
     fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+
+    /** The single long-lived root shell; closed when idle and when the App process ends. */
+    internal val session: RootSession by lazy { RootSession() }
+
+    fun close() = session.close()
 }
+
+/**
+ * Default transport for executeScopedRequest: `su -c <request>` goes through the persistent root
+ * session instead of forking a new su each time. Anything else keeps the plain process path.
+ */
+internal suspend fun executeRootRequest(command: List<String>, timeoutMs: Long): ShellResult =
+    if (command.size == 3 && command[0] == "su" && command[1] == "-c") {
+        RootShell.session.execute(command[2], timeoutMs)
+    } else {
+        executeProcess(command, timeoutMs)
+    }
 
 private const val TASK_SCOPE = "/data/adb/modules/LuoShu/common/task_scope.sh"
 private const val REQUEST_CLEANUP_TIMEOUT_MS = 20_000L
@@ -60,7 +76,7 @@ internal suspend fun executeScopedRequest(
     timeoutMs: Long,
     token: String = "app-${UUID.randomUUID()}",
     scopePath: String = TASK_SCOPE,
-    executor: suspend (List<String>, Long) -> ShellResult = ::executeProcess,
+    executor: suspend (List<String>, Long) -> ShellResult = ::executeRootRequest,
 ): ShellResult {
     require(timeoutMs > 0L) { "Request timeout must be positive" }
     require(token.length <= 160 && token !in setOf(".", "..") && token.matches(Regex("[A-Za-z0-9._-]+"))) { "Invalid request token" }
