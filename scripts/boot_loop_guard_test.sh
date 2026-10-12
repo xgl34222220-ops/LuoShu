@@ -20,7 +20,8 @@ for file in post-fs-data.sh post-mount.sh boot-completed.sh late-load.sh action.
   cp "$ROOT/$file" "$MOD/$file"
 done
 for file in util_functions.sh util_functions_core.sh font_settings_policy.sh \
-  boot_loop_guard.sh next_boot_payload.sh module_status.sh; do
+  boot_loop_guard.sh next_boot_payload.sh module_status.sh google_font_provider_service.sh \
+  system_ota_guard.sh; do
   cp "$ROOT/common/$file" "$MOD/common/$file"
 done
 printf 'id=LuoShu\nname=洛书\ndescription=Android 全局字体管理，当前字体：Demo\n' > "$MOD/module.prop"
@@ -41,7 +42,10 @@ EOF
 # module_status.sh is the Magisk boot-completed point; fake getprop.
 cat > "$BIN/getprop" <<'EOF'
 #!/bin/sh
-[ "$1" = sys.boot_completed ] && printf '%s\n' "${FIXTURE_BOOT_COMPLETED:-0}"
+case "$1" in
+  sys.boot_completed) printf '%s\n' "${FIXTURE_BOOT_COMPLETED:-0}" ;;
+  ro.build.fingerprint) printf '%s\n' "${FIXTURE_FINGERPRINT:-fixture-build}" ;;
+esac
 EOF
 chmod 0755 "$BIN/getprop"
 
@@ -68,6 +72,61 @@ FIXTURE_BOOT_COMPLETED=0 LUOSHU_BOOTLOOP_BOOT_ID=boot-a MODDIR="$MOD" sh "$MOD/c
 [ "$(counter)" = 1 ] || fail 'module_status cleared counter before boot completed'
 FIXTURE_BOOT_COMPLETED=1 LUOSHU_BOOTLOOP_BOOT_ID=boot-a MODDIR="$MOD" sh "$MOD/common/module_status.sh" >/dev/null
 [ "$(counter)" = 0 ] || fail 'completed boot did not clear counter'
+
+# 2b. Magisk early boot-completed point: google_font_provider_service.sh boot
+# (started first by the root service.sh on both routes) clears the counter as
+# soon as sys.boot_completed=1, without the task supervisor or the slower
+# service maintenance that precedes module_status.sh.
+provider_boot() { # provider_boot BOOT_ID BOOT_COMPLETED
+  LUOSHU_BOOTLOOP_BOOT_ID="$1" FIXTURE_BOOT_COMPLETED="$2" LUOSHU_BOOTLOOP_AWAIT_SECONDS=0 \
+    MODDIR="$MOD" sh "$MOD/common/google_font_provider_service.sh" boot >/dev/null 2>&1 || true
+}
+wait_counter() {
+  _wc=0
+  while [ "$_wc" -lt 50 ]; do
+    [ "$(counter)" = "$1" ] && return 0
+    sleep 0.1
+    _wc=$((_wc + 1))
+  done
+  return 1
+}
+stage boot-m Magisk post-fs-data.sh
+[ "$(counter)" = 1 ] || fail "boot-m counter=$(counter)"
+provider_boot boot-m 0
+sleep 0.3
+[ "$(counter)" = 1 ] || fail 'provider service cleared the counter before boot completed'
+provider_boot boot-m 1
+wait_counter 0 || fail 'provider service did not clear the counter at boot completed'
+grep -q '^completedBootId=boot-m$' "$MOD/config/boot-loop-guard.conf" || fail 'completedBootId not recorded by the provider service'
+# Reboot shortly after every completed boot, before module_status ever ran:
+# never counted as unfinished boots.
+for boot in boot-n boot-o boot-p; do
+  stage "$boot" Magisk post-fs-data.sh
+  mounted || fail "$boot did not mount after completed boots"
+  provider_boot "$boot" 1
+  wait_counter 0 || fail "$boot completed boot not cleared early"
+done
+! safe || fail 'quick reboots after completed boots entered safe mode'
+
+# 2c. Legacy route: the stale $MODDIR/.font_switch.lock is cleared before mount.
+mkdir -p "$MOD/.font_switch.lock"
+printf '99999\n' > "$MOD/.font_switch.lock/pid"
+stage boot-q Magisk post-fs-data.sh
+[ ! -e "$MOD/.font_switch.lock" ] || fail 'legacy route left the stale .font_switch.lock'
+provider_boot boot-q 1
+wait_counter 0 || fail 'boot-q not cleared'
+
+# 2d. System OTA detected before mount: recorded, rescan requested, physical
+# slots still mount; the build record itself is left to the post-boot check.
+printf 'fingerprint=old-build\n' > "$MOD/config/system-build.conf"
+FIXTURE_FINGERPRINT=new-build stage boot-r Magisk post-fs-data.sh
+mounted || fail 'OTA boot did not mount the physical slots'
+grep -q '^bootId=boot-r$' "$MOD/config/system-ota-boot-hold.conf" || fail 'OTA early hold not recorded by the hook'
+[ -f "$MOD/config/stock_inventory_scan_pending" ] || fail 'OTA early hook did not request the rescan'
+grep -q '^fingerprint=old-build$' "$MOD/config/system-build.conf" || fail 'OTA early hook rewrote the build record'
+provider_boot boot-r 1
+wait_counter 0 || fail 'boot-r not cleared'
+rm -f "$MOD/config/system-build.conf" "$MOD/config/system-ota-boot-hold.conf" "$MOD/config/stock_inventory_scan_pending"
 
 # 3. Two consecutive unfinished boots -> third boot enters safe mode, no mount.
 stage boot-b Magisk post-fs-data.sh

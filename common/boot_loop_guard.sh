@@ -11,7 +11,12 @@
 #                 boots that never reached boot-completed, enter safe mode.
 #   post-mount    safe mode: stop before any LuoShu mount.
 #   boot-completed / module_status (sys.boot_completed=1)
-#                 the boot finished: clear the counter. Safe mode stays until
+#                 the boot finished: clear the counter. Magisk has no
+#                 boot-completed stage, so google_font_provider_service.sh boot
+#                 (started first by the root service.sh on both routes) also runs
+#                 luoshu_bootloop_await_complete, which clears the counter as soon
+#                 as sys.boot_completed=1 instead of after the slower service
+#                 maintenance that precedes module_status. Safe mode stays until
 #                 the user re-enables it (action button or app_bridge
 #                 boot_guard_reset), so a bad payload cannot loop again.
 #
@@ -166,6 +171,56 @@ luoshu_bootloop_complete() {
     return 0
 }
 
+# Magisk boot-completed point. Poll sys.boot_completed (bounded) and clear the
+# counter the moment Android reports it, so a reboot shortly after boot (common
+# right after a font switch) is not counted as an unfinished boot. Idempotent
+# with module_status.sh and the KernelSU/APatch boot-completed stage.
+luoshu_bootloop_await_complete() {
+    _lbac_limit="${LUOSHU_BOOTLOOP_AWAIT_SECONDS:-600}"
+    case "$_lbac_limit" in ''|*[!0-9]*) _lbac_limit=600 ;; esac
+    [ "$_lbac_limit" -le 900 ] || _lbac_limit=900
+    _lbac_step="${LUOSHU_BOOTLOOP_AWAIT_INTERVAL:-2}"
+    case "$_lbac_step" in ''|*[!0-9]*|0) _lbac_step=2 ;; esac
+    _lbac_waited=0
+    while [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ]; do
+        [ -f "$(luoshu_bootloop_module)/module.prop" ] || return 1
+        [ "$_lbac_waited" -lt "$_lbac_limit" ] || return 1
+        sleep "$_lbac_step"
+        _lbac_waited=$((_lbac_waited + _lbac_step))
+    done
+    luoshu_bootloop_complete
+}
+
+# Early post-fs-data maintenance that the frozen routers cannot do themselves.
+# Runs only after luoshu_bootloop_begin allowed this boot to mount.
+luoshu_bootloop_postfs_maintenance() {
+    _lbpm_module=$(luoshu_bootloop_module)
+    # Legacy (physical) route: the frozen router only removes the pre-2.x
+    # config/font_switch.lock; the lock actually used is $MODDIR/.font_switch.lock.
+    # Nothing can legitimately own it before Zygote, so clear it here (the v4
+    # route already does this in its v2.2.7 initializer).
+    if [ -f "$_lbpm_module/config/font_runtime_legacy_v14_4.conf" ] && \
+       { [ -e "$_lbpm_module/.font_switch.lock" ] || [ -L "$_lbpm_module/.font_switch.lock" ]; }; then
+        if type luoshu_font_lock_force_clear >/dev/null 2>&1; then
+            luoshu_font_lock_force_clear "$_lbpm_module/.font_switch.lock" >/dev/null 2>&1 || \
+                luoshu_bootloop_log "残留字体切换锁清理失败：$_lbpm_module/.font_switch.lock"
+        else
+            rm -f "$_lbpm_module/.font_switch.lock/pid" 2>/dev/null || true
+            rmdir "$_lbpm_module/.font_switch.lock" 2>/dev/null || true
+            rm -f "$_lbpm_module/.font_switch.lock" 2>/dev/null || true
+        fi
+    fi
+    # System OTA early detection: compare ro.build.fingerprint before any
+    # LuoShu mount; on a mismatch this boot skips the XML overlay and the
+    # /data/fonts dynamic view (system_ota_guard.sh).
+    if [ -f "$_lbpm_module/common/system_ota_guard.sh" ]; then
+        . "$_lbpm_module/common/system_ota_guard.sh"
+        type luoshu_system_ota_early_boot >/dev/null 2>&1 && \
+            luoshu_system_ota_early_boot "$_lbpm_module" "$(luoshu_bootloop_boot_id)" >/dev/null 2>&1
+    fi
+    return 0
+}
+
 # User re-enable: leave safe mode and start counting from zero.
 luoshu_bootloop_reset() {
     _lbr_was=0
@@ -190,7 +245,10 @@ luoshu_bootloop_stage_hook() {
     [ -f "$_lbsh_module/module.prop" ] || return 0
     case "${0##*/}" in
         post-fs-data.sh)
-            luoshu_bootloop_begin && return 0
+            if luoshu_bootloop_begin; then
+                luoshu_bootloop_postfs_maintenance
+                return 0
+            fi
             luoshu_bootloop_log '本次启动处于卡开机保护，post-fs-data 跳过挂载'
             # The v2.2.7 Magisk core sources a temporary copy; remove it here
             # because the core's own cleanup line is never reached.

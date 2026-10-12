@@ -35,8 +35,20 @@ class BackgroundTreeTest(unittest.TestCase):
         ps = self.bin / "ps"
         ps.write_text(f"#!/bin/sh\ncat '{self.root / 'process-tree'}'\n")
         ps.chmod(0o755)
+        # background_task.sh delegates stopping to the task supervisor
+        # (common/task_scope.sh, rebuilt in e5ded2ba). Give every helper a real
+        # module tree and the host Python instead of the bundled runtime.
+        self.scope_module = self.root / "scope-module"
+        (self.scope_module / "common").mkdir(parents=True)
+        (self.scope_module / "module.prop").write_text("id=LuoShu\n")
+        for name in ("background_task.sh", "task_scope.sh", "task_scope.py",
+                     "runtime_paths.sh", "runtime_paths_lock.py"):
+            (self.scope_module / "common" / name).symlink_to(ROOT / "common" / name)
         self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}",
-                    "LUOSHU_PROC_ROOT": str(self.proc)}
+                    "LUOSHU_PROC_ROOT": str(self.proc),
+                    "MODDIR": str(self.scope_module),
+                    "LUOSHU_TASK_SCOPE_PYTHON": sys.executable,
+                    "LUOSHU_RUNTIME_PATHS_PYTHON": sys.executable}
 
     def spawn(self, command, **kwargs):
         process = subprocess.Popen(command, start_new_session=True,
@@ -111,9 +123,11 @@ class BackgroundTreeTest(unittest.TestCase):
         pidfile = self.root / "task.pid"
         pidfile.write_text(str(sentinel.pid))
         Path(str(pidfile) + ".task").write_text("old-task")
-        Path(str(pidfile) + ".boot").write_text("previous-boot")
+        # A well-formed boot id that is not the current one.
+        Path(str(pidfile) + ".boot").write_text("00000000-0000-4000-8000-000000000000")
         subprocess.run(["sh", "-c", '. "$1"; luoshu_stop_task_pid "$2"', "sh",
-                        str(ROOT / "common/background_task.sh"), str(pidfile)], check=True, timeout=5)
+                        str(ROOT / "common/background_task.sh"), str(pidfile)],
+                       env=self.env, check=True, timeout=10)
         self.assertIsNone(sentinel.poll())
         self.assertFalse(pidfile.exists())
 
@@ -122,7 +136,9 @@ class BackgroundTreeTest(unittest.TestCase):
         module = self.root / "module"
         (module / "common").mkdir(parents=True)
         (module / "config").mkdir()
-        (module / "common/background_task.sh").symlink_to(ROOT / "common/background_task.sh")
+        for name in ("background_task.sh", "task_scope.sh", "task_scope.py",
+                     "runtime_paths.sh", "runtime_paths_lock.py"):
+            (module / "common" / name).symlink_to(ROOT / "common" / name)
         worker = self.spawn(["sh", str(ROOT / "common/font_switch_task.sh"),
                              "run", "signal-task", "custom-font", "1"],
                             env={**self.env, "MODDIR": str(module), "LUOSHU_FONT_MANAGER": str(manager)})
@@ -130,6 +146,12 @@ class BackgroundTreeTest(unittest.TestCase):
         worker.terminate()
         self.assertEqual(worker.wait(timeout=5), 143)
         self.wait_for(lambda: not alive(leaf, proc_id))
+        # The supervisor owns the process tree since the task_scope rebuild; the
+        # controller converges the record once the worker is gone (the App's
+        # status/reconcile path), instead of trusting a write from a dying shell.
+        subprocess.run(["sh", str(ROOT / "common/font_switch_task.sh"), "reconcile"],
+                       env={**self.env, "MODDIR": str(module)}, check=True, timeout=15,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         task = (module / "config/switch_task.conf").read_text()
         self.assertIn("state=failed\n", task)
         self.assertIn("task=signal-task\n", task)
@@ -141,7 +163,8 @@ class BackgroundTreeTest(unittest.TestCase):
         (module / "common").mkdir(parents=True)
         (module / "config").mkdir()
         (module / "config/active_font.conf").write_text("custom\n")
-        for name in ("background_task.sh", "font_switch_lock.sh"):
+        for name in ("background_task.sh", "font_switch_lock.sh", "task_scope.sh", "task_scope.py",
+                     "runtime_paths.sh", "runtime_paths_lock.py"):
             (module / "common" / name).symlink_to(ROOT / "common" / name)
         (module / "common/google_font_provider_bridge.sh").write_text(
             f'case "$1" in fingerprint) echo current;; apply) exec sh "{manager}";; esac\n')

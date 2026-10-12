@@ -1,0 +1,61 @@
+name: ShellCheck core scripts
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.sh'
+      - scripts/stable111_frozen_runtime.json
+      - .github/workflows/shellcheck.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shellcheck:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ShellCheck core and changed scripts (severity=error)
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          command -v shellcheck >/dev/null 2>&1 || {
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends shellcheck >/dev/null
+          }
+          shellcheck --version
+          # Starts at severity=error on purpose: it catches real breakage
+          # without a repository-wide style rewrite. Frozen 1.1.1 runtime files
+          # (scripts/stable111_frozen_runtime.json) are never edited, so they are
+          # never linted here either.
+          frozen="$(python3 -c 'import json; print("\n".join(json.load(open("scripts/stable111_frozen_runtime.json"))["sha256"]))')"
+          core='customize.sh uninstall.sh action.sh late-load.sh
+            common/boot_loop_guard.sh common/system_ota_guard.sh common/util_functions.sh
+            common/google_font_provider_service.sh common/boot_housekeeping.sh
+            common/module_status.sh common/app_bridge.sh common/font_safety.sh
+            common/background_task.sh common/font_switch_lock.sh common/font_switch_task.sh
+            common/device_font_dynamic_guard.sh common/device_font_payload_runtime.sh
+            scripts/release_skip_gate.sh scripts/check.sh'
+          changed=''
+          if [[ -n "${BASE_SHA:-}" ]]; then
+            changed="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" HEAD -- '*.sh' || true)"
+          fi
+          declare -A seen=()
+          files=()
+          for file in $core $changed; do
+            [[ -f "$file" ]] || continue
+            [[ -z "${seen[$file]:-}" ]] || continue
+            seen[$file]=1
+            if grep -qxF "$file" <<<"$frozen"; then
+              continue
+            fi
+            files+=("$file")
+          done
+          printf 'Checking %s scripts:\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          shellcheck -s sh -S error "${files[@]}"
