@@ -31,7 +31,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Any module.prop change on main triggers this workflow. When the version did
+  # not change and its tag is already published, there is nothing new to sign:
+  # finish successfully with a notice instead of failing the release job with
+  # exit 2. Signing and publishing steps below are unchanged.
+  gate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    outputs:
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip when the release version is unchanged
+        id: decide
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          result="$(sh ./scripts/release_skip_gate.sh "$GITHUB_EVENT_NAME" "$GITHUB_REF_TYPE" "$GITHUB_REF_NAME" "$GITHUB_SHA")"
+          printf '%s\n' "$result"
+          publish="$(printf '%s\n' "$result" | sed -n 's/^publish=//p')"
+          reason="$(printf '%s\n' "$result" | sed -n 's/^reason=//p')"
+          [[ "$publish" == true || "$publish" == false ]] || { echo "Unexpected gate result" >&2; exit 2; }
+          if [[ "$publish" == false ]]; then
+            echo "::notice title=Release skipped::${reason}"
+            {
+              echo '### Publish signed release: skipped'
+              echo
+              echo "${reason}"
+              echo
+              echo 'Bump version/versionCode in module.prop to publish a new signed release.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
   release:
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:

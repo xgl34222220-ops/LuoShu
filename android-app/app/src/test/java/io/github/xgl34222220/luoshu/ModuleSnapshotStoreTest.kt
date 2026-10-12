@@ -53,6 +53,12 @@ class ModuleSnapshotStoreTest {
     }
 
     @Test
+    fun partialMountIsNotLabelledAsFullyEffective() {
+        val state = ModuleSnapshot(activeFont = "NewFont", effectiveFont = "NewFont", fontEffectState = "partial")
+        assertEquals("NewFont（部分生效）", state.effectiveLabel)
+    }
+
+    @Test
     fun defaultFontStagedForRebootDoesNotClaimItIsAlreadyRestored() {
         val state = ModuleSnapshot(activeFont = "default", fontEffectState = "pending-reboot", rebootRequired = true)
         assertEquals("系统默认字体（等待完整重启）", state.effectiveLabel)

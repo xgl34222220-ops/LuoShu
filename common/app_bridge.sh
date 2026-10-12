@@ -190,6 +190,13 @@ status_json() {
         if [ "$_mount_state" = failed ]; then
             _verification_reason=self-mount-failed
         fi
+    elif [ "$_verification_state" = verified ] && [ "$_verification_mode" = mount-confirmed ] &&
+         [ "$_mount_state" = degraded ] && [ -n "$_mount_failed" ]; then
+        # The physical route confirms any non-failed self-mount, including
+        # "degraded" with failed components. That is partial, not verified.
+        _effective_active="$_active"
+        _font_effect_state=partial
+        _verification_reason=self-mount-degraded
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
             aligned|mount-verified|mount-confirmed)
@@ -264,6 +271,19 @@ switch_task_ready() {
         return 1
     }
     return 0
+}
+
+# Boot-loop safe mode (卡开机保护): the frozen post-fs-data activates a staged
+# .luoshu-payload-next before the guard runs, so a new payload must not be
+# staged at all while safe mode is active. Restoring the system default stays
+# allowed; the user re-enables first (action button or boot_guard_reset).
+boot_guard_allows_stage() {
+    _bgas_target="${1:-}"
+    [ "$_bgas_target" != default ] || return 0
+    [ -f "$MODDIR/common/boot_loop_guard.sh" ] || return 0
+    ( MODULE_DIR="$MODDIR"; . "$MODDIR/common/boot_loop_guard.sh"; luoshu_bootloop_safe_mode_active ) || return 0
+    printf '{"status":"error","code":"boot-guard-safe-mode","message":"卡开机保护已启用：为避免再次卡开机，暂不换入新字体。请先在 Root 管理器点击洛书“操作”按钮（或在 App 中解除卡开机保护）后再应用；恢复系统默认字体不受影响。"}\n'
+    return 1
 }
 
 mix_ready() {
@@ -407,12 +427,12 @@ case "${1:-status}" in
         sh "$FONT_MANAGER" action validate "${2:-}"
         ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
-    switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
+    switch_start) switch_task_ready || exit 1; boot_guard_allows_stage "${2:-default}" || exit 0; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
     font-switch-cancel|switch_cancel) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" cancel "${2:-}"; exit $? ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
     mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
-    mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-0}" "${9:-0}" ;;
+    mix_start) mix_ready || exit 1; boot_guard_allows_stage mix || exit 0; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-0}" "${9:-0}" ;;
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
     font-mix-cancel|mix_cancel) mix_ready || exit 1; sh "$MIX_ENGINE" cancel "${2:-}"; exit $? ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;

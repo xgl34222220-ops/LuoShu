@@ -3,6 +3,20 @@
 set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
+# Magisk boot-completed point for the boot-loop guard (卡开机保护). The root
+# service.sh starts this entry first on both routes; clear the unfinished-boot
+# counter as soon as sys.boot_completed=1, before (and independently of) the
+# task supervisor, the bundled Python and the slower service maintenance.
+# Bounded poll that exits at boot completed; idempotent with module_status.sh
+# and the KernelSU/APatch boot-completed stage.
+if [ "${1:-boot}" = boot ] && [ -z "${LUOSHU_TASK_SCOPE_PID:-}" ] && \
+   [ -f "$MODDIR/common/boot_loop_guard.sh" ]; then
+    (
+        MODULE_DIR="$MODDIR"
+        . "$MODDIR/common/boot_loop_guard.sh"
+        luoshu_bootloop_await_complete
+    ) </dev/null >/dev/null 2>&1 &
+fi
 if [ -f "$MODDIR/common/runtime_paths.sh" ]; then
     . "$MODDIR/common/runtime_paths.sh"
     luoshu_runtime_paths_init "$MODDIR" || exit 1

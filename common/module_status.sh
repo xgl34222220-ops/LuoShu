@@ -57,6 +57,11 @@ if [ "$ACTIVE" != default ]; then
         EFFECTIVE_DISPLAY="已配置：$DISPLAY（等待重启）"
     elif [ "$MOUNT_STATE" = failed ] || [ "$VERIFY_STATE" = failed ]; then
         EFFECTIVE_DISPLAY="系统默认字体（$DISPLAY 未生效）"
+    elif [ "$MOUNT_STATE" = degraded ] && \
+         [ -n "$(sed -n 's/^failed=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1 | tr -d '\r\n')" ]; then
+        # Degraded with failed components is partial, even though the physical
+        # route records it as confirmed.
+        EFFECTIVE_DISPLAY="$DISPLAY（部分生效）"
     else
         EFFECTIVE_DISPLAY="$DISPLAY"
     fi

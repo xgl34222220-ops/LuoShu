@@ -5,6 +5,12 @@ on:
     paths:
       - common/hyperos_physical_policy.py
       - common/legacy_v14_4/hyperos_full_coverage.sh
+      - common/legacy_v14_4/hyperos_clock_compat.sh
+      - common/legacy_v14_4/rom_adapters.sh
+      - common/hyperos_global.sh
+      - common/rom_adapters.sh
+      - common/hyperos_source_xml.py
+      - scripts/hyperos_source_xml_test.py
       - common/font_inventory_scan.py
       - scripts/hyperos_latin_policy_regression_test.py
       - common/hyperos_webview_route.sh
@@ -16,6 +22,7 @@ permissions:
 jobs:
   policy:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -27,6 +34,11 @@ jobs:
         run: |
           sh -n common/legacy_v14_4/hyperos_full_coverage.sh
           sh -n common/hyperos_webview_route.sh
-          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py
+          sh -n common/legacy_v14_4/hyperos_clock_compat.sh
+          sh -n common/legacy_v14_4/rom_adapters.sh
+          sh -n common/hyperos_global.sh
+          sh -n common/rom_adapters.sh
+          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py common/hyperos_source_xml.py scripts/hyperos_source_xml_test.py
           python3 scripts/hyperos_latin_policy_regression_test.py
           python3 scripts/hyperos_webview_route_test.py
+          python3 scripts/hyperos_source_xml_test.py

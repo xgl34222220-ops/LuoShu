@@ -66,6 +66,7 @@ internal data class ModuleSnapshot(
             fontEffectState == "pending-reboot" -> "${activeLabel}（等待完整重启）"
             activeFont in setOf("", "default") || fontEffectState == "system" -> "系统默认字体"
             fontEffectState == "verified" && effectiveFont == activeFont -> activeLabel
+            fontEffectState == "partial" && effectiveFont == activeFont -> "${activeLabel}（部分生效）"
             fontEffectState == "live-mounted" && effectiveFont == activeFont -> "${activeLabel}（当前启动已挂载，重启后完整生效）"
             fontEffectState == "failed" -> "系统默认字体（${activeLabel}未生效）"
             else -> "${activeLabel}（已准备，待本次启动验证）"
