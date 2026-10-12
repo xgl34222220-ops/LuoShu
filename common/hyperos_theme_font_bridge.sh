@@ -29,6 +29,13 @@ _htf_active() {
     # Compare resolved routes, not the spelling of readlink's immediate hop.
     # Only the two known framework paths are accepted; never follow arbitrary
     # user theme links into another module or outside the font router.
+    # The optional pre-zygote theme takeover already serves the payload on the
+    # theme fonts; a per-namespace view on top would only stack a second layer.
+    if [ -f "$MODDIR/common/hyperos_theme_takeover.sh" ] && \
+       MODDIR="$MODDIR" LUOSHU_REAL_MODDIR="$MODDIR" \
+       sh "$MODDIR/common/hyperos_theme_takeover.sh" owned "$HTF_THEME_TARGET" >/dev/null 2>&1; then
+        return 1
+    fi
     _htf_resolved=$(readlink -f "$HTF_ALIAS" 2>/dev/null) || return 1
     _htf_router_resolved=$(readlink -f "$HTF_ROUTER" 2>/dev/null) || return 1
     [ "$_htf_resolved" = "$_htf_router_resolved" ] || return 1

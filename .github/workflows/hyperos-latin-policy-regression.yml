@@ -5,6 +5,19 @@ on:
     paths:
       - common/hyperos_physical_policy.py
       - common/legacy_v14_4/hyperos_full_coverage.sh
+      - common/legacy_v14_4/hyperos_clock_compat.sh
+      - common/hyperos_global.sh
+      - common/rom_adapters.sh
+      - common/legacy_v14_4/rom_adapters.sh
+      - common/hyperos_metrics_batch.py
+      - common/hyperos_source_xml.py
+      - common/hyperos_theme_takeover.sh
+      - common/hyperos_boot_routes.sh
+      - common/hyperos_coverage_bridge.sh
+      - common/font_coverage_locator.py
+      - scripts/hyperos_source_xml_test.py
+      - scripts/hyperos_theme_takeover_test.py
+      - scripts/font_coverage_locator_test.py
       - common/font_inventory_scan.py
       - scripts/hyperos_latin_policy_regression_test.py
       - common/hyperos_webview_route.sh
@@ -26,7 +39,17 @@ jobs:
       - name: Compile source and run focused policy regressions
         run: |
           sh -n common/legacy_v14_4/hyperos_full_coverage.sh
+          sh -n common/legacy_v14_4/hyperos_clock_compat.sh
+          sh -n common/hyperos_global.sh
           sh -n common/hyperos_webview_route.sh
-          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py
+          sh -n common/hyperos_theme_takeover.sh
+          sh -n common/hyperos_boot_routes.sh
+          sh -n common/hyperos_coverage_bridge.sh
+          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py common/hyperos_source_xml.py common/font_coverage_locator.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py
+          # Shell copies of the filename policy are generated; fail on drift.
+          python3 common/hyperos_physical_policy.py --check
           python3 scripts/hyperos_latin_policy_regression_test.py
           python3 scripts/hyperos_webview_route_test.py
+          python3 scripts/hyperos_source_xml_test.py
+          python3 scripts/hyperos_theme_takeover_test.py
+          python3 scripts/font_coverage_locator_test.py

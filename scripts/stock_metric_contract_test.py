@@ -266,8 +266,9 @@ class StockMetricContractTest(unittest.TestCase):
                   "NotoSans-Regular.ttf": (930, -250), "MiLanProVF.ttf": (980, -220),
                   "XiaomiSansVF.ttf": (1150, -310), "DroidSans.ttf": (1020, -260),
                   # Restored UI targets must retain their own stock contracts.
-                  "DroidSansMono.ttf": (1100, -240), "DroidSansFallback.ttf": (980, -270),
-                  "NotoSansMono-Regular.ttf": (1024, -256),
+                  "DroidSansFallback.ttf": (980, -270),
+                  # HyperOS 3 optional groups: captured whatever the group setting.
+                  "MiuiEx-Regular.ttf": (1010, -250), "Interscaled-Bold.ttf": (960, -240),
                   "NotoSansDisplay-Regular.otf": (1040, -280),
                   "NotoSansSemiCondensed-Regular.ttf": (950, -210),
                   "NotoSansVF.ttf": (1080, -300)}
@@ -441,7 +442,8 @@ class StockMetricContractTest(unittest.TestCase):
                     "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf", "NotoSansAdlam-VF.ttf",
                     "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
                     "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf",
-                    "NotoSansSemiCondensed-Icons.ttf", "NotoSansMono-Italic.ttf")
+                    "NotoSansSemiCondensed-Icons.ttf", "NotoSansMono-Italic.ttf",
+                    "DroidSansMono.ttf", "MitypeMonoVF.ttf", "MiSansL3.otf")
         for name in excluded:
             make_font(args.system_fonts / name)
         disguised_collection = "NotoSansCollection.ttf"
@@ -459,7 +461,10 @@ class StockMetricContractTest(unittest.TestCase):
         slots = json.loads(args.output.read_text())["slots"]
         for name in (*excluded, disguised_collection):
             self.assertNotIn(f"/system/fonts/{name}", slots)
-        self.assertIn("/system/fonts/DroidSansMono.ttf", slots)
+        # Mono / tabular faces and MiSansL3 are kept stock by the physical policy.
+        self.assertNotIn("/system/fonts/DroidSansMono.ttf", slots)
+        self.assertNotIn("/system/fonts/MiSansL3.otf", slots)
+        self.assertIn("/system/fonts/MiuiEx-Regular.ttf", slots)
         self.assertIn("/system/fonts/NotoSansSemiCondensed-Regular.ttf", slots)
         self.assertIn("/mi_ext/fonts/NotoSansSC-Regular.otf", slots)
         self.assertIn("/product/fonts/NotoSansSC-Regular.otf", slots)

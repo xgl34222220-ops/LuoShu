@@ -87,6 +87,16 @@ _dfcache_file_digest() {
     printf '%s\n' "$_dfc_digest"
 }
 
+_dfcache_hyperos_seed_present() {
+    for _dfc_seed_dir in ${LUOSHU_HYPEROS_SEED_ETC_ROOT:-/system_ext/etc}; do
+        for _dfc_seed in "$_dfc_seed_dir"/hyper_fonts*.xml "$_dfc_seed_dir"/hyper_font_fallback*.xml \
+                         "$_dfc_seed_dir"/miui_fonts*.xml "$_dfc_seed_dir"/miui_font_fallback*.xml; do
+            [ -f "$_dfc_seed" ] && return 0
+        done
+    done
+    return 1
+}
+
 _dfcache_source_key() {
     _dfc_module="$(_dfcache_module)"
     _dfc_store="$(_dfcache_payload_root)/system/fonts/.luoshu-font-store"
@@ -95,11 +105,14 @@ _dfcache_source_key() {
     [ -n "$_dfc_files" ] || return 1
     {
         printf 'source-contract-v5-content\n'
-        # Experimental HyperOS seed-XML rewrite changes the rendered overlay, so a
-        # cache built with it off must not be reused with it on. Flag off adds
-        # nothing, keeping existing cache identities unchanged.
-        grep -qx 'enabled=1' "$_dfc_module/config/hyperos_source_xml.conf" 2>/dev/null && \
-            printf 'hyperos-source-xml-v1\n'
+        # The HyperOS seed-XML rewrite (default on, exact enabled=0 turns it off)
+        # changes the rendered overlay, so a cache built with it off must not be
+        # reused with it on. It only runs where seed XML exists; other ROMs add
+        # nothing and keep their existing cache identities.
+        if _dfcache_hyperos_seed_present && \
+           ! grep -qx 'enabled=0' "$_dfc_module/config/hyperos_source_xml.conf" 2>/dev/null; then
+            printf 'hyperos-source-xml-v2\n'
+        fi
         while IFS= read -r _dfc_file; do
             [ -f "$_dfc_file" ] || continue
             _dfc_digest=$(_dfcache_file_digest "$_dfc_file") || exit 1

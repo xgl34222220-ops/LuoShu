@@ -9,6 +9,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -136,11 +137,17 @@ fun HomeRoute(
         }
     }
 
+    val coverageModel: HyperOsCoverageModel = viewModel()
+    val coverageReady = state.moduleInstalled && state.rootGranted && !state.loading && !state.statusCached
+    LaunchedEffect(coverageReady) { if (coverageReady) coverageModel.load() }
+
     HomeScreenMiuix(
         style = style,
         state = state,
         actions = actions,
         onDeviceDetailsExpanded = { deviceDetailsExpanded = it },
+        showHyperOsCoverage = coverageReady && coverageModel.status?.hyperOs == true,
+        hyperOsCoverageContent = { HyperOsCoverageSection(coverageModel) },
         trustContent = {
             if (state.moduleInstalled) {
                 Column(Modifier.fillMaxWidth()) {

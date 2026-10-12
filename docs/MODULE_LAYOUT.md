@@ -58,6 +58,17 @@ Release-policy JSON, branch cleanup state and one-shot maintenance data belong t
 
 `common/font_inventory_scan.py` is the only stock-font scanner entry point. Scanner revision is stored in data (`SCANNER_REVISION`), not encoded in filenames. Do not recreate `font_inventory_scan_vN.py` wrappers.
 
+## HyperOS filename policy
+
+`common/hyperos_physical_policy.py` is the only source of HyperOS physical font targets (core
+prefixes, optional slot groups, Mono / MiSansL3 kept stock). The shell mappers
+(`legacy_v14_4/hyperos_clock_compat.sh`, `legacy_v14_4/hyperos_full_coverage.sh`,
+`hyperos_global.sh`) carry a block generated from it; edit the Python policy and run
+`python3 common/hyperos_physical_policy.py --write`. `--check` runs in `scripts/check.sh` and
+the HyperOS policy workflow, so a hand-edited shell copy fails CI. Optional groups are read from
+`config/hyperos_slot_groups.conf` (`miui_ex`, `misans_ext` default on; `lockscreen_styles` default
+off), which the App writes through `common/hyperos_coverage_bridge.sh`.
+
 ## Compatibility code
 
 `common/legacy_v14_4/` remains because the current composite/safe-switch compatibility path still uses it. It is not a dumping ground:

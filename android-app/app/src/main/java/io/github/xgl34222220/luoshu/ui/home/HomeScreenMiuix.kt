@@ -80,6 +80,8 @@ internal fun HomeScreenMiuix(
     actions: HomeActions,
     trustContent: @Composable () -> Unit,
     onDeviceDetailsExpanded: (Boolean) -> Unit = {},
+    showHyperOsCoverage: Boolean = false,
+    hyperOsCoverageContent: @Composable () -> Unit = {},
 ) {
     val tokens = LocalMiuixTokens.current
     val scheme = MaterialTheme.colorScheme
@@ -250,6 +252,13 @@ internal fun HomeScreenMiuix(
                             color = textSecondary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
+            }
+        }
+        // HyperOS only: theme-store font hint and 未覆盖界面定位. The item exists
+        // only after the module reported a HyperOS device, so other layouts are unchanged.
+        if (showHyperOsCoverage) {
+            item(key = "hyperos-coverage") {
+                hyperOsCoverageContent()
             }
         }
         item(key = "font-actions") {

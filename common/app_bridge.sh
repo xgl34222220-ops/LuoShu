@@ -430,6 +430,17 @@ case "${1:-status}" in
         printf '{"status":"ok","data":{"bootGuard":"%s","counter":%s,"limit":%s}}\n' \
             "$_bg_state" "$_bg_count" "$LUOSHU_BOOTLOOP_LIMIT"
         ;;
+    hyperos_coverage_status|hyperos_coverage_set|coverage_locate)
+        if [ ! -f "$MODDIR/common/hyperos_coverage_bridge.sh" ]; then
+            printf '{"status":"error","message":"HyperOS 覆盖组件不可用"}\n'
+            exit 0
+        fi
+        case "$1" in
+            hyperos_coverage_status) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" status ;;
+            hyperos_coverage_set) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" set "${2:-}" "${3:-}" ;;
+            coverage_locate) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" locate "${2:-}" ;;
+        esac
+        ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac

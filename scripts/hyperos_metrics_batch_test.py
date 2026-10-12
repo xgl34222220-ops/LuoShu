@@ -108,7 +108,11 @@ class HyperOSMetricsTest(unittest.TestCase):
         slots['/system/fonts/CarroisGothicSC-Regular.ttf'].update(
             source='xml', families=['sans-serif-smallcaps'])
         self.inventory(slots)
-        result = batch.build(self.module, self.stage, [])
+        # Lock screen / widget styles are an optional group, default off.
+        groups = self.module / 'config/hyperos_slot_groups.conf'
+        groups.write_text('lockscreen_styles=1\n')
+        with patch.dict(os.environ, {'LUOSHU_HYPEROS_SLOT_GROUPS_CONF': str(groups)}):
+            result = batch.build(self.module, self.stage, [])
         self.assertEqual(result['mapped'], len(cases))
         self.assertEqual(result['fallbackSlots'], 0)
         reports = self.report()
@@ -117,6 +121,22 @@ class HyperOSMetricsTest(unittest.TestCase):
                 self.assertEqual(font['glyf']['A'].yMax, tops[weight])
                 self.assertEqual(font['hhea'].ascent, slots[f'/{part}/fonts/{name}']['metrics']['hhea']['ascent'])
             self.assertEqual(reports[f'/{part}/fonts/{name}']['slotSource'], 'stock-inventory')
+
+    def test_lockscreen_style_group_is_off_by_default_and_mono_stays_stock(self):
+        names = (('Interscaled-Medium.otf', 500), ('ChamberiDisplay-Semibold.ttf', 600),
+                 ('MitypeMonoVF.ttf', 400), ('MiSansL3.otf', 400), ('MiuiEx-Light.ttf', 300))
+        for weight in (300, 500, 600):
+            font_file(self.fonts / f'{weight}.ttf')
+        slots = {f'/product/fonts/{name}': self.verified(name, 'product', weight)
+                 for name, weight in names}
+        self.inventory(slots)
+        missing = self.module / 'config/absent-groups.conf'
+        with patch.dict(os.environ, {'LUOSHU_HYPEROS_SLOT_GROUPS_CONF': str(missing)}):
+            result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], 1)
+        self.assertTrue((self.stage / 'product/fonts/MiuiEx-Light.ttf').is_file())
+        for name, _weight in names[:4]:
+            self.assertFalse((self.stage / 'product/fonts' / name).exists(), name)
 
     def test_unavailable_completion_weight_uses_selected_regular_source(self):
         self.inventory({'/product/fonts/MiuiEx-Bold.ttf': self.verified('MiuiEx-Bold.ttf', weight=700)})

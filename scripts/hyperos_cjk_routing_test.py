@@ -563,11 +563,19 @@ class RoutingTest(unittest.TestCase):
 
     def test_clock_and_mono_slots_keep_existing_routing(self):
         self.default_pair()
-        names = ('MiClock.otf', 'RobotoMono-Regular.ttf', 'DroidSansMono.ttf',
-                 'NotoSansMono-Regular.ttf')
+        names = ('MiClock.otf',)
         for name in names:
             self.stock(name, (LATIN, 48))
+        # Mono/tabular slots are kept stock: a staged alias (left by an older
+        # mapper) is removed from the isolated stage so the ROM file shows.
+        mono = ('RobotoMono-Regular.ttf', 'DroidSansMono.ttf', 'NotoSansMono-Regular.ttf')
+        for name in mono:
+            self.stock(name, (LATIN, 48))
+            make_font(self.fonts / name)
         self.build()
+        for name in mono:
+            self.assertFalse((self.fonts / name).exists(), name)
+            self.assertNotIn('/system/fonts/' + name, self.reports)
         for name in names:
             with TTFont(self.fonts / name) as font:
                 self.assertIn(HAN, font.getBestCmap())
@@ -596,7 +604,7 @@ class RoutingTest(unittest.TestCase):
         points = tuple(dict.fromkeys((*DEFAULT_POINTS, *alphanumeric)))
         source_path = self.fonts / '400.ttf'
         make_font(source_path, points, variable=True)
-        names = ('DroidSansMono.ttf', 'DroidSansFallback.ttf', 'NotoSansMono-Regular.ttf',
+        names = ('DroidSansFallback.ttf',
                  'NotoSansDisplay-Regular.ttf', 'NotoSansCondensed-Regular.ttf',
                  'NotoSansSemiCondensed-Regular.ttf', 'NotoSansVF.ttf')
         stock_before = {}

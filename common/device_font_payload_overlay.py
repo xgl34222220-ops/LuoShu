@@ -519,8 +519,9 @@ def render_overlay(
                 f"槽位映射不完整：mapped={mapped} rewritten={rewritten} dynamic={dynamic_mapped} physical={direct_physical}"
             )
 
-        # Experimental, default OFF: per-slot rewrite of HyperOS system_ext seed
-        # XML. With the flag off nothing below runs and the overlay is unchanged.
+        # HyperOS seed/customization XML rewrite: default ON (``enabled=0`` in
+        # config/hyperos_source_xml.conf turns it off). A no-op on ROMs without
+        # seed XML; any validation failure leaves the main overlay untouched.
         hyperos_report = None
         if hyperos_source_xml is not None and hyperos_source_xml.enabled():
             hyperos_report = hyperos_source_xml.apply(
