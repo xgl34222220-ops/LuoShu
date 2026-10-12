@@ -106,6 +106,7 @@ common/hyperos_theme_font_bridge.sh
 common/hyperos_theme_font_patch.py
 common/hyperos_webview_route.sh
 common/hyperos_physical_policy.py
+common/hyperos_source_xml.py
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh

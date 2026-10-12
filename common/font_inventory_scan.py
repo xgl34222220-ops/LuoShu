@@ -133,6 +133,41 @@ def _discover_xml_sources(etc_roots: Iterable[tuple[str, Path, Path]]) -> list[t
                 discovered[str(logical)] = (partition, logical, actual)
     return [discovered[key] for key in sorted(discovered)]
 
+HYPEROS_SEED_DATA_PREFIX = "/data/system/fonts/theme_webview/"
+
+
+def _xml_link_chains(etc_roots: Iterable[tuple[str, Path, Path]]) -> list[dict[str, Any]]:
+    """Record symlinked font XML (HyperOS: /system/etc/fonts.xml -> /data/system/fonts/theme_webview/).
+
+    Read-only: only lstat/readlink, never opens the /data target.
+    """
+    chains: list[dict[str, Any]] = []
+    for partition, logical_root, actual_root in etc_roots:
+        if not actual_root.is_dir():
+            continue
+        names: set[str] = set()
+        if partition == "system":
+            names.update(("fonts.xml", "font_fallback.xml"))
+        for pattern in (p for p in XML_PATTERNS if p.startswith(("hyper_", "miui_"))):
+            names.update(item.name for item in actual_root.glob(pattern))
+        for name in sorted(names):
+            actual = actual_root / name
+            try:
+                if not actual.is_symlink():
+                    continue
+                link = os.readlink(actual)
+            except OSError:
+                continue
+            resolved = link if link.startswith("/") else str(Path(str(logical_root / name)).parent / link)
+            chains.append({
+                "path": str(logical_root / name),
+                "link": link,
+                "resolved": os.path.normpath(resolved),
+                "dataSeeded": os.path.normpath(resolved).startswith(HYPEROS_SEED_DATA_PREFIX),
+            })
+    return chains
+
+
 def _merge_families(target: dict[str, list[str]], source: dict[str, list[str]]) -> None:
     for family, paths in source.items():
         bucket = target.setdefault(family, [])
@@ -926,6 +961,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
             for partition, logical, actual in etc_roots if actual.is_dir()
         ],
         "xmlSources": [str(logical) for _partition, logical, _actual in xml_sources],
+        "xmlLinks": _xml_link_chains(etc_roots),
         "families": {name: paths for name, paths in sorted(families.items()) if name and paths},
         "slots": {logical: slots[logical] for logical in sorted(slots)},
         "slotCount": len(slots),

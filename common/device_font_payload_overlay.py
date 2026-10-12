@@ -21,6 +21,11 @@ from typing import Any, Iterable
 
 import device_font_template as template_engine
 
+try:  # experimental, default-off HyperOS seed rewrite; never block the renderer
+    import hyperos_source_xml
+except Exception:  # pragma: no cover - missing helper means the step is off
+    hyperos_source_xml = None
+
 SCHEMA = "device-font-overlay-v1"
 PAYLOAD_SCHEMA = "device-font-payload-v1"
 DYNAMIC_PREFIX = "/data/fonts/"
@@ -514,6 +519,14 @@ def render_overlay(
                 f"槽位映射不完整：mapped={mapped} rewritten={rewritten} dynamic={dynamic_mapped} physical={direct_physical}"
             )
 
+        # Experimental, default OFF: per-slot rewrite of HyperOS system_ext seed
+        # XML. With the flag off nothing below runs and the overlay is unchanged.
+        hyperos_report = None
+        if hyperos_source_xml is not None and hyperos_source_xml.enabled():
+            hyperos_report = hyperos_source_xml.apply(
+                template, slots, payload_root, stage, copied, copy_generated
+            )
+
         report = {
             "schema": SCHEMA,
             "deviceFingerprint": template.get("fingerprint", ""),
@@ -548,6 +561,8 @@ def render_overlay(
                 for report in dynamic_reports
             ],
         }
+        if hyperos_report is not None:
+            report["hyperosSourceXml"] = hyperos_report
         atomic_json(report, stage / "overlay-manifest.json")
         commit_directory(stage, output_tree)
         return report
