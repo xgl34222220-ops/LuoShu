@@ -188,4 +188,46 @@ class DeviceTrustUiTest {
         assertEquals(DeviceTrustLevel.ISSUE, state.level)
         assertTrue(state.error.isNotBlank())
     }
+
+    @Test
+    fun degradedSelfMountWithFailuresIsNotPresentedAsVerified() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=missing
+                template=missing
+                alignment=verified
+                mode=mount-confirmed
+                reason=physical-self-mount-active
+                mountState=degraded
+                mountFailure=product/fonts
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertTrue(state.partialMount)
+        assertEquals(DeviceTrustLevel.COMPATIBILITY, state.level)
+    }
+
+    @Test
+    fun bindOnlyDegradedSelfMountStaysVerified() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=missing
+                template=missing
+                alignment=verified
+                mode=mount-confirmed
+                reason=physical-self-mount-active
+                mountState=degraded
+                mountFailure=
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertFalse(state.partialMount)
+        assertEquals(DeviceTrustLevel.VERIFIED, state.level)
+    }
 }

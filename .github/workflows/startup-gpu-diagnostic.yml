@@ -1,11 +1,8 @@
 name: One-shot startup GPU diagnostic (not acceptance)
 
 on:
-  push:
-    branches: [claude/laughing-hypatia-ogd2oz]
-    paths:
-      - diagnostics/startup_gpu_probe.py
-      - .github/workflows/startup-gpu-diagnostic.yml
+  # One-shot startup diagnostic; the branch it was attached to is gone.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1,18 +1,6 @@
 name: Build Test Candidate
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - claude/laughing-hypatia-ogd2oz
-    paths:
-      - common/**
-      - scripts/**
-      - android-app/**
-      - customize.sh
-      - uninstall.sh
-      - module.prop
-      - .github/workflows/test-candidate.yml
-      - .github/workflows/android-ui-smoke.yml
   pull_request:
     branches:
       - main
@@ -34,7 +22,7 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4

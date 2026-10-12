@@ -145,9 +145,51 @@ luoshu_boot_real_dir() {
     fi
 }
 
+# Bound .luoshu-retired. Next-boot activation moves the previous payload to
+# .luoshu-retired/payload-<bootId>; only a verified boot used to remove it, so
+# every pending/failed verification (safe mode included) kept another complete
+# payload (tens of MB of CJK). Keep the newest LUOSHU_RETIRED_KEEP (default 1)
+# entries; the entry retired by this very boot is always kept as the latest
+# rollback reference. Older entries also go once the total exceeds
+# LUOSHU_RETIRED_MAX_KB (default 262144 KiB).
+luoshu_retired_payload_cap() {
+    _lrpc_moddir="$1"
+    _lrpc_root="$_lrpc_moddir/.luoshu-retired"
+    [ -d "$_lrpc_root" ] && [ ! -L "$_lrpc_root" ] || return 0
+    _lrpc_keep="${LUOSHU_RETIRED_KEEP:-1}"
+    case "$_lrpc_keep" in ''|*[!0-9]*) _lrpc_keep=1 ;; esac
+    _lrpc_max="${LUOSHU_RETIRED_MAX_KB:-262144}"
+    case "$_lrpc_max" in ''|*[!0-9]*) _lrpc_max=262144 ;; esac
+    _lrpc_boot="${LUOSHU_BOOTLOOP_BOOT_ID:-$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')}"
+    _lrpc_current="payload-${_lrpc_boot}"
+    _lrpc_seen=0
+    _lrpc_total=0
+    # Newest first by mtime; names never contain newlines (payload-<bootId>).
+    for _lrpc_name in $(ls -1t "$_lrpc_root" 2>/dev/null); do
+        _lrpc_path="$_lrpc_root/$_lrpc_name"
+        case "$_lrpc_name" in payload-*) ;; *) continue ;; esac
+        [ -d "$_lrpc_path" ] && [ ! -L "$_lrpc_path" ] || continue
+        if [ -n "$_lrpc_boot" ] && [ "$_lrpc_name" = "$_lrpc_current" ]; then
+            _lrpc_seen=$((_lrpc_seen + 1))
+            continue
+        fi
+        _lrpc_kb=$(du -sk "$_lrpc_path" 2>/dev/null | awk '{print $1}')
+        case "$_lrpc_kb" in ''|*[!0-9]*) _lrpc_kb=0 ;; esac
+        if [ "$_lrpc_seen" -lt "$_lrpc_keep" ] && [ $((_lrpc_total + _lrpc_kb)) -le "$_lrpc_max" ]; then
+            _lrpc_seen=$((_lrpc_seen + 1))
+            _lrpc_total=$((_lrpc_total + _lrpc_kb))
+            continue
+        fi
+        rm -rf "$_lrpc_path" 2>/dev/null || true
+    done
+    rmdir "$_lrpc_root" 2>/dev/null || true
+    return 0
+}
+
 luoshu_boot_housekeep() {
     _lbh_moddir="$1"
     [ -d "$_lbh_moddir" ] || return 0
+    luoshu_retired_payload_cap "$_lbh_moddir"
     _lbh_logdir=$(luoshu_boot_real_dir "$_lbh_moddir" logs)
     if [ -n "$_lbh_logdir" ]; then
         for _lbh_log in "$_lbh_logdir"/*; do
