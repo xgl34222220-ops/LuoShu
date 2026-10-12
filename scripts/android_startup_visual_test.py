@@ -378,7 +378,7 @@ class RealSurfaceReferenceTest(unittest.TestCase):
 
     def test_real_splash_exit_frames_from_failed_dark_runs_are_recognized(self):
         frames = self.splash_exit_frames()
-        self.assertEqual(4, len(frames))
+        self.assertEqual(5, len(frames))
         for reference, frame in frames:
             with self.subTest(file=reference["file"]):
                 self.assertEqual("splash-exit-composite", frame["state"])
@@ -430,6 +430,42 @@ class RealSurfaceReferenceTest(unittest.TestCase):
                                 {"frame": 2, "seconds": .1, "state": "startup-shell"},
                                 {"frame": 3, "seconds": .15, "state": "home"}]
                     self.assertFalse(timeline_verdict(sequence)["passed"])
+
+    def test_real_slid_window_frame_is_bounded_downward_shift_over_black(self):
+        reference = next(item for item in self.provenance["references"] if item["file"] == "splash-exit-dark-1155-028.png")
+        frame = self.classify(reference)
+        self.assertEqual("splash-exit-composite", frame["state"])
+        fit = frame["composite_match"]
+        # 20dp platform shift: 35px on the 720px recording, 17.5px on the 360px normalized frame.
+        self.assertIn(fit["shell_shift_pixels"], (17, 18))
+        self.assertGreaterEqual(fit["vacated_band_dark_fraction"], .8)
+        self.assertGreaterEqual(min(fit["shifted_text_scores"]), .92)
+        classifier = self.classifiers["dark"]
+        with Image.open(self.fixtures / reference["file"]) as original:
+            image = np.asarray(original.convert("RGB").resize((360, 780), Image.Resampling.BILINEAR))
+        shell = np.asarray(Image.open(self.fixtures / "native-shell-dark.png").convert("RGB"))
+        def slid(dy):
+            moved = np.zeros_like(shell)
+            if dy >= 0:
+                moved[dy:] = shell[:780 - dy]
+            else:
+                moved[:dy] = shell[-dy:]
+            return moved
+        self.assertEqual("splash-exit-composite", classifier.classify(slid(9))["state"])
+        # Moved up, beyond the platform length, sideways, or with content in the vacated band.
+        for name, variant in (("up", slid(-9)), ("too-far", slid(30)), ("sideways", np.roll(image, 12, axis=1)),
+                              ("wrapped", np.roll(shell, 12, axis=0))):
+            with self.subTest(variant=name):
+                self.assertNotEqual("splash-exit-composite", classifier.classify(variant)["state"])
+        logo, home = {"state": "native-logo"}, {"state": "home"}
+        settled = {"state": "startup-shell"}
+        def verdict(sequence):
+            return timeline_verdict([{**item, "frame": i, "seconds": i * .05} for i, item in enumerate(sequence)])
+        halfway = {"frame": 0, "seconds": 0, **classifier.classify(slid(9))}
+        self.assertTrue(verdict([logo, frame, halfway, settled, home])["passed"])
+        backwards = verdict([logo, halfway, frame, settled, home])
+        self.assertFalse(backwards["passed"])
+        self.assertIn("slid back down", " ".join(backwards["errors"]))
 
     def test_real_frozen_fixture_hashes_and_original_frame_provenance(self):
         for reference in self.provenance["references"] + self.provenance["home_references"]:

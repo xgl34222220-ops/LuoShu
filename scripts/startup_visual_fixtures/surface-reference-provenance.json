@@ -3,7 +3,7 @@
   "commit": "6af650c388d966f3bb242f4c7241c9012bdd79bb",
   "artifact": "LuoShu-Startup-Visual-API-36",
   "artifact_id": 11507365772,
-  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes. Launch shell references (shell-*) come from workflow run 38092197157 (commit 40209dc). Retired glass-lens icon logo-transition frames were removed with that icon. Platform splash exit composites (splash-exit-*) come from workflow run 38184802017 (PR #284, commit 6286ea1), attempts whose dark cold start failed only on these frames.",
+  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes. Launch shell references (shell-*) come from workflow run 38092197157 (commit 40209dc). Retired glass-lens icon logo-transition frames were removed with that icon. Platform splash exit composites (splash-exit-*) come from workflow run 38184802017 (PR #284, commit 6286ea1), attempts whose dark cold start failed only on these frames; the slid-window frame (splash-exit-dark-1155-028) comes from workflow run 38191786435 (PR #287, commit 98333d1).",
   "references": [
     {
       "file": "home-light-resume-001.png",
@@ -275,6 +275,25 @@
       "expected_state": "splash-exit-composite",
       "workflow_run": 38184802017,
       "artifact_id": 11719972576
+    },
+    {
+      "file": "splash-exit-dark-1155-028.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "996d0df1d403a87ef173ff52d0b3d8c324ad93ae749c6387bad3e6f3f265851a",
+      "frame": 28,
+      "time_seconds": 4.345811,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "abda19f64a1df697d3833a40743882e5ccdd8fbfce9b066f282a3ef06b18fea5",
+      "theme": "dark",
+      "expected_state": "splash-exit-composite",
+      "workflow_run": 38191786435,
+      "artifact_id": 11722331155
     }
   ],
   "home_references": [
