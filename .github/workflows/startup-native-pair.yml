@@ -1,10 +1,7 @@
 name: One-shot native startup pair (not acceptance)
 on:
-  push:
-    branches: [claude/laughing-hypatia-ogd2oz]
-    paths:
-      - diagnostics/startup_native_pair.py
-      - .github/workflows/startup-native-pair.yml
+  # One-shot startup diagnostic; the branch it was attached to is gone.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:

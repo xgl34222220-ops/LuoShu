@@ -4,9 +4,9 @@
 
 ## 重构系列正式版本编号（2026-09-13T04:47:32Z 起）
 
-维护者本次指定重新从 **重构版 1.0.0** 起算：**1.0.0 → 1.1.1 → 2.0.0 → 2.2.2 → 3.0.0 → 3.3.3**。规则仍为 `n.0.0 → n.n.n → (n+1).0.0`，当前发布目标 currentStable 为 v2.2.2，nextStable 为 v3.0.0；已撤回的 v2.0.0 标签和附件保留不变；旧的“下一正式版 5.0.0”计划已被替代。
+维护者本次指定重新从 **重构版 1.0.0** 起算：**1.0.0 → 1.1.1 → 2.0.0 → 2.2.2 → 3.0.0 → 3.3.3**。规则仍为 `n.0.0 → n.n.n → (n+1).0.0`，当前正式版 currentStable 为 v3.0.0（标签 `refactor-v3.0.0`，升级代码 80000 / 8000001，2026-10-11 发布），下一正式版 nextStable 为 v3.3.3（80303 / 8030301）；已撤回的 v2.0.0 标签和附件保留不变；旧的“下一正式版 5.0.0”计划已被替代。
 
-`module.prop` 写入 `versionSeries=refactor`，显示版本写当前正式版本（如 v2.2.2），不加 Beta/RC。内部版本代码不能重置：固定采用 `50000 + major*10000 + minor*100 + patch`；App 为 `moduleVersionCode*100 + 1`。1.0.0 对应 60000 / 6000001，高于已交付 4.4.4 (40404 / 4040401) 和 5.0.0-Beta1 (50000 / 5000001)。1.1.1 对应 60101，2.0.0 对应 70000，2.2.2 对应 70202。旧系列没有此属性时保留原公式。
+`module.prop` 写入 `versionSeries=refactor`，显示版本写当前正式版本（如 v2.2.2），不加 Beta/RC。内部版本代码不能重置：固定采用 `50000 + major*10000 + minor*100 + patch`；App 为 `moduleVersionCode*100 + 1`。1.0.0 对应 60000 / 6000001，高于已交付 4.4.4 (40404 / 4040401) 和 5.0.0-Beta1 (50000 / 5000001)。1.1.1 对应 60101，2.0.0 对应 70000，2.2.2 对应 70202，3.0.0 对应 80000，3.3.3 对应 80303。旧系列没有此属性时保留原公式。
 
 `release_version_policy.py` 统一校验编号和系列；发布门禁不再把“显示版本重置”误报为内部编号错误。App 包名、模块 ID、固定签名和数据路径不得随重编号改变，安装时不得要求用户卸载或清除数据。
 
@@ -39,7 +39,8 @@
 2. 稳定版不含 Alpha、Beta、RC，不含 prerelease 标记；提高 versionCode，保持 module.prop 为唯一版本源。
 3. 默认要求最低真机矩阵有证据。维护者明确授权某一版本在矩阵仍待测时正式发布，可以使用既有 `config/stable_release_authorization.conf`，必须绑定该版本，不得写成长期通用豁免，也不得把待测记录改成通过。
 4. 合并 main 后，Publish signed release 重新运行源码检查、App lint / 单元测试、固定签名、证书、单模块成品和发布门禁，再创建 GitHub Release。
-5. 已有 Tag 或 Release 不覆盖；修订内容使用新版本。预发行必须有 prerelease 标记；正式版本更新正式和预览通道。
+5. 已有 Tag 或 Release 不覆盖；修订内容使用新版本。
+   `Publish signed release` 在 main 上由 `module.prop`、`RELEASE_NOTES_*.md` 或 `release.yml` 的任何改动触发（例如只新增 `actionIcon=`）。若版本号未变、对应标签已存在且 main 与该标签之间有非发布文件差异，前置 `gate` 作业（`scripts/release_skip_gate.sh`）判定“无新版本可发布”：工作流以 success 结束，在 Summary 中说明跳过原因，签名与发布作业显示为 skipped，不再在 “Read and verify release version” 以 exit 2 失败。只有提高 version/versionCode 才会发布新的签名版本；versionCode 变化但 version 未变、标签不是 main 的祖先等不一致情况仍由发布作业报错。预发行必须有 prerelease 标记；正式版本更新正式和预览通道。
 6. 检查 Release 的模块 ZIP、独立 APK、两份 SHA-256 均已上传，核对在线更新元数据与真实下载地址，再交付安装包。
 
 正式 Release 包含 `LuoShu-<版本>.zip`、`LuoShu-App-<版本>.apk` 及各自 SHA-256。Lite 变体已取消；模块必须内置相同签名 App，必要时手动覆盖安装独立 APK。

@@ -82,6 +82,16 @@
 
 真机至少确认：刷入后标准分区目录为空、`.luoshu-payload` 存在、能够完整开机、字体应用生效、ROM Emoji 保留、恢复系统字体正常、卸载后洛书挂载和私有负载消失。
 
+### 3.0.0 之后新增的真机验收项
+
+| 项目 | Root 管理器 | 步骤 | 预期 | 结果 |
+| --- | --- | --- | --- | --- |
+| 卡开机保护（误触发） | Magisk | 应用字体后完整开机；开机完成 30 s 内再重启，连续 3 次 | 不进入安全模式；`config/boot-loop-guard.conf` 每次开机完成后 `count=0`、`completedBootId` 为当次 boot_id | 待测 |
+| 卡开机保护（触发） | Magisk / KernelSU / APatch | 在开机动画阶段强制重启 2 次（未到开机完成） | 第 3 次开机进入安全模式、跳过洛书挂载，字体与选择保留；“操作”按钮可解除；安全模式下 App 应用新字体被拒绝，恢复默认可用 | 待测 |
+| late-load | KernelSU（late-load 模式） | `ksud late-load` 启动；同一次开机重复触发 | 早期流程每次开机只执行一次；字体在 post-mount 挂载；不计入未完成启动 | 待测 |
+| OTA 重扫 | 任意 | 应用字体后刷入系统更新（指纹变化）并开机 | 首次开机日志有“开机早期检测到系统更新”，本次不挂 XML 覆盖与 /data/fonts 视图、字体文件槽正常；开机后标记原厂字体重扫；下次开机 XML 自动放回 | 待测 |
+| 卸载残留 | Magisk / KernelSU / APatch（含 meta-overlayfs） | 有后台字体任务时卸载并重启 | `/data/adb/luoshu/self-mount`、`/data/adb/metamodule/mnt/LuoShu`、`/data/adb/modules_update/LuoShu` 均不存在；卸载后系统字体恢复原厂；`font_weight_adjustment` 不被改写 | 待测 |
+
 ## 发布规则
 
 - Alpha/Beta/RC 只发布为 GitHub prerelease；

@@ -106,6 +106,7 @@ internal data class OnlineUpdateInfo(
     val sha256: String = "",
     val appUrl: String = "",
     val appSha256: String = "",
+    val warning: String = "",
 ) {
     val currentVersionCode: Int get() = BuildConfig.VERSION_CODE / 100
     val available: Boolean get() = versionCode > 0 && zipUrl.isNotBlank()
@@ -242,34 +243,21 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
 
     private suspend fun fetchUpdateInfo(channel: UpdateChannel): OnlineUpdateInfo = withContext(Dispatchers.IO) {
         val file = if (channel == UpdateChannel.PRERELEASE) "update-prerelease.json" else "update.json"
-        val metadataUrl = "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/$file"
-        val root = JSONObject(fetchText(metadataUrl, "application/json"))
-        currentCoroutineContext().ensureActive()
-        val zipUrl = root.optString("zipUrl").trim()
-        val versionCode = root.optInt("versionCode", 0)
-        require(versionCode > 0 && zipUrl.startsWith("https://")) { "更新元数据不完整" }
-
-        val appUrl = deriveAppUrl(zipUrl)
-        val moduleSha = runCatching { fetchPublishedSha256("$zipUrl.sha256") }.getOrDefault("")
-        currentCoroutineContext().ensureActive()
-        val appSha = if (appUrl.isNotBlank()) {
-            runCatching { fetchPublishedSha256("$appUrl.sha256") }.getOrDefault("")
-        } else {
-            ""
-        }
-        currentCoroutineContext().ensureActive()
+        val callerContext = currentCoroutineContext()
+        val resolved = resolveOnlineUpdate(file, ::fetchText) { callerContext.ensureActive() }
         OnlineUpdateInfo(
-            version = root.optString("version").trim(),
-            versionCode = versionCode,
-            zipUrl = zipUrl,
-            changelogUrl = root.optString("changelog").trim(),
-            sha256 = moduleSha,
-            appUrl = appUrl,
-            appSha256 = appSha,
+            version = resolved.version,
+            versionCode = resolved.versionCode,
+            zipUrl = resolved.zipUrl,
+            changelogUrl = resolved.changelogUrl,
+            sha256 = resolved.sha256,
+            appUrl = resolved.appUrl,
+            appSha256 = resolved.appSha256,
+            warning = resolved.warning,
         )
     }
 
-    private fun fetchText(url: String, accept: String = "text/plain"): String {
+    private fun fetchText(url: String, accept: String): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8_000
             readTimeout = 8_000
@@ -281,26 +269,11 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
         }
         try {
             val code = connection.responseCode
-            if (code !in 200..299) error("更新服务器返回 HTTP $code")
+            if (code !in 200..299) error("HTTP $code")
             return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun fetchPublishedSha256(url: String): String {
-        val value = fetchText(url).trim().split(Regex("\\s+"), limit = 2).firstOrNull().orEmpty().lowercase()
-        require(value.matches(Regex("[0-9a-f]{64}"))) { "SHA-256 校验文件无效" }
-        return value
-    }
-
-    private fun deriveAppUrl(zipUrl: String): String {
-        val slash = zipUrl.lastIndexOf('/')
-        if (slash <= 0) return ""
-        val file = zipUrl.substring(slash + 1)
-        if (!file.startsWith("LuoShu-") || !file.endsWith(".zip")) return ""
-        val artifact = file.removePrefix("LuoShu-").removeSuffix(".zip")
-        return zipUrl.substring(0, slash + 1) + "LuoShu-App-$artifact.apk"
     }
 }
 

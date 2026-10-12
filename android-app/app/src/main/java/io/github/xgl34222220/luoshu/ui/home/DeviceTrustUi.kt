@@ -85,6 +85,10 @@ internal data class DeviceTrustState(
     val reapplyReason: String = "",
     val error: String = "",
 ) {
+    /** Self-mount degraded with failed components (a bind-only fallback with nothing failed is complete). */
+    val partialMount: Boolean
+        get() = mountState == "degraded" && mountFailure.isNotBlank()
+
     val level: DeviceTrustLevel
         get() = when {
             error.isNotBlank() -> DeviceTrustLevel.ISSUE
@@ -93,6 +97,9 @@ internal data class DeviceTrustState(
             alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
             cacheFailure.isNotBlank() && alignment != "verified" -> DeviceTrustLevel.ISSUE
             reapplyPending -> DeviceTrustLevel.PENDING
+            // The physical route confirms any non-failed self-mount, including a
+            // degraded one with failed components: partial, never verified.
+            partialMount -> DeviceTrustLevel.COMPATIBILITY
             alignment == "verified" && mode in setOf("aligned", "mount-verified", "mount-confirmed") -> DeviceTrustLevel.VERIFIED
             alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
             alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
@@ -407,6 +414,12 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             Icons.Rounded.Info,
             scheme.secondary,
         )
+        state.level == DeviceTrustLevel.COMPATIBILITY && state.partialMount -> DeviceTrustPresentation(
+            "字体部分生效",
+            "自挂载已降级，未接管：${state.mountFailure}；可导出诊断或重新应用",
+            Icons.Rounded.Info,
+            scheme.tertiary,
+        )
         state.level == DeviceTrustLevel.COMPATIBILITY -> DeviceTrustPresentation(
             "字体效果尚未确认",
             "已生成兼容映射，但没有系统实际加载证据",
@@ -464,6 +477,7 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "self-mount-not-confirmed" -> "本次启动的自挂载事务尚未确认"
     "current-boot-mount-confirmed" -> "本次启动的字体、配置与挂载事务均已确认"
     "physical-self-mount-active" -> "本次启动自挂载已确认，当前字体负载已生效"
+    "self-mount-degraded" -> "自挂载已降级，部分字体位置未接管"
     "dynamic-config-changed" -> "系统在启动后改写了动态字体配置"
     "verified-by-visible-mounts" -> "系统可见字体文件与洛书负载一致"
     "mount-active-visible-layout-differs" -> "挂载事务已确认；系统字体服务使用了不同的可见路径"
@@ -486,6 +500,7 @@ private fun friendlyTrustValue(value: String): String = when (value) {
     "mount-confirmed" -> "挂载已确认"
     "compatibility" -> "兼容映射"
     "mounted" -> "完整挂载"
+    "degraded" -> "部分生效"
     "idle" -> "未启用"
     "unknown", "" -> "未知"
     else -> value

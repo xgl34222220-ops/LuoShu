@@ -604,6 +604,15 @@ font_config_boot_guard() {
         luoshu_payload_quarantine
         return 1
     fi
+    # First boot after a system OTA (detected before any mount by the boot-loop
+    # guard hook): the generated XML is held out of the payload for this boot and
+    # the dynamic view is skipped, so neither the manifest nor the transaction
+    # state is judged now. Physical slots still mount; the next boot validates.
+    if type luoshu_system_ota_boot_hold_active >/dev/null 2>&1 && \
+       luoshu_system_ota_boot_hold_active "$(_luoshu_safety_module)"; then
+        _luoshu_safety_log WARN '系统更新后首次开机：本次跳过 XML 覆盖与动态视图校验，保留字体负载与事务状态'
+        return 0
+    fi
     case "$_lbg_state" in
         booting)
             _lbg_saved_boot=$(sed -n 's/^bootId=//p' "$_lbg_config/font-payload-boot.conf" 2>/dev/null | head -n1)
@@ -617,33 +626,66 @@ font_config_boot_guard() {
                 return 0
             fi
             # A missing service confirmation is inconclusive, not proof that the payload caused a
-            # boot failure (KernelSU/APatch mount timing differs). Retry the same validated generation
-            # once; only a second unconfirmed boot quarantines it.
+            # boot failure (KernelSU/APatch mount timing differs).
+            #
+            # One meaning of "unfinished boot" for the whole module: the boot-loop guard
+            # (boot_loop_guard.sh, loaded by util_functions.sh before this runs) records
+            # completedBootId when Android reaches sys.boot_completed and is the only
+            # counter that escalates (safe mode after LUOSHU_BOOTLOOP_LIMIT unfinished boots,
+            # payload and selection kept). So here:
+            #   - previous boot reached boot completed (user rebooted before the service
+            #     verification finished): not a failure, no count;
+            #   - previous boot never completed: keep the validated generation and let the
+            #     guard escalate; never quarantine on a private, shorter count.
+            # Without the guard (older callers/tests) the historical retry-once rule stays.
             _lbg_retry_generation=$(sed -n 's/^generation=//p' "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null | head -n1)
             _lbg_retry_count=$(sed -n 's/^count=//p' "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null | head -n1)
             case "$_lbg_retry_count" in ''|*[!0-9]*) _lbg_retry_count=0 ;; esac
             [ "$_lbg_retry_generation" = "$_lbg_generation" ] || _lbg_retry_count=0
-            if [ "$_lbg_retry_count" -ge 1 ]; then
+            _lbg_reason=previous-boot-unconfirmed-retry
+            _lbg_guarded=0
+            if type luoshu_bootloop_get >/dev/null 2>&1; then
+                _lbg_guarded=1
+                _lbg_completed=$(luoshu_bootloop_get completedBootId)
+                if [ -n "$_lbg_saved_boot" ] && [ "$_lbg_completed" = "$_lbg_saved_boot" ]; then
+                    _lbg_reason=previous-boot-completed-unverified
+                    _lbg_retry_count=-1
+                else
+                    _lbg_reason=previous-boot-unfinished-guarded
+                fi
+            fi
+            if [ "$_lbg_guarded" -eq 0 ] && [ "$_lbg_retry_count" -ge 1 ]; then
                 luoshu_payload_quarantine
                 return 1
             fi
             luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
             _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null) || { luoshu_payload_quarantine; return 1; }
-            {
-                printf 'generation=%s\n' "$_lbg_generation"
-                printf 'count=1\n'
-                printf 'time=%s\n' "$(date +%s)"
-            } > "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null || true
+            if [ "$_lbg_retry_count" -lt 0 ]; then
+                rm -f "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null || true
+            else
+                {
+                    printf 'generation=%s\n' "$_lbg_generation"
+                    printf 'count=%s\n' "$((_lbg_retry_count + 1))"
+                    printf 'time=%s\n' "$(date +%s)"
+                } > "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null || true
+            fi
             {
                 printf 'state=booting\n'
                 printf 'font=%s\n' "$_lbg_active"
                 printf 'generation=%s\n' "$_lbg_generation"
                 printf 'bootId=%s\n' "$_lbg_current_boot"
                 printf 'time=%s\n' "$(date +%s)"
-                printf 'reason=previous-boot-unconfirmed-retry\n'
+                printf 'reason=%s\n' "$_lbg_reason"
             } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
             mv -f "$_lbg_config/font-payload-boot.conf.tmp.$$" "$_lbg_config/font-payload-boot.conf" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
-            _luoshu_safety_log WARN '上次开机未留下服务确认；已保留同一代字体负载并进行一次有界重试'
+            case "$_lbg_reason" in
+                previous-boot-completed-unverified)
+                    _luoshu_safety_log INFO '上次开机已完成但服务验证未结束；不计为未完成启动，保留同一代字体负载' ;;
+                previous-boot-unfinished-guarded)
+                    _luoshu_safety_log WARN '上次开机未完成；保留同一代字体负载，由卡开机保护统一计数并在达到上限时进入安全模式' ;;
+                *)
+                    _luoshu_safety_log WARN '上次开机未留下服务确认；已保留同一代字体负载并进行一次有界重试' ;;
+            esac
             return 0
             ;;
         prepared)

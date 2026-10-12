@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.logs.DiagnosticExportDialog
@@ -72,6 +73,7 @@ fun HomeRoute(
     var deviceDetailsExpanded by remember { mutableStateOf(false) }
     var diagnosticState by remember { mutableStateOf(DiagnosticExportState()) }
     val scope = rememberCoroutineScope()
+    val lifecycleState = LocalLifecycleOwner.current.lifecycle.currentStateFlow
     val runStockScan: () -> Unit = scan@{
         if (stockScanBusy) return@scan
         stockScanBusy = true
@@ -126,11 +128,14 @@ fun HomeRoute(
         // The collapsed home card needs no second Root request or polling worker.
         if (!deviceDetailsExpanded && !showTrustDetails && !showAcceptanceGuide) return@LaunchedEffect
 
+        awaitLifecycleStarted(lifecycleState)
         var latest = loadDeviceTrustState()
         trustState = latest
         var attempt = 0
         while (latest.level == DeviceTrustLevel.PENDING && attempt < 9 && !state.taskRunning && !state.rebootRequired) {
             delay(5_000L)
+            // Background time does not spend the 9 visible re-checks or issue Root reads.
+            awaitLifecycleStarted(lifecycleState)
             latest = loadDeviceTrustState()
             trustState = latest
             attempt += 1

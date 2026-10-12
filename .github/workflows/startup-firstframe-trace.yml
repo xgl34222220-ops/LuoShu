@@ -1,10 +1,7 @@
 name: One-shot first-frame public trace (not acceptance)
 on:
-  push:
-    branches: [claude/laughing-hypatia-ogd2oz]
-    paths:
-      - diagnostics/startup_firstframe_trace.py
-      - .github/workflows/startup-firstframe-trace.yml
+  # One-shot startup diagnostic; the branch it was attached to is gone.
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
