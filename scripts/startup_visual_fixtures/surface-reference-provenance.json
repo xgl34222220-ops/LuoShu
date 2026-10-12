@@ -3,7 +3,7 @@
   "commit": "6af650c388d966f3bb242f4c7241c9012bdd79bb",
   "artifact": "LuoShu-Startup-Visual-API-36",
   "artifact_id": 11507365772,
-  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes. Launch shell references (shell-*) come from workflow run 38092197157 (commit 40209dc). Retired glass-lens icon logo-transition frames were removed with that icon.",
+  "notes": "Real frozen frames test explicit reference-based scale/translation recognition and known failures. They are never inserted into emulator footage and are not evidence that a later candidate passes. Launch shell references (shell-*) come from workflow run 38092197157 (commit 40209dc). Retired glass-lens icon logo-transition frames were removed with that icon. Platform splash exit composites (splash-exit-*) come from workflow run 38184802017 (PR #284, commit 6286ea1), attempts whose dark cold start failed only on these frames.",
   "references": [
     {
       "file": "home-light-resume-001.png",
@@ -199,6 +199,82 @@
       "expected_state": "startup-shell",
       "workflow_run": 38092197157,
       "artifact_id": 11684468748
+    },
+    {
+      "file": "splash-exit-dark-2153-021.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "e81078d63a5816c145c4fb4e35582a6fc3beb5b6833dfae4f5cdfbbaafec0bf0",
+      "frame": 21,
+      "time_seconds": 3.634056,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "e2aa4a1a08faaf2fb647b6cf5986a0180708b35607f790d661164a70b2fa86c4",
+      "theme": "dark",
+      "expected_state": "splash-exit-composite",
+      "workflow_run": 38184802017,
+      "artifact_id": 11720412153
+    },
+    {
+      "file": "splash-exit-dark-2153-022.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "e81078d63a5816c145c4fb4e35582a6fc3beb5b6833dfae4f5cdfbbaafec0bf0",
+      "frame": 22,
+      "time_seconds": 3.753333,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "d7efc07eee37590db124400cb312498f777d8b409d88d7aa48fbe2fde4b78f5e",
+      "theme": "dark",
+      "expected_state": "splash-exit-composite",
+      "workflow_run": 38184802017,
+      "artifact_id": 11720412153
+    },
+    {
+      "file": "splash-exit-dark-3391-013.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "0335c85b70c6a8667d83c3ed1e3466433922a295fb1d7661e0f3a345bdebfc3b",
+      "frame": 13,
+      "time_seconds": 3.6797,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "1db1c1a205b7df8455e2108ad23e99e0275759ecd70cd86b06986200becce0f5",
+      "theme": "dark",
+      "expected_state": "splash-exit-composite",
+      "workflow_run": 38184802017,
+      "artifact_id": 11719343391
+    },
+    {
+      "file": "splash-exit-dark-2576-016.png",
+      "source": "dark-cold-start.mp4",
+      "source_sha256": "99a35ebaad2eda55c398835e6f4905cc9bfbfd52c9363bb5d2a6a88efe31b186",
+      "frame": 16,
+      "time_seconds": 2.077256,
+      "crop_pixels": [
+        0,
+        0,
+        720,
+        1560
+      ],
+      "pixel_transform": "Unmodified full-size original RGB decoded frame saved as PNG",
+      "file_sha256": "75a5de945945179f67e27cd4cf3772c29df97cdf3f3469f348fe5593b4eaf388",
+      "theme": "dark",
+      "expected_state": "splash-exit-composite",
+      "workflow_run": 38184802017,
+      "artifact_id": 11719972576
     }
   ],
   "home_references": [

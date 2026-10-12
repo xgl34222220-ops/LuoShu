@@ -58,6 +58,21 @@ WORDMARK_PARTIAL_SCORE = .8
 WORDMARK_PARTIAL_CONTRAST = .2
 # A steady native logo sits on the opaque splash colour (low-res field, card area excluded).
 SPLASH_FIELD_TOLERANCE = 12.0
+# The platform starting window exits by fading the opaque splash (icon first) while a soft
+# vertical edge reveals the already submitted launch shell; on API 36 this is composited over
+# black, so a frame can show a dimmed splash and a partly revealed shell at once. Such a frame
+# is recognized only when every field row (card and wordmark excluded) is explained as
+# a*splash + b*shell (+ (1-a-b)*black) with physical alpha weights, one monotone edge,
+# small residuals, and a visible surface far above the black-blank threshold.
+COMPOSITE_MIN_OPACITY = .2
+COMPOSITE_WEIGHT_SLACK = .05
+COMPOSITE_PROFILE_SLACK = .08
+COMPOSITE_TEXT_WEIGHT = .25
+COMPOSITE_TEXT_CONTRAST_FRACTION = .7
+# A frame equal to one known surface (all splash, all shell, all black) is not a composite.
+COMPOSITE_MIN_ENDPOINT = 2.0
+COMPOSITE_TEMPORAL_SLACK = .05
+COMPOSITE_MAX_SECONDS = 1.0
 SURFACE_SCALES = tuple(index / 200 for index in range(130, 211))
 SURFACE_SHIFT = (20, 80)
 
@@ -134,6 +149,64 @@ def blend_fit(frame: np.ndarray, first: np.ndarray, second: np.ndarray, mask: np
             "matched": bool(matched)}
 
 
+def monotone_fit(values: np.ndarray) -> np.ndarray:
+    """Least-squares non-decreasing fit (pool adjacent violators)."""
+    blocks = []
+    for value in values:
+        blocks.append([float(value), 1])
+        while len(blocks) > 1 and blocks[-2][0] > blocks[-1][0]:
+            value_sum = blocks[-2][0] * blocks[-2][1] + blocks[-1][0] * blocks[-1][1]
+            count = blocks[-2][1] + blocks[-1][1]
+            blocks[-2:] = [[value_sum / count, count]]
+    return np.concatenate([np.full(count, value) for value, count in blocks])
+
+
+def composite_fit(frame: np.ndarray, splash: np.ndarray, shell: np.ndarray, mask: np.ndarray,
+                  text_rows: range) -> dict:
+    """Explain each low-res row as a*splash + b*shell over black; report the row weights."""
+    splash_weights, shell_weights, residuals, rows = [], [], [], []
+    for row in range(frame.shape[0]):
+        cells = mask[row]
+        if not cells.any():
+            continue
+        basis = np.stack([splash[row][cells].ravel(), shell[row][cells].ravel()], axis=1)
+        target = frame[row][cells].ravel()
+        weights, *_ = np.linalg.lstsq(basis, target, rcond=None)
+        residuals.append(np.abs((target - basis @ weights).reshape(-1, 3)).max(axis=1))
+        splash_weights.append(float(weights[0]))
+        shell_weights.append(float(weights[1]))
+        rows.append(row)
+    a, b = np.array(splash_weights), np.array(shell_weights)
+    residual = np.concatenate(residuals)
+    mean = float(residual.mean())
+    p98 = float(np.percentile(residual, 98))
+    # Distance to the nearest single known surface (splash, shell, or black backdrop):
+    # the composite must explain the frame far better than any one of them alone.
+    endpoint = min(float(np.abs(frame - reference).max(axis=2)[mask].mean())
+                   for reference in (splash, shell, np.zeros_like(frame)))
+    opacity = a + b
+    # One soft edge: splash weight changes monotonically along the screen and the
+    # shell weight in the opposite direction (direction taken from the endpoints);
+    # each row may deviate from the best monotone profile only by measurement noise.
+    direction = 1.0 if a[-1] >= a[0] else -1.0
+    directed_a, directed_b = a[::int(direction)], b[::int(direction)]
+    profile_error = max(float(np.abs(directed_a - monotone_fit(directed_a)).max()),
+                        float(np.abs(directed_b + monotone_fit(-directed_b)).max()))
+    text_mask = np.isin(rows, list(text_rows))
+    text_shell_weight = float(b[text_mask].mean()) if text_mask.any() else 0.0
+    physical = (a.min() >= -COMPOSITE_WEIGHT_SLACK and b.min() >= -COMPOSITE_WEIGHT_SLACK
+                and opacity.max() <= 1 + COMPOSITE_WEIGHT_SLACK and opacity.min() >= COMPOSITE_MIN_OPACITY)
+    matched = (physical and profile_error <= COMPOSITE_PROFILE_SLACK
+               and mean <= BLEND_MEAN_RESIDUAL and p98 <= BLEND_P98_RESIDUAL
+               and endpoint >= COMPOSITE_MIN_ENDPOINT and mean <= BLEND_IMPROVEMENT * endpoint)
+    return {"splash_weight_range": [round(float(a.min()), 4), round(float(a.max()), 4)],
+            "shell_weight_range": [round(float(b.min()), 4), round(float(b.max()), 4)],
+            "min_opacity": round(float(opacity.min()), 4), "max_opacity": round(float(opacity.max()), 4),
+            "shell_weight": round(float(b.mean()), 4), "text_shell_weight": round(text_shell_weight, 4),
+            "profile_error": round(profile_error, 4), "mean_residual": round(mean, 3),
+            "p98_residual": round(p98, 3), "endpoint_residual": round(endpoint, 3), "matched": bool(matched)}
+
+
 class FrameClassifier:
     def __init__(self, home: Image.Image, hierarchy: ET.Element, theme: str,
                  size: tuple[int, int], baseline: Image.Image | None = None):
@@ -194,6 +267,9 @@ class FrameClassifier:
                      for index, value in enumerate(SHELL_CARD_BOUNDS))
         self.shell_field_mask = field_mask(size, (card, *scaled_text))
         self.blend_mask = field_mask(size, (card,))
+        text_top = min(bounds[1] for bounds in scaled_text) // FIELD_CELL
+        text_bottom = -(-max(bounds[3] for bounds in scaled_text) // FIELD_CELL)
+        self.text_rows = range(text_top, text_bottom)
         self.shell_field = field(self.shell_reference)
         self.splash_field = field(self.splash_reference)
         self.home_field = field(self.reference)
@@ -276,6 +352,19 @@ class FrameClassifier:
                 "shell_to_home": blend_fit(frame_field, self.shell_field, self.home_field, self.blend_mask)}
         return {**fits, "matched": any(fit["matched"] for fit in fits.values())}
 
+    def composite_match(self, frame_field: np.ndarray, shell: dict) -> dict:
+        """Platform splash exit: dimmed splash and edge-revealed launch shell in one frame."""
+        # Wordmark cells are excluded from the colour fit; the wordmark is checked on its own below.
+        fit = composite_fit(frame_field, self.splash_field, self.shell_field, self.shell_field_mask, self.text_rows)
+        # Where the shell is visibly revealed its real wordmark must be there, at the same
+        # place and with ink that tracks the shell weight; a shifted or different surface fails.
+        text_ok = True
+        if fit["text_shell_weight"] >= COMPOSITE_TEXT_WEIGHT:
+            text_ok = (min(shell["text_scores"]) >= WORDMARK_PARTIAL_SCORE
+                       and min(shell["text_contrast_ratios"])
+                       >= COMPOSITE_TEXT_CONTRAST_FRACTION * fit["text_shell_weight"])
+        return {**fit, "wordmark_consistent": bool(text_ok), "matched": bool(fit["matched"] and text_ok)}
+
     def classify(self, frame: np.ndarray) -> dict:
         height, width, _ = frame.shape
         interior = frame[int(height * .06):int(height * .94), int(width * .04):int(width * .96)]
@@ -284,6 +373,7 @@ class FrameClassifier:
         frame_field = field(frame)
         shell = self.shell_match(frame, edge_frame, frame_field)
         blend = {"matched": False}
+        composite = {"matched": False}
         # The glass card carries the same icon tile as the splash orb. The platform splash is
         # an opaque single colour without the wordmark; the launch shell's diffuse field or
         # its wordmark rule the logo states out.
@@ -330,8 +420,12 @@ class FrameClassifier:
                     # A dissolve/crossfade frame still shows the (partly faded) wordmark;
                     # blank or flat frames cannot qualify through the colour fit alone.
                     blend = self.blend_match(frame_field)
-                    state = "shell-transition" if blend["matched"] and shell["wordmark_visible"] else "unclassified"
-        return {"state": state, "shell_match": shell, "blend_match": blend,
+                    if blend["matched"] and shell["wordmark_visible"]:
+                        state = "shell-transition"
+                    else:
+                        composite = self.composite_match(frame_field, shell)
+                        state = "splash-exit-composite" if composite["matched"] else "unclassified"
+        return {"state": state, "shell_match": shell, "blend_match": blend, "composite_match": composite,
                 "splash_field_mean_difference": round(splash_field_mean, 3), "logo_excluded": bool(logo_excluded), "logo_score": round(logo_score, 5),
                 "home_scores": {key: round(value, 5) for key, value in home_match["scores"].items()},
                 "home_transform": {key: round(value, 5) if isinstance(value, float) else value for key, value in home_match.items() if key != "scores"},
@@ -346,9 +440,30 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
     logo_seen = False
     native_logo_seen = False
     shell_seen = False
+    composite_run = None
     for frame in frames:
         state = frame["state"]
         stamp = f"frame {frame['frame']} at {frame['seconds']:.6f}s"
+        if composite_run is not None and state != "splash-exit-composite":
+            # The splash exit must hand off to the launch shell, promptly.
+            if state not in ("shell-transition", "startup-shell"):
+                errors.append(f"Splash exit composite was not followed by the launch shell: {stamp}")
+            elif frame["seconds"] - composite_run["start"] > COMPOSITE_MAX_SECONDS:
+                errors.append(f"Splash exit composite lasted longer than {COMPOSITE_MAX_SECONDS}s: {stamp}")
+            composite_run = None
+        if state == "splash-exit-composite":
+            weight = (frame.get("composite_match") or {}).get("shell_weight", 0.0)
+            if warm:
+                errors.append(f"Warm same-process resume displayed splash exit: {stamp}")
+            if shell_seen or home_seen:
+                errors.append(f"Splash exit composite returned after the launch shell or home: {stamp}")
+            if not native_logo_seen:
+                errors.append(f"Splash exit composite lacked preceding native-logo coverage: {stamp}")
+            if composite_run is None:
+                composite_run = {"start": frame["seconds"], "weight": weight}
+            elif weight < composite_run["weight"] - COMPOSITE_TEMPORAL_SLACK:
+                errors.append(f"Splash exit composite reversed toward the splash: {stamp}")
+            composite_run["weight"] = max(composite_run["weight"], weight)
         if state in ("native-logo", "logo-transition"):
             if home_seen:
                 errors.append(f"Native logo returned after visible home: {stamp}")
@@ -382,6 +497,8 @@ def timeline_verdict(frames: list[dict], *, warm: bool = False) -> dict:
             errors.append(f"Unclassified visual evidence: {stamp}")
         if state == "prelaunch" and (logo_seen or shell_seen or home_seen):
             errors.append(f"Launch returned to the previous surface: {stamp}")
+    if composite_run is not None:
+        errors.append("Recording ended inside the splash exit composite")
     if not home_seen:
         errors.append("Recording never established visible real home content")
     if not warm and not native_logo_seen:
@@ -423,7 +540,11 @@ def inspect_recording(video: Path, home: Path, hierarchy: Path, theme: str, outp
                              "blend_p98_residual": BLEND_P98_RESIDUAL, "blend_improvement": BLEND_IMPROVEMENT,
                              "shell_text_search_pixels": SHELL_TEXT_SEARCH, "shell_text_subpixel_phases": list(SHELL_TEXT_SUBPIXEL), "wordmark_partial_score": WORDMARK_PARTIAL_SCORE,
                              "wordmark_partial_contrast": WORDMARK_PARTIAL_CONTRAST,
-                             "splash_field_tolerance": SPLASH_FIELD_TOLERANCE},
+                             "splash_field_tolerance": SPLASH_FIELD_TOLERANCE,
+                             "composite_min_opacity": COMPOSITE_MIN_OPACITY, "composite_weight_slack": COMPOSITE_WEIGHT_SLACK,
+                             "composite_profile_slack": COMPOSITE_PROFILE_SLACK, "composite_text_weight": COMPOSITE_TEXT_WEIGHT,
+                             "composite_text_contrast_fraction": COMPOSITE_TEXT_CONTRAST_FRACTION, "composite_min_endpoint": COMPOSITE_MIN_ENDPOINT,
+                             "composite_temporal_slack": COMPOSITE_TEMPORAL_SLACK, "composite_max_seconds": COMPOSITE_MAX_SECONDS},
               "surface_transform_bounds": {"scale_min": min(SURFACE_SCALES), "scale_max": max(SURFACE_SCALES),
                                            "scale_step": .005, "shared_home_translation_pixels": list(SURFACE_SHIFT)}}
     try:

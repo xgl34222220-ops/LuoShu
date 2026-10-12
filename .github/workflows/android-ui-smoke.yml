@@ -217,7 +217,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Prepare every-frame visual acceptance and regression tests
-        timeout-minutes: 10
+        timeout-minutes: 15
         shell: bash
         run: |
           set -o pipefail
@@ -227,24 +227,37 @@ jobs:
           mkdir -p launch-visual-output
           # Bound mirror stalls and retain preparation errors alongside footage.
           if ! command -v ffmpeg || ! command -v ffprobe; then
-            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee launch-visual-output/decoder-apt-update.log
-            # Keep the original 180s cap and apt signature verification, but
-            # retain acquisition/dpkg progress: the 59cd6627 timeout produced
-            # an empty -qq log and cannot establish which phase stalled.
-            set +e
-            timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg 2>&1 | tee launch-visual-output/decoder-apt-install.log
-            decoder_pipeline_status=("${PIPESTATUS[@]}")
-            decoder_install_status=${decoder_pipeline_status[0]}
-            decoder_log_status=${decoder_pipeline_status[1]}
-            set -e
-            if test "$decoder_install_status" -ne 0 || test "$decoder_log_status" -ne 0; then
+            # A mirror stall (apt-get killed by the 180s cap) is runner infrastructure, not a
+            # decoder result: retry the same signed update+install once on a fresh attempt,
+            # keeping each attempt's log. A second failure still fails the job.
+            for decoder_attempt in 1 2; do
+              set +e
+              timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update -qq 2>&1 | tee "launch-visual-output/decoder-apt-update-$decoder_attempt.log"
+              decoder_update_status=("${PIPESTATUS[@]}")
+              # Keep the original 180s cap and apt signature verification, but
+              # retain acquisition/dpkg progress: the 59cd6627 timeout produced
+              # an empty -qq log and cannot establish which phase stalled.
+              decoder_install_status=${decoder_update_status[0]}
+              decoder_log_status=${decoder_update_status[1]}
+              if test "${decoder_update_status[0]}" -eq 0 && test "${decoder_update_status[1]}" -eq 0; then
+                timeout 180s sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends ffmpeg 2>&1 | tee "launch-visual-output/decoder-apt-install-$decoder_attempt.log"
+                decoder_pipeline_status=("${PIPESTATUS[@]}")
+                decoder_install_status=${decoder_pipeline_status[0]}
+                decoder_log_status=${decoder_pipeline_status[1]}
+              fi
+              set -e
+              if test "$decoder_install_status" -eq 0 && test "$decoder_log_status" -eq 0; then break; fi
               # Read-only package/process state; command arguments and secrets
               # are excluded. Do not stop package managers or clear caches.
-              dpkg-query -W -f='${Package}\t${Status}\t${Version}\n' ffmpeg libavcodec60 libavformat60 libavutil58 > launch-visual-output/decoder-package-state.txt 2>&1 || true
-              ps -eo pid,ppid,etimes,stat,comm > launch-visual-output/decoder-package-processes.txt 2>&1 || true
-              if test "$decoder_install_status" -ne 0; then exit "$decoder_install_status"; fi
-              exit "$decoder_log_status"
-            fi
+              dpkg-query -W -f='${Package}\t${Status}\t${Version}\n' ffmpeg libavcodec60 libavformat60 libavutil58 > "launch-visual-output/decoder-package-state-$decoder_attempt.txt" 2>&1 || true
+              ps -eo pid,ppid,etimes,stat,comm > "launch-visual-output/decoder-package-processes-$decoder_attempt.txt" 2>&1 || true
+              if test "$decoder_attempt" -eq 2; then
+                if test "$decoder_install_status" -ne 0; then exit "$decoder_install_status"; fi
+                exit "$decoder_log_status"
+              fi
+              # Let a still-running dpkg/apt from the killed attempt release its lock.
+              sleep 20
+            done
           fi
           python3 -m venv "$RUNNER_TEMP/luoshu-startup-visual"
           timeout 180s "$RUNNER_TEMP/luoshu-startup-visual/bin/pip" install --timeout 30 --retries 2 numpy==2.3.5 Pillow==12.3.0 scipy==1.17.0

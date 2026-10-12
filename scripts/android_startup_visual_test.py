@@ -162,6 +162,52 @@ class StartupVisualTest(unittest.TestCase):
             frames = [{"frame": i, "seconds": i * .001, **classifier.classify(image)} for i, image in enumerate(sequence)]
             self.assertTrue(timeline_verdict(frames)["passed"], timeline_verdict(frames)["errors"])
 
+    def test_splash_exit_composite_needs_physical_rows_one_edge_and_visible_surface(self):
+        for theme in ("light", "dark"):
+            classifier, home, baseline, splash = self.reference(theme)
+            native = classifier.splash_reference.astype(np.float32).copy()
+            # The platform fades the icon out first; real exit frames carry no splash icon.
+            x1, y1, x2, y2 = SHELL_CARD_BOUNDS
+            native[y1:y2, x1:x2] = native[150, 30]
+            shell = np.asarray(self.shell_reference(theme)).astype(np.float32)
+            rows = np.linspace(0, 1, native.shape[0], dtype=np.float32)[:, None, None]
+            def compose(splash_weight, shell_weight):
+                return np.clip(native * splash_weight + shell * shell_weight, 0, 255).astype(np.uint8)
+            # Real platform exit shapes: splash dimmed over black above a soft edge; a partly
+            # revealed shell above an edge that still shows the opaque splash.
+            dimmed = compose(np.clip(.45 + (rows - .7) * 4, .45, 1), 0)
+            reveal = compose(1 - np.clip(.4 - (rows - .65) * 2, 0, .4), np.clip(.4 - (rows - .65) * 2, 0, .4))
+            for image in (dimmed, reveal):
+                self.assertEqual("splash-exit-composite", classifier.classify(image)["state"])
+            # Nearly black, two separate shell bands, a flat foreign colour, or a pure surface fail.
+            nearly_black = compose(np.clip(.1 + (rows - .7) * .3, .1, .19), 0)
+            band = ((rows > .2) & (rows < .4)) | (rows > .75)
+            two_edges = compose(np.where(band, .3, 1), np.where(band, .7, 0))
+            foreign = np.full_like(native, (90, 60, 30) if theme == "dark" else (240, 200, 160)).astype(np.uint8)
+            for image in (nearly_black, two_edges, foreign, native.astype(np.uint8)):
+                self.assertNotEqual("splash-exit-composite", classifier.classify(image)["state"])
+
+    def test_splash_exit_composite_timeline_is_cold_anchored_monotone_and_brief(self):
+        def composite(weight):
+            return {"state": "splash-exit-composite", "composite_match": {"shell_weight": weight}}
+        logo, shell, home = {"state": "native-logo"}, {"state": "startup-shell"}, {"state": "home"}
+        def verdict(frames, warm=False, step=.05):
+            return timeline_verdict([{"frame": i, "seconds": i * step, **frame} for i, frame in enumerate(frames)], warm=warm)
+        self.assertTrue(verdict([logo, composite(0), composite(.4), {"state": "shell-transition"}, shell, home])["passed"])
+        for frames, warm, step, error in (
+            ([logo, composite(.4), shell, home], True, .05, "Warm same-process"),
+            ([{"state": "prelaunch"}, composite(.4), shell, home], False, .05, "lacked preceding native-logo"),
+            ([logo, composite(.5), composite(.1), shell, home], False, .05, "reversed toward the splash"),
+            ([logo, composite(.4), home], False, .05, "not followed by the launch shell"),
+            ([logo, composite(.2), logo, shell, home], False, .05, "not followed by the launch shell"),
+            ([logo, shell, composite(.4), shell, home], False, .05, "returned after the launch shell"),
+            ([logo, composite(.1), composite(.2), shell, home], False, .6, "lasted longer"),
+            ([logo, composite(.4)], False, .05, "ended inside the splash exit"),
+        ):
+            result = verdict(frames, warm, step)
+            self.assertFalse(result["passed"])
+            self.assertIn(error, " ".join(result["errors"]))
+
     def test_shell_transition_is_forbidden_after_home_warm_or_without_logo(self):
         for frames, warm, error in (
             ([{"state": "native-logo"}, {"state": "home"}, {"state": "shell-transition"}, {"state": "home"}], False, "returned after visible home"),
@@ -325,6 +371,65 @@ class RealSurfaceReferenceTest(unittest.TestCase):
                                          {"frame": 2, "seconds": .02, **result},
                                          {"frame": 3, "seconds": .03, "state": "home"}])
                 self.assertIn("returned after visible home", " ".join(late["errors"]))
+
+    def splash_exit_frames(self):
+        return [(reference, {"frame": reference["frame"], "seconds": reference["time_seconds"], **self.classify(reference)})
+                for reference in self.provenance["references"] if reference["expected_state"] == "splash-exit-composite"]
+
+    def test_real_splash_exit_frames_from_failed_dark_runs_are_recognized(self):
+        frames = self.splash_exit_frames()
+        self.assertEqual(4, len(frames))
+        for reference, frame in frames:
+            with self.subTest(file=reference["file"]):
+                self.assertEqual("splash-exit-composite", frame["state"])
+                fit = frame["composite_match"]
+                self.assertGreaterEqual(fit["min_opacity"], .2)
+                self.assertLessEqual(fit["max_opacity"], 1.05)
+                self.assertLessEqual(fit["mean_residual"], .45 * fit["endpoint_residual"])
+                self.assertNotIn(frame["state"], ("home", "native-logo", "startup-shell"))
+
+    def test_real_splash_exit_sequence_passes_only_between_logo_and_shell(self):
+        frames = {reference["file"]: frame for reference, frame in self.splash_exit_frames()}
+        shell = {reference["file"]: {"frame": reference["frame"], "seconds": reference["time_seconds"], **self.classify(reference)}
+                 for reference in self.provenance["references"] if reference["file"].startswith("shell-dark-cold")}
+        dimmed, reveal = frames["splash-exit-dark-2153-021.png"], frames["splash-exit-dark-2153-022.png"]
+        self.assertLess(dimmed["composite_match"]["shell_weight"], reveal["composite_match"]["shell_weight"])
+        logo, home = {"state": "native-logo"}, {"state": "home"}
+        def verdict(sequence, warm=False):
+            return timeline_verdict([{**frame, "frame": i, "seconds": i * .05} for i, frame in enumerate(sequence)], warm=warm)
+        handoff = [logo, dimmed, reveal, shell["shell-dark-cold-023.png"], shell["shell-dark-cold-025.png"], home]
+        self.assertTrue(verdict(handoff)["passed"], verdict(handoff)["errors"])
+        for sequence, warm, error in (
+            (handoff, True, "Warm same-process"),
+            (handoff[1:], False, "lacked preceding native-logo"),
+            ([logo, reveal, dimmed, shell["shell-dark-cold-023.png"], home], False, "reversed toward the splash"),
+            ([logo, dimmed, home], False, "not followed by the launch shell"),
+            ([logo, shell["shell-dark-cold-025.png"], dimmed, shell["shell-dark-cold-025.png"], home], False, "returned after"),
+        ):
+            result = verdict(sequence, warm)
+            self.assertFalse(result["passed"])
+            self.assertIn(error, " ".join(result["errors"]))
+
+    def test_real_splash_exit_frames_dimmed_to_black_shifted_or_covered_still_fail(self):
+        for reference, _ in self.splash_exit_frames():
+            with Image.open(self.fixtures / reference["file"]) as original:
+                frame = np.asarray(original.convert("RGB").resize((360, 780), Image.Resampling.BILINEAR)).astype(np.float32)
+            classifier = self.classifiers["dark"]
+            covered = frame.copy()
+            covered[130:730] = (70, 80, 90)
+            variants = {"black": frame * .05, "nearly-black": frame * .15, "covered": covered}
+            if reference["file"] == "splash-exit-dark-2153-022.png":
+                # The partly revealed shell carries its wordmark; a 12px shift must fail.
+                variants["shifted"] = np.roll(frame, 12, axis=1)
+            for name, image in variants.items():
+                with self.subTest(file=reference["file"], variant=name):
+                    result = classifier.classify(np.clip(image, 0, 255).astype(np.uint8))
+                    self.assertIn(result["state"], ("unclassified", "black-blank"))
+                    sequence = [{"frame": 0, "seconds": 0, "state": "native-logo"},
+                                {"frame": 1, "seconds": .05, **result},
+                                {"frame": 2, "seconds": .1, "state": "startup-shell"},
+                                {"frame": 3, "seconds": .15, "state": "home"}]
+                    self.assertFalse(timeline_verdict(sequence)["passed"])
 
     def test_real_frozen_fixture_hashes_and_original_frame_provenance(self):
         for reference in self.provenance["references"] + self.provenance["home_references"]:
