@@ -65,7 +65,31 @@ internal fun nativeImportNotificationSpec(state: NativeImportState): NativeImpor
     )
 }
 
+/**
+ * Android 15+ caps dataSync foreground time (6 h per 24 h). When the system calls onTimeout the
+ * service must leave the foreground within seconds. Progress is already persisted per file by
+ * NativeImportViewModel, so the queue is asked to pause after the current file and the user is
+ * told how to continue; nothing is discarded.
+ */
+internal fun nativeImportTimeoutNotice(state: NativeImportState): NativeImportState {
+    val progress = if (state.total > 0) "（已处理 ${state.processed}/${state.total}）" else ""
+    return state.copy(
+        message = "已达到系统后台导入时长上限$progress，当前文件完成后暂停；打开洛书后可继续导入",
+    )
+}
+
 internal object NativeImportNotificationController {
+    /** Set when the service left the foreground early (timeout / refused start). */
+    @Volatile
+    private var serviceDetached = false
+
+    fun markServiceDetached() {
+        serviceDetached = true
+    }
+
+    /** The application publishes the next settled state itself once the service is gone. */
+    fun consumeServiceDetached(): Boolean = serviceDetached.also { serviceDetached = false }
+
     fun start(context: Context) {
         ensureChannel(context)
         ContextCompat.startForegroundService(context, Intent(context, NativeImportForegroundService::class.java))
@@ -164,9 +188,27 @@ internal class NativeImportForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val initial = importViewModel.state.takeIf { it.phase != NativeImportPhase.IDLE }
             ?: NativeImportState(phase = NativeImportPhase.QUEUED, message = "正在准备字体导入任务")
-        startAsForeground(initial)
+        if (!startAsForeground(initial)) {
+            // dataSync quota exhausted (Android 15+) or background start refused: keep the saved
+            // queue, pause it and show a passive notification instead of crashing the App.
+            NativeImportNotificationController.markServiceDetached()
+            importViewModel.pauseImport()
+            NativeImportNotificationController.notify(this, nativeImportTimeoutNotice(importViewModel.state))
+            stopSelfResult(startId)
+            return START_NOT_STICKY
+        }
         observeImportState(startId)
         return START_NOT_STICKY
+    }
+
+    /** Android 15+ foreground-time limit for dataSync; must stop within a few seconds. */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        observerJob?.cancel()
+        NativeImportNotificationController.markServiceDetached()
+        importViewModel.pauseImport()
+        NativeImportNotificationController.notify(this, nativeImportTimeoutNotice(importViewModel.state))
+        stopForeground(STOP_FOREGROUND_DETACH)
+        stopSelf()
     }
 
     private fun observeImportState(startId: Int) {
@@ -191,12 +233,18 @@ internal class NativeImportForegroundService : Service() {
         }
     }
 
-    private fun startAsForeground(state: NativeImportState) {
+    private fun startAsForeground(state: NativeImportState): Boolean {
         val notification = NativeImportNotificationController.buildNotification(this, state)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(IMPORT_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(IMPORT_NOTIFICATION_ID, notification)
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(IMPORT_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(IMPORT_NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (error: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException (API 31+) is an IllegalStateException.
+            false
         }
     }
 

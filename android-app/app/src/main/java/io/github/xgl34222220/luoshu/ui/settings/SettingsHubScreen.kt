@@ -657,6 +657,7 @@ private fun UpdatePage(model: SystemCenterViewModel) {
                 InfoLine("当前 App", BuildConfig.VERSION_NAME)
                 if (info.available) { InfoLine("在线版本", info.version); InfoLine("版本代码", info.versionCode.toString()); if (info.sha256.isNotBlank()) InfoLine("模块 SHA-256", info.sha256); if (info.appSha256.isNotBlank()) InfoLine("App SHA-256", info.appSha256) }
                 if (info.error.isNotBlank()) Text(info.error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
+                if (info.warning.isNotBlank()) Text(info.warning, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(model::checkUpdate, Modifier.fillMaxWidth(), enabled = !info.loading) { Icon(Icons.Rounded.Refresh, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("检查更新") }
             }
