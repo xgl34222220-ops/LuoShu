@@ -16,6 +16,22 @@ print_line() {
     fi
 }
 
+# 卡开机保护处于生效状态时，“操作”按钮优先作为“重新启用”：清除安全模式，
+# 下次启动恢复洛书挂载。App 安装/更新可再次点击完成。
+GUARD="$MODDIR/common/boot_loop_guard.sh"
+if [ -f "$GUARD" ]; then
+    . "$GUARD"
+    if luoshu_bootloop_safe_mode_active; then
+        luoshu_bootloop_reset
+        [ ! -f "$MODDIR/common/module_status.sh" ] || \
+            MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
+        print_line "已重新启用洛书：卡开机保护已解除。"
+        print_line "重启后将恢复字体挂载；若再次卡开机，保护会重新生效。"
+        print_line "如需安装或更新洛书 App，请再次点击“操作”按钮。"
+        exit 0
+    fi
+fi
+
 if [ ! -s "$APK" ]; then
     print_line "未找到模块内置的洛书 App。"
     print_line "请重新下载并刷入完整的洛书模块包。"

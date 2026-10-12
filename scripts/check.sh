@@ -55,6 +55,7 @@ sh "$ROOT/scripts/uninstall_cleanup_test.sh"
 sh "$ROOT/scripts/uninstall_deferred_restore_test.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 sh "$ROOT/scripts/boot_housekeeping_test.sh"
+sh "$ROOT/scripts/boot_loop_guard_test.sh"
 sh "$ROOT/scripts/foreign_font_module_test.sh"
 sh "$ROOT/scripts/ksu_metadata_ota_test.sh"
 

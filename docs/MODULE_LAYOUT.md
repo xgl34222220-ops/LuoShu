@@ -14,6 +14,7 @@ LuoShu/
 ├── post-mount.sh
 ├── service.sh
 ├── boot-completed.sh
+├── late-load.sh        # KernelSU late-load 入口（仅 KSU_LATE_LOAD=1 时运行）
 ├── action.sh
 ├── uninstall.sh
 ├── common/

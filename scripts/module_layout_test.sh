@@ -10,7 +10,7 @@ fail() {
 }
 
 # Root-manager entrypoints are the only runtime shell entrypoints allowed at module root.
-for path in customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh action.sh boot-completed.sh; do
+for path in customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh action.sh boot-completed.sh late-load.sh; do
   [ -f "$ROOT/$path" ] || fail "missing root hook: $path"
 done
 for obsolete in post-fs-data-v4.sh post-mount-v4.sh service_v4.sh; do
@@ -60,7 +60,7 @@ done
 
 # All moved shell cores must remain syntactically valid.
 for path in \
-  customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh \
+  customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh late-load.sh \
   .luoshu-runtime/core/post-fs-data.sh \
   .luoshu-runtime/core/post-mount.sh \
   .luoshu-runtime/core/service.sh \

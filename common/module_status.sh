@@ -13,6 +13,15 @@ if [ -z "$MODDIR" ]; then
 fi
 
 PROP="$MODDIR/module.prop"
+BOOT_GUARD="$MODDIR/common/boot_loop_guard.sh"
+SAFE_MODE=false
+if [ -f "$BOOT_GUARD" ]; then
+    . "$BOOT_GUARD"
+    # service.sh runs this only after sys.boot_completed=1, which is also the
+    # Magisk boot-completed point for the boot-loop counter.
+    [ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] && luoshu_bootloop_complete
+    luoshu_bootloop_safe_mode_active && SAFE_MODE=true
+fi
 # 开机 service 阶段经此刷新：只读扫描其他字体模块，结果供 App 首页告警与诊断导出。
 [ -f "$MODDIR/common/foreign_font_modules.sh" ] && \
     MODDIR="$MODDIR" sh "$MODDIR/common/foreign_font_modules.sh" scan >/dev/null 2>&1 || true
@@ -62,6 +71,9 @@ if [ -f "$MODDIR/common/system_ota_guard.sh" ]; then
 fi
 
 DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
+if [ "$SAFE_MODE" = true ]; then
+    DESCRIPTION="⚠ 卡开机保护：连续启动未完成，已跳过洛书挂载（点“操作”重新启用）；当前选择：$DISPLAY"
+fi
 
 # KernelSU: publish the status through the documented module config key
 # override.description (https://kernelsu.org/guide/module-config.html) instead
