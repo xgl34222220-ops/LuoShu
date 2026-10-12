@@ -5,6 +5,7 @@ common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
 common/boot_housekeeping.sh
+common/boot_loop_guard.sh
 common/system_ota_guard.sh
 common/task_scope.py
 common/task_scope.sh
@@ -14,6 +15,9 @@ common/coloros_global.sh
 common/coloros_metrics_batch.py
 common/coloros_stage_complete.sh
 common/composite_font.py
+common/composite_collection_build.py
+common/composite_collection_build.sh
+common/composite_collection_contract.py
 common/device_font_boot_verify.sh
 common/device_font_cache.sh
 common/device_font_dynamic_guard.sh
@@ -108,6 +112,8 @@ common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
 common/mix_task_handoff.sh
+common/json_error_message.sh
+common/json_error_message.py
 common/mix_weight_mode.sh
 common/module_status.sh
 common/module_update_hotfix_v4.sh
@@ -150,6 +156,7 @@ service.sh
 uninstall.sh
 action.sh
 boot-completed.sh
+late-load.sh
 magic
 common/font_next_transaction.sh
 common/font_live_switch.sh

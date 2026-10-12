@@ -29,9 +29,41 @@ from android_ui_smoke import (
     HOME_BATCH_TIMING_HELPER, HOME_BATCH_TIMING_CLOCK, home_batch_capture_command, home_batch_timing,
     diagnostic_video_after_baseline_failure,
 )
+import android_ui_smoke
 
 
 PACKAGE = "io.github.xgl34222220.luoshu.debug"
+
+# The host timing scenarios below were written against a 10s HOME budget (deadlines
+# 110 = 100 + 10, mock clocks that cross 10s, "within 10s" messages). They exercise the
+# deadline algorithm, so they keep that budget explicitly; the production budget is
+# asserted separately in HomeBaselineBudgetTest.
+PRODUCTION_HOME_BASELINE_TIMEOUT_SECONDS = android_ui_smoke.HOME_BASELINE_TIMEOUT_SECONDS
+SCENARIO_HOME_BASELINE_TIMEOUT_SECONDS = 10
+_home_budget_patch = patch.object(android_ui_smoke, "HOME_BASELINE_TIMEOUT_SECONDS", SCENARIO_HOME_BASELINE_TIMEOUT_SECONDS)
+
+
+def setUpModule():
+    _home_budget_patch.start()
+
+
+def tearDownModule():
+    _home_budget_patch.stop()
+
+
+class HomeBaselineBudgetTest(unittest.TestCase):
+    def test_production_home_budget_is_twenty_seconds_and_only_the_wait_changes(self):
+        # Launcher precondition only; App startup acceptance and frame checks are unchanged.
+        self.assertEqual(20, PRODUCTION_HOME_BASELINE_TIMEOUT_SECONDS)
+        run = SmokeRun.__new__(SmokeRun)
+        run._capture_home_baseline = Mock(return_value=b"png")
+        self.assertEqual(b"png", run.wait_home_baseline("light-cold-start"))
+        run._capture_home_baseline.assert_called_once_with(
+            "light-cold-start", timeout=android_ui_smoke.HOME_BASELINE_TIMEOUT_SECONDS,
+            role="startup-acceptance-baseline")
+        source = Path(android_ui_smoke.__file__).read_text(encoding="utf-8")
+        self.assertIn('"required_stable_captures": 3', source)
+        self.assertIn("if stable >= 3:", source)
 
 
 class UiSmokeHarnessTest(FixtureContextTestCase):

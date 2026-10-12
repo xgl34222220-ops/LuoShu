@@ -295,32 +295,36 @@ find_preview_source() {
     _family="$1"
     _target="${2:-400}"
     case "$_target" in ''|*[!0-9]*) _target=400 ;; esac
-    _variable=''
     _best=''
     _best_score=99999
     for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
               "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_f" ] || continue
-        if type detect_font_family >/dev/null 2>&1; then
-            _detected="$(detect_font_family "$(basename "$_f")")"
+        _filename="${_f##*/}"
+        if type detect_font_family_value >/dev/null 2>&1; then
+            detect_font_family_value "$_filename"
+            _detected="$LUOSHU_DETECTED_FONT_FAMILY"
+        elif type detect_font_family >/dev/null 2>&1; then
+            _detected="$(detect_font_family "$_filename")"
         else
-            _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
+            _detected="${_filename%.*}"; _detected="${_detected%-Regular}"
         fi
         [ "$_detected" = "$_family" ] || continue
+        [ -f "$_f" ] || continue
         if type is_variable_font >/dev/null 2>&1 && is_variable_font "$_f" 2>/dev/null; then
-            [ -n "$_variable" ] || _variable="$_f"
-            continue
+            # The first variable source already wins over every static weight.
+            # Returning here preserves the existing tie/order rule.
+            printf '%s\n' "$_f"
+            return 0
         fi
         _role=regular
-        type detect_font_weight >/dev/null 2>&1 && _role="$(detect_font_weight "$(basename "$_f")")"
+        type detect_font_weight >/dev/null 2>&1 && _role="$(detect_font_weight "$_filename")"
         _number="$(preview_role_number "$_role")"
         _score=$((_number - _target)); [ "$_score" -ge 0 ] 2>/dev/null || _score=$((-_score))
         if [ -z "$_best" ] || [ "$_score" -lt "$_best_score" ] 2>/dev/null; then
             _best="$_f"; _best_score="$_score"
         fi
     done
-    if [ -n "$_variable" ]; then printf '%s\n' "$_variable"
-    elif [ -n "$_best" ]; then printf '%s\n' "$_best"
+    if [ -n "$_best" ]; then printf '%s\n' "$_best"
     else return 1
     fi
 }
@@ -412,6 +416,20 @@ case "${1:-status}" in
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
     font-mix-cancel|mix_cancel) mix_ready || exit 1; sh "$MIX_ENGINE" cancel "${2:-}"; exit $? ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
+    boot_guard_status|boot_guard_reset)
+        if [ ! -f "$MODDIR/common/boot_loop_guard.sh" ]; then
+            printf '{"status":"error","message":"卡开机保护组件不可用"}\n'
+            exit 0
+        fi
+        . "$MODDIR/common/boot_loop_guard.sh"
+        [ "$1" != boot_guard_reset ] || luoshu_bootloop_reset
+        _bg_state=normal
+        luoshu_bootloop_safe_mode_active && _bg_state=safe-mode
+        _bg_count=$(luoshu_bootloop_get count)
+        case "$_bg_count" in ''|*[!0-9]*) _bg_count=0 ;; esac
+        printf '{"status":"ok","data":{"bootGuard":"%s","counter":%s,"limit":%s}}\n' \
+            "$_bg_state" "$_bg_count" "$LUOSHU_BOOTLOOP_LIMIT"
+        ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac

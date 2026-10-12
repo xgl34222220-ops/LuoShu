@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.ViewTreeObserver
@@ -15,6 +17,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.ViewModelProvider
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
+import io.github.xgl34222220.luoshu.ui.launch.LuoShuNativeShellGate
 import io.github.xgl34222220.luoshu.ui.launch.LuoShuNativeShellPolicy
 import io.github.xgl34222220.luoshu.ui.launch.LuoShuNativeShellView
 import androidx.activity.ComponentActivity
@@ -52,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private var shellCommitObserver: ViewTreeObserver? = null
     private var shellDrawListener: ViewTreeObserver.OnPreDrawListener? = null
     private var shellHandoffCallback: Runnable? = null
+    private var shellGate: LuoShuNativeShellGate? = null
     private var pendingAppearance: AppearanceSettings? = null
     // Cold launch only: the diffuse glass shell drawn above the already composed home.
     private var launchShellVisible by mutableStateOf(false)
@@ -108,8 +112,10 @@ class MainActivity : ComponentActivity() {
     private fun installNativeShell(startedAt: Long) {
         val policy = checkNotNull(nativeShellPolicy)
         val root = FrameLayout(this)
-        root.addView(LuoShuNativeShellView(this), FrameLayout.LayoutParams(-1, -1))
+        val shellView = LuoShuNativeShellView(this)
+        root.addView(shellView, FrameLayout.LayoutParams(-1, -1))
         setContentView(root)
+        val gate = LuoShuNativeShellGate().also { shellGate = it }
         val decor = window.decorView
         // The first callback belongs only to the preparation frame. No home/blur/permission release.
         shellCommitCallback = Runnable {
@@ -127,9 +133,47 @@ class MainActivity : ComponentActivity() {
                 scheduleNativeShellHandoff(root, policy, startedAt, softwareFallback = true)
                 false
             } else {
-                true
+                // Cancelled traversals keep the platform splash: no WindowManager draw sync
+                // starts, so its default exit can only reveal an already rendered shell.
+                when (gate.onPreDraw(SystemClock.uptimeMillis(), shellView.width > 0 && shellView.height > 0)) {
+                    LuoShuNativeShellGate.Decision.START_RENDER -> {
+                        prerenderNativeShell(shellView, gate, startedAt)
+                        false
+                    }
+                    LuoShuNativeShellGate.Decision.HOLD -> false
+                    LuoShuNativeShellGate.Decision.DRAW -> {
+                        if (gate.state == LuoShuNativeShellGate.State.EXPIRED && shellView.prerendered == null) {
+                            Log.w("LuoShuStartup", "event=native_shell_prerender_expired elapsedMs=${SystemClock.elapsedRealtime() - startedAt}")
+                        }
+                        true
+                    }
+                }
             }
         }.also { decor.viewTreeObserver.addOnPreDrawListener(it) }
+    }
+
+    /** Off-main raster of the preparation frame; its first Window frame only draws a bitmap. */
+    private fun prerenderNativeShell(view: LuoShuNativeShellView, gate: LuoShuNativeShellGate, startedAt: Long) {
+        val width = view.width
+        val height = view.height
+        val main = Handler(Looper.getMainLooper())
+        Log.i("LuoShuStartup", "event=native_shell_prerender_started elapsedMs=${SystemClock.elapsedRealtime() - startedAt} size=${width}x$height")
+        Thread({
+            val bitmap = runCatching { LuoShuNativeShellView.prerender(this, width, height) }
+                .onFailure { Log.w("LuoShuStartup", "event=native_shell_prerender_failed", it) }
+                .getOrNull()
+            main.post {
+                if (isFinishing || isDestroyed) return@post
+                if (bitmap == null) {
+                    gate.onFailed()
+                } else if (gate.onRendered()) {
+                    view.prerendered = bitmap
+                    Log.i("LuoShuStartup", "event=native_shell_prerendered elapsedMs=${SystemClock.elapsedRealtime() - startedAt} size=${width}x$height")
+                }
+                // The next traversal (rescheduled by the cancelled draw) now presents it.
+                window.decorView.invalidate()
+            }
+        }, "LuoShuShellRaster").apply { isDaemon = true }.start()
     }
 
     private fun scheduleNativeShellHandoff(
@@ -253,6 +297,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         firstFramePolicy.dispose()
         nativeShellPolicy?.dispose()
+        shellGate?.dispose()
         shellHandoffCallback?.let(window.decorView::removeCallbacks)
         shellHandoffCallback = null
         removeNativeShellObservers()

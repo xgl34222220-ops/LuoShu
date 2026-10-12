@@ -153,6 +153,41 @@ class SingleStageLaunchSourceTest(unittest.TestCase):
         self.assertIn("softwareFallback = true", install)
         self.assertRegex(install, r"softwareFallback = true\)\s*false")
 
+    def test_preparation_frame_is_rasterised_before_the_first_window_draw(self):
+        # 2026-10 CI (#287 rerun): the first preparation draw took ~3s on the emulator;
+        # WindowManager's ~1s draw sync expired, the default splash exit ran over an
+        # empty Window and recorded 0.5-1.3s of black. Keep the platform splash by
+        # cancelling traversals until the first frame is a finished bitmap.
+        install = method(self.activity, "private fun installNativeShell(")
+        self.assertIn("val gate = LuoShuNativeShellGate()", install)
+        self.assertIn("gate.onPreDraw(SystemClock.uptimeMillis(), shellView.width > 0 && shellView.height > 0)", install)
+        self.assertRegex(install, r"Decision\.START_RENDER -> \{\s*prerenderNativeShell\(shellView, gate, startedAt\)\s*false\s*\}")
+        self.assertRegex(install, r"Decision\.HOLD -> false")
+        self.assertRegex(install, r"(?s)Decision\.DRAW -> \{.*?\}\s*true\s*\}\s*\}")
+        raster = method(self.activity, "private fun prerenderNativeShell(")
+        self.assertIn("Thread(", raster)
+        self.assertIn("LuoShuNativeShellView.prerender(this, width, height)", raster)
+        self.assertIn("gate.onRendered()", raster)
+        self.assertIn("gate.onFailed()", raster)
+        self.assertIn("if (isFinishing || isDestroyed) return@post", raster)
+        self.assertLess(raster.index("gate.onRendered()"), raster.index("view.prerendered = bitmap"))
+        for forbidden in ("postDelayed", "deliverFirstFrame(", "onShellSubmitted", "beginContent", "setContent("):
+            self.assertNotIn(forbidden, raster)
+        self.assertIn("shellGate?.dispose()", method(self.activity, "override fun onDestroy("))
+        shell = (JAVA / "ui/launch/LuoShuNativeShellView.kt").read_text()
+        draw = method(shell, "override fun onDraw(")
+        self.assertIn("ready.width == width && ready.height == height", draw)
+        self.assertLess(draw.index("canvas.drawBitmap(ready"), draw.index("artwork.draw(canvas, width, height, firstFrame)"))
+        prerender = method(shell, "fun prerender(")
+        # Private instance: the shared artwork's paints/paths stay main-thread only.
+        self.assertIn("LuoShuLaunchArtwork.standalone(context)", prerender)
+        self.assertNotIn("obtain(", prerender)
+        self.assertIn("LuoShuLaunchShellTimeline.first(textVisible = true)", prerender)
+        gate = (JAVA / "ui/launch/LuoShuNativeShellGate.kt").read_text()
+        limit = int(re.search(r"const val HOLD_LIMIT_MS = (\d+)L", gate).group(1))
+        self.assertGreaterEqual(limit, 1000)
+        self.assertLessEqual(limit, 5000)
+
     def test_native_splash_keeps_default_platform_exit_without_client_transfer(self):
         # A synchronously removed exit callback still transfers a copied logo to
         # the decor before that callback, which can cover an already drawn home.

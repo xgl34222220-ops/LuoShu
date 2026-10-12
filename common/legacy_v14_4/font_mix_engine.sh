@@ -17,6 +17,7 @@ REALMOD="${LUOSHU_REAL_MODDIR:-$MODDIR}"
 . "$REALMOD/common/runtime_paths.sh" || exit 126
 luoshu_runtime_paths_init "$REALMOD" || exit 126
 . "$REALMOD/common/background_task.sh" || exit 126
+[ -f "$REALMOD/common/json_error_message.sh" ] && . "$REALMOD/common/json_error_message.sh"
 . "$REALMOD/common/font_switch_lock.sh" || exit 126
 CONFIG_DIR="$LUOSHU_CONFIG_DIR"
 SYSTEM_FONTS_DIR="$MODDIR/system/fonts"
@@ -352,7 +353,11 @@ set_mix_error() {
 extract_composite_error() {
     _ef="$1"; _rc="$2"; _msg=""
     if [ -s "$_ef" ]; then
-        _msg=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_ef" 2>/dev/null | tail -n1)
+        # Bounded top-level JSON decoding: no Android UTF-8 regex crash, and
+        # escaped quotes/paths survive. A missing helper keeps the text fallback.
+        if type luoshu_json_error_message >/dev/null 2>&1; then
+            _msg=$(luoshu_json_error_message "$_ef" 2>/dev/null || true)
+        fi
         [ -n "$_msg" ] || _msg=$(tail -n1 "$_ef" 2>/dev/null | tr -d '\r')
     fi
     case "$_rc" in

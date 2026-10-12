@@ -11,7 +11,23 @@ trap cleanup EXIT HUP INT TERM
 export LUOSHU_TASK_SCOPE_PYTHON="$(command -v python3)"
 export LUOSHU_RUNTIME_PATHS_PYTHON="$LUOSHU_TASK_SCOPE_PYTHON"
 
-. "$ROOT/common/mix_task_handoff.sh"
+MODDIR="$ROOT" . "$ROOT/common/mix_task_handoff.sh"
+
+# Reproduce the Chinese progress string from the Android sed native crash.
+# Numeric progress must remain usable for compact and pretty writer variants,
+# while truncated/non-numeric/out-of-range values cannot reach shell arithmetic.
+for value in 0 36 95 100; do
+    printf '{"stage":"collection","message":"正在编译本机 CJK 集合面 1/5","percent":%s,"time":1791038898}\n' "$value" > "$TMP/progress.json"
+    test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = "$value"
+done
+printf '{"message":"正在生成完整复合字体", "percent" : 95 }\n' > "$TMP/progress.json"
+test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = 95
+for raw in '"95"' '-1' '101' '95oops' 'true'; do
+    printf '{"message":"完整复合字体正在后台生成","percent":%s}\n' "$raw" > "$TMP/progress.json"
+    test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = 0
+done
+printf '{"message":"完整复合字体正在后台生成","percent":95' > "$TMP/progress.json"
+test "$(luoshu_mix_progress_percent "$TMP/progress.json")" = 0
 
 RESPONSE="$TMP/response.json"
 TASK="$TMP/mix_task.conf"
@@ -24,7 +40,10 @@ cjk=LuoShuMixCJK
 latin=LuoShuMixLatin
 digit=LuoShuMixDigit
 EOF_TASK
-test "$(luoshu_resolve_nested_mix_task "$RESPONSE" "$TASK" stale LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit)" = from-output
+if luoshu_resolve_nested_mix_task "$RESPONSE" "$TASK" stale LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit >/dev/null 2>&1; then
+    echo 'startup output bypassed persisted task identity' >&2
+    exit 1
+fi
 
 : >"$RESPONSE"
 cat >"$TASK" <<'EOF_TASK'
@@ -64,6 +83,8 @@ if [ -s "$FONT" ]; then
     cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
     cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
     cp "$ROOT/common/mix_task_handoff.sh" "$MODULE/common/mix_task_handoff.sh"
+    cp "$ROOT/common/json_error_message.sh" "$MODULE/common/json_error_message.sh"
+    cp "$ROOT/common/json_error_message.py" "$MODULE/common/json_error_message.py"
     for helper in task_scope.sh task_scope.py runtime_paths.sh runtime_paths_lock.py util_functions_core.sh; do
         cp "$ROOT/common/$helper" "$MODULE/common/$helper"
     done
