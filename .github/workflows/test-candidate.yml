@@ -148,8 +148,26 @@ jobs:
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_scan_test.py --font "$FONT"
+          STOCK_CJK="$(find /usr/share/fonts -type f -iname 'NotoSansCJK-Regular.ttc' -print -quit)"
+          test -s "$STOCK_CJK"
+          python3 scripts/composite_collection_real_test.py --stock "$STOCK_CJK"
           grep -q '多字重 · ${weights.size} 档' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt
           grep -q '静态字体现在始终按当前所选字重走快速单文件组合' common/mix_weight_mode.sh
+
+      # Android 15's stock CJK collection is variable CFF2 (wght 400-900). The
+      # composite must keep every native face and its variation contracts.
+      - name: Verify actual Android 15 variable CJK collection
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/NotoSansCJK-Android15-variable.ttc"
+          curl --fail --location --retry 3 --output "${fixture}.base64" \
+            'https://android.googlesource.com/platform/external/noto-fonts/+/1763da7de494446263d6e6b7b9e9328eac8ecdd8/notosanscjk/NotoSansCJK-wght-400-900.otf.ttc?format=TEXT'
+          base64 --decode "${fixture}.base64" > "$fixture"
+          echo "3e7e5afaac2c6d872592d76abedac03a51c6f0fc42d11e311ff2816a6c368afe  $fixture" | sha256sum -c -
+          PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages" \
+            python3 scripts/composite_collection_real_test.py --stock "$fixture" --expected-retained 0
+          rm -f "${fixture}.base64" "$fixture"
 
       - name: Enforce current pre-release readiness
         shell: bash

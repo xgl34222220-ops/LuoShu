@@ -38,6 +38,7 @@ python3 "$ROOT/scripts/android_launch_source_test.py"
 sh "$ROOT/scripts/font_next_transaction_test.sh"
 python3 "$ROOT/scripts/font_live_switch_test.py"
 python3 "$ROOT/scripts/inventory_output_contract_test.py" >/dev/null
+python3 "$ROOT/scripts/stock_error_contract_test.py" >/dev/null
 sh "$ROOT/scripts/runtime_paths_test.sh"
 sh "$ROOT/scripts/installer_bootstrap_test.sh"
 python3 "$ROOT/scripts/task_scope_legacy_test.py"
@@ -171,6 +172,7 @@ grep -q 'common/font_mix_controller.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'preview_source)' "$ROOT/common/app_bridge.sh"
 grep -q 'find_preview_source' "$ROOT/common/app_bridge.sh"
+python3 "$ROOT/scripts/preview_source_contract_test.py" >/dev/null
 grep -q 'sha256' "$ROOT/common/app_bridge.sh"
 grep -q 'rebootRequired' "$ROOT/common/app_bridge.sh"
 grep -q 'effectiveActive' "$ROOT/common/app_bridge.sh"
@@ -202,7 +204,7 @@ grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/githu
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'resolveAndCacheFontDefaultAxes' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontPickerDialog.kt"
 grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
-grep -q 'optDouble("default"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
+grep -q 'resolveFontAxisInfo(font)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
 # Miuix 悬浮底栏必须使用真实背景取样、RuntimeShader 折射和连续圆角；图标文字保持为独立内容层。
@@ -370,9 +372,15 @@ sh "$ROOT/scripts/font_validation_cache_test.sh"
 sh "$ROOT/scripts/font_library_ui_layout_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"
+python3 "$ROOT/scripts/font_axis_info_test.py"
 sh "$ROOT/scripts/app_installer_test.sh"
 sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
 sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
+python3 "$ROOT/scripts/mix_handoff_contract_test.py" >/dev/null
+python3 "$ROOT/scripts/composite_error_contract_test.py" >/dev/null
+python3 "$ROOT/scripts/mix_snapshot_contract_test.py" >/dev/null
+python3 "$ROOT/scripts/composite_collection_contract_test.py"
+python3 "$ROOT/scripts/composite_collection_build_test.py"
 # The prior module-build rerun exited inside this gate without identifying the
 # failing command. Trace its isolated fixture; preserve every assertion.
 sh -x "$ROOT/scripts/legacy_mix_finalize_race_test.sh"

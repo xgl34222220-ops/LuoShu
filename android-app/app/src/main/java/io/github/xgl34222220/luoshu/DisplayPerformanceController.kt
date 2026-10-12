@@ -29,14 +29,16 @@ internal fun selectHighestSameResolutionMode(
             .thenBy { if (it.modeId == current.modeId) 1 else 0 },
     )
 
+// Query the system only for a window that can request a mode. A cold cache may
+// require a synchronous service call, including during initial focus delivery.
 internal fun shouldRequestHighRefresh(
     enabled: Boolean,
-    powerSaveMode: Boolean,
+    powerSaveMode: () -> Boolean,
     resumed: Boolean,
     focused: Boolean,
     pictureInPicture: Boolean,
     finishing: Boolean,
-): Boolean = enabled && !powerSaveMode && resumed && focused && !pictureInPicture && !finishing
+): Boolean = enabled && resumed && focused && !pictureInPicture && !finishing && !powerSaveMode()
 
 /** Applies an optional same-resolution high-refresh preference while respecting power saver. */
 internal class DisplayPerformanceController(
@@ -139,7 +141,7 @@ internal class DisplayPerformanceController(
     private fun applyPreference(force: Boolean = false) {
         if (!shouldRequestHighRefresh(
                 enabled = highRefreshEnabled,
-                powerSaveMode = powerManager.isPowerSaveMode,
+                powerSaveMode = { powerManager.isPowerSaveMode },
                 resumed = resumed,
                 focused = focused,
                 pictureInPicture = pictureInPicture,

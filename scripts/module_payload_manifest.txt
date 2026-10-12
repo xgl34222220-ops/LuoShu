@@ -15,6 +15,9 @@ common/coloros_global.sh
 common/coloros_metrics_batch.py
 common/coloros_stage_complete.sh
 common/composite_font.py
+common/composite_collection_build.py
+common/composite_collection_build.sh
+common/composite_collection_contract.py
 common/device_font_boot_verify.sh
 common/device_font_cache.sh
 common/device_font_dynamic_guard.sh
@@ -108,6 +111,8 @@ common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
 common/mix_task_handoff.sh
+common/json_error_message.sh
+common/json_error_message.py
 common/mix_weight_mode.sh
 common/module_status.sh
 common/module_update_hotfix_v4.sh

@@ -611,7 +611,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     append(RootShell.quote(latinSize.toString())).append(' ')
                     append(RootShell.quote(latinOffset.toString()))
                 }
-                val start = RootShell.exec(command, timeoutMs = 20_000L)
+                // Admission includes isolated payload staging and compatibility-runtime
+                // preparation before the task is persisted; generation keeps its own budget.
+                val start = RootShell.exec(command, timeoutMs = 75_000L)
                 start.requireCleaned()
                 if (start.code != 0) error(start.stderr.ifBlank { "无法启动复合字体任务" })
                 val root = firstJson(start.stdout)
