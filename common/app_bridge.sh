@@ -265,16 +265,8 @@ manager_ready() {
     return 0
 }
 
-# Complete device reboot, never a soft (zygote/SystemUI) restart: only a real
-# boot remounts the font payload before system_server builds its font map.
-# It runs in the FOREGROUND of the App's supervised request. The old path
-# printed "ok", backgrounded `svc power reboot` and returned at once, so the
-# task supervisor (a Linux subreaper that reaps every descendant of a finished
-# request) terminated the backgrounded command within ~2 s, usually before
-# svc's app_process reached PowerManager, and the reboot silently never
-# happened. Each step blocks while the device goes down; a step that returns
-# falls through to the next one (KernelSU, Magisk and APatch all provide svc,
-# toybox reboot and setprop as root).
+# Complete reboot (never a soft restart), in the foreground: a backgrounded
+# reboot is reaped by the request's task supervisor before it takes effect.
 full_reboot() {
     sync 2>/dev/null || true
     _fr_settle="${LUOSHU_REBOOT_SETTLE_SECONDS:-6}"

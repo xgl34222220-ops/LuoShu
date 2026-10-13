@@ -36,10 +36,7 @@ _lht_init() {
     # an ~8.9 KiB near-glyphless sfnt; real theme fonts are far larger.
     LHT_PLACEHOLDER_MAX_BYTES="${LUOSHU_THEME_TAKEOVER_PLACEHOLDER_MAX_BYTES:-65536}"
     LHT_MAX_FILES=32
-    # Stock fonts the theme engine copies into the theme dir on the DEFAULT
-    # theme (byte copies are not a theme-store font).
     LHT_STOCK_DIR="${LUOSHU_THEME_TAKEOVER_STOCK_DIR:-/system/fonts}"
-    # Same bound as hyperos_webview_route.sh's theme-engine Roboto check.
     LHT_ROBOTO_MAX_BYTES="${LUOSHU_THEME_TAKEOVER_ROBOTO_MAX_BYTES:-4194304}"
 }
 
@@ -89,11 +86,8 @@ _lht_theme_files() {
     done
 }
 
-# Identities (dev:ino) of files LuoShu itself serves on theme paths in this
-# boot: the early webview-route clone (it binds over the theme engine's Roboto
-# or the default-theme placeholder, never over a user theme) and the provider
-# watcher's per-namespace theme views. Seeing one of them through the theme
-# directory is LuoShu's own work, not a theme-store font.
+# dev:ino of LuoShu's own files on theme paths (webview-route clone, provider
+# theme views): seeing one through the theme dir is not a theme-store font.
 _lht_luoshu_ids() {
     _lht_boot=$(_lht_boot_id)
     if [ -s "$LHT_MODULE/config/hyperos-webview-route.conf" ]; then
@@ -110,7 +104,6 @@ _lht_luoshu_ids() {
     done
 }
 
-# Byte-identical to one of the given files (size compared first, cmp only then).
 _lht_same_as_any() {
     _lht_sa_file="$1"; shift
     _lht_sa_size=$(_lht_size "$_lht_sa_file")
@@ -122,13 +115,8 @@ _lht_same_as_any() {
     return 1
 }
 
-# One theme-dir file: user | placeholder | luoshu | stock.
-#   user        a theme-store font (the only class that triggers the warning)
-#   placeholder the ROM default-theme near-glyphless sfnt
-#   luoshu      a LuoShu clone/payload seen through the theme path
-#   stock       the theme engine's copy of ROM Roboto/MiSans (default theme)
-# The optional takeover binds only over user files, so a file it currently owns
-# stays "user": its lower file is the theme-store font.
+# user | placeholder | luoshu | stock; only "user" is a theme-store font. A
+# file the takeover owns stays "user" (it binds only over theme-store fonts).
 _lht_classify() {
     _lht_cf="$1"
     if _lht_journal_has "$_lht_cf" && lht_owned "$_lht_cf"; then
@@ -151,8 +139,7 @@ _lht_classify() {
         "$LHT_MODULE/config/hyperos-theme-takeover"/*; do [ -f "$_lht_p" ] && printf '%s\n' "$_lht_p"; done); then
         printf 'luoshu\n'; return 0
     fi
-    # The theme engine's own Roboto (Roboto-named Latin file, Roboto-sized);
-    # theme-store fonts carry their own family name and are CJK-sized.
+    # Theme engine's own Roboto (as hyperos_webview_route.sh accepts it).
     if [ "$_lht_cf_sz" -le "$LHT_ROBOTO_MAX_BYTES" ] && \
        tr -d '\000' < "$_lht_cf" 2>/dev/null | tr -c 'A-Za-z' '\n' 2>/dev/null | grep -qx 'Roboto[A-Za-z]*'; then
         printf 'stock\n'; return 0
@@ -161,8 +148,6 @@ _lht_classify() {
 }
 
 # state: none | placeholder | user-theme. Prints key=value lines.
-# Only files classified "user" make a user-theme; names lists those files when
-# there are any (so the App never shows LuoShu's own Roboto as a theme font).
 lht_detect() {
     _lht_files=0; _lht_user=0; _lht_bytes=0; _lht_names=''; _lht_user_names=''; _lht_own=0
     LHT_LUOSHU_IDS=$(_lht_luoshu_ids)

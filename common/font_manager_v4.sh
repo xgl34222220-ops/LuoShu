@@ -742,8 +742,7 @@ handle_action() {
             ;;
         reboot_device)
             printf '{"status":"ok","data":{"message":"正在重启手机"}}\n'
-            # Foreground: a backgrounded reboot is reaped by the task supervisor
-            # as soon as this request returns (see app_bridge.sh full_reboot).
+            # Foreground: the task supervisor reaps backgrounded children.
             svc power reboot </dev/null >/dev/null 2>&1 || reboot </dev/null >/dev/null 2>&1
             ;;
         *) printf '{"status":"error","message":"未知字体管理操作"}\n' ;;

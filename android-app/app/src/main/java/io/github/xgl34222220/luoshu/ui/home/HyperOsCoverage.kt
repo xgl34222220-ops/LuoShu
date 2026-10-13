@@ -300,7 +300,8 @@ internal fun coverageScanSummary(scan: CoverageScanResult): String = when {
     scan.items.isEmpty() -> "已检测 ${scan.scanned} 个正在运行的进程，都在使用洛书字体。"
     else -> "已检测 ${scan.scanned} 个正在运行的进程：${scan.covered} 个已使用洛书字体，" +
         "${scan.items.size} 个没有（可自动处理 ${scan.fixable.size} 个）。"
-} + (if (scan.truncated) "进程较多，本次只检测了一部分。" else "")
+} + (if (scan.weightLoss) "当前为静态字体，中粗/粗体会显示为常规粗细。" else "") +
+    (if (scan.truncated) "进程较多，本次只检测了一部分。" else "")
 
 internal fun scanFixMessage(applied: List<HyperOsSetting>, requested: List<HyperOsSetting>): String {
     if (applied.isEmpty()) return "应用失败，请确认已授予 Root 权限后重试。"

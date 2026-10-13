@@ -168,6 +168,7 @@ class HyperOsCoverageTest {
         assertEquals(listOf(HyperOsSetting.LOCKSCREEN), pendingScanFixes(scan, HyperOsCoverageStatus()))
         assertTrue(pendingScanFixes(scan, HyperOsCoverageStatus(lockscreenStyles = true)).isEmpty())
         assertTrue(coverageScanSummary(scan).contains("2 个没有"))
+        assertTrue(coverageScanSummary(scan).contains("静态字体"))
         assertEquals("sh '/data/adb/modules/LuoShu/common/app_bridge.sh' coverage_scan", coverageScanCommand())
     }
 

@@ -422,19 +422,12 @@ private fun CoverageScanResults(scan: CoverageScanResult, status: HyperOsCoverag
     val tokens = LocalMiuixTokens.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(coverageScanSummary(scan), style = MaterialTheme.typography.bodySmall, color = tokens.textPrimary)
-        if (scan.weightLoss) {
-            Text("当前字体是静态字体，压在可变字体槽上时中粗/粗体会显示为常规粗细。",
-                style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
-        }
         val pending = pendingScanFixes(scan, status)
         if (pending.isNotEmpty()) {
             Button(onClick = { model.applyFixes(pending) }, enabled = !model.settingBusy,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                 Text("一键应用建议：打开" + pending.joinToString("、") { it.title })
             }
-        } else if (scan.fixable.isNotEmpty()) {
-            Text("建议的覆盖设置已全部打开；重新应用当前字体并重启后再扫描。",
-                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
         }
         scan.items.take(30).forEach { item ->
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -448,10 +441,6 @@ private fun CoverageScanResults(scan: CoverageScanResult, status: HyperOsCoverag
                     Text("无法自动处理：$reason", style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
                 }
             }
-        }
-        if (scan.items.size > 30) {
-            Text("另有 ${scan.items.size - 30} 个进程未列出。", style = MaterialTheme.typography.bodySmall,
-                color = tokens.textSecondary)
         }
     }
 }
@@ -494,10 +483,9 @@ private fun CoverageAppPickerDialog(
 ) {
     val tokens = LocalMiuixTokens.current
     var query by rememberSaveable { mutableStateOf("") }
-    var includeSystem by rememberSaveable { mutableStateOf(true) }
     androidx.compose.runtime.LaunchedEffect(Unit) { model.loadApps(packageManager) }
     val all = model.apps.orEmpty()
-    val shown = remember(all, query, includeSystem) { filterCoverageApps(all, query, includeSystem) }
+    val shown = remember(all, query) { filterCoverageApps(all, query, includeSystem = true) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             color = tokens.cardBackground,
@@ -513,14 +501,6 @@ private fun CoverageAppPickerDialog(
                     label = { Text("搜索应用名称或包名") },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(
-                    Modifier.fillMaxWidth().clickable(role = Role.Switch) { includeSystem = !includeSystem },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("显示系统应用", style = MaterialTheme.typography.bodyMedium, color = tokens.textPrimary,
-                        modifier = Modifier.weight(1f))
-                    Switch(checked = includeSystem, onCheckedChange = null)
-                }
                 val typed = query.trim()
                 if (isValidCoveragePackage(typed) && all.none { it.packageName == typed }) {
                     TextButton(onClick = { onPick(typed) }) { Text("直接定位 $typed") }
