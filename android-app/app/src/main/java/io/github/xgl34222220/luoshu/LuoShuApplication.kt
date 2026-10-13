@@ -61,7 +61,8 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
                         // A running service publishes the transition before it exits.
                         // Restored paused/terminal records have no service, so the
                         // application publishes them once.
-                        if (!foregroundServiceExpected) {
+                        val serviceDetached = NativeImportNotificationController.consumeServiceDetached()
+                        if (!foregroundServiceExpected || serviceDetached) {
                             val signature = "${state.phase}:${state.processed}:${state.message}"
                             if (signature != lastPassiveSignature) {
                                 NativeImportNotificationController.notify(this@LuoShuApplication, state)
@@ -82,6 +83,7 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
     }
 
     override fun onTerminate() {
+        RootShell.close()
         googleFontMaintenance.close()
         applicationScope.cancel()
         viewModelStore.clear()

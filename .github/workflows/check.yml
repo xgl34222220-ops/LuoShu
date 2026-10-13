@@ -96,6 +96,8 @@ jobs:
           python3 common/font_role_check.py "$CJK" cjk
           python3 common/font_role_check.py "$LATIN" latin
           python3 common/font_role_check.py "$LATIN" digit
+          # Identity normalization keeps outlines/metrics and rewrites name/OS2 (needs a real font).
+          python3 scripts/font_name_normalize_test.py --font "$LATIN"
           if python3 common/font_role_check.py "$LATIN" cjk; then
             echo 'Latin-only font unexpectedly passed the CJK role gate' >&2
             exit 1

@@ -60,6 +60,27 @@ sh "$ROOT/scripts/boot_housekeeping_test.sh"
 sh "$ROOT/scripts/boot_loop_guard_test.sh"
 sh "$ROOT/scripts/foreign_font_module_test.sh"
 sh "$ROOT/scripts/ksu_metadata_ota_test.sh"
+# 此前未接入任何 workflow 的独立回归（font_name_normalize_test.py 需要真实字体，
+# 由 check.yml 的 composite role coverage 步骤以 DejaVuSans 运行）。
+python3 "$ROOT/scripts/background_task_tree_test.py" >/dev/null
+sh "$ROOT/scripts/device_font_runtime_report_test.sh"
+sh "$ROOT/scripts/device_font_slot_plan_runtime_test.sh"
+sh "$ROOT/scripts/device_font_slot_plan_test.sh"
+sh "$ROOT/scripts/font_config_runtime_test.sh"
+python3 "$ROOT/scripts/font_config_targets_test.py"
+sh "$ROOT/scripts/font_config_weights_test.sh"
+sh "$ROOT/scripts/font_import_compat_test.sh"
+sh "$ROOT/scripts/font_safety_test.sh"
+sh "$ROOT/scripts/meta_module_sync_test.sh"
+sh "$ROOT/scripts/service_dynamic_template_order_test.sh"
+sh "$ROOT/scripts/v4_rom_regression_test.sh"
+# 稳定性加固：Magisk 卡开机保护、OTA 早检测、未完成开机统一语义、卸载、发布跳过。
+sh "$ROOT/scripts/boot_unfinished_semantics_test.sh"
+sh "$ROOT/scripts/system_ota_early_test.sh"
+sh "$ROOT/scripts/uninstall_resilience_test.sh"
+sh "$ROOT/scripts/app_bridge_boot_guard_test.sh"
+python3 "$ROOT/scripts/customize_exit_rewrite_test.py"
+sh "$ROOT/scripts/release_skip_gate_test.sh"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \

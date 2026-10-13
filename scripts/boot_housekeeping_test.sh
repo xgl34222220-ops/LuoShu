@@ -94,6 +94,29 @@ COUNT=$(find "$M2/.luoshu-state/logs" -maxdepth 1 -type f | wc -l | tr -d ' ')
 ok test "$COUNT" -le 40
 ok test -L "$M2/logs"
 
+# Retired payloads are bounded even when verification failed or stayed pending.
+M3="$TMP/m3"
+mkdir -p "$M3/.luoshu-retired"
+for b in old-1 old-2 old-3 cur; do
+  mkdir -p "$M3/.luoshu-retired/payload-$b/system/fonts"
+  dd if=/dev/zero of="$M3/.luoshu-retired/payload-$b/system/fonts/A.ttf" bs=1024 count=64 2>/dev/null
+done
+touch -d '@1700000001' "$M3/.luoshu-retired/payload-old-1"
+touch -d '@1700000002' "$M3/.luoshu-retired/payload-old-2"
+touch -d '@1700000003' "$M3/.luoshu-retired/payload-old-3"
+touch -d '@1700000000' "$M3/.luoshu-retired/payload-cur"
+mkdir -p "$M3/.luoshu-retired/unrelated"
+LUOSHU_BOOTLOOP_BOOT_ID=cur luoshu_boot_housekeep "$M3"
+ok test -d "$M3/.luoshu-retired/payload-cur"
+ok test -d "$M3/.luoshu-retired/payload-old-3"
+no test -e "$M3/.luoshu-retired/payload-old-2"
+no test -e "$M3/.luoshu-retired/payload-old-1"
+ok test -d "$M3/.luoshu-retired/unrelated"
+# Size cap: an older entry above the cap goes; this boot's entry is kept.
+LUOSHU_BOOTLOOP_BOOT_ID=cur LUOSHU_RETIRED_MAX_KB=16 luoshu_retired_payload_cap "$M3"
+no test -e "$M3/.luoshu-retired/payload-old-3"
+ok test -d "$M3/.luoshu-retired/payload-cur"
+
 # Settle delay is bounded and can be disabled.
 LUOSHU_BOOT_SETTLE_SECONDS=0 luoshu_boot_settle
 LUOSHU_BOOT_SETTLE_SECONDS=abc sh -c ". '$MODULE/common/boot_housekeeping.sh'; sleep() { echo \"\$1\"; }; luoshu_boot_settle" > "$TMP/settle"

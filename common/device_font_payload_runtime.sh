@@ -372,6 +372,11 @@ device_font_dynamic_mount_apply() {
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
     [ -s "$_dfpr_state" ] || return 2
+    # First boot after a system OTA: the view was derived from the previous ROM.
+    if type luoshu_system_ota_boot_hold_active >/dev/null 2>&1 && \
+       luoshu_system_ota_boot_hold_active "$_dfpr_module_dir"; then
+        return 2
+    fi
     _dfpr_source_rel=$(sed -n 's/^source=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_target=$(sed -n 's/^target=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_target_hash=$(sed -n 's/^targetSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)

@@ -76,4 +76,20 @@ class NativeImportNotificationSpecTest {
 
         assertEquals(listOf(NativeImportNotificationAction.CLEAR), spec.actions)
     }
+
+    @Test
+    fun foregroundTimeoutNoticeKeepsProgressAndTellsTheUserHowToContinue() {
+        val running = NativeImportState(
+            phase = NativeImportPhase.RUNNING,
+            total = 8,
+            processed = 3,
+            message = "正在导入 4/8：font.ttf",
+        )
+        val notice = nativeImportTimeoutNotice(running)
+        assertEquals(running.phase, notice.phase)
+        assertEquals(8, notice.total)
+        assertEquals(3, notice.processed)
+        assertTrue(notice.message.contains("3/8"))
+        assertTrue(notice.message.contains("继续"))
+    }
 }

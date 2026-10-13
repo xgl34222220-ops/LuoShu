@@ -456,7 +456,7 @@ copy_as_hyperos() {
                 fi
             fi
             if [ -n "$rb" ]; then
-                for dest_name in "Roboto-${rb}.ttf"; do
+                for dest_name in Roboto-"${rb}".ttf; do
                     _rom_exact_target_exists "$dest_name" || continue
                     if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
                         weight_count=$((weight_count + 1))

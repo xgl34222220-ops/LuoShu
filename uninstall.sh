@@ -10,10 +10,18 @@ MODULE_DIR="$MODDIR"
 # child cannot recreate a view after restore completes.
 [ ! -f "$MODDIR/common/font_switch_lock.sh" ] || . "$MODDIR/common/font_switch_lock.sh"
 [ ! -f "$MODDIR/common/background_task.sh" ] || . "$MODDIR/common/background_task.sh"
+# The Root manager deletes the module directory whatever this script returns
+# (see the Google compatibility note below), so a task that could not be
+# reaped must never abort the uninstall: stopping early would leave the
+# self-mount state, the metamodule mirror and modules_update behind, and a
+# leftover meta-overlayfs mirror can keep mounting fonts after removal.
+# Record the failure and continue the best-effort cleanup.
 if type luoshu_stop_module_tasks >/dev/null 2>&1; then
     if ! luoshu_stop_module_tasks "$MODDIR"; then
-        echo '洛书：字体任务未全部回收，清理证据已保留，未继续拆除挂载。' >&2
-        exit 1
+        echo '洛书：字体任务未全部回收；已记录并继续完整清理（私有视图、自挂载状态、元模块镜像）。' >&2
+        if command -v log >/dev/null 2>&1; then
+            log -t LuoShu 'uninstall: module tasks not fully reaped; continuing best-effort cleanup' >/dev/null 2>&1 || true
+        fi
     fi
 fi
 for _bridge in google_font_provider_bridge.sh hyperos_theme_font_bridge.sh hyperos_webview_route.sh hyperos_theme_takeover.sh; do
