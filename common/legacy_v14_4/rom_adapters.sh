@@ -172,6 +172,25 @@ _legacy_coloros_oem_names() {
     echo "OplusOSUI-XThin OplusOSUI-Thin OplusOSUI-ExtraLight OplusOSUI-Light OplusOSUI-Regular OplusOSUI-Medium OplusOSUI-SemiBold OplusOSUI-Bold OplusOSUI-ExtraBold OplusOSUI-Black OplusSans-Thin OplusSans-ExtraLight OplusSans-Light OplusSans-Regular OplusSans-Medium OplusSans-SemiBold OplusSans-Bold OplusSans-ExtraBold OplusSans-Black OppoSans-Thin OppoSans-Light OppoSans-Regular OppoSans-Medium OppoSans-SemiBold OppoSans-Bold OppoSans-ExtraBold OppoSans-Black OnePlusSans-Regular OnePlusSans-Medium OnePlusSans-Bold Roboto-ExtraLight Roboto-SemiBold Roboto-ExtraBold Roboto-Black GoogleSans-SemiBold GoogleSansText-SemiBold GoogleSans-VF GoogleSansText-VF GoogleSansTextVF"
 }
 
+# >>> LUOSHU_COLOROS_LATIN_POLICY（common/coloros_latin_policy.py 的副本；scripts/coloros_latin_coverage_test.py 校验一致）
+# ColorOS 15/16 fonts_base.xml 的 osans-solid-digits 数字族；OSans-RC（生僻汉字库）与
+# OSans-Ext（占位）是回退族，始终保留原厂。osans_digits 分组默认开，
+# config/coloros_slot_groups.conf 中精确的 osans_digits=0 关闭。
+_legacy_coloros_digit_names() {
+    echo "OSans-Solid-Digits-VF"
+}
+_legacy_coloros_keep_file() {
+    case "$1" in OSans-RC-Regular.ttf|OSans-Ext-Regular.otf|OSans-RC*|OSans-Ext*) return 0 ;; esac
+    return 1
+}
+_legacy_coloros_osans_digits_on() {
+    _lcodo_conf="${LUOSHU_COLOROS_SLOT_GROUPS_CONF:-${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}}/config/coloros_slot_groups.conf}"
+    [ -f "$_lcodo_conf" ] || return 0
+    _lcodo_value=$(tr -d '\r' < "$_lcodo_conf" 2>/dev/null | sed -n 's/^osans_digits=\([01]\)$/\1/p' | tail -n 1)
+    [ "$_lcodo_value" != 0 ]
+}
+# <<< LUOSHU_COLOROS_LATIN_POLICY
+
 # 旧映射器的目标目录与以前一致：system/system_ext/product/my_product/vendor（只计算
 # 一次，不 fork）。其余 OEM 分区（my_stock、oplus_* 等）的槽位由原厂清单补齐阶段
 # 直接写入对应分区，不在 system/fonts 下新建原厂不存在的节点。
@@ -189,11 +208,14 @@ _legacy_coloros_roots_init() {
 
 # 输出某个 stem 在上述真实目录里的单字体文件名（保留原厂扩展名 .ttf/.otf）。
 # 集合字体（.ttc/.otc）由单面用户字体替换会破坏 face 索引，保持原厂。
+# ColorOS 的 SysFont-*.ttf 是指向 /data/format_unclear/font（flip font）的符号链接，
+# 链条可能悬空或成环（-e 为假）；原厂存在的链接本身就是真实槽位，同样覆盖。
 _legacy_coloros_existing_file() {
     _lcef_stem="$1"
     for _lcef_root in $_LEGACY_COLOROS_ROOTS; do
         for _lcef_ext in ttf otf; do
-            [ -e "$_lcef_root/$_lcef_stem.$_lcef_ext" ] && { LEGACY_COLOROS_FILE="$_lcef_stem.$_lcef_ext"; return 0; }
+            { [ -e "$_lcef_root/$_lcef_stem.$_lcef_ext" ] || [ -L "$_lcef_root/$_lcef_stem.$_lcef_ext" ]; } && \
+                { LEGACY_COLOROS_FILE="$_lcef_stem.$_lcef_ext"; return 0; }
         done
     done
     return 1
@@ -204,8 +226,9 @@ _legacy_coloros_existing_file() {
 _legacy_coloros_discover() {
     for _lcd_root in $_LEGACY_COLOROS_ROOTS; do
         for _lcd_path in "$_lcd_root"/*.ttf "$_lcd_root"/*.otf; do
-            [ -f "$_lcd_path" ] || continue
+            [ -f "$_lcd_path" ] || [ -L "$_lcd_path" ] || continue
             _lcd_name=${_lcd_path##*/}
+            _legacy_coloros_keep_file "$_lcd_name" && continue
             case "$_lcd_name" in
                 *[Ii]talic*|*[Oo]blique*|*[Ss]erif*|*SERIF*|*[Mm]ono*|*MONO*|*[Cc]ode*|*[Ee]moji*|*[Ss]ymbol*|*[Ii]con*|*[Cc]lock*|\
                 *[Mm]yanmar*|*[Tt]hai*|*[Aa]rabic*|*[Hh]ebrew*|*[Kk]hmer*|*[Ll]ao*|*[Tt]ibetan*|*[Dd]evanagari*|*[Bb]engali*|*[Tt]amil*|\
@@ -215,6 +238,8 @@ _legacy_coloros_discover() {
                 SysFont*|SysSans*|OplusSans*|OPlusSans*|OplusOSUI*|OppoSans*|Opposans*|OPPOSans*|OPSans*|OnePlusSans*|\
                 GoogleSans*|Roboto*|SourceSansPro*|DIN*|OPPODIN*)
                     printf '%s\n' "$_lcd_name" ;;
+                OSans-*Digits*)
+                    _legacy_coloros_osans_digits_on && printf '%s\n' "$_lcd_name" ;;
             esac
         done
     done
@@ -276,7 +301,9 @@ copy_as_coloros() {
     base_names="SysSans-Hant-Regular SysSans-Hans-Regular SysFont-Static-Regular SysFont-Hant-Regular SysFont-Hans-Regular SysFont-Regular SysSans-En-Regular"
     _lca_done=' '
     _lca_targets=''
-    for name in $base_names $(_coloros_extra_names) $(_legacy_coloros_oem_names); do
+    _lca_digit_names=''
+    _legacy_coloros_osans_digits_on && _lca_digit_names=$(_legacy_coloros_digit_names)
+    for name in $base_names $(_coloros_extra_names) $(_legacy_coloros_oem_names) $_lca_digit_names; do
         _legacy_coloros_existing_file "$name" || continue
         case "$_lca_done" in *" $LEGACY_COLOROS_FILE "*) continue ;; esac
         _lca_done="$_lca_done$LEGACY_COLOROS_FILE "
@@ -334,6 +361,18 @@ copy_as_coloros() {
     [ "$bad_count" -gt 0 ] && _log_step "  ⚠ 其中 $bad_count 个校验异常，请检查源字体文件是否完整"
     [ "$extra_count" -gt 0 ] && _log_step "  已覆盖 $extra_count 个额外字体文件（数字/英文/系统 UI 等）"
     [ "$weight_count" -gt 0 ] && _log_step "  已按字重对应 $weight_count 个槽位（Bold/Medium/Light等）"
+    # 只读诊断：ColorOS 设置/主题字体把 flip 字体指向 /data 时，应用里的英文数字绕过 /system/fonts。
+    _lca_flip="${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}}/common/coloros_flipfont.sh"
+    if [ -f "$_lca_flip" ]; then
+        _lca_hint=$( (. "$_lca_flip" && luoshu_coloros_flipfont_hint) 2>/dev/null )
+        if [ -n "$_lca_hint" ]; then
+            while IFS= read -r _lca_line; do
+                [ -n "$_lca_line" ] && _log_step "  $_lca_line"
+            done <<EOF_LUOSHU_COLOROS_FLIP
+$_lca_hint
+EOF_LUOSHU_COLOROS_FLIP
+        fi
+    fi
     return 0
 }
 

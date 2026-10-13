@@ -36,6 +36,12 @@ get_all_coloros_files() {
     _dfpp_key="${LUOSHU_COLOROS_CACHE_KEY:-$(getprop ro.build.fingerprint 2>/dev/null)}"
     [ -n "$_dfpp_key" ] || _dfpp_key="$(getprop ro.build.version.incremental 2>/dev/null)"
     [ -n "$_dfpp_key" ] || _dfpp_key=unknown
+    # The target names also change with a module update (ColorOS Latin/digit policy revision),
+    # not only with an OTA; a fingerprint-only key kept serving the old list after an update.
+    _dfpp_key="$_dfpp_key;coloros-targets-r${LUOSHU_COLOROS_TARGETS_REVISION:-0}"
+    if type _coloros_osans_digits_on >/dev/null 2>&1 && ! _coloros_osans_digits_on; then
+        _dfpp_key="$_dfpp_key;osans_digits=0"
+    fi
     _dfpp_cached_key=$(sed -n 's/^key=//p' "$_dfpp_cache" 2>/dev/null | head -n1)
     if [ "$_dfpp_cached_key" = "$_dfpp_key" ] && sed -n '2,$p' "$_dfpp_cache" 2>/dev/null | grep -q .; then
         sed -n '2,$p' "$_dfpp_cache" 2>/dev/null
@@ -50,6 +56,7 @@ get_all_coloros_files() {
             if type _coloros_google_text_files >/dev/null 2>&1; then _coloros_google_text_files; fi
             if type _coloros_vendor_files >/dev/null 2>&1; then _coloros_vendor_files; fi
             if type _coloros_oem_ui_files >/dev/null 2>&1; then _coloros_oem_ui_files; fi
+            if type _coloros_digit_files >/dev/null 2>&1; then _coloros_digit_files; fi
             if type _coloros_discovered_ui_files >/dev/null 2>&1; then _coloros_discovered_ui_files; fi
         } | tr ' ' '\n' | awk 'NF && !seen[$0]++'
     } > "$_dfpp_tmp" 2>/dev/null || { rm -f "$_dfpp_tmp" 2>/dev/null || true; return 1; }
@@ -120,7 +127,11 @@ _device_font_fast_alias_roots() {
 /hw_product/fonts|$_dffar_module/hw_product/fonts"
     fi
     while IFS='|' read -r _dffar_real _dffar_overlay; do
-        [ -e "$_dffar_real/$_dffar_file" ] || continue
+        # ColorOS SysFont-*.ttf are stock symlinks whose flip-font chain may dangle or loop.
+        # Other ROMs keep the existence gate (HyperOS framework links must stay untouched).
+        if [ ! -e "$_dffar_real/$_dffar_file" ]; then
+            [ "${IS_COLOROS:-false}" = true ] && [ -L "$_dffar_real/$_dffar_file" ] || continue
+        fi
         mkdir -p "$_dffar_overlay" 2>/dev/null || continue
         rm -f "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
         if ln "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null ||            cp -f "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null; then

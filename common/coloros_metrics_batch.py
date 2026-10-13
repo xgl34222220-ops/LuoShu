@@ -20,6 +20,7 @@ from fontTools.ttLib import TTCollection, TTFont
 from font_inventory import (FONT_EXTENSIONS, FontRoot, _heuristic_candidate,
                             _pick_actual_root, _stock_font_path)
 from font_inventory_scan import _is_ui_family
+import coloros_latin_policy
 from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_copy,
                                   resolve_slot_contract,
                                   read_inventory, write_metrics, compact_routed_source,
@@ -28,14 +29,16 @@ from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_c
                                   inventory_completion_jobs)
 
 
-def eligible_slot(slot: object, logical: str) -> bool:
+def eligible_slot(slot: object, logical: str, groups: frozenset | None = None) -> bool:
     if not isinstance(slot, dict) or slot.get('path', logical) != logical:
         return False
     name = Path(logical).name
     if any(token in name.lower() for token in ('emoji', 'symbol', 'icon', 'math', 'music', 'serif', 'mono')):
         return False
     families = slot.get('families', [])
-    return _heuristic_candidate(name) or (
+    # OPlus digit faces (osans-solid-digits) take the stock line contract like
+    # other measured numeric slots; coloros_latin_policy owns the name rule.
+    return _heuristic_candidate(name) or coloros_latin_policy.mapped_digit_name(name, groups) or (
         isinstance(families, list) and any(isinstance(family, str) and _is_ui_family(family) for family in families)
     )
 
@@ -191,6 +194,9 @@ def build(module: Path, stage: Path) -> dict:
     roots = font_roots(module)
     stock_roots = None
     structure_cache = {}
+    groups_conf = os.environ.get('LUOSHU_COLOROS_SLOT_GROUPS_CONF', '').strip()
+    groups = coloros_latin_policy.enabled_groups(
+        Path(groups_conf) if groups_conf else module / 'config' / 'coloros_slot_groups.conf')
     for partition, logical_root in roots.items():
         root = stage / partition / 'fonts'
         if not root.is_dir():
@@ -216,7 +222,7 @@ def build(module: Path, stage: Path) -> dict:
                 else:
                     report['reason'] = 'missing-or-ineligible-stock-slot'
                 continue
-            if not eligible_slot(slot, logical):
+            if not eligible_slot(slot, logical, groups):
                 report['reason'] = 'missing-or-ineligible-stock-slot'
                 continue
             face_index = slot.get('faceIndex', 0)
@@ -260,6 +266,10 @@ def build(module: Path, stage: Path) -> dict:
     # Complete only current, trusted inventory slots, using their real physical
     # existence and stock metrics rather than another ROM-specific target list.
     for source, destination, contract in inventory_completion_jobs(module, stage, inventory, seen):
+        # The rare-Han store, placeholder fallbacks and a disabled digit group
+        # stay stock even when the scanner measured them as text/numeric faces.
+        if coloros_latin_policy.keeps_stock(destination.name, groups):
+            continue
         logical = '/' + destination.relative_to(stage).as_posix()
         report = {'slot': logical, 'metricsSource': 'preserved', 'slotSource': 'stock-inventory'}
         reports.append(report)

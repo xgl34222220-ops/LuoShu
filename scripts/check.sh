@@ -310,6 +310,8 @@ sh "$ROOT/scripts/module_layout_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
 python3 "$ROOT/scripts/font_coverage_speed_test.py"
 sh "$ROOT/scripts/coloros_legacy_coverage_test.sh"
+# ColorOS 15/16 拉丁/数字覆盖：OSans 数字族、SysFont flip 链接槽位、生僻字/占位回退保留、flip 字体诊断。
+python3 "$ROOT/scripts/coloros_latin_coverage_test.py"
 python3 "$ROOT/scripts/safe_switch_cache_identity_test.py"
 python3 "$ROOT/scripts/safe_switch_timing_test.py"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)

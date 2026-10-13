@@ -11,7 +11,9 @@ common/task_scope.py
 common/task_scope.sh
 common/runtime_paths.sh
 common/runtime_paths_lock.py
+common/coloros_flipfont.sh
 common/coloros_global.sh
+common/coloros_latin_policy.py
 common/coloros_metrics_batch.py
 common/coloros_stage_complete.sh
 common/composite_font.py
