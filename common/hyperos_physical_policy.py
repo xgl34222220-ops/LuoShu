@@ -20,8 +20,14 @@ Optional slot groups (config/hyperos_slot_groups.conf, ``key=0|1`` lines):
 
 Always kept stock: italic/serif/emoji/symbol/icon/script faces, collections,
 MiSansL3 (GB18030 rare-character store; replacing it turns rare Han into tofu)
-and every ``*Mono*`` face (monospace / tabular clock slots must never receive a
-proportional user font).
+and every clock/tabular ``*Mono*`` face (MitypeMonoVF, MitypeClockMono*,
+MiClockMono*, InterMono*, BebasNeue-Mono, any ``*Clock*Mono*``: digit slots must
+never receive a proportional user font).
+
+Code monospace faces behind the system ``monospace`` family (DroidSansMono.ttf,
+RobotoMono*, NotoSansMono*) are replaced like other UI text, as before v4.3:
+keeping them stock left terminal / flash-log screens (``FontFamily.Monospace``)
+in the ROM font.
 """
 from __future__ import annotations
 
@@ -42,7 +48,7 @@ DYNAMIC_OVERLAY_TARGET = "/data/system/fonts/theme_webview/Roboto-Regular.ttf"
 
 # Bump font_inventory_scan.HYPEROS_COVERAGE_REVISION whenever this policy changes
 # which stock files are captured, so installed inventories are rescanned.
-POLICY_REVISION = 2
+POLICY_REVISION = 3
 
 
 def preserved_dynamic_alias(data: dict, logical: str) -> bool:
@@ -76,6 +82,14 @@ _LANG_TOKENS = ("CJKJP", "CJKKR")
 _RARE_HAN_PREFIXES = ("MiSansL3",)
 # Any monospace/tabular face. Lower-case substring match.
 MONO_TOKEN = "mono"
+# Code monospace faces of the system ``monospace`` family. They are replaced
+# (core) unless the name also carries CLOCK_TOKEN; every other Mono face stays
+# stock. NotoSansMono uses exact-family matching so NotoSansMonoCJK*/Script*
+# fallbacks are never treated as Latin UI.
+CLOCK_TOKEN = "clock"
+_CODE_MONO_NAMES = ("DroidSansMono.ttf",)
+_CODE_MONO_PREFIXES = ("RobotoMono",)
+_CODE_MONO_FAMILIES = ("NotoSansMono", "NotoSansMonoVF")
 
 # Clock faces keep their own (core) handling even though "MiSansC" is the
 # misans_ext prefix; checked before the group prefixes.
@@ -148,11 +162,11 @@ STATIC_NAMES = (
     "Miui-Regular.ttf", "Miui-Bold.ttf",
 )
 # Files earlier builds aliased that this policy now keeps stock. Mappers delete
-# stale staged/overlay copies of these names.
+# stale staged/overlay copies of these names. Code monospace names
+# (DroidSansMono/RobotoMono/NotoSansMono) are replaced again and must not be here.
 RETIRED_NAMES = (
     "MiSansL3.otf", "MitypeMonoVF.ttf", "MitypeClockMono.ttf", "MitypeClockMono.otf",
-    "MiClockMono.ttf", "MiClockMono.otf", "RobotoMono-Regular.ttf", "DroidSansMono.ttf",
-    "NotoSansMono-Regular.ttf",
+    "MiClockMono.ttf", "MiClockMono.otf",
 )
 
 # Every family prefix any HyperOS mapper writes. A staged alias with one of these
@@ -198,6 +212,16 @@ def enabled_groups(path: Path | None = None) -> frozenset[str]:
 
 
 # ------------------------------------------------------------------ policy
+def is_code_mono(name: str) -> bool:
+    """System ``monospace`` text faces (terminals, logs), not clock/tabular digits."""
+    if CLOCK_TOKEN in name.lower():
+        return False
+    stem = Path(name).stem
+    return (name in _CODE_MONO_NAMES or name.startswith(_CODE_MONO_PREFIXES)
+            or any(stem == family or stem.startswith(family + "-")
+                   for family in _CODE_MONO_FAMILIES))
+
+
 def classify(name: str) -> str:
     """Return why a filename is (not) a target, independent of group settings.
 
@@ -221,7 +245,7 @@ def classify(name: str) -> str:
     if name.startswith(_RARE_HAN_PREFIXES):
         return "rare-han"
     if MONO_TOKEN in lower:
-        return "mono"
+        return "core" if is_code_mono(name) else "mono"
     if not name.startswith(_CLOCK_BEFORE_GROUPS):
         for group in GROUPS:
             if name.startswith(GROUP_PREFIXES[group]):
@@ -258,7 +282,7 @@ def xml_file_allowed(name: str, generated: str = "", groups: frozenset[str] | No
                      monospace_build: bool = False) -> bool:
     """May an XML ``<font>`` node naming stock ``name`` point at ``generated``?
 
-    Mono stock files may only receive a monospace-aware build: a ``LuoShuMono*``
+    Clock/tabular Mono stock files may only receive a monospace-aware build: a ``LuoShuMono*``
     font, or a per-slot build whose role is ``mono``/``clock`` (stock-exact
     advances, ``monospace_build=True``). Rare-Han, excluded and disabled-group
     files never change. Names the physical policy does not list (e.g.
@@ -302,6 +326,8 @@ def render_shell_block() -> str:
             + f")\n            _lhpp_group_enabled {group}\n            return $?\n            ;;")
     core = _case_list([f"{p}*" for p in _PREFIXES + _NOTO_UI_PREFIXES] + list(_UI_NAMES) + list(_NUMERIC))
     families = " ".join(_NOTO_LATIN_UI_FAMILIES)
+    code_mono = _case_list(list(_CODE_MONO_NAMES) + [f"{p}*" for p in _CODE_MONO_PREFIXES])
+    code_families = " ".join(_CODE_MONO_FAMILIES)
     icon_fp = " ".join(_ICON_FALSE_POSITIVES)
     group_any = _case_list([f"{p}*" for g in GROUPS for p in GROUP_PREFIXES[g]])
     defaults = "; ".join(f"_LHPP_G_{g}={1 if GROUP_DEFAULTS[g] else 0}" for g in GROUPS)
@@ -378,6 +404,22 @@ _lhpp_safe_name() {{
         {lang}) return 1 ;;
         {rare}) return 1 ;;
     esac
+    case "$_lhpp_lower" in
+        *{CLOCK_TOKEN}*) ;;
+        *{MONO_TOKEN}*)
+            # Code monospace (system monospace family) is replaced; see is_code_mono.
+            case "$_lhpp_name" in
+                {code_mono}) return 0 ;;
+            esac
+            _lhpp_stem=${{_lhpp_name%.*}}
+            for _lhpp_family in {code_families}; do
+                case "$_lhpp_stem" in
+                    "$_lhpp_family"|"$_lhpp_family"-*) return 0 ;;
+                esac
+            done
+            return 1
+            ;;
+    esac
     case "$_lhpp_lower" in *{MONO_TOKEN}*) return 1 ;; esac
     case "$_lhpp_name" in
         {clock_first}) ;;
@@ -434,6 +476,7 @@ _lhpp_retired_names() {{
 def policy_digest() -> str:
     """Digest of the policy data only (not of this generator's own output)."""
     data = repr((_EXCLUDED, _ICON_FALSE_POSITIVES, _LANG_PREFIXES, _LANG_TOKENS, _RARE_HAN_PREFIXES, MONO_TOKEN,
+                 CLOCK_TOKEN, _CODE_MONO_NAMES, _CODE_MONO_PREFIXES, _CODE_MONO_FAMILIES,
                  _CLOCK_BEFORE_GROUPS, GROUPS, sorted(GROUP_DEFAULTS.items()),
                  sorted(GROUP_PREFIXES.items()), _PREFIXES, _NOTO_UI_PREFIXES,
                  _NOTO_LATIN_UI_FAMILIES, _UI_NAMES, _NUMERIC, STATIC_NAMES, RETIRED_NAMES,

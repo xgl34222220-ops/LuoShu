@@ -434,12 +434,13 @@ def check_cache_key_flag(base: Path) -> None:
 
 
 def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
-    """Mono files only take mono builds; zh families follow a CJK-capable user font."""
+    """Clock/tabular Mono files only take mono builds; code monospace (DroidSansMono)
+    is replaced like UI text; zh families follow a CJK-capable user font."""
     raw = (
         "<?xml version='1.0' encoding='utf-8'?>\n"
         "<familyset>\n"
         "  <family name='sans-serif'><font weight='400' style='normal'>Roboto-Regular.ttf</font></family>\n"
-        "  <family name='monospace'><font weight='400' style='normal'>DroidSansMono.ttf</font></family>\n"
+        "  <family name='monospace'><font weight='400' style='normal'>MitypeMonoVF.ttf</font></family>\n"
         "  <family lang='zh-Hans'><font weight='400' style='normal'>NotoSansSC-Regular.otf</font>\n"
         "    <font weight='700' style='normal'>NotoSansSC-Bold.otf</font></family>\n"
         "  <family lang='zh-Hant zh-Bopo'><font weight='400' style='normal'>NotoSansTC-Regular.otf</font></family>\n"
@@ -452,15 +453,21 @@ def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
     source = base / "routing.xml"
     slots = [slot(source, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
              slot(source, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-700.ttf", 700),
-             slot(source, "monospace", "DroidSansMono.ttf", "LuoShuSlot-prop-400.ttf")]
-    # Proportional build for a Mono file: kept stock.
+             slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-prop-400.ttf")]
+    # Proportional build for a clock/tabular Mono file: kept stock.
     mapping, notes = seedxml.plan_mapping(root, slots, "fonts.xml", None)
     assert mapping == {0: "LuoShuSlot-ui-400.ttf"}, mapping
-    assert "policy-kept:DroidSansMono.ttf" in notes, notes
+    assert "policy-kept:MitypeMonoVF.ttf" in notes, notes
     # Mono-role build (stock-exact advances): allowed.
-    mono_slots = slots[:2] + [slot(source, "monospace", "DroidSansMono.ttf", "LuoShuSlot-mono-400.ttf", roles=("mono",))]
+    mono_slots = slots[:2] + [slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-mono-400.ttf", roles=("mono",))]
     mapping, _notes = seedxml.plan_mapping(root, mono_slots, "fonts.xml", None)
     assert mapping[1] == "LuoShuSlot-mono-400.ttf", mapping
+    # Code monospace (system monospace family, e.g. flash logs): replaced again.
+    code_root = seedxml._parse_bytes(raw.replace(b"MitypeMonoVF.ttf", b"DroidSansMono.ttf"))
+    code_slots = slots[:2] + [slot(source, "monospace", "DroidSansMono.ttf", "LuoShuSlot-prop-400.ttf")]
+    mapping, notes = seedxml.plan_mapping(code_root, code_slots, "fonts.xml", None)
+    assert mapping == {0: "LuoShuSlot-ui-400.ttf", 1: "LuoShuSlot-prop-400.ttf"}, mapping
+    assert "policy-kept:DroidSansMono.ttf" not in notes, notes
     # zh routing: simplified-only coverage routes zh-Hans, not zh-Hant.
     counts = {"LuoShuSlot-ui-400.ttf": 7000, "LuoShuSlot-ui-700.ttf": 7000}
     targets = seedxml.cjk_route_targets(slots, lambda name: counts.get(name, 0))
@@ -509,7 +516,7 @@ def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
     assert report["status"] == "applied", report
     staged = (stage / "system_ext/etc/miui_fonts.xml").read_text()
     assert ">LuoShuSlot-ui-400.ttf</font>\n    <font weight='700' style='normal'>LuoShuSlot-ui-700.ttf<" in staged, staged
-    assert ">DroidSansMono.ttf<" in staged and ">NotoSansTC-Regular.otf<" in staged
+    assert ">MitypeMonoVF.ttf<" in staged and ">NotoSansTC-Regular.otf<" in staged
     assert report["cjkRouting"]["400"]["file"] == "LuoShuSlot-ui-400.ttf"
 
 

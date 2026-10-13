@@ -39,16 +39,23 @@ PRESERVED = (
     'DroidSans.ttf', 'DroidSans-Regular.ttf', 'DroidSans-Bold.ttf',
     'Clockopia.ttf', 'AndroidClock.ttf', '100.ttf', '350.ttf', '400.ttf', '900.ttf',
 )
-# Monospace / tabular clock slots and the GB18030 rare-character store stay
-# stock on both the legacy (v14.4) and v4 routes: a proportional user font in a
-# Mono slot misaligns terminals, timers and clocks; MiSansL3 carries 60k+ rare
-# Han a user font lacks.
+# Clock / tabular Mono slots and the GB18030 rare-character store stay stock on
+# both the legacy (v14.4) and v4 routes: a proportional user font in a clock
+# digit slot misaligns timers and clocks; MiSansL3 carries 60k+ rare Han a user
+# font lacks.
 KEPT_STOCK = (
-    'RobotoMono-Regular.ttf', 'NotoSansMono-Regular.ttf', 'NotoSansMono-Bold.ttf',
-    'NotoSansMono.ttf', 'NotoSansMonoVF.ttf', 'DroidSansMono.ttf', 'MitypeMonoVF.ttf',
+    'MitypeMonoVF.ttf',
     'MitypeClockMono.ttf', 'MitypeClockMono.otf', 'MiClockMono.ttf', 'MiClockMono.otf',
     'InterMono-SemiBold.ttf', 'BebasNeue-Mono.ttf', 'CommutersSansMono.ttf',
+    'RobotoMonoClock.ttf', 'NotoSansMonoClock-Regular.ttf',
     'MiSansL3.otf',
+)
+# Code monospace faces behind the system ``monospace`` family (terminals,
+# ReSukiSU/KernelSU flash logs via FontFamily.Monospace) are replaced again, as
+# before v4.3 (1bf06137). NotoSansMono CJK/Script/Arabic variants stay excluded.
+CODE_MONO = (
+    'DroidSansMono.ttf', 'RobotoMono-Regular.ttf', 'RobotoMono-Bold.ttf', 'RobotoMonoVF.ttf',
+    'NotoSansMono-Regular.ttf', 'NotoSansMono-Bold.ttf', 'NotoSansMono.ttf', 'NotoSansMonoVF.ttf',
 )
 DEFAULT_ON_GROUPS = (
     'MiuiEx-Regular.ttf', 'MiuiEx-Bold.ttf', 'MiuiEx-Light.ttf', 'Miui-Regular.ttf',
@@ -122,9 +129,12 @@ class LatinPolicyRegressionTest(unittest.TestCase):
                 self.assertFalse(safe_physical_font_name(name))
 
     def test_shell_and_python_have_the_same_policy(self):
-        names = RESTORED + PRESERVED + EXCLUDED + KEPT_STOCK + DEFAULT_ON_GROUPS + DEFAULT_OFF_GROUPS
-        self.assertEqual(shell_result(names), [safe_physical_font_name(name, policy.parse_groups(''))
-                                               for name in names])
+        names = (RESTORED + PRESERVED + EXCLUDED + KEPT_STOCK + CODE_MONO
+                 + DEFAULT_ON_GROUPS + DEFAULT_OFF_GROUPS)
+        expected = [safe_physical_font_name(name, policy.parse_groups('')) for name in names]
+        for shell in [ROOT / item for item in policy.SHELL_TARGETS]:
+            with self.subTest(shell=shell.name):
+                self.assertEqual(shell_result(names, shell=shell), expected)
 
     def test_mono_clock_and_rare_han_slots_stay_stock(self):
         for name in KEPT_STOCK:
@@ -132,6 +142,51 @@ class LatinPolicyRegressionTest(unittest.TestCase):
                 self.assertFalse(safe_physical_font_name(name, policy.ALL_GROUPS))
                 self.assertIn(policy.classify(name), ('mono', 'rare-han'))
         self.assertEqual(shell_result(KEPT_STOCK, 'lockscreen_styles=1\n'), [False] * len(KEPT_STOCK))
+
+    def test_code_monospace_is_replaced_and_not_retired(self):
+        for name in CODE_MONO:
+            with self.subTest(name=name):
+                self.assertEqual(policy.classify(name), 'core')
+                self.assertTrue(safe_physical_font_name(name, policy.parse_groups('')))
+                self.assertNotIn(name, policy.RETIRED_NAMES)
+                self.assertTrue(policy.xml_file_allowed(name, 'LuoShuSlot-ui-400.ttf'))
+        for shell in [ROOT / item for item in policy.SHELL_TARGETS]:
+            with self.subTest(shell=shell.name):
+                self.assertEqual(shell_result(CODE_MONO, shell=shell), [True] * len(CODE_MONO))
+                proc = subprocess.run(['sh', '-c', '. "$1"; _lhpp_retired_names', 'sh', str(shell)],
+                                      check=True, text=True, capture_output=True)
+                retired = proc.stdout.split()
+                for name in ('DroidSansMono.ttf', 'RobotoMono-Regular.ttf', 'NotoSansMono-Regular.ttf'):
+                    self.assertNotIn(name, retired)
+                self.assertIn('MitypeMonoVF.ttf', retired)
+        # Clock/tabular Mono faces stay stock even next to the code families.
+        for name in ('MitypeMonoVF.ttf', 'MiClockMono.otf', 'MitypeClockMono.ttf'):
+            self.assertEqual(policy.classify(name), 'mono')
+            self.assertTrue(policy.xml_file_allowed(name, 'LuoShuMono-400.ttf'))
+            self.assertFalse(policy.xml_file_allowed(name, 'LuoShuSlot-ui-400.ttf'))
+        # Boot slot repair keeps a code-mono alias and drops a clock-mono one.
+        with tempfile.TemporaryDirectory() as temp:
+            overlay, real = Path(temp) / 'overlay', Path(temp) / 'real'
+            overlay.mkdir()
+            real.mkdir()
+            names = ('DroidSansMono.ttf', 'RobotoMono-Regular.ttf', 'NotoSansMono-Regular.ttf',
+                     'MitypeMonoVF.ttf', 'MiClockMono.otf')
+            for name in names:
+                (overlay / name).write_bytes(b'alias')
+                (real / name).write_bytes(b'stock')
+            env = os.environ.copy()
+            env.pop('LUOSHU_HYPEROS_SLOT_GROUPS_CONF', None)
+            for key in ('LUOSHU_REAL_MODDIR', 'MODDIR', 'MODULE_DIR', 'PWD'):
+                env[key] = temp
+            subprocess.run(['sh', '-c', '. "$1"; _lhcc_prune_policy_aliases "$2" "$3"', 'sh',
+                            str(ROOT / 'common/legacy_v14_4/hyperos_clock_compat.sh'),
+                            str(overlay), str(real)],
+                           cwd=temp, env=env, check=True, text=True, capture_output=True)
+            self.assertEqual(sorted(p.name for p in overlay.iterdir()),
+                             ['DroidSansMono.ttf', 'NotoSansMono-Regular.ttf', 'RobotoMono-Regular.ttf'])
+        import hyperos_metrics_batch as batch
+        self.assertFalse(batch.policy_keeps_stock('DroidSansMono.ttf', policy.ALL_GROUPS))
+        self.assertTrue(batch.policy_keeps_stock('MiClockMono.otf', policy.ALL_GROUPS))
 
     def test_optional_groups_have_documented_defaults_and_toggle(self):
         defaults = policy.parse_groups('')
@@ -163,8 +218,9 @@ class LatinPolicyRegressionTest(unittest.TestCase):
         # The scanner captures every group (enabling one later needs no rescan);
         # the XML route never points a Mono/rare-Han/disabled file at a proportional build.
         self.assertTrue(safe_physical_font_name('Interscaled-Bold.ttf', policy.ALL_GROUPS))
-        self.assertFalse(policy.xml_file_allowed('RobotoMono-Regular.ttf', 'LuoShuSlot-ui-400.ttf'))
-        self.assertTrue(policy.xml_file_allowed('RobotoMono-Regular.ttf', 'LuoShuMono-400.ttf'))
+        self.assertFalse(policy.xml_file_allowed('MitypeMonoVF.ttf', 'LuoShuSlot-ui-400.ttf'))
+        self.assertTrue(policy.xml_file_allowed('MitypeMonoVF.ttf', 'LuoShuMono-400.ttf'))
+        self.assertTrue(policy.xml_file_allowed('RobotoMono-Regular.ttf', 'LuoShuSlot-ui-400.ttf'))
         self.assertFalse(policy.xml_file_allowed('MiSansL3.otf', 'LuoShuSlot-ui-400.ttf'))
         self.assertFalse(policy.xml_file_allowed('C800.ttf', 'LuoShuSlot-ui-400.ttf', policy.parse_groups('')))
         self.assertTrue(policy.xml_file_allowed('Roboto-Regular.ttf', 'LuoShuSlot-ui-400.ttf'))
@@ -227,7 +283,9 @@ class LatinPolicyRegressionTest(unittest.TestCase):
         self.assertFalse(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 3}))
         self.assertFalse(current({'romKind': 'hyperos'}))
         self.assertFalse(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 4}))
-        self.assertTrue(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 5}))
+        # 6: code monospace re-captured; revision-5 inventories lack its stock metrics.
+        self.assertFalse(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 5}))
+        self.assertTrue(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 6}))
         self.assertFalse(current({'romKind': 'generic', 'hyperosCoverageRevision': 3,
                                   'scanSummary': {'fontSignatures': {'hyperos': ['MiSansVF.ttf']}}}))
 
