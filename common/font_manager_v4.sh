@@ -742,7 +742,8 @@ handle_action() {
             ;;
         reboot_device)
             printf '{"status":"ok","data":{"message":"正在重启手机"}}\n'
-            (svc power reboot 2>/dev/null || reboot 2>/dev/null) </dev/null >/dev/null 2>&1 &
+            # Foreground: the task supervisor reaps backgrounded children.
+            svc power reboot </dev/null >/dev/null 2>&1 || reboot </dev/null >/dev/null 2>&1
             ;;
         *) printf '{"status":"error","message":"未知字体管理操作"}\n' ;;
     esac

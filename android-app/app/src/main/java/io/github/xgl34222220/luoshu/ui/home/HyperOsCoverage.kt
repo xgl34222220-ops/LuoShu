@@ -14,6 +14,8 @@ internal data class HyperOsThemeState(
     val state: String = "none",
     val files: Int = 0,
     val userFiles: Int = 0,
+    /** Files in the theme dir that are LuoShu's own clone/payload (never a theme-store font). */
+    val luoshuFiles: Int = 0,
     val names: List<String> = emptyList(),
     val takeover: Boolean = false,
     val owned: Boolean = false,
@@ -132,6 +134,7 @@ internal fun parseHyperOsCoverageStatus(raw: String): HyperOsCoverageStatus {
             state = theme.optString("state", "none").ifBlank { "none" },
             files = theme.optInt("files", 0),
             userFiles = theme.optInt("userFiles", 0),
+            luoshuFiles = theme.optInt("luoshuFiles", 0),
             names = theme.optString("names").split(';').map { it.trim() }.filter { it.isNotEmpty() },
             takeover = theme.optBoolean("takeover", false),
             owned = theme.optBoolean("owned", false),
@@ -186,3 +189,121 @@ internal fun settingChangeMessage(setting: HyperOsSetting): String = when (setti
 
 internal val COVERAGE_SCOPE_NOTE =
     "微信、QQ、支付宝等应用内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内；洛书主模块不做 Hook。"
+
+// --- 选择应用定位 / 一键扫描 ----------------------------------------------------------------------
+
+/** One installed app (user or system) offered by the locator picker. */
+internal data class CoverageApp(
+    val packageName: String,
+    val label: String,
+    val system: Boolean,
+)
+
+/**
+ * Root fallback for the picker: `pm list packages` lines ("package:com.x"), used when the
+ * PackageManager list is filtered (HyperOS "获取应用列表" permission) or incomplete.
+ */
+internal const val COVERAGE_PACKAGE_LIST_COMMAND = "pm list packages 2>/dev/null || cmd package list packages 2>/dev/null"
+
+internal fun parsePmPackageList(raw: String): List<String> = raw.lineSequence()
+    .map { it.trim() }
+    .filter { it.startsWith("package:") }
+    .map { it.removePrefix("package:").substringBefore('=').trim() }
+    .filter { isValidCoveragePackage(it) }
+    .distinct()
+    .toList()
+
+/** PackageManager entries win (label/icon); root-only packages are added by name. */
+internal fun mergeCoverageApps(fromPackageManager: List<CoverageApp>, fromRoot: List<String>): List<CoverageApp> {
+    val byPackage = LinkedHashMap<String, CoverageApp>()
+    fromPackageManager.forEach { byPackage[it.packageName] = it }
+    fromRoot.forEach { name -> byPackage.getOrPut(name) { CoverageApp(name, name, system = true) } }
+    return byPackage.values.sortedBy { (if (it.system) "1" else "0") + it.label.lowercase() + "\u0000" + it.packageName }
+}
+
+/** Search by label or package name, case-insensitive. */
+internal fun filterCoverageApps(apps: List<CoverageApp>, query: String): List<CoverageApp> {
+    val needle = query.trim().lowercase()
+    return if (needle.isEmpty()) apps
+    else apps.filter { it.label.lowercase().contains(needle) || it.packageName.lowercase().contains(needle) }
+}
+
+internal data class CoverageScanItem(
+    val packageName: String,
+    val process: String,
+    val verdict: String,
+    val title: String,
+    val fixes: List<HyperOsSetting>,
+    val reasons: List<String>,
+)
+
+internal data class CoverageScanResult(
+    val verdict: String,
+    val scanned: Int,
+    val covered: Int,
+    val items: List<CoverageScanItem>,
+    val fixes: List<HyperOsSetting>,
+    val truncated: Boolean,
+    val weightLoss: Boolean,
+) {
+    val fixable: List<CoverageScanItem> get() = items.filter { it.fixes.isNotEmpty() }
+}
+
+internal fun coverageScanCommand(): String = "sh ${RootShell.quote(HYPEROS_COVERAGE_BRIDGE)} coverage_scan"
+
+internal fun hyperOsSettingForKey(key: String): HyperOsSetting? = HyperOsSetting.entries.firstOrNull { it.key == key }
+
+private fun org.json.JSONArray?.strings(): List<String> = buildList {
+    if (this@strings != null) for (i in 0 until this@strings.length()) add(this@strings.optString(i))
+}.filter { it.isNotBlank() }
+
+internal fun parseCoverageScan(raw: String): CoverageScanResult {
+    val data = bridgeData(raw)
+    val items = data.optJSONArray("items")
+    val parsed = buildList {
+        if (items != null) {
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                add(
+                    CoverageScanItem(
+                        packageName = item.optString("package"),
+                        process = item.optString("process").ifBlank { item.optString("package") },
+                        verdict = item.optString("verdict"),
+                        title = item.optString("title"),
+                        fixes = item.optJSONArray("fixes").strings().mapNotNull(::hyperOsSettingForKey),
+                        reasons = item.optJSONArray("reasons").strings(),
+                    ),
+                )
+            }
+        }
+    }
+    return CoverageScanResult(
+        verdict = data.optString("verdict"),
+        scanned = data.optInt("scanned", 0),
+        covered = data.optInt("covered", 0),
+        items = parsed,
+        fixes = data.optJSONArray("fixes").strings().mapNotNull(::hyperOsSettingForKey),
+        truncated = data.optBoolean("truncated", false),
+        weightLoss = data.optBoolean("weightLoss", false),
+    )
+}
+
+/** Settings a one-tap apply would actually change (already-on switches are skipped). */
+internal fun pendingScanFixes(scan: CoverageScanResult, status: HyperOsCoverageStatus): List<HyperOsSetting> =
+    scan.fixes.distinct().filter { !status.valueOf(it) }
+
+internal fun coverageScanSummary(scan: CoverageScanResult): String = when {
+    scan.verdict == "no-payload" -> "洛书当前没有生效的字体负载，先在字体库应用一款字体并重启。"
+    scan.items.isEmpty() -> "已检测 ${scan.scanned} 个正在运行的进程，都在使用洛书字体。"
+    else -> "已检测 ${scan.scanned} 个正在运行的进程：${scan.covered} 个已使用洛书字体，" +
+        "${scan.items.size} 个没有（可自动处理 ${scan.fixable.size} 个）。"
+} + (if (scan.weightLoss) "当前为静态字体，中粗/粗体会显示为常规粗细。" else "") +
+    (if (scan.truncated) "进程较多，本次只检测了一部分。" else "")
+
+internal fun scanFixMessage(applied: List<HyperOsSetting>, requested: List<HyperOsSetting>): String {
+    if (applied.isEmpty()) return "应用失败，请确认已授予 Root 权限后重试。"
+    val names = applied.joinToString("、") { it.title }
+    val effect = if (applied.any { it != HyperOsSetting.THEME_TAKEOVER }) "重新应用当前字体并重启后生效。" else "重启后生效。"
+    val rest = if (applied.size < requested.size) "其余设置未能保存，请重试。" else ""
+    return "已打开：$names。$rest$effect"
+}
