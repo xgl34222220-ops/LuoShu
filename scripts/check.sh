@@ -327,6 +327,13 @@ python3 "$ROOT/scripts/google_font_guard_resume_test.py"
 python3 "$ROOT/scripts/google_font_provider_journal_test.py"
 python3 "$ROOT/scripts/hyperos_theme_font_bridge_test.py"
 python3 "$ROOT/scripts/hyperos_webview_route_test.py"
+# HyperOS coverage: single-source filename policy (generated shell blocks must be
+# current), optional slot groups, Mono/MiSansL3 kept stock, theme takeover,
+# v4 early route hook, App coverage bridge and the 未覆盖界面定位 helper.
+python3 "$ROOT/common/hyperos_physical_policy.py" --check
+python3 "$ROOT/scripts/hyperos_latin_policy_regression_test.py"
+python3 "$ROOT/scripts/hyperos_theme_takeover_test.py"
+python3 "$ROOT/scripts/font_coverage_locator_test.py"
 python3 "$ROOT/scripts/status_provider_hotfix_test.py"
 sh "$ROOT/scripts/full_backup_root_test.sh"
 python3 "$ROOT/scripts/legacy_mix_status_lifecycle_test.py"

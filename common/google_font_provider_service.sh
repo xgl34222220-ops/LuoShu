@@ -57,6 +57,9 @@ provider_restore() {
     if [ -f "$MODDIR/common/hyperos_webview_route.sh" ]; then
         provider_run "$MODDIR/common/hyperos_webview_route.sh" restore || _provider_restore_rc=1
     fi
+    if [ -f "$MODDIR/common/hyperos_theme_takeover.sh" ]; then
+        provider_run "$MODDIR/common/hyperos_theme_takeover.sh" restore || _provider_restore_rc=1
+    fi
     return "$_provider_restore_rc"
 }
 

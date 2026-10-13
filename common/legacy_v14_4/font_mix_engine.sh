@@ -273,7 +273,7 @@ populate_hyperos_payload() (
     SYSTEM_FONTS_DIR="$1"; _composite="$2"
     _font_store_reset "$SYSTEM_FONTS_DIR" || exit 1
     _ma=$(_font_anchor "$_composite" "$SYSTEM_FONTS_DIR" mix-composite) || exit 1
-    alias_core "$_ma" MiSansVF.ttf MiSansVF_Overlay.ttf MiSansTCVF.ttf MiSansL3.otf MiSansLatinVF.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf || exit 1
+    alias_core "$_ma" MiSansVF.ttf MiSansVF_Overlay.ttf MiSansTCVF.ttf MiSansLatinVF.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf || exit 1
     alias_existing_list "$_ma" Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf
     verify_core_files "$SYSTEM_FONTS_DIR" MiSansVF.ttf MiSansLatinVF.ttf Roboto-Regular.ttf 400.ttf 700.ttf || exit 1
 )

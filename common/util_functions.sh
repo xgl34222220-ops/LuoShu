@@ -357,3 +357,19 @@ for _luof_guard in "${MODULE_DIR:-}/common/boot_loop_guard.sh" "${MODDIR:-}/comm
     break
 done
 unset _luof_guard
+
+# v4 runtime only: HyperOS MiSansVF_Overlay route (and optional theme takeover)
+# before zygote. Reached after the boot-loop guard, which exits in safe mode.
+# The helper returns at once on the legacy route, on other ROMs and when the
+# module is disabled/default.
+case "${0##*/}" in
+    post-fs-data.sh)
+        for _luof_routes in "${MODULE_DIR:-}/common/hyperos_boot_routes.sh" "${MODDIR:-}/common/hyperos_boot_routes.sh"; do
+            [ "$_luof_routes" != "/common/hyperos_boot_routes.sh" ] || continue
+            [ -f "$_luof_routes" ] || continue
+            ( . "$_luof_routes"; luoshu_hyperos_boot_routes_ensure ) >/dev/null 2>&1 || true
+            break
+        done
+        unset _luof_routes
+        ;;
+esac

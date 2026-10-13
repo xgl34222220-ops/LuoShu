@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Experimental HyperOS seed-XML rewrite (default OFF).
+"""HyperOS seed-XML rewrite (default ON for HyperOS, ``enabled=0`` turns it off).
 
 HyperOS exposes ``/system/etc/fonts.xml`` and ``font_fallback.xml`` as symlinks
 to ``/data/system/fonts/theme_webview/``. init copies those files from the
@@ -8,12 +8,28 @@ switches between ``hyper_*`` and ``miui_*`` seeds. A per-file bind of the
 logical XML therefore lands on a ``/data`` copy that init or the framework can
 replace.
 
-When ``config/hyperos_source_xml.conf`` contains ``enabled=1`` this step adds
-per-slot rewritten copies of the system_ext seeds to LuoShu's staged overlay
-tree, so the existing private self-mount overlays them like every other staged
-XML. Only the file-name text of ``<font>`` nodes whose slot LuoShu already
-replaced is changed; every other byte of the seed stays identical. Any parse,
-alignment or validation problem makes the whole step a no-op.
+Unless ``config/hyperos_source_xml.conf`` contains an exact ``enabled=0`` line,
+this step adds per-slot rewritten copies of the system_ext seeds to LuoShu's
+staged overlay tree, so the existing private self-mount overlays them like every
+other staged XML. It runs only where seed XML exists (HyperOS/MIUI), so other
+ROMs are unaffected. The same rewrite covers ``/product/etc/fonts_customization.xml``
+(AOSP OEM customization) and ``/system/etc/{fonts,font_fallback}.xml`` when they
+are regular files the main renderer did not stage; on HyperOS 2+ those two are
+symlinks to ``/data/system/fonts/theme_webview/`` that init fills from the
+rewritten seeds, so they are reported and left alone.
+
+Only the file-name text of ``<font>`` nodes whose slot LuoShu already replaced
+is changed, plus (when the selected font really covers CJK) the plain
+single-face fonts of ``lang="zh-Hans|zh-Hant|zh-HK"`` families, routed to the
+default sans-serif build of the nearest weight. Every other byte stays
+identical. Files the physical policy keeps stock (Mono/tabular, MiSansL3,
+disabled optional groups) are never pointed at a proportional build.
+
+After rendering, every output is re-parsed and checked: structure and
+attributes unchanged, every family still complete with non-empty file names,
+every rewritten name present in the staged tree, and no stock reference that
+resolved before now unresolved. Any parse, alignment or validation problem
+makes the whole step a no-op, so the ROM XML is used unchanged.
 """
 from __future__ import annotations
 
@@ -26,7 +42,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Callable
 
-SCHEMA = "hyperos-source-xml-v1"
+try:
+    import hyperos_physical_policy as physical_policy
+except ImportError:  # pragma: no cover - module layout always ships it
+    physical_policy = None
+
+SCHEMA = "hyperos-source-xml-v2"
 SEED_PATTERNS = (
     "hyper_fonts*.xml",
     "hyper_font_fallback*.xml",
@@ -35,6 +56,15 @@ SEED_PATTERNS = (
 )
 LOGICAL_SEED_ETC = "/system_ext/etc"
 LOGICAL_SYSTEM_XMLS = ("fonts.xml", "font_fallback.xml")
+LOGICAL_PRODUCT_CUSTOMIZATION = "/product/etc/fonts_customization.xml"
+# lang= tokens routed to the user font when it covers CJK, with the minimum
+# number of CJK Unified Ideographs the font must carry (GB2312 ~6.7k, Big5 ~13k).
+CJK_LANG_MIN_HAN = {
+    "zh-Hans": 6000, "zh-CN": 6000, "zh-SG": 6000,
+    "zh-Hant": 13000, "zh-TW": 13000, "zh-HK": 13000, "zh-MO": 13000,
+    # AOSP declares Traditional Chinese as lang="zh-Hant zh-Bopo".
+    "zh-Bopo": 13000,
+}
 DATA_SEED_PREFIX = "/data/system/fonts/theme_webview/"
 _LUOSHU_MARKER = re.compile(rb"LuoShu(?:Mono|Slot)?-")
 _SAFE_GENERATED = re.compile(r"^LuoShu[A-Za-z0-9._-]*\.(?:ttf|otf)$")
@@ -58,15 +88,16 @@ def config_path() -> Path:
 
 
 def enabled() -> bool:
-    """Only an exact ``enabled=1`` line turns the experiment on.
+    """On by default; only an exact ``enabled=0`` line turns it off.
 
-    Same rule as ``grep -qx 'enabled=1'`` in device_font_cache.sh.
+    Same rule as ``grep -qx 'enabled=0'`` in device_font_cache.sh. The step is a
+    no-op wherever no HyperOS/MIUI seed XML exists.
     """
     try:
         text = config_path().read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return False
-    return any(line == "enabled=1" for line in text.split("\n"))
+        return True
+    return not any(line == "enabled=0" for line in text.split("\n"))
 
 
 def _log(event: dict[str, Any]) -> None:
@@ -89,6 +120,31 @@ def _seed_actual_root() -> Path:
 def _system_etc_root() -> Path:
     raw = os.environ.get("LUOSHU_HYPEROS_SYSTEM_ETC_ROOT", "").strip()
     return Path(raw) if raw else Path("/system/etc")
+
+
+def _product_etc_root() -> Path:
+    raw = os.environ.get("LUOSHU_HYPEROS_PRODUCT_ETC_ROOT", "").strip()
+    return Path(raw) if raw else Path("/product/etc")
+
+
+def _font_root(partition: str) -> Path:
+    """Stock font directory an XML in ``partition`` resolves file names against."""
+    raw = os.environ.get(f"LUOSHU_{partition.upper()}_FONTS_ROOT", "").strip()
+    return Path(raw) if raw else Path(f"/{partition}/fonts")
+
+
+def discover_extra_sources() -> list[tuple[str, Path, str]]:
+    """Regular (non-seeded) system XML and the product OEM customization XML."""
+    found: list[tuple[str, Path, str]] = []
+    system_etc = _system_etc_root()
+    for name in LOGICAL_SYSTEM_XMLS:
+        path = system_etc / name
+        if path.is_file() and not path.is_symlink():
+            found.append((f"/system/etc/{name}", path, "system"))
+    product = _product_etc_root() / Path(LOGICAL_PRODUCT_CUSTOMIZATION).name
+    if product.is_file() and not product.is_symlink():
+        found.append((LOGICAL_PRODUCT_CUSTOMIZATION, product, "product"))
+    return found
 
 
 def link_chain(path: Path, logical: str) -> dict[str, Any]:
@@ -128,7 +184,8 @@ def stock_seed_input(template: dict[str, Any], logical: str, live: Path) -> tupl
         if snapshot.is_file():
             return snapshot, "template-snapshot"
     state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
-    lower = state_root / "lower" / "system_ext-etc" / Path(logical).name
+    partition = logical.strip("/").split("/", 1)[0]
+    lower = state_root / "lower" / f"{partition}-etc" / Path(logical).name
     if lower.is_file():
         return lower, "self-mount-lower"
     return live, "live"
@@ -207,36 +264,120 @@ def _pair_name(seed_name: str) -> str:
     return "font_fallback.xml" if "fallback" in seed_name else "fonts.xml"
 
 
+def _family_attrs(root: ET.Element) -> dict[int, dict[str, str]]:
+    """font ordinal -> attributes of its nearest enclosing <family>."""
+    parents = {child: parent for parent in root.iter() for child in list(parent)}
+    result: dict[int, dict[str, str]] = {}
+    for ordinal, (node, _name) in enumerate(_font_nodes(root)):
+        current = parents.get(node)
+        while current is not None and _local(current.tag) != "family":
+            current = parents.get(current)
+        result[ordinal] = dict(current.attrib) if current is not None else {}
+    return result
+
+
+def _policy_allows(declared: str, generated: str, monospace_build: bool = False) -> bool:
+    if physical_policy is None:
+        return True
+    return physical_policy.xml_file_allowed(declared, generated, monospace_build=monospace_build)
+
+
+def _monospace_build(slots: list[dict[str, Any]]) -> bool:
+    """Per-slot builds with a mono/clock role keep stock advances exactly."""
+    return bool(slots) and all(
+        isinstance(slot.get("roles"), list) and {"mono", "clock"} & set(slot["roles"])
+        for slot in slots)
+
+
+def cjk_lang_min(attrs: dict[str, str]) -> int:
+    """Strictest Han requirement of a family's zh lang tags, 0 when not a zh family."""
+    if attrs.get("variant") or attrs.get("fallbackFor") or attrs.get("fallbackfor"):
+        return 0
+    tags = re.split(r"[\s,]+", attrs.get("lang", "").strip())
+    needs = [CJK_LANG_MIN_HAN[tag] for tag in tags if tag in CJK_LANG_MIN_HAN]
+    # A family mixing zh with another script (e.g. "zh-Hans ja") is not routed.
+    if not needs or len(needs) != len([tag for tag in tags if tag]):
+        return 0
+    return max(needs)
+
+
+def cjk_route_targets(slots: list[dict[str, Any]], han_count: Callable[[str], int]) -> dict[int, tuple[str, int]]:
+    """weight -> (generated sans-serif build, its Han count) for routing zh families."""
+    targets: dict[int, tuple[str, int]] = {}
+    for slot in slots:
+        family = _normalize(str(slot.get("familyNormalized") or slot.get("family") or ""))
+        generated = str(slot.get("generatedFile") or "")
+        if family != "sans-serif" or not generated or not _SAFE_GENERATED.match(generated):
+            continue
+        if str(slot.get("style", "normal")).lower() != "normal":
+            continue
+        weight = _weight(slot.get("weight", "400"))
+        if weight in targets:
+            continue
+        count = han_count(generated)
+        if count > 0:
+            targets[weight] = (generated, count)
+    return targets
+
+
 def plan_mapping(
     root: ET.Element,
     slots: list[dict[str, Any]],
     seed_name: str,
+    cjk_targets: dict[int, tuple[str, int]] | None = None,
 ) -> tuple[dict[int, str], list[str]]:
     """Return font-node ordinal -> generated filename, plus ambiguity notes."""
     index = _slot_index(slots)
     pair = _pair_name(seed_name)
     mapping: dict[int, str] = {}
     notes: list[str] = []
+    families = _family_attrs(root)
     for ordinal, (node, family) in enumerate(_font_nodes(root)):
         attrs = dict(node.attrib)
+        declared = (node.text or "").strip()
         key = (
             _normalize(family),
             _weight(attrs.get("weight")),
             attrs.get("style", "normal").lower(),
             _index(attrs),
-            (node.text or "").strip(),
+            declared,
             _postscript(attrs),
         )
         candidates = index.get(key, [])
-        if not candidates:
+        if candidates:
+            paired = [s for s in candidates if Path(str(s.get("sourceXml", ""))).name == pair]
+            chosen = paired or candidates
+            names = sorted({str(s["generatedFile"]) for s in chosen})
+            if len(names) != 1:
+                notes.append(f"ambiguous:{family}:{key[1]}:{key[4]}")
+                continue
+            if not _policy_allows(declared, names[0], _monospace_build(chosen)):
+                notes.append(f"policy-kept:{declared}")
+                continue
+            mapping[ordinal] = names[0]
             continue
-        paired = [s for s in candidates if Path(str(s.get("sourceXml", ""))).name == pair]
-        chosen = paired or candidates
-        names = sorted({str(s["generatedFile"]) for s in chosen})
-        if len(names) != 1:
-            notes.append(f"ambiguous:{family}:{key[1]}:{key[4]}")
+        # zh-Hans/zh-Hant/zh-HK families: route to the user font only when it
+        # really carries enough Han for that script.
+        need = cjk_lang_min(families.get(ordinal, {}))
+        if not need or not cjk_targets:
             continue
-        mapping[ordinal] = names[0]
+        if (key[2] != "normal" or key[3] != 0 or "index" in attrs or not declared
+                or declared.lower().endswith((".ttc", ".otc"))):
+            notes.append(f"cjk-kept:{declared}")
+            continue
+        weight = key[1]
+        nearest = min(cjk_targets, key=lambda value: (abs(value - weight), value))
+        generated, count = cjk_targets[nearest]
+        if count < need:
+            notes.append(f"cjk-coverage-low:{declared}:{count}<{need}")
+            continue
+        if (physical_policy is not None
+                and physical_policy.classify(declared) not in ("core", "unlisted")) \
+                or not _policy_allows(declared, generated):
+            notes.append(f"policy-kept:{declared}")
+            continue
+        mapping[ordinal] = generated
+        notes.append(f"cjk-routed:{declared}->{generated}")
     return mapping, notes
 
 
@@ -356,6 +497,53 @@ def validate_rewrite(original: bytes, rewritten: bytes, mapping: dict[int, str])
         raise SourceXmlError("mapped rewrite produced no change")
 
 
+def _font_texts(root: ET.Element) -> list[str]:
+    return [(node.text or "").strip() for node, _family in _font_nodes(root)]
+
+
+def validate_references(
+    original: bytes,
+    rewritten: bytes,
+    stage: Path,
+    partition: str,
+    stock_fonts: Path,
+) -> None:
+    """Strict post-render check: families complete, every reference resolvable.
+
+    A rewritten name must exist in the staged ``<partition>/fonts``. A stock name
+    must resolve as before; names that were already unresolved on this ROM are
+    tolerated (OEM lists sometimes name optional files) but never newly created.
+    """
+    old_root = _parse_bytes(original)
+    new_root = _parse_bytes(rewritten)
+    old_families = [f for f in old_root.iter() if _local(f.tag) == "family"]
+    new_families = [f for f in new_root.iter() if _local(f.tag) == "family"]
+    if len(old_families) != len(new_families):
+        raise SourceXmlError("family count changed")
+    for old, new in zip(old_families, new_families):
+        old_fonts = [n for n in old.iter() if _local(n.tag) == "font"]
+        new_fonts = [n for n in new.iter() if _local(n.tag) == "font"]
+        if len(old_fonts) != len(new_fonts):
+            raise SourceXmlError(f"family {old.attrib.get('name', '')!r} lost fonts")
+        if any(not (n.text or "").strip() for n, o in zip(new_fonts, old_fonts) if (o.text or "").strip()):
+            raise SourceXmlError(f"family {old.attrib.get('name', '')!r} has an empty font")
+    staged_fonts = stage / partition / "fonts"
+
+    def resolves(name: str) -> bool:
+        if not name or "/" in name or name in (".", ".."):
+            return False
+        return (staged_fonts / name).is_file() or (stock_fonts / name).exists()
+
+    before = {name for name in _font_texts(old_root) if not resolves(name)}
+    for old_name, new_name in zip(_font_texts(old_root), _font_texts(new_root)):
+        if old_name == new_name:
+            if not resolves(new_name) and new_name not in before:
+                raise SourceXmlError(f"stock reference {new_name} no longer resolves")
+            continue
+        if not _SAFE_GENERATED.match(new_name) or not (staged_fonts / new_name).is_file():
+            raise SourceXmlError(f"rewritten reference {new_name} missing from staged {partition}/fonts")
+
+
 def _line_swap_only(old: bytes, new: bytes, pairs: dict[bytes, set[bytes]], depth: int = 0) -> bool:
     """True when ``new`` equals ``old`` with some stock names swapped for their generated names."""
     if old == new:
@@ -375,6 +563,27 @@ def _line_swap_only(old: bytes, new: bytes, pairs: dict[bytes, set[bytes]], dept
     return False
 
 
+def _han_counter(payload_root: Path) -> Callable[[str], int]:
+    """Count CJK Unified Ideographs (U+4E00..U+9FFF) in a generated build."""
+    cache: dict[str, int] = {}
+
+    def count(name: str) -> int:
+        if name in cache:
+            return cache[name]
+        total = 0
+        try:
+            from fontTools.ttLib import TTFont  # type: ignore
+            with TTFont(payload_root / "fonts" / name, lazy=True, fontNumber=0) as font:
+                cmap = font.getBestCmap() or {}
+                total = sum(1 for point in cmap if 0x4E00 <= point <= 0x9FFF)
+        except Exception:  # missing fontTools or unreadable font: never route
+            total = 0
+        cache[name] = total
+        return total
+
+    return count
+
+
 def apply(
     template: dict[str, Any],
     slots: list[dict[str, Any]],
@@ -382,6 +591,7 @@ def apply(
     stage: Path,
     copied: dict[tuple[str, str], Path],
     copy_generated: Callable[..., Path],
+    han_count: Callable[[str], int] | None = None,
 ) -> dict[str, Any]:
     """Stage rewritten seeds. Never raises; on any failure nothing is left behind."""
     system_etc = _system_etc_root()
@@ -390,6 +600,7 @@ def apply(
         "status": "skipped",
         "links": [link_chain(system_etc / name, f"/system/etc/{name}") for name in LOGICAL_SYSTEM_XMLS],
         "seeds": [],
+        "extra": [],
     }
     written: list[Path] = []
     added_fonts: list[tuple[str, str]] = []
@@ -399,41 +610,50 @@ def apply(
             report["reason"] = "no-seed-xml"
             _log(report)
             return report
-        planned: list[tuple[str, bytes, dict[int, str], str]] = []
-        for logical, live in seeds:
+        cjk_targets = cjk_route_targets(slots, han_count or _han_counter(payload_root))
+        report["cjkRouting"] = {str(weight): {"file": name, "han": count}
+                                for weight, (name, count) in sorted(cjk_targets.items())}
+        sources: list[tuple[str, Path, str, bool]] = [
+            (logical, live, "system", True) for logical, live in seeds]
+        sources += [(logical, live, partition, False)
+                    for logical, live, partition in discover_extra_sources()]
+        planned: list[tuple[str, bytes, bytes, dict[int, str], str, str]] = []
+        for logical, live, partition, is_seed in sources:
+            output = stage / logical.lstrip("/")
+            entry: dict[str, Any] = {"source": logical, "link": link_chain(live, logical)}
+            (report["seeds"] if is_seed else report["extra"]).append(entry)
+            if output.exists():
+                if is_seed:
+                    raise SourceXmlError(f"{logical} already staged by the main renderer")
+                entry["skipped"] = "staged-by-main-renderer"
+                continue
             source, origin = stock_seed_input(template, logical, live)
+            entry["input"] = origin
             raw = source.read_bytes()
             if _LUOSHU_MARKER.search(raw):
                 raise SourceXmlError(f"{logical} is not a stock view ({origin})")
             root = _parse_bytes(raw)
-            mapping, notes = plan_mapping(root, slots, Path(logical).name)
-            entry: dict[str, Any] = {
-                "source": logical,
-                "input": origin,
-                "changedFonts": len(mapping),
-                "notes": notes,
-                "link": link_chain(live, logical),
-            }
-            report["seeds"].append(entry)
+            mapping, notes = plan_mapping(root, slots, Path(logical).name, cjk_targets)
+            entry["changedFonts"] = len(mapping)
+            entry["notes"] = notes
             if not mapping:
                 continue
             rewritten = rewrite_text(raw, root, mapping)
             validate_rewrite(raw, rewritten, mapping)
-            output = stage / logical.lstrip("/")
-            if output.exists():
-                raise SourceXmlError(f"{logical} already staged by the main renderer")
-            planned.append((logical, rewritten, mapping, str(output)))
+            planned.append((logical, raw, rewritten, mapping, str(output), partition))
         if not planned:
             report["reason"] = "no-mapped-slots"
             _log(report)
             return report
-        for _logical, _rewritten, mapping, _output in planned:
+        for _logical, _raw, _rewritten, mapping, _output, partition in planned:
             for name in sorted(set(mapping.values())):
-                key = ("system", name)
+                key = (partition, name)
                 if key not in copied:
-                    copy_generated(payload_root, stage, "system", name, copied)
+                    copy_generated(payload_root, stage, partition, name, copied)
                     added_fonts.append(key)
-        for _logical, rewritten, _mapping, output_raw in planned:
+        for logical, raw, rewritten, _mapping, _output, partition in planned:
+            validate_references(raw, rewritten, stage, partition, _font_root(partition))
+        for _logical, _raw, rewritten, _mapping, output_raw, _partition in planned:
             output = Path(output_raw)
             output.parent.mkdir(parents=True, exist_ok=True)
             temporary = output.with_name(f".{output.name}.tmp.{os.getpid()}")
@@ -443,6 +663,8 @@ def apply(
             written.append(output)
             if output.read_bytes() != rewritten:
                 raise SourceXmlError(f"{output} verification failed")
+            # Final gate: what is on disk must parse.
+            _parse_bytes(output.read_bytes())
         report["status"] = "applied"
         report["stagedXml"] = [str(path.relative_to(stage)) for path in written]
         _log(report)

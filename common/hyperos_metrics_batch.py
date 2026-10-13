@@ -25,14 +25,29 @@ from font_inventory import (LOGICAL_FONT_ROOTS, _generic_font_name_candidate,
 from font_inventory_scan import _is_ui_family, _safe_dynamic_partition_name
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
-from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name
+from hyperos_physical_policy import (MAPPER_FAMILY_PREFIXES, classify as policy_classify,
+                                     enabled_groups, preserved_dynamic_alias,
+                                     safe_physical_font_name)
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
-# Families the HyperOS physical mappers (legacy and full coverage) write aliases for.
-MAPPER_FAMILY_PREFIXES = ("MiSans", "XiaomiSans", "MiLanPro", "Mitype", "MiClock",
-                          "AndroidClock", "Roboto", "GoogleSans", "SourceSansPro",
-                          "NotoSans", "DroidSans")
+# MAPPER_FAMILY_PREFIXES (families the HyperOS physical mappers write aliases
+# for) comes from hyperos_physical_policy.py, the single filename source.
+
+
+def policy_keeps_stock(name: str, groups: frozenset | None = None) -> bool:
+    """Names the physical policy always keeps stock, or an optional group that is off.
+
+    Inventory completion reuses measured stock slots by their own evidence; it
+    must still never hand a monospace face, MiSansL3 or a disabled group a
+    proportional user font.
+    """
+    kind = policy_classify(name)
+    if kind in ("mono", "rare-han"):
+        return True
+    if kind in ("miui_ex", "misans_ext", "lockscreen_styles"):
+        return kind not in (enabled_groups() if groups is None else groups)
+    return False
 
 
 def weight_for_name(name: str) -> int:
@@ -137,8 +152,10 @@ def inventory_completion_jobs(module: Path, stage: Path, inventory: dict, seen: 
     resolved = stage.resolve()
     roots = inventory_font_roots(module)
     jobs = []
+    groups = enabled_groups()
     for logical, slot in sorted(indexed.items()):
         if (not isinstance(logical, str) or logical in seen or
+                policy_keeps_stock(Path(logical).name, groups) or
                 preserved_dynamic_alias(inventory, logical) or
                 not inventory_completion_slot(slot, logical)):
             continue

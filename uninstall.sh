@@ -24,7 +24,7 @@ if type luoshu_stop_module_tasks >/dev/null 2>&1; then
         fi
     fi
 fi
-for _bridge in google_font_provider_bridge.sh hyperos_theme_font_bridge.sh hyperos_webview_route.sh; do
+for _bridge in google_font_provider_bridge.sh hyperos_theme_font_bridge.sh hyperos_webview_route.sh hyperos_theme_takeover.sh; do
     [ ! -f "$MODDIR/common/$_bridge" ] || MODDIR="$MODDIR" sh "$MODDIR/common/$_bridge" restore >/dev/null 2>&1 || true
 done
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"

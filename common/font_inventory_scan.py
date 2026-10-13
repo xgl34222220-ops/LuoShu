@@ -18,14 +18,17 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import font_inventory as base
-from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
+from hyperos_physical_policy import (ALL_GROUPS as HYPEROS_ALL_GROUPS,
+                                    PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
 SCANNER_REVISION = 5
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
-HYPEROS_COVERAGE_REVISION = 4
+# 5: HyperOS 3 slot groups (MiuiEx/Miui, MiSans Rounded/C, MiLanVF, lock screen
+#    styles) captured; Mono faces and MiSansL3 retired from the physical policy.
+HYPEROS_COVERAGE_REVISION = 5
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
@@ -619,7 +622,9 @@ def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[ba
         if root.partition not in HYPEROS_PARTITIONS or not root.actual.is_dir():
             continue
         for actual in sorted(root.actual.iterdir(), key=lambda item: item.name.lower()):
-            if not safe_physical_font_name(actual.name):
+            # Capture every optional group so enabling one later needs no rescan;
+            # mappers apply config/hyperos_slot_groups.conf.
+            if not safe_physical_font_name(actual.name, HYPEROS_ALL_GROUPS):
                 continue
             logical = base._logical_path(root, actual)
             if (logical == DYNAMIC_OVERLAY_PATH and actual.is_symlink()
@@ -882,7 +887,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     retired_physical_slots = {
         path for path, entry in (existing or {}).get("slots", {}).items()
         if hyperos and entry.get("source") == "hyperos-physical"
-        and path not in slots and not safe_physical_font_name(Path(path).name)
+        and path not in slots
+        and not safe_physical_font_name(Path(path).name, HYPEROS_ALL_GROUPS)
     }
     preserved_paths = set(dynamic_aliases) | retired_physical_slots
     retired_absent_upgrade_slots: set[str] = set()

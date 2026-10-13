@@ -319,7 +319,7 @@ copy_as_coloros() {
 #   权重变体，虽然真机上目前只有 200/300/400/700.ttf 四个文件是真实存在的，
 #   但为兼容其他机型/未来版本，10个粗细全部生成
 get_all_hyperos_files() {
-    echo "MiSansVF.ttf MiSansVF_Overlay.ttf MiSansLatinVF.ttf MiSansTCVF.ttf MiSansL3.otf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf"
+    echo "MiSansVF.ttf MiSansVF_Overlay.ttf MiSansLatinVF.ttf MiSansTCVF.ttf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf"
 }
 
 # 旧版本曾把正体用户字体写进 Roboto 斜体槽：斜体文字变成正体，且这些别名不在
@@ -393,7 +393,7 @@ copy_as_hyperos() {
                 fi
             fi
             if [ -n "$rb" ]; then
-                for dest_name in "Roboto-${rb}.ttf"; do
+                for dest_name in Roboto-"${rb}".ttf; do
                     _rom_exact_target_exists "$dest_name" || continue
                     if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
                         weight_count=$((weight_count + 1))

@@ -26,6 +26,24 @@ _lwr_module() {
     printf '%s\n' "${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}}"
 }
 
+# The legacy physical payload always carries a processed Roboto-Regular.ttf. A
+# v4 per-device payload may only carry LuoShuSlot-* builds plus its font store,
+# so fall back to the store's regular/composite source (same order as the theme
+# bridge) instead of skipping the route on the v4 runtime.
+_lwr_default_payload() {
+    for _lwr_dp in "$1/Roboto-Regular.ttf" \
+                   "$1/.luoshu-font-store/mix-composite.font" \
+                   "$1/.luoshu-font-store/regular.font" \
+                   "$1/.luoshu-font-store/compact-regular.font" \
+                   "$1/400.ttf"; do
+        if [ -s "$_lwr_dp" ]; then
+            printf '%s\n' "$_lwr_dp"
+            return 0
+        fi
+    done
+    printf '%s\n' "$1/Roboto-Regular.ttf"
+}
+
 _lwr_init() {
     LWR_MODULE=$(_lwr_module)
     LWR_ALIAS="${LUOSHU_WEBVIEW_ROUTE_ALIAS:-/system/fonts/MiSansVF_Overlay.ttf}"
@@ -40,7 +58,7 @@ _lwr_init() {
     LWR_THEME_PLACEHOLDER_MAX_BYTES="${LUOSHU_WEBVIEW_ROUTE_THEME_PLACEHOLDER_MAX_BYTES:-65536}"
     LWR_MOUNTINFO="${LUOSHU_WEBVIEW_ROUTE_MOUNTINFO:-/proc/self/mountinfo}"
     LWR_BOOT_ID_FILE="${LUOSHU_WEBVIEW_ROUTE_BOOT_ID:-/proc/sys/kernel/random/boot_id}"
-    LWR_PAYLOAD="${LUOSHU_WEBVIEW_ROUTE_PAYLOAD:-$LWR_MODULE/.luoshu-payload/system/fonts/Roboto-Regular.ttf}"
+    LWR_PAYLOAD="${LUOSHU_WEBVIEW_ROUTE_PAYLOAD:-$(_lwr_default_payload "$LWR_MODULE/.luoshu-payload/system/fonts")}"
     LWR_CACHE="$LWR_MODULE/config/hyperos-webview-route"
     LWR_JOURNAL="$LWR_MODULE/config/hyperos-webview-route.conf"
     LWR_LOCK="$LWR_MODULE/config/.hyperos-webview-route.lock"
