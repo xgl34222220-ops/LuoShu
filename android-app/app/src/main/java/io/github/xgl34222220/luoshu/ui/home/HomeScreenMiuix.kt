@@ -254,8 +254,8 @@ internal fun HomeScreenMiuix(
                 }
             }
         }
-        // HyperOS only: theme-store font hint and 未覆盖界面定位. The item exists
-        // only after the module reported a HyperOS device, so other layouts are unchanged.
+        // 未覆盖界面定位 on every ROM (ColorOS/OxygenOS, AOSP-like, others) once the module
+        // answered; the theme-store hint and HyperOS 覆盖设置 inside stay HyperOS-only.
         if (showHyperOsCoverage) {
             item(key = "hyperos-coverage") {
                 hyperOsCoverageContent()

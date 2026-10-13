@@ -15,6 +15,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 
 from fontTools.ttLib import TTFont
 from fontTools import subset
@@ -231,11 +232,17 @@ def build_collections(module: Path, stage: Path, names: list[str],
                     os.utime(cached)
                     link_copy(cached, destination)
                 else:
+                    started = time.monotonic()
                     report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
                                               source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
                                               allow=allow)
                     report = {'key': key, 'stockFaces': report['stockFaces'], 'outputSha256': report['outputSha256'],
-                              'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces'])}
+                              'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces']),
+                              'retainedSlots': {reason: max((face.get(field, 0) for face in report['faces']), default=0)
+                                                for reason, field in (('conflict', 'retainedConflictSlots'),
+                                                                      ('outOfFrame', 'retainedOutOfFrameSlots'))},
+                              'buildSeconds': round(time.monotonic() - started, 1),
+                              'stockBytes': stock.stat().st_size, 'outputBytes': destination.stat().st_size}
                     try:  # caching is an optimization; a failure never touches the staged result
                         cache_dir.mkdir(parents=True, exist_ok=True)
                         temporary = cached.with_name(cached.name + f'.tmp.{os.getpid()}')
@@ -250,7 +257,9 @@ def build_collections(module: Path, stage: Path, names: list[str],
                     except OSError:
                         pass
                 done.append({'slot': logical, 'mode': 'collection', 'stockFaces': report['stockFaces'],
-                             'compiledFaces': report['compiledFaces'], 'cached': cache_hit})
+                             'compiledFaces': report['compiledFaces'], 'cached': cache_hit,
+                             **{field: report[field] for field in ('retainedSlots', 'buildSeconds', 'stockBytes', 'outputBytes')
+                                if field in report}})
             except Exception as error:  # keep the ROM collection; report why
                 destination.unlink(missing_ok=True)
                 skipped[logical] = f'{type(error).__name__}: {error}'

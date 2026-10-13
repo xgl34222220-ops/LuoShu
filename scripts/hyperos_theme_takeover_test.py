@@ -314,8 +314,43 @@ class CoverageBridgeTest(_Fixture):
 
     def test_app_bridge_dispatches_coverage_commands(self):
         text = (ROOT / 'common/app_bridge.sh').read_text()
-        for command in ('hyperos_coverage_status', 'hyperos_coverage_set', 'coverage_locate'):
+        for command in ('hyperos_coverage_status', 'hyperos_coverage_set', 'coverage_locate',
+                        'coverage_scan', 'coverage_export'):
             self.assertIn(command, text)
+        self.assertNotIn('HyperOS 覆盖组件不可用', text)
+
+    def coloros_bridge(self, *args, **extra):
+        self.command('getprop', '#!/bin/sh\n[ "$1" = ro.build.version.oplusrom ] && echo V16.0.0\n')
+        out = subprocess.run(['sh', str(ROOT / 'common/hyperos_coverage_bridge.sh'), *args],
+                             env={**self.env, 'LUOSHU_COVERAGE_PYTHON': sys.executable, **extra},
+                             capture_output=True, text=True, timeout=60).stdout
+        return json.loads(out)
+
+    def test_coloros_status_locate_and_scan_work_without_hyperos(self):
+        data = self.coloros_bridge('status')['data']
+        self.assertEqual((data['hyperos'], data['rom']), (False, 'coloros'))
+        self.assertEqual(self.coloros_bridge('set', 'xml', '0')['status'], 'error')
+        located = self.coloros_bridge('locate', 'com.android.launcher', LUOSHU_COVERAGE_PID='')
+        self.assertEqual((located['status'], located['data']['rom']), ('ok', 'coloros'), located)
+        proc = self.root / 'proc'
+        proc.mkdir()
+        scanned = self.coloros_bridge('scan', LUOSHU_COVERAGE_PROC_ROOT=str(proc))
+        self.assertEqual((scanned['status'], scanned['data']['rom']), ('ok', 'coloros'), scanned)
+
+    def test_export_writes_one_report_file(self):
+        reports = self.root / 'reports'
+        proc = self.root / 'proc'
+        proc.mkdir()
+        data = self.coloros_bridge('export', LUOSHU_COVERAGE_REPORT_DIR=str(reports),
+                                   LUOSHU_COVERAGE_PROC_ROOT=str(proc), LUOSHU_COVERAGE_HOST_ROOT=str(self.root))
+        self.assertEqual(data['status'], 'ok', data)
+        path = Path(data['data']['path'])
+        self.assertEqual(path.parent, reports)
+        self.assertRegex(path.name, r'^LuoShu-coverage-full-\d{8}-\d{6}\.json$')
+        report = json.loads(path.read_text())
+        self.assertEqual(report['device']['rom'], 'coloros')
+        self.assertEqual(report['device']['romVersion'], 'V16.0.0')
+        self.assertIn(report['device']['rootManager'], ('Root', 'KernelSU', 'Magisk', 'APatch'))
 
 
 if __name__ == '__main__':

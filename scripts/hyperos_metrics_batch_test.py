@@ -114,8 +114,16 @@ class HyperOSMetricsTest(unittest.TestCase):
         from composite_collection_contract import collection_faces
         self.assertEqual(collection_faces(stock), collection_faces(output))
         report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        core = ('slot', 'mode', 'stockFaces', 'compiledFaces', 'cached')
         self.assertEqual([{'slot': '/system/fonts/NotoSansCJK-Regular.ttc', 'mode': 'collection',
-                           'stockFaces': 3, 'compiledFaces': 2, 'cached': False}], report['collections'])
+                           'stockFaces': 3, 'compiledFaces': 2, 'cached': False}],
+                         [{key: entry[key] for key in core} for entry in report['collections']])
+        # Size/time/retained-slot evidence travels with the device report.
+        entry = report['collections'][0]
+        self.assertEqual(output.stat().st_size, entry['outputBytes'])
+        self.assertEqual(stock.stat().st_size, entry['stockBytes'])
+        self.assertEqual({'conflict': 0, 'outOfFrame': 0}, entry['retainedSlots'])
+        self.assertGreaterEqual(entry['buildSeconds'], 0)
         for index in range(3):
             with TTFont(stock, fontNumber=index) as original, TTFont(output, fontNumber=index) as result:
                 self.assertEqual(original['name'].getDebugName(1), result['name'].getDebugName(1))
