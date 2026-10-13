@@ -104,11 +104,14 @@ def _protected(font):
                       font['head'].xMax, font['head'].yMax]}
 
 
-def specialized(font):
+def specialized(font, allow=()):
+    # allow: label words a caller deliberately replaces (e.g. 'serif' for a
+    # stock serif CJK collection). Mono/italic faces always stay stock.
     names = font['name'] if 'name' in font else None
     label = ' '.join(filter(None, (names.getDebugName(i) for i in (1, 2, 16, 17)))) if names else ''
+    words = tuple(word for word in ('mono', 'serif', 'emoji', 'symbol', 'icon') if word not in allow)
     return (bool(font['post'].isFixedPitch) if 'post' in font else False) or any(
-        word in label.lower() for word in ('mono', 'serif', 'emoji', 'symbol', 'icon')) or bool(
+        word in label.lower() for word in words) or bool(
         font['head'].macStyle & 2 or ('OS/2' in font and font['OS/2'].fsSelection & 1))
 
 
@@ -187,8 +190,8 @@ def retained_vertical_deltas(font, name):
     return values
 
 
-def replace_face(font, donor, recordings):
-    if specialized(font):
+def replace_face(font, donor, recordings, allow=()):
+    if specialized(font, allow):
         return {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
     kind = 'glyf' if 'glyf' in font else 'CFF ' if 'CFF ' in font else 'CFF2' if 'CFF2' in font else None
     if kind is None:
@@ -326,35 +329,52 @@ def replace_face(font, donor, recordings):
             'replacementVariation': 'fixed-source-at-selected-weight'}
 
 
-def build(source, stock, output, workspace, request, target, progress=None):
-    source, stock, output = map(Path, (source, stock, output))
-    if source.resolve() == output.resolve() or stock.resolve() == output.resolve():
-        raise ValueError('集合输出不能覆盖来源或原厂文件')
-    before = (identity(source), identity(stock))
-    source_hash, stock_hash = sha(source), sha(stock)
+def face_weight(stock, index):
+    with TTFont(stock, fontNumber=index, lazy=True, recalcTimestamp=False) as font:
+        weight = font['OS/2'].usWeightClass if 'OS/2' in font else 400
+    return weight if 1 <= weight <= 1000 else 400
+
+
+def build(source, stock, output, workspace, request, target, progress=None,
+          source_for_weight=None, allow=()):
+    """source_for_weight(weight) -> donor path picks a donor per stock face
+    (by its OS/2 weight); without it every face uses ``source``."""
+    stock, output = Path(stock), Path(output)
     count = collection_faces(stock)
-    face_index = _pick_face(source, 'cjk', 400, None)
-    kwargs = {'fontNumber': face_index} if face_index >= 0 else {}
+    weights = [face_weight(stock, index) for index in range(count)]
+    sources = ([Path(source_for_weight(weight)) for weight in weights] if source_for_weight
+               else [Path(source)] * count)
+    unique = list(dict.fromkeys(sources))
+    if any(path.resolve() == output.resolve() for path in unique) or stock.resolve() == output.resolve():
+        raise ValueError('集合输出不能覆盖来源或原厂文件')
+    before = ([identity(path) for path in unique], identity(stock))
+    source_hashes, stock_hash = [sha(path) for path in unique], sha(stock)
+    faces = {path: _pick_face(path, 'cjk', weights[sources.index(path)], None) for path in unique}
     report = {'schema': SCHEMA, 'requestId': request, 'target': target,
-              'sourceSha256': source_hash, 'stockSha256': stock_hash,
-              'sourceFace': face_index, 'stockFaces': count, 'faces': []}
+              'sourceSha256': source_hashes[0], 'stockSha256': stock_hash,
+              'sourceFace': faces[unique[0]], 'stockFaces': count, 'faces': []}
     with tempfile.TemporaryDirectory(prefix='collection-', dir=workspace) as temporary:
         temporary = Path(temporary)
         face_paths = []
-        with TTFont(source, lazy=True, recalcTimestamp=False, **kwargs) as donor:
-            cmap = donor.getBestCmap() or {}
-            if any(cp not in cmap for cp in map(ord, '中ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')):
-                raise ValueError('组合来源缺少必需的中文、英文字母或数字')
-            if not any(tag in donor for tag in ('glyf', 'CFF ', 'CFF2')):
-                raise ValueError('组合来源不包含可用轮廓')
-            recordings = {}
+        donors = {}
+        try:
+            for path in unique:
+                kwargs = {'fontNumber': faces[path]} if faces[path] >= 0 else {}
+                donor = TTFont(path, lazy=True, recalcTimestamp=False, **kwargs)
+                donors[path] = (donor, {})
+                cmap = donor.getBestCmap() or {}
+                if any(cp not in cmap for cp in map(ord, '中ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')):
+                    raise ValueError('组合来源缺少必需的中文、英文字母或数字')
+                if not any(tag in donor for tag in ('glyf', 'CFF ', 'CFF2')):
+                    raise ValueError('组合来源不包含可用轮廓')
             for index in range(count):
+                donor, recordings = donors[sources[index]]
                 _progress(progress, 'collection', f'正在编译本机 CJK 集合面 {index + 1}/{count}', 95)
                 face_path = temporary / f'face-{index}.font'
                 with TTFont(stock, fontNumber=index, lazy=True, recalcBBoxes=False,
                             recalcTimestamp=False) as font:
                     original = protected(font)
-                    details = replace_face(font, donor, recordings)
+                    details = replace_face(font, donor, recordings, allow)
                     if protected(font) != original:
                         raise ValueError(f'集合面 {index} 的原厂布局契约已变化')
                     if details['mode'] == 'compiled':
@@ -367,10 +387,15 @@ def build(source, stock, output, workspace, request, target, progress=None):
                 with TTFont(face_path, lazy=True, recalcTimestamp=False) as check:
                     if protected(check) != original:
                         raise ValueError(f'集合面 {index} 序列化后布局契约已变化')
+                if source_for_weight:
+                    details = dict(details, stockWeight=weights[index], source=sources[index].name)
                 report['faces'].append(dict(index=index, contract=original, **details))
                 face_paths.append(face_path)
                 del font, check
                 gc.collect()
+        finally:
+            for donor, _recordings in donors.values():
+                donor.close()
         if not any(face['mode'] == 'compiled' for face in report['faces']):
             raise ValueError('集合没有可替换的常规 CJK 字体面')
         collection = TTCollection()
@@ -387,7 +412,8 @@ def build(source, stock, output, workspace, request, target, progress=None):
             with TTFont(staged, fontNumber=index, lazy=True, recalcTimestamp=False) as check:
                 if protected(check) != face['contract']:
                     raise ValueError(f'集合面 {index} 合集后布局契约已变化')
-        if before != (identity(source), identity(stock)) or sha(source) != source_hash or sha(stock) != stock_hash:
+        if (before != ([identity(path) for path in unique], identity(stock)) or
+                [sha(path) for path in unique] != source_hashes or sha(stock) != stock_hash):
             raise ValueError('集合编译期间来源或原厂字体已变化')
         report['outputSha256'] = sha(staged)
         report['result'] = 'PASS'

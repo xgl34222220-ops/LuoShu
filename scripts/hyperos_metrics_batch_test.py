@@ -91,6 +91,47 @@ class HyperOSMetricsTest(unittest.TestCase):
         return {row['slot']: row for row in json.loads(
             (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
 
+    def stock_collection(self, name='NotoSansCJK-Regular.ttc'):
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        from composite_collection_build_test import fixture
+        from fontTools.ttLib import TTCollection
+        work = self.root / 'collection-fixture'; work.mkdir(exist_ok=True)
+        collection = TTCollection(); collection.fonts = []
+        for number, index in enumerate((0, 2, 0)):  # weights 400, 600, 400; last face mono
+            path = work / f'face-{number}.font'; fixture(path, index, mono=number == 2)
+            collection.fonts.append(TTFont(path))
+        target = self.root / 'stock/system' / name
+        collection.save(target); collection.close()
+        for weight in (400, 700):
+            fixture(self.fonts / f'LuoShu-{weight}.ttf', 1)
+        return target
+
+    def test_stock_cjk_collection_compiled_with_face_count_order_and_weights(self):
+        stock = self.stock_collection()
+        (self.root / 'stock/system/400.ttf').touch()
+        batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        output = self.fonts / 'NotoSansCJK-Regular.ttc'
+        from composite_collection_contract import collection_faces
+        self.assertEqual(collection_faces(stock), collection_faces(output))
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual([{'slot': '/system/fonts/NotoSansCJK-Regular.ttc', 'mode': 'collection',
+                           'stockFaces': 3, 'compiledFaces': 2}], report['collections'])
+        for index in range(3):
+            with TTFont(stock, fontNumber=index) as original, TTFont(output, fontNumber=index) as result:
+                self.assertEqual(original['name'].getDebugName(1), result['name'].getDebugName(1))
+                self.assertEqual(original.getBestCmap(), result.getBestCmap())
+        self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 400).name)
+        self.assertEqual('LuoShu-700.ttf', batch.collection_source_for_weight(self.fonts, 600).name)
+        self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 300).name)
+
+    def test_uncompilable_stock_collection_stays_stock(self):
+        (self.root / 'stock/system/NotoSerifCJK-Regular.ttc').write_bytes(b'not a collection')
+        (self.root / 'stock/system/400.ttf').touch()
+        batch.build(self.module, self.stage, ['400.ttf', 'NotoSerifCJK-Regular.ttc'])
+        self.assertFalse((self.fonts / 'NotoSerifCJK-Regular.ttc').exists())
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertIn('/system/fonts/NotoSerifCJK-Regular.ttc', report['preservedCollections'])
+
     def test_trusted_inventory_completes_oem_names_and_explicit_weights(self):
         # Names/styles match actual stock inventory omissions from Redmi/dali
         # OS3.0.303. Synthetic outlines avoid copying ROM fonts into the repo.

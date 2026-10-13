@@ -5,7 +5,8 @@
 在临时目录里按名字建出占位文件，调用模块真实的 shell 映射函数得到"会被替换"的文件：
 
 * hyperos：common/legacy_v14_4/hyperos_full_coverage.sh 的 ``_lhcc_names_for_root``
-  （其中的名单由 common/hyperos_physical_policy.py 生成，分组开关取默认值）；
+  （其中的名单由 common/hyperos_physical_policy.py 生成，分组开关取默认值）加
+  ``_lhcc_collection_names_for_root``（暂存时按本机字体面编译的 CJK 集合）；
 * coloros：common/coloros_global.sh 的 ``get_all_coloros_files``（只计夹具中存在的文件）。
 
 规则（--check，CI 与 scripts/check.sh 使用）：
@@ -35,7 +36,8 @@ SCHEMA = 'rom-coverage-baseline-v1'
 
 MAPPERS = {
     'hyperos': ('common/legacy_v14_4/hyperos_full_coverage.sh',
-                '. "$1"; _lhcc_static_names() { :; }; _lhcc_names_for_root "$2"'),
+                '. "$1"; _lhcc_static_names() { :; }; _lhcc_names_for_root "$2"; '
+                '_lhcc_collection_names_for_root "$2"'),
     'coloros': ('common/coloros_global.sh', '. "$1"; get_all_coloros_files'),
 }
 

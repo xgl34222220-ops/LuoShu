@@ -360,6 +360,16 @@ _lhcc_names_for_root() {
     } | awk 'NF && !seen[$0]++'
 }
 
+# Stock CJK collections (WebView/Chromium zh/ja/ko) present on this root. Only the
+# apply-time stage (hyperos_metrics_batch.py) compiles them index-preserving with
+# the device's face count/order; boot repair never aliases a single font here.
+_lhcc_collection_names_for_root() {
+    for _lhcc_cn in NotoSansCJK-Regular.ttc NotoSerifCJK-Regular.ttc; do
+        [ -f "$1/$_lhcc_cn" ] && printf '%s\n' "$_lhcc_cn"
+    done
+    return 0
+}
+
 luoshu_hyperos_full_payload_ensure() {
     type luoshu_hyperos_clock_payload_ensure >/dev/null 2>&1 || return 0
     luoshu_hyperos_clock_payload_ensure "$@"

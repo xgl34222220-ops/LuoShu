@@ -65,7 +65,7 @@ internal enum class HyperOsSetting(val key: String, val title: String, val hint:
     MIUI_EX("group:miui_ex", "MiuiEx / Miui 字体", "旧版 MIUI 与主题引擎使用的 MiuiEx-*、Miui-* 文件（默认开）"),
     MISANS_EXT("group:misans_ext", "MiSans 圆体 / 紧凑 / MiLanVF", "MiSansRounded*、MiSansC*、MiLanVF*（默认开）"),
     LOCKSCREEN("group:lockscreen_styles", "锁屏 / 息屏 / 小部件样式字体",
-        "Interscaled、C800、Qinghe、ChamberiDisplay、DelaGothicOne 等设计样式字体（默认关，开启会改变这些样式的设计字形；等宽样式始终保留原厂）"),
+        "Interscaled、C800、Qinghe、ChamberiDisplay、DelaGothicOne 等设计样式字体（默认关，开启会改变这些样式的设计字形；InterMono、BebasNeue-Mono 等宽样式始终替换）"),
     SOURCE_XML("xml", "改写 HyperOS 字体配置 XML",
         "覆盖 hyper/miui 种子 XML、fonts_customization.xml；校验失败自动整体回退原厂（默认开）"),
     THEME_TAKEOVER("theme_takeover", "接管主题商店字体",

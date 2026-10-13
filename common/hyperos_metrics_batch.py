@@ -139,6 +139,54 @@ def pick_source(fonts: Path, name: str) -> Path:
     raise ValueError(f'没有可用的源字体：{name}')
 
 
+# Stock CJK collections WebView/Chromium and AOSP zh/ja/ko fallbacks read.
+# They are compiled index-preserving (same face count and order, stock
+# cmap/layout/metrics per face) with the user's outlines; mono/italic faces stay
+# stock. Never a plain alias: one SFNT under a .ttc name breaks face indexes.
+COLLECTION_TARGETS = {'NotoSansCJK-Regular.ttc': (), 'NotoSerifCJK-Regular.ttc': ('serif',)}
+WEIGHT_STEPS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
+
+
+def collection_source_for_weight(fonts: Path, weight: int) -> Path:
+    """User donor for one stock face weight: exact weight, else nearest."""
+    store = fonts / '.luoshu-font-store'
+    for step in sorted(WEIGHT_STEPS, key=lambda value: (abs(value - weight), value)):
+        for path in (fonts / f'LuoShu-{step}.ttf', store / f'wght-{step}.font', fonts / f'{step}.ttf'):
+            if nonempty(path):
+                return path
+    return pick_source(fonts, 'Regular.ttf')
+
+
+def build_collections(module: Path, stage: Path, names: list[str],
+                      workspace: Path) -> tuple[list, dict]:
+    """Compile each requested stock collection; a failure keeps that file stock."""
+    from composite_collection_build import build as build_collection, stock_path
+    fonts = stage / 'system/fonts'
+    done, skipped = [], {}
+    for part in PARTS:
+        override = os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT')
+        root = Path(override or f'/{part}/fonts')
+        for name in names:
+            if not (root / name).is_file():
+                continue
+            destination = stage / part / 'fonts' / name
+            logical = f'/{part}/fonts/{name}'
+            try:
+                # The live path may already be LuoShu's mounted build: read the
+                # unmounted stock view (tests point the root at a fixture).
+                stock = root / name if override else stock_path(module, logical)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
+                                          source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
+                                          allow=COLLECTION_TARGETS[name])
+                done.append({'slot': logical, 'mode': 'collection', 'stockFaces': report['stockFaces'],
+                             'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces'])})
+            except Exception as error:  # keep the ROM collection; report why
+                destination.unlink(missing_ok=True)
+                skipped[logical] = f'{type(error).__name__}: {error}'
+    return done, skipped
+
+
 def inventory_font_roots(module: Path) -> dict[str, Path]:
     """Canonical stock roots plus the scanner's safe partition manifest."""
     roots = dict(LOGICAL_FONT_ROOTS)
@@ -986,6 +1034,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
         raise ValueError('HyperOS 字体暂存目录不存在')
     fonts = stage / 'system/fonts'
     data = read_inventory(module)
+    collection_names = [name for name in dict.fromkeys(names) if name in COLLECTION_TARGETS]
+    names = [name for name in names if name not in COLLECTION_TARGETS]
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
@@ -1123,6 +1173,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'cjkRoutingReason': routing_reason,
                                 **cjk_routing_report(logical, routing_reason, routing_evidence),
                                 **output_reports[key]})
+        collections, collections_kept = build_collections(module, stage, collection_names, outputs)
         for output, dest in prepared:
             link_copy(output, dest)
         for alias in preserved_aliases + excluded_aliases:
@@ -1141,6 +1192,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in preserved_aliases],
                            'preservedFallbackSlots': fallback_preserved,
+                           'collections': collections,
+                           'preservedCollections': collections_kept,
                            'preservedStockAliases': sorted({
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in excluded_aliases if alias.parent.is_dir()})},

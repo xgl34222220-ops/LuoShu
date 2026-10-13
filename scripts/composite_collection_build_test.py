@@ -485,6 +485,40 @@ class CollectionBuildTest(unittest.TestCase):
         checked=contract.validate(payload,'request-collection',self.root/'empty-stock')
         self.assertEqual('FAIL',checked['result']); self.assertIn('生成证明',checked['errors'][0]['reason'])
 
+    def test_per_face_donor_uses_exact_or_nearest_weight(self):
+        self.collection()  # face weights 400 and 600
+        regular, bold = self.root / 'w400.ttf', self.root / 'w700.ttf'
+        fixture(regular, 1); fixture(bold, 1)
+        with TTFont(bold) as font:
+            glyph = font['glyf'][font.getBestCmap()[ord('中')]]
+            glyph.coordinates[2] = (500, 700)
+            font.save(bold)
+        asked = []
+        def pick(weight):
+            asked.append(weight)
+            return regular if weight == 400 else bold
+        report = builder.build(None, self.stock, self.output, self.workspace, 'request-collection',
+                               '/system/fonts/NotoSansCJK-Regular.ttc', source_for_weight=pick)
+        self.assertEqual([400, 600], asked)
+        self.assertEqual(['w400.ttf', 'w700.ttf'], [face['source'] for face in report['faces']])
+        for index, donor in ((0, regular), (1, bold)):
+            with TTFont(donor) as source, TTFont(self.output, fontNumber=index) as result:
+                self.assertEqual(outline(source, '中'), outline(result, '中'))
+
+    def test_serif_faces_replaced_only_when_allowed(self):
+        self.collection()
+        with TTCollection(self.stock) as collection:
+            for font in collection.fonts:
+                for record in font['name'].names:
+                    if record.nameID == 1:
+                        record.string = 'Noto Serif CJK SC'
+            collection.save(self.root / 'serif.ttc')
+        os.replace(self.root / 'serif.ttc', self.stock)
+        with self.assertRaises(ValueError):
+            self.run_build()
+        report = builder.build(self.source, self.stock, self.output, self.workspace, 'request-collection',
+                               '/system/fonts/NotoSerifCJK-Regular.ttc', allow=('serif',))
+        self.assertTrue(all(face['mode'] == 'compiled' for face in report['faces']))
 
 if __name__ == '__main__':
     unittest.main()
