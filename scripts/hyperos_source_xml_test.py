@@ -429,14 +429,13 @@ def check_cache_key_flag(base: Path) -> None:
 
 
 def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
-    """Clock/tabular Mono files only take mono builds; code monospace (DroidSansMono)
-    is replaced like UI text; the main sans-serif and every zh family keep stock
+    """MiSansL3 is never rewritten; clock and code monospace files take any build; the main sans-serif and every zh family keep stock
     file names (WebView re-opens fonts by path), other families are renamed."""
     raw = (
         "<?xml version='1.0' encoding='utf-8'?>\n"
         "<familyset>\n"
         "  <family name='sans-serif'><font weight='400' style='normal'>Roboto-Regular.ttf</font></family>\n"
-        "  <family name='monospace'><font weight='400' style='normal'>MitypeMonoVF.ttf</font></family>\n"
+        "  <family name='monospace'><font weight='400' style='normal'>MiSansL3.otf</font></family>\n"
         "  <family name='google-sans'><font weight='400' style='normal'>GoogleSans-Regular.ttf</font></family>\n"
         "  <family lang='zh-Hans'><font weight='400' style='normal'>NotoSansSC-Regular.otf</font>\n"
         "    <font weight='700' style='normal'>NotoSansSC-Bold.otf</font></family>\n"
@@ -451,19 +450,24 @@ def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
     slots = [slot(source, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
              slot(source, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-700.ttf", 700),
              slot(source, "google-sans", "GoogleSans-Regular.ttf", "LuoShuSlot-gs-400.ttf"),
-             slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-prop-400.ttf")]
-    # Proportional build for a clock/tabular Mono file: kept stock. The main
+             slot(source, "monospace", "MiSansL3.otf", "LuoShuSlot-prop-400.ttf")]
+    # The rare-Han store is kept stock even for a matching slot. The main
     # sans-serif family keeps its stock name; google-sans (#290 coverage) is renamed.
     mapping, notes = seedxml.plan_mapping(root, slots, "fonts.xml")
     assert mapping == {2: "LuoShuSlot-gs-400.ttf"}, mapping
-    assert "policy-kept:MitypeMonoVF.ttf" in notes, notes
+    assert "policy-kept:MiSansL3.otf" in notes, notes
     assert "stock-name-kept:Roboto-Regular.ttf" in notes, notes
-    # Mono-role build (stock-exact advances): allowed.
-    mono_slots = slots[:3] + [slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-mono-400.ttf", roles=("mono",))]
+    # ...also for a mono-role build.
+    mono_slots = slots[:3] + [slot(source, "monospace", "MiSansL3.otf", "LuoShuSlot-mono-400.ttf", roles=("mono",))]
     mapping, _notes = seedxml.plan_mapping(root, mono_slots, "fonts.xml")
-    assert mapping[1] == "LuoShuSlot-mono-400.ttf", mapping
+    assert 1 not in mapping, mapping
+    # Clock faces (Mono/tabular included) are replaced by any build now.
+    clock_root = seedxml._parse_bytes(raw.replace(b"MiSansL3.otf", b"MitypeMonoVF.ttf"))
+    clock_slots = slots[:3] + [slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-prop-400.ttf")]
+    mapping, notes = seedxml.plan_mapping(clock_root, clock_slots, "fonts.xml")
+    assert mapping == {1: "LuoShuSlot-prop-400.ttf", 2: "LuoShuSlot-gs-400.ttf"}, mapping
     # Code monospace (system monospace family, e.g. flash logs): replaced again.
-    code_root = seedxml._parse_bytes(raw.replace(b"MitypeMonoVF.ttf", b"DroidSansMono.ttf"))
+    code_root = seedxml._parse_bytes(raw.replace(b"MiSansL3.otf", b"DroidSansMono.ttf"))
     code_slots = slots[:3] + [slot(source, "monospace", "DroidSansMono.ttf", "LuoShuSlot-prop-400.ttf")]
     mapping, notes = seedxml.plan_mapping(code_root, code_slots, "fonts.xml")
     assert mapping == {1: "LuoShuSlot-prop-400.ttf", 2: "LuoShuSlot-gs-400.ttf"}, mapping

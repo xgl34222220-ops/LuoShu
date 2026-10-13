@@ -221,8 +221,8 @@ _legacy_coloros_existing_file() {
     return 1
 }
 
-# 发现 OTA 新增或改名的正体 UI 槽位；斜体、衬线、等宽/代码、表情、符号、图标、
-# 时钟（由原厂清单按实测覆盖处理）与各文字专用回退字体一律保持原厂。
+# 发现 OTA 新增或改名的正体 UI 槽位；斜体、衬线、代码字体、表情、符号、图标与各文字专用回退
+# 字体保持原厂。时钟与等宽槽位（AndroidClock*、DroidSansMono、RobotoMono*）同样换成用户字体。
 _legacy_coloros_discover() {
     for _lcd_root in $_LEGACY_COLOROS_ROOTS; do
         for _lcd_path in "$_lcd_root"/*.ttf "$_lcd_root"/*.otf; do
@@ -230,13 +230,13 @@ _legacy_coloros_discover() {
             _lcd_name=${_lcd_path##*/}
             _legacy_coloros_keep_file "$_lcd_name" && continue
             case "$_lcd_name" in
-                *[Ii]talic*|*[Oo]blique*|*[Ss]erif*|*SERIF*|*[Mm]ono*|*MONO*|*[Cc]ode*|*[Ee]moji*|*[Ss]ymbol*|*[Ii]con*|*[Cc]lock*|\
+                *[Ii]talic*|*[Oo]blique*|*[Ss]erif*|*SERIF*|*[Cc]ode*|*[Ee]moji*|*[Ss]ymbol*|*[Ii]con*|\
                 *[Mm]yanmar*|*[Tt]hai*|*[Aa]rabic*|*[Hh]ebrew*|*[Kk]hmer*|*[Ll]ao*|*[Tt]ibetan*|*[Dd]evanagari*|*[Bb]engali*|*[Tt]amil*|\
                 *[Jj]apanese*|*[Kk]orean*|*[Hh]angul*|*[Mm]ath*|*[Mm]usic*) continue ;;
             esac
             case "$_lcd_name" in
                 SysFont*|SysSans*|OplusSans*|OPlusSans*|OplusOSUI*|OppoSans*|Opposans*|OPPOSans*|OPSans*|OnePlusSans*|\
-                GoogleSans*|Roboto*|SourceSansPro*|DIN*|OPPODIN*)
+                GoogleSans*|Roboto*|SourceSansPro*|DIN*|OPPODIN*|AndroidClock*|*[Cc]lock*|DroidSansMono.ttf)
                     printf '%s\n' "$_lcd_name" ;;
                 OSans-*Digits*)
                     _legacy_coloros_osans_digits_on && printf '%s\n' "$_lcd_name" ;;

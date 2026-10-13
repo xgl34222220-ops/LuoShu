@@ -28,9 +28,10 @@ METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
 # 5: HyperOS 3 slot groups (MiuiEx/Miui, MiSans Rounded/C, MiLanVF, lock screen
 #    styles) captured; Mono faces and MiSansL3 retired from the physical policy.
-# 6: code monospace (DroidSansMono, RobotoMono*, NotoSansMono*) replaced again;
-#    only clock/tabular Mono faces and MiSansL3 stay stock.
-HYPEROS_COVERAGE_REVISION = 6
+# 6: code monospace (DroidSansMono, RobotoMono*, NotoSansMono*) replaced again.
+# 7: clock faces (MitypeMonoVF, *Clock*Mono*, InterMono*, BebasNeue-Mono, any
+#    *Clock*) replaced too; only MiSansL3 stays stock by policy.
+HYPEROS_COVERAGE_REVISION = 7
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),

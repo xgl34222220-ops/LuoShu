@@ -116,16 +116,18 @@ class LocatorTest(unittest.TestCase):
         self.app_sees_payload()
         self.map("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")
         self.map("/system/fonts/C800.ttf", self.stock_file("C800.ttf"))
-        self.map("/system/fonts/MitypeMonoVF.ttf", self.stock_file("MitypeMonoVF.ttf"))
+        self.map("/system/fonts/MiSansL3.otf", self.stock_file("MiSansL3.otf"))
         self.map("/system/fonts/VendorClockX.ttf", self.stock_file("VendorClockX.ttf"))
         result = self.run_locate()
         outside = next(f for f in result["findings"] if f["category"] == "outside-whitelist")
         self.assertIn("/system/fonts/C800.ttf（lockscreen_styles 组未开启）", outside["files"])
-        self.assertIn("/system/fonts/VendorClockX.ttf", outside["files"])
-        self.assertTrue(any("MitypeMonoVF" in item for item in result["keptByDesign"]))
+        # Clock faces are policy targets now: a stock clock is not "outside".
+        self.assertNotIn("/system/fonts/VendorClockX.ttf", outside["files"])
+        self.assertTrue(any("MiSansL3" in item for item in result["keptByDesign"]))
         # With the lock screen group on, C800 is no longer "outside".
         result = self.run_locate(groups=policy.ALL_GROUPS)
-        outside = next(f for f in result["findings"] if f["category"] == "outside-whitelist")
+        outside = next((f for f in result["findings"] if f["category"] == "outside-whitelist"),
+                       {"files": []})
         self.assertNotIn("/system/fonts/C800.ttf（lockscreen_styles 组未开启）", outside["files"])
 
     def test_embedded_font_apps_and_private_font_files(self):

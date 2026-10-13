@@ -443,8 +443,9 @@ class StockMetricContractTest(unittest.TestCase):
                     "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
                     "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf",
                     "NotoSansSemiCondensed-Icons.ttf", "NotoSansMono-Italic.ttf",
-                    "MitypeMonoVF.ttf", "MiClockMono.otf", "MiSansL3.otf")
-        make_font(args.system_fonts / "DroidSansMono.ttf")
+                    "MiSansL3.otf")
+        for name in ("DroidSansMono.ttf", "MitypeMonoVF.ttf", "MiClockMono.otf"):
+            make_font(args.system_fonts / name)
         for name in excluded:
             make_font(args.system_fonts / name)
         disguised_collection = "NotoSansCollection.ttf"
@@ -462,10 +463,10 @@ class StockMetricContractTest(unittest.TestCase):
         slots = json.loads(args.output.read_text())["slots"]
         for name in (*excluded, disguised_collection):
             self.assertNotIn(f"/system/fonts/{name}", slots)
-        # Clock/tabular Mono faces and MiSansL3 are kept stock by the physical
-        # policy; code monospace (system monospace family) is captured again.
-        self.assertNotIn("/system/fonts/MitypeMonoVF.ttf", slots)
-        self.assertIn("/system/fonts/DroidSansMono.ttf", slots)
+        # Only MiSansL3 is kept stock by the physical policy; code monospace and
+        # clock faces are captured.
+        for name in ("DroidSansMono.ttf", "MitypeMonoVF.ttf", "MiClockMono.otf"):
+            self.assertIn(f"/system/fonts/{name}", slots)
         self.assertNotIn("/system/fonts/MiSansL3.otf", slots)
         self.assertIn("/system/fonts/MiuiEx-Regular.ttf", slots)
         self.assertIn("/system/fonts/NotoSansSemiCondensed-Regular.ttf", slots)

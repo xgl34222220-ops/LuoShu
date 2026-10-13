@@ -20,8 +20,7 @@ rewritten seeds, so they are reported and left alone.
 
 Only the file-name text of ``<font>`` nodes whose slot LuoShu already replaced
 is changed. Every other byte stays identical. Files the physical policy keeps
-stock (clock/tabular Mono, MiSansL3, disabled optional groups) are never pointed
-at a proportional build.
+stock (MiSansL3, disabled optional groups) are never rewritten.
 
 The main ``sans-serif`` family and ``lang="zh-*"`` families are never renamed:
 they keep their stock file names and the physical route replaces the content of

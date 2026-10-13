@@ -306,9 +306,9 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
         if path in replaced_paths:
             continue
         kind = classify_stock(item, groups)
-        if kind in ("mono", "rare-han", "excluded"):
+        if kind in ("rare-han", "excluded"):
             kept.append(f"{path}（按设计保留：{kind}）")
-        elif kind != "core" and kind != "group-on":
+        elif kind not in ("core", "clock", "group-on"):
             outside.append(path if not kind.startswith("group-off:")
                            else f"{path}（{kind.split(':', 1)[1]} 组未开启）")
     if outside:

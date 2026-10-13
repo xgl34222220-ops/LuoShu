@@ -566,22 +566,14 @@ class RoutingTest(unittest.TestCase):
         names = ('MiClock.otf',)
         for name in names:
             self.stock(name, (LATIN, 48))
-        # Clock/tabular Mono slots are kept stock: a staged alias (left by an
-        # older mapper) is removed from the isolated stage so the ROM file shows.
-        mono = ('MitypeMonoVF.ttf', 'MitypeClockMono.otf', 'MiClockMono.ttf')
+        # Clock/tabular Mono and code monospace slots are replaced (clock slots
+        # also get tabular digits); none of them is pruned from the stage.
+        mono = ('MitypeMonoVF.ttf', 'MitypeClockMono.otf', 'MiClockMono.ttf',
+                'RobotoMono-Regular.ttf', 'DroidSansMono.ttf', 'NotoSansMono-Regular.ttf')
         for name in mono:
-            self.stock(name, (LATIN, 48))
-            make_font(self.fonts / name)
-        # Code monospace (system monospace family: terminals, flash logs) is
-        # replaced again, as before v4.3.
-        code_mono = ('RobotoMono-Regular.ttf', 'DroidSansMono.ttf', 'NotoSansMono-Regular.ttf')
-        for name in code_mono:
             self.stock(name, (LATIN, 48))
         self.build()
         for name in mono:
-            self.assertFalse((self.fonts / name).exists(), name)
-            self.assertNotIn('/system/fonts/' + name, self.reports)
-        for name in code_mono:
             self.assertTrue((self.fonts / name).exists(), name)
             self.assertIn('/system/fonts/' + name, self.reports)
         for name in names:

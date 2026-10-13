@@ -122,7 +122,7 @@ class HyperOSMetricsTest(unittest.TestCase):
                 self.assertEqual(font['hhea'].ascent, slots[f'/{part}/fonts/{name}']['metrics']['hhea']['ascent'])
             self.assertEqual(reports[f'/{part}/fonts/{name}']['slotSource'], 'stock-inventory')
 
-    def test_lockscreen_style_group_is_off_by_default_and_mono_stays_stock(self):
+    def test_lockscreen_style_group_is_off_by_default_and_clock_mono_is_replaced(self):
         names = (('Interscaled-Medium.otf', 500), ('ChamberiDisplay-Semibold.ttf', 600),
                  ('MitypeMonoVF.ttf', 400), ('MiSansL3.otf', 400), ('MiuiEx-Light.ttf', 300))
         for weight in (300, 500, 600):
@@ -133,10 +133,47 @@ class HyperOSMetricsTest(unittest.TestCase):
         missing = self.module / 'config/absent-groups.conf'
         with patch.dict(os.environ, {'LUOSHU_HYPEROS_SLOT_GROUPS_CONF': str(missing)}):
             result = batch.build(self.module, self.stage, [])
-        self.assertEqual(result['mapped'], 1)
+        # MitypeMonoVF is a clock face: replaced now; MiSansL3 stays stock.
+        self.assertEqual(result['mapped'], 2)
         self.assertTrue((self.stage / 'product/fonts/MiuiEx-Light.ttf').is_file())
-        for name, _weight in names[:4]:
+        self.assertTrue((self.stage / 'product/fonts/MitypeMonoVF.ttf').is_file())
+        for name in ('Interscaled-Medium.otf', 'ChamberiDisplay-Semibold.ttf', 'MiSansL3.otf'):
             self.assertFalse((self.stage / 'product/fonts' / name).exists(), name)
+
+    def test_clock_slots_get_tabular_digits_from_the_user_font(self):
+        widths = {0x30 + index: 480 + index * 20 for index in range(10)}  # proportional
+        path = self.fonts / '400.ttf'
+        fb = FontBuilder(1000, isTTF=True)
+        cmap = {cp: f'u{cp:X}' for cp in (*widths, 65)}
+        order = ['.notdef', *cmap.values()]
+        glyphs = {}
+        for name in order:
+            pen = TTGlyphPen(None)
+            pen.moveTo((40, 0)); pen.lineTo((400, 0)); pen.lineTo((400, 700)); pen.closePath()
+            glyphs[name] = pen.glyph()
+        fb.setupGlyphOrder(order); fb.setupCharacterMap(cmap); fb.setupGlyf(glyphs)
+        fb.setupHorizontalMetrics({name: (widths.get(int(name[1:], 16), 600) if name != '.notdef' else 600, 40)
+                                   for name in order})
+        fb.setupHorizontalHeader(ascent=1600, descent=-600)
+        fb.setupOS2(sTypoAscender=1600, sTypoDescender=-600, usWinAscent=1700, usWinDescent=700)
+        fb.setupNameTable({'familyName': 'Fixture', 'styleName': 'Regular'})
+        fb.setupPost(); fb.setupMaxp(); fb.save(path)
+        slots = {f'/system/fonts/{name}': slot() for name in ('MiClockMono.otf', 'Roboto-Regular.ttf')}
+        self.inventory(slots)
+        batch.build(self.module, self.stage, [Path(logical).name for logical in slots])
+        with TTFont(self.fonts / 'MiClockMono.otf') as font:
+            hmtx, cmap = font['hmtx'].metrics, font.getBestCmap()
+            advances = {hmtx[cmap[cp]][0] for cp in widths}
+            self.assertEqual(advances, {660})
+            # The narrowest digit is centred in the tabular cell (TrueType lsb shift).
+            self.assertEqual(hmtx[cmap[0x30]][1], 40 + (660 - 480) // 2)
+            self.assertEqual(hmtx[cmap[65]][0], 600)
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
+            hmtx, cmap = font['hmtx'].metrics, font.getBestCmap()
+            self.assertEqual({hmtx[cmap[cp]][0] for cp in widths}, set(widths.values()))
+        reports = self.report()
+        self.assertEqual(reports['/system/fonts/MiClockMono.otf']['tabularDigits'], 'applied')
+        self.assertNotIn('tabularDigits', reports['/system/fonts/Roboto-Regular.ttf'])
 
     def test_unavailable_completion_weight_uses_selected_regular_source(self):
         self.inventory({'/product/fonts/MiuiEx-Bold.ttf': self.verified('MiuiEx-Bold.ttf', weight=700)})

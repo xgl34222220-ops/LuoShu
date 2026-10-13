@@ -55,7 +55,8 @@ _coloros_osans_digits_on() {
 # <<< LUOSHU_COLOROS_LATIN_POLICY
 
 # Discover safe upright UI slots from every real OPlus partition. This covers renamed files introduced
-# by an OTA without replacing serif, emoji, symbols, monospace, icons or true italic faces.
+# by an OTA without replacing serif, emoji, symbols, icons or true italic faces. Clock and monospace
+# slots (AndroidClock*, DroidSansMono, RobotoMono*) take the user font like other UI text.
 _coloros_discovered_ui_files() {
     while IFS='|' read -r _lcg_real _lcg_overlay; do
         [ -d "$_lcg_real" ] || continue
@@ -65,10 +66,11 @@ _coloros_discovered_ui_files() {
             _lcg_name=${_lcg_path##*/}
             _coloros_policy_keep_file "$_lcg_name" && continue
             case "$_lcg_name" in
-                *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*|*Myanmar*) continue ;;
+                *Italic*|*Oblique*|*Serif*|*Emoji*|*Symbol*|*Icon*|*Myanmar*) continue ;;
             esac
             case "$_lcg_name" in
-                SysFont*.ttf|SysSans*.ttf|OplusSans*.ttf|OplusOSUI*.ttf|OppoSans*.ttf|Opposans*.ttf|OPSans*.ttf|GoogleSans*.ttf|Roboto*.ttf|SourceSansPro*.ttf|DIN*.ttf|OPPODIN*.ttf)
+                SysFont*.ttf|SysSans*.ttf|OplusSans*.ttf|OplusOSUI*.ttf|OppoSans*.ttf|Opposans*.ttf|OPSans*.ttf|GoogleSans*.ttf|Roboto*.ttf|SourceSansPro*.ttf|DIN*.ttf|OPPODIN*.ttf|\
+                AndroidClock*.ttf|*Clock*.ttf|DroidSansMono.ttf)
                     printf '%s\n' "$_lcg_name"
                     ;;
                 OSans-*Digits*.ttf)

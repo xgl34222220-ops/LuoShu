@@ -26,6 +26,7 @@ from font_inventory_scan import _is_ui_family, _safe_dynamic_partition_name
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
 from hyperos_physical_policy import (MAPPER_FAMILY_PREFIXES, classify as policy_classify,
+                                     is_clock_face,
                                      enabled_groups, preserved_dynamic_alias,
                                      safe_physical_font_name)
 from font_capability import (SCRIPT_COVERAGE_MIN, fallback_script_for_slot,
@@ -42,11 +43,10 @@ def policy_keeps_stock(name: str, groups: frozenset | None = None) -> bool:
     """Names the physical policy always keeps stock, or an optional group that is off.
 
     Inventory completion reuses measured stock slots by their own evidence; it
-    must still never hand a monospace face, MiSansL3 or a disabled group a
-    proportional user font.
+    must still never hand MiSansL3 or a disabled group a user font.
     """
     kind = policy_classify(name)
-    if kind in ("mono", "rare-han"):
+    if kind == "rare-han":
         return True
     if kind in ("miui_ex", "misans_ext", "lockscreen_styles"):
         return kind not in (enabled_groups() if groups is None else groups)
@@ -163,6 +163,9 @@ def inventory_completion_slot(slot: object, logical: str) -> bool:
     # exception to the generic name deny list. Admission uses the stock face's
     # own coverage evidence, whichever scan pass (XML/heuristic/verified) found it.
     numeric = _numeric_display_slot_candidate(name, metrics)
+    # Clock faces (incl. Mono/tabular ones) are explicit policy targets even
+    # though the generic name deny list rejects "mono"; they get tabular digits.
+    numeric = numeric or (is_clock_face(name) and safe_physical_font_name(name))
     if (Path(name).suffix.lower() not in {'.ttf', '.otf'} or
             slot.get('format') in {'TTC', 'OTC'} or slot.get('faceIndex', 0) != 0 or
             slot.get('style', 'normal') != 'normal' or
@@ -524,6 +527,50 @@ def write_metrics(source: Path, output: Path, contract: tuple,
 
 
 PATCHED_METRIC_TABLES = ('head', 'hhea', 'OS/2')
+DIGIT_CODEPOINTS = tuple(range(0x30, 0x3A))
+
+
+def apply_tabular_digits(path: Path) -> dict:
+    """Give a clock slot equal-width digits built from the user font, in place.
+
+    Static fonts only: every digit takes the widest digit advance. TrueType
+    digits are re-centred through the hmtx left side bearing (FreeType places
+    glyf outlines relative to it); CFF digits keep their position. Variable
+    fonts are left unchanged (HVAR/gvar would override hmtx at other weights),
+    so the user font is used as is. Outlines are never decoded or rewritten.
+    """
+    face = _pick_face(path)
+    options = {'fontNumber': face} if face >= 0 else {}
+    try:
+        with path.open('rb') as stream, TTFont(stream, lazy=True, recalcBBoxes=False,
+                                               recalcTimestamp=False, **options) as font:
+            if 'fvar' in font or 'hmtx' not in font:
+                return {'tabularDigits': 'skipped-variable' if 'fvar' in font else 'no-hmtx'}
+            cmap = font.getBestCmap() or {}
+            names = [cmap.get(code) for code in DIGIT_CODEPOINTS]
+            metrics = font['hmtx'].metrics
+            if any(name is None or name not in metrics for name in names):
+                return {'tabularDigits': 'missing-digits'}
+            advance = max(metrics[name][0] for name in names)
+            if all(metrics[name][0] == advance for name in names):
+                return {'tabularDigits': 'already-tabular', 'tabularAdvance': advance}
+            truetype = 'glyf' in font
+            for name in dict.fromkeys(names):
+                width, lsb = metrics[name]
+                shift = (advance - width) // 2 if truetype else 0
+                metrics[name] = (advance, lsb + shift)
+            for tag in ('hdmx', 'LTSH'):  # cached per-size advances would disagree
+                if tag in font:
+                    del font[tag]
+            temporary = path.with_name(path.name + '.tnum')
+            font.save(temporary, reorderTables=False)
+        os.replace(temporary, path)
+        os.chmod(path, 0o644)
+        return {'tabularDigits': 'applied', 'tabularAdvance': advance,
+                'tabularCentered': truetype}
+    except Exception as error:  # never block staging; the slot keeps the user font as is
+        path.with_name(path.name + '.tnum').unlink(missing_ok=True)
+        return {'tabularDigits': f'error:{error.__class__.__name__}'}
 
 
 def _patch_metric_tables(source: Path, output: Path, font: TTFont, descriptor: int) -> bool:
@@ -1035,9 +1082,11 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             if contract[-1] != 'stock':
                 routing, stock_punctuation, routing_reason = None, frozenset(), 'invalid-stock-contract'
             align_bottom = bitmap_bottom_slot(data, logical, contract)
+            # Clock slots get equal-width digits so seconds/timers do not jump.
+            tabular = is_clock_face(dest.name)
             key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
-                   routing, stock_punctuation, align_bottom)
-            if key not in cache and dest in fallback_outputs:
+                   routing, stock_punctuation, align_bottom, tabular)
+            if key not in cache and dest in fallback_outputs and not tabular:
                 cache[key], output_reports[key] = fallback_outputs[dest]
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
@@ -1053,6 +1102,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
                                                     align_bitmap_bottom=align_bottom)
                 output_reports[key]['removedCjkMappings'] += compact_removed
+                if tabular:
+                    output_reports[key].update(apply_tabular_digits(output))
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'

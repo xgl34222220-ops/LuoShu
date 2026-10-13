@@ -51,7 +51,8 @@ make_font "$STOCK/my_stock/fonts/OplusOSUI-Medium.ttf" stock
 ) || { cat "$TMP/log" >&2; fail "copy_as_coloros 返回失败"; }
 
 for name in SysSans-En-Regular.ttf SysFont-Regular.ttf OplusOSUI-Regular.ttf GoogleSansText-SemiBold.ttf \
-            SysSans-Hans-Regular.otf SysSans-En-Display-Regular.ttf; do
+            SysSans-Hans-Regular.otf SysSans-En-Display-Regular.ttf RobotoMono-Regular.ttf \
+            SysSans-Clock-Regular.ttf; do
     [ -f "$DEST/$name" ] || { cat "$TMP/log"; fail "缺少数字/英文槽位 $name"; }
     cmp -s "$DEST/$name" "$USER_FONTS_DIR/Demo-Regular.ttf" || fail "$name 未使用常规字重"
 done
@@ -62,8 +63,8 @@ cmp -s "$DEST/OplusOSUI-XThin.ttf" "$USER_FONTS_DIR/Demo-Thin.ttf" || fail "Oplu
 # No SemiBold in the family: regular, never a missing slot.
 cmp -s "$DEST/Roboto-SemiBold.ttf" "$USER_FONTS_DIR/Demo-Regular.ttf" || fail "缺失字重未回退常规"
 
-for name in SysFont-Myanmar.ttf Roboto-Italic.ttf RobotoMono-Regular.ttf GoogleSansCode-Regular.ttf \
-            Oplus-Serif.ttf NotoColorEmoji.ttf SysSans-Clock-Regular.ttf SysFont-Hant-Regular.ttc \
+for name in SysFont-Myanmar.ttf Roboto-Italic.ttf GoogleSansCode-Regular.ttf \
+            Oplus-Serif.ttf NotoColorEmoji.ttf SysFont-Hant-Regular.ttc \
             SysFont-Hant-Regular.ttf SysSans-Hans-Regular.ttf OplusOSUI-Medium.ttf; do
     [ ! -e "$DEST/$name" ] || fail "不应替换或新建 $name"
 done
