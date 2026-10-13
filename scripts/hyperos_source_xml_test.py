@@ -292,37 +292,32 @@ def check_flag_on(base: Path, fx: dict, reference: dict[str, bytes]) -> None:
     report = render(fx, out, "enabled=1\n")
     hx = report["hyperosSourceXml"]
     assert hx["status"] == "applied", hx
-    assert hx["schema"] == "hyperos-source-xml-v2"
+    assert hx["schema"] == "hyperos-source-xml-v3"
     links = {item["path"]: item for item in hx["links"]}
     assert links["/system/etc/fonts.xml"]["kind"] == "file"
     tree = tree_bytes(out)
     staged = staged_system_xml(tree)
+    # The fallback seed only holds the main sans-serif family, which keeps its
+    # stock file name (WebView re-opens fonts by path), so it is not staged.
     assert sorted(staged) == [
         "system_ext/etc/hyper_fonts.xml",
-        "system_ext/etc/miui_font_fallback.xml",
         "system_ext/etc/miui_fonts.xml",
     ], sorted(staged)
     for name, original in (("miui_fonts.xml", MIUI_FONTS), ("hyper_fonts.xml", HYPER_FONTS)):
-        expected = (
-            original
-            .replace(">Roboto-Regular.ttf\n            <axis", ">LuoShuSlot-ui-400.ttf\n            <axis", 1)
-            .replace(">Roboto-Regular.ttf<axis tag=\"wght\" stylevalue=\"700\"/>",
-                     ">LuoShuSlot-ui-700.ttf<axis tag=\"wght\" stylevalue=\"700\"/>", 1)
-            .replace(">CutiveMono.ttf<", ">LuoShuSlot-mono-400.ttf<", 1)
-        ).encode("utf-8")
+        expected = original.replace(">CutiveMono.ttf<", ">LuoShuSlot-mono-400.ttf<", 1).encode("utf-8")
         assert staged[f"system_ext/etc/{name}"] == expected, staged[f"system_ext/etc/{name}"].decode()
-        # The commented-out Roboto node, MiSansVF, the TTC index node and CRLF stay stock.
-        assert b"<!-- <font weight=\"400\" style=\"normal\">Roboto-Regular.ttf</font> -->" in expected
+        # sans-serif Roboto nodes (and the commented-out one), MiSansVF, the zh
+        # TTC index node and CRLF stay stock.
+        assert expected.count(b">Roboto-Regular.ttf") == 3 and b"LuoShuSlot-ui-" not in expected
         assert b"index=\"2\">NotoSansCJK-Regular.ttc<" in expected and b"\r\n" in expected
-    fallback = staged["system_ext/etc/miui_font_fallback.xml"].decode()
-    assert fallback == MIUI_FALLBACK.replace(">Roboto-Regular.ttf<", ">LuoShuSlot-ui-400.ttf<"), fallback
+    notes = [note for entry in hx["seeds"] for note in entry.get("notes", [])]
+    assert "stock-name-kept:Roboto-Regular.ttf" in notes and "stock-name-kept:NotoSansCJK-Regular.ttc" in notes, notes
     for name in ("LuoShuSlot-ui-400.ttf", "LuoShuSlot-ui-700.ttf", "LuoShuSlot-mono-400.ttf"):
         assert f"system/fonts/{name}" in tree, name
     # Regular (non-seeded) /system/etc XML the main renderer did not stage is
     # rewritten by the same per-slot mapping.
-    expected_system = (SYSTEM_FONTS.replace("'400' style='normal'>Roboto-Regular.ttf", "'400' style='normal'>LuoShuSlot-ui-400.ttf")
-                       .replace("'700' style='normal'>Roboto-Regular.ttf", "'700' style='normal'>LuoShuSlot-ui-700.ttf")
-                       .replace(">CutiveMono.ttf<", ">LuoShuSlot-mono-400.ttf<"))
+    # rewritten by the same per-slot mapping (main sans-serif keeps stock names).
+    expected_system = SYSTEM_FONTS.replace(">CutiveMono.ttf<", ">LuoShuSlot-mono-400.ttf<")
     assert tree["system/etc/fonts.xml"].decode() == expected_system, tree["system/etc/fonts.xml"].decode()
     assert {e["source"] for e in hx["extra"]} == {"/system/etc/fonts.xml", "/system/etc/font_fallback.xml"}
     # Everything the main renderer produced is unchanged apart from the manifest.
@@ -418,7 +413,7 @@ def check_cache_key_flag(base: Path) -> None:
     digest = hashlib.sha256(b"font-data\n").hexdigest()
     legacy = hashlib.sha256(f"source-contract-v5-content\nregular.font|{digest}\n".encode()).hexdigest()
     expected_on = hashlib.sha256(
-        f"source-contract-v5-content\nhyperos-source-xml-v2\nregular.font|{digest}\n".encode()).hexdigest()
+        f"source-contract-v5-content\nhyperos-source-xml-v3\nregular.font|{digest}\n".encode()).hexdigest()
     # Non-HyperOS (no seeds): unchanged identity whatever the flag says.
     assert key() == legacy
     conf.write_text("enabled=1\n")
@@ -435,12 +430,14 @@ def check_cache_key_flag(base: Path) -> None:
 
 def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
     """Clock/tabular Mono files only take mono builds; code monospace (DroidSansMono)
-    is replaced like UI text; zh families follow a CJK-capable user font."""
+    is replaced like UI text; the main sans-serif and every zh family keep stock
+    file names (WebView re-opens fonts by path), other families are renamed."""
     raw = (
         "<?xml version='1.0' encoding='utf-8'?>\n"
         "<familyset>\n"
         "  <family name='sans-serif'><font weight='400' style='normal'>Roboto-Regular.ttf</font></family>\n"
         "  <family name='monospace'><font weight='400' style='normal'>MitypeMonoVF.ttf</font></family>\n"
+        "  <family name='google-sans'><font weight='400' style='normal'>GoogleSans-Regular.ttf</font></family>\n"
         "  <family lang='zh-Hans'><font weight='400' style='normal'>NotoSansSC-Regular.otf</font>\n"
         "    <font weight='700' style='normal'>NotoSansSC-Bold.otf</font></family>\n"
         "  <family lang='zh-Hant zh-Bopo'><font weight='400' style='normal'>NotoSansTC-Regular.otf</font></family>\n"
@@ -453,46 +450,44 @@ def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
     source = base / "routing.xml"
     slots = [slot(source, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
              slot(source, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-700.ttf", 700),
+             slot(source, "google-sans", "GoogleSans-Regular.ttf", "LuoShuSlot-gs-400.ttf"),
              slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-prop-400.ttf")]
-    # Proportional build for a clock/tabular Mono file: kept stock.
-    mapping, notes = seedxml.plan_mapping(root, slots, "fonts.xml", None)
-    assert mapping == {0: "LuoShuSlot-ui-400.ttf"}, mapping
+    # Proportional build for a clock/tabular Mono file: kept stock. The main
+    # sans-serif family keeps its stock name; google-sans (#290 coverage) is renamed.
+    mapping, notes = seedxml.plan_mapping(root, slots, "fonts.xml")
+    assert mapping == {2: "LuoShuSlot-gs-400.ttf"}, mapping
     assert "policy-kept:MitypeMonoVF.ttf" in notes, notes
+    assert "stock-name-kept:Roboto-Regular.ttf" in notes, notes
     # Mono-role build (stock-exact advances): allowed.
-    mono_slots = slots[:2] + [slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-mono-400.ttf", roles=("mono",))]
-    mapping, _notes = seedxml.plan_mapping(root, mono_slots, "fonts.xml", None)
+    mono_slots = slots[:3] + [slot(source, "monospace", "MitypeMonoVF.ttf", "LuoShuSlot-mono-400.ttf", roles=("mono",))]
+    mapping, _notes = seedxml.plan_mapping(root, mono_slots, "fonts.xml")
     assert mapping[1] == "LuoShuSlot-mono-400.ttf", mapping
     # Code monospace (system monospace family, e.g. flash logs): replaced again.
     code_root = seedxml._parse_bytes(raw.replace(b"MitypeMonoVF.ttf", b"DroidSansMono.ttf"))
-    code_slots = slots[:2] + [slot(source, "monospace", "DroidSansMono.ttf", "LuoShuSlot-prop-400.ttf")]
-    mapping, notes = seedxml.plan_mapping(code_root, code_slots, "fonts.xml", None)
-    assert mapping == {0: "LuoShuSlot-ui-400.ttf", 1: "LuoShuSlot-prop-400.ttf"}, mapping
+    code_slots = slots[:3] + [slot(source, "monospace", "DroidSansMono.ttf", "LuoShuSlot-prop-400.ttf")]
+    mapping, notes = seedxml.plan_mapping(code_root, code_slots, "fonts.xml")
+    assert mapping == {1: "LuoShuSlot-prop-400.ttf", 2: "LuoShuSlot-gs-400.ttf"}, mapping
     assert "policy-kept:DroidSansMono.ttf" not in notes, notes
-    # zh routing: simplified-only coverage routes zh-Hans, not zh-Hant.
-    counts = {"LuoShuSlot-ui-400.ttf": 7000, "LuoShuSlot-ui-700.ttf": 7000}
-    targets = seedxml.cjk_route_targets(slots, lambda name: counts.get(name, 0))
-    assert targets == {400: ("LuoShuSlot-ui-400.ttf", 7000), 700: ("LuoShuSlot-ui-700.ttf", 7000)}, targets
-    mapping, notes = seedxml.plan_mapping(root, slots, "fonts.xml", targets)
-    assert mapping == {0: "LuoShuSlot-ui-400.ttf", 2: "LuoShuSlot-ui-400.ttf", 3: "LuoShuSlot-ui-700.ttf"}, mapping
-    assert any(note.startswith("cjk-coverage-low:NotoSansTC-Regular.otf") for note in notes), notes
-    assert any(note.startswith("cjk-coverage-low:NotoSerifTC-Regular.otf") for note in notes), notes
-    # Full Big5 coverage routes zh-Hant (incl. AOSP "zh-Hant zh-Bopo") sans files;
-    # a zh+ja family, a TTC index, serif and variant families stay stock.
-    counts = {"LuoShuSlot-ui-400.ttf": 20000, "LuoShuSlot-ui-700.ttf": 20000}
-    targets = seedxml.cjk_route_targets(slots, lambda name: counts.get(name, 0))
-    mapping, notes = seedxml.plan_mapping(root, slots, "fonts.xml", targets)
-    assert mapping.get(4) == "LuoShuSlot-ui-400.ttf", mapping
-    assert 5 not in mapping and 6 not in mapping and 7 not in mapping and 8 not in mapping, mapping
-    assert "cjk-kept:NotoSansCJK-Regular.ttc" in notes and "policy-kept:NotoSerifTC-Regular.otf" in notes, notes
-    assert seedxml.cjk_lang_min({"lang": "zh-Hant zh-Bopo"}) == 13000
-    assert seedxml.cjk_lang_min({"lang": "zh-Hans ja"}) == 0
-    assert seedxml.cjk_lang_min({"lang": "zh-HK"}) == 13000
+    # zh families (zh-Hans, "zh-Hant zh-Bopo", zh+ja, TTC, serif, variant) are
+    # never renamed, even when a slot matches them exactly.
+    zh_slots = slots + [slot(source, "", "NotoSansSC-Regular.otf", "LuoShuSlot-ui-400.ttf"),
+                        slot(source, "", "NotoSansTC-Regular.otf", "LuoShuSlot-ui-400.ttf")]
+    mapping, notes = seedxml.plan_mapping(root, zh_slots, "fonts.xml")
+    assert mapping == {2: "LuoShuSlot-gs-400.ttf"}, mapping
+    for name in ("NotoSansSC-Regular.otf", "NotoSansSC-Bold.otf", "NotoSansTC-Regular.otf",
+                 "NotoSansCJK-Regular.ttc", "NotoSerifTC-Regular.otf"):
+        assert f"stock-name-kept:{name}" in notes, (name, notes)
+    assert not any(note.startswith("cjk-routed") for note in notes), notes
+    assert seedxml.is_zh_family({"lang": "zh-Hant zh-Bopo"})
+    assert seedxml.is_zh_family({"lang": "zh-Hans ja"})
+    assert not seedxml.is_zh_family({"lang": "ja"}) and not seedxml.is_zh_family({})
 
-    # End-to-end apply: routed zh family in a seed is staged and validated.
+    # End-to-end apply: only google-sans is renamed; sans-serif and zh stay stock.
     seed_etc = base / "route-rom/system_ext/etc"
     write(seed_etc / "miui_fonts.xml", raw.decode())
     payload_root = base / "route-payload"
-    for name in ("LuoShuSlot-ui-400.ttf", "LuoShuSlot-ui-700.ttf", "LuoShuSlot-prop-400.ttf"):
+    for name in ("LuoShuSlot-ui-400.ttf", "LuoShuSlot-ui-700.ttf", "LuoShuSlot-prop-400.ttf",
+                 "LuoShuSlot-gs-400.ttf"):
         write(payload_root / "fonts" / name, (name.encode() + b"\0") * 256)
     stage = base / "route-stage"
     stage.mkdir()
@@ -505,8 +500,7 @@ def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
     saved = {key: os.environ.get(key) for key in env}
     os.environ.update(env)
     try:
-        report = seedxml.apply({}, slots, payload_root, stage, copied, overlay.copy_generated,
-                               han_count=lambda name: 7000)
+        report = seedxml.apply({}, slots, payload_root, stage, copied, overlay.copy_generated)
     finally:
         for key, value in saved.items():
             if value is None:
@@ -515,9 +509,9 @@ def check_policy_and_lang_routing(base: Path, fx: dict) -> None:
                 os.environ[key] = value
     assert report["status"] == "applied", report
     staged = (stage / "system_ext/etc/miui_fonts.xml").read_text()
-    assert ">LuoShuSlot-ui-400.ttf</font>\n    <font weight='700' style='normal'>LuoShuSlot-ui-700.ttf<" in staged, staged
-    assert ">MitypeMonoVF.ttf<" in staged and ">NotoSansTC-Regular.otf<" in staged
-    assert report["cjkRouting"]["400"]["file"] == "LuoShuSlot-ui-400.ttf"
+    assert staged == raw.decode().replace(">GoogleSans-Regular.ttf<", ">LuoShuSlot-gs-400.ttf<"), staged
+    assert "LuoShuSlot-ui-" not in staged and "cjkRouting" not in report, report
+    assert sorted(path.name for path in (stage / "system/fonts").iterdir()) == ["LuoShuSlot-gs-400.ttf"]
 
 
 def check_product_customization_and_strict_validation(base: Path) -> None:
@@ -528,6 +522,9 @@ def check_product_customization_and_strict_validation(base: Path) -> None:
     write(product, "<?xml version='1.0' encoding='utf-8'?>\n<fonts-modification version='1'>\n"
                    "  <family customizationType='new-named-family' name='sans-serif'>\n"
                    "    <font weight='400' style='normal'>Roboto-Regular.ttf</font>\n"
+                   "  </family>\n"
+                   "  <family customizationType='new-named-family' name='google-sans'>\n"
+                   "    <font weight='400' style='normal'>GoogleSans-Regular.ttf</font>\n"
                    "  </family>\n</fonts-modification>\n")
     system_etc = rom / "system/etc"
     system_etc.mkdir(parents=True)
@@ -536,7 +533,8 @@ def check_product_customization_and_strict_validation(base: Path) -> None:
     os.symlink("/data/system/fonts/theme_webview/font_fallback.xml", system_etc / "font_fallback.xml")
     payload_root = base / "cust-payload"
     write(payload_root / "fonts/LuoShuSlot-ui-400.ttf", b"x" * 4096)
-    slots = [slot(product, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf")]
+    slots = [slot(product, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
+             slot(product, "google-sans", "GoogleSans-Regular.ttf", "LuoShuSlot-ui-400.ttf")]
     env = {"LUOSHU_HYPEROS_SEED_ETC_ROOT": str(seed_etc),
            "LUOSHU_HYPEROS_SYSTEM_ETC_ROOT": str(system_etc),
            "LUOSHU_HYPEROS_PRODUCT_ETC_ROOT": str(rom / "product/etc"),
@@ -548,7 +546,7 @@ def check_product_customization_and_strict_validation(base: Path) -> None:
         saved = {key: os.environ.get(key) for key in env}
         os.environ.update(env)
         try:
-            return seedxml.apply({}, slots, payload_root, stage, {}, copy, han_count=lambda name: 0)
+            return seedxml.apply({}, slots, payload_root, stage, {}, copy)
         finally:
             for key, value in saved.items():
                 if value is None:
@@ -559,8 +557,10 @@ def check_product_customization_and_strict_validation(base: Path) -> None:
     stage = base / "cust-stage"
     report = run(stage)
     assert report["status"] == "applied", report
-    assert sorted(report["stagedXml"]) == ["product/etc/fonts_customization.xml",
-                                           "system_ext/etc/miui_font_fallback.xml"], report
+    # The seed holds only the main sans-serif family: kept stock, not staged.
+    assert sorted(report["stagedXml"]) == ["product/etc/fonts_customization.xml"], report
+    customized = (stage / "product/etc/fonts_customization.xml").read_text()
+    assert ">Roboto-Regular.ttf<" in customized and ">LuoShuSlot-ui-400.ttf<" in customized, customized
     # Customization fonts resolve against /product/fonts: the build is staged there.
     assert (stage / "product/fonts/LuoShuSlot-ui-400.ttf").is_file()
     assert not (stage / "system/etc/fonts.xml").exists()
@@ -572,15 +572,16 @@ def check_product_customization_and_strict_validation(base: Path) -> None:
     saved = {key: os.environ.get(key) for key in env}
     os.environ.update(env)
     try:
-        stage2_report = seedxml.apply({}, slots, payload_root, stage2, {}, overlay.copy_generated,
-                                      han_count=lambda name: 0)
+        stage2_report = seedxml.apply({}, slots, payload_root, stage2, {}, overlay.copy_generated)
     finally:
         for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
-    assert stage2_report["status"] == "applied", stage2_report
+    # Nothing else to rewrite (the seed only holds sans-serif): a clean skip.
+    assert stage2_report["status"] == "skipped", stage2_report
+    assert stage2_report["reason"] == "no-mapped-slots", stage2_report
     assert stage2_report["extra"][0]["skipped"] == "staged-by-main-renderer"
     assert (stage2 / "product/etc/fonts_customization.xml").read_bytes() == b"<main/>"
 

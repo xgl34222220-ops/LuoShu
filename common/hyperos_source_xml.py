@@ -19,11 +19,17 @@ symlinks to ``/data/system/fonts/theme_webview/`` that init fills from the
 rewritten seeds, so they are reported and left alone.
 
 Only the file-name text of ``<font>`` nodes whose slot LuoShu already replaced
-is changed, plus (when the selected font really covers CJK) the plain
-single-face fonts of ``lang="zh-Hans|zh-Hant|zh-HK"`` families, routed to the
-default sans-serif build of the nearest weight. Every other byte stays
-identical. Files the physical policy keeps stock (Mono/tabular, MiSansL3,
-disabled optional groups) are never pointed at a proportional build.
+is changed. Every other byte stays identical. Files the physical policy keeps
+stock (clock/tabular Mono, MiSansL3, disabled optional groups) are never pointed
+at a proportional build.
+
+The main ``sans-serif`` family and ``lang="zh-*"`` families are never renamed:
+they keep their stock file names and the physical route replaces the content of
+those same-name slots (the pre-v4.3 / 1bf06137 behaviour). Chromium's
+``SkFontMgr_android_ndk`` re-opens every font by path inside the WebView
+renderer; a new ``LuoShu*.ttf`` name that the renderer cannot open (or that no
+longer matches Skia's own fonts.xml parse) drops the whole family, so web pages
+fell back to stock fonts and mixed weights for Simplified-only Han.
 
 After rendering, every output is re-parsed and checked: structure and
 attributes unchanged, every family still complete with non-empty file names,
@@ -47,7 +53,7 @@ try:
 except ImportError:  # pragma: no cover - module layout always ships it
     physical_policy = None
 
-SCHEMA = "hyperos-source-xml-v2"
+SCHEMA = "hyperos-source-xml-v3"
 SEED_PATTERNS = (
     "hyper_fonts*.xml",
     "hyper_font_fallback*.xml",
@@ -57,15 +63,10 @@ SEED_PATTERNS = (
 LOGICAL_SEED_ETC = "/system_ext/etc"
 LOGICAL_SYSTEM_XMLS = ("fonts.xml", "font_fallback.xml")
 LOGICAL_PRODUCT_CUSTOMIZATION = "/product/etc/fonts_customization.xml"
-# lang= tokens routed to the user font when it covers CJK, with the minimum
-# number of CJK Unified Ideographs the font must carry (GB2312 ~6.7k, Big5 ~13k).
-CJK_LANG_MIN_HAN = {
-    "zh-Hans": 6000, "zh-CN": 6000, "zh-SG": 6000,
-    "zh-Hant": 13000, "zh-TW": 13000, "zh-HK": 13000, "zh-MO": 13000,
-    # AOSP declares Traditional Chinese as lang="zh-Hant zh-Bopo".
-    "zh-Bopo": 13000,
-}
 DATA_SEED_PREFIX = "/data/system/fonts/theme_webview/"
+# Families whose <font> file names stay stock; their same-name slots carry the
+# user font through the physical route (normalized family names).
+STOCK_NAME_FAMILIES = frozenset({"sans-serif"})
 _LUOSHU_MARKER = re.compile(rb"LuoShu(?:Mono|Slot)?-")
 _SAFE_GENERATED = re.compile(r"^LuoShu[A-Za-z0-9._-]*\.(?:ttf|otf)$")
 _MASK_RE = re.compile(r"<!--.*?-->|<!\[CDATA\[.*?\]\]>|<\?.*?\?>|<!DOCTYPE[^>]*>", re.S)
@@ -289,44 +290,18 @@ def _monospace_build(slots: list[dict[str, Any]]) -> bool:
         for slot in slots)
 
 
-def cjk_lang_min(attrs: dict[str, str]) -> int:
-    """Strictest Han requirement of a family's zh lang tags, 0 when not a zh family."""
-    if attrs.get("variant") or attrs.get("fallbackFor") or attrs.get("fallbackfor"):
-        return 0
+def is_zh_family(attrs: dict[str, str]) -> bool:
+    """Any family declaring a zh lang tag (zh-Hans, "zh-Hant zh-Bopo", "zh-Hans ja", ...)."""
     tags = re.split(r"[\s,]+", attrs.get("lang", "").strip())
-    needs = [CJK_LANG_MIN_HAN[tag] for tag in tags if tag in CJK_LANG_MIN_HAN]
-    # A family mixing zh with another script (e.g. "zh-Hans ja") is not routed.
-    if not needs or len(needs) != len([tag for tag in tags if tag]):
-        return 0
-    return max(needs)
-
-
-def cjk_route_targets(slots: list[dict[str, Any]], han_count: Callable[[str], int]) -> dict[int, tuple[str, int]]:
-    """weight -> (generated sans-serif build, its Han count) for routing zh families."""
-    targets: dict[int, tuple[str, int]] = {}
-    for slot in slots:
-        family = _normalize(str(slot.get("familyNormalized") or slot.get("family") or ""))
-        generated = str(slot.get("generatedFile") or "")
-        if family != "sans-serif" or not generated or not _SAFE_GENERATED.match(generated):
-            continue
-        if str(slot.get("style", "normal")).lower() != "normal":
-            continue
-        weight = _weight(slot.get("weight", "400"))
-        if weight in targets:
-            continue
-        count = han_count(generated)
-        if count > 0:
-            targets[weight] = (generated, count)
-    return targets
+    return any(tag == "zh" or tag.startswith("zh-") for tag in tags if tag)
 
 
 def plan_mapping(
     root: ET.Element,
     slots: list[dict[str, Any]],
     seed_name: str,
-    cjk_targets: dict[int, tuple[str, int]] | None = None,
 ) -> tuple[dict[int, str], list[str]]:
-    """Return font-node ordinal -> generated filename, plus ambiguity notes."""
+    """Return font-node ordinal -> generated filename, plus notes."""
     index = _slot_index(slots)
     pair = _pair_name(seed_name)
     mapping: dict[int, str] = {}
@@ -335,6 +310,13 @@ def plan_mapping(
     for ordinal, (node, family) in enumerate(_font_nodes(root)):
         attrs = dict(node.attrib)
         declared = (node.text or "").strip()
+        family_attrs = families.get(ordinal, {})
+        # Main sans-serif and zh families keep stock file names; the physical
+        # route swaps the content of those same-name slots.
+        if _normalize(family) in STOCK_NAME_FAMILIES or is_zh_family(family_attrs):
+            if declared:
+                notes.append(f"stock-name-kept:{declared}")
+            continue
         key = (
             _normalize(family),
             _weight(attrs.get("weight")),
@@ -344,40 +326,18 @@ def plan_mapping(
             _postscript(attrs),
         )
         candidates = index.get(key, [])
-        if candidates:
-            paired = [s for s in candidates if Path(str(s.get("sourceXml", ""))).name == pair]
-            chosen = paired or candidates
-            names = sorted({str(s["generatedFile"]) for s in chosen})
-            if len(names) != 1:
-                notes.append(f"ambiguous:{family}:{key[1]}:{key[4]}")
-                continue
-            if not _policy_allows(declared, names[0], _monospace_build(chosen)):
-                notes.append(f"policy-kept:{declared}")
-                continue
-            mapping[ordinal] = names[0]
+        if not candidates:
             continue
-        # zh-Hans/zh-Hant/zh-HK families: route to the user font only when it
-        # really carries enough Han for that script.
-        need = cjk_lang_min(families.get(ordinal, {}))
-        if not need or not cjk_targets:
+        paired = [s for s in candidates if Path(str(s.get("sourceXml", ""))).name == pair]
+        chosen = paired or candidates
+        names = sorted({str(s["generatedFile"]) for s in chosen})
+        if len(names) != 1:
+            notes.append(f"ambiguous:{family}:{key[1]}:{key[4]}")
             continue
-        if (key[2] != "normal" or key[3] != 0 or "index" in attrs or not declared
-                or declared.lower().endswith((".ttc", ".otc"))):
-            notes.append(f"cjk-kept:{declared}")
-            continue
-        weight = key[1]
-        nearest = min(cjk_targets, key=lambda value: (abs(value - weight), value))
-        generated, count = cjk_targets[nearest]
-        if count < need:
-            notes.append(f"cjk-coverage-low:{declared}:{count}<{need}")
-            continue
-        if (physical_policy is not None
-                and physical_policy.classify(declared) not in ("core", "unlisted")) \
-                or not _policy_allows(declared, generated):
+        if not _policy_allows(declared, names[0], _monospace_build(chosen)):
             notes.append(f"policy-kept:{declared}")
             continue
-        mapping[ordinal] = generated
-        notes.append(f"cjk-routed:{declared}->{generated}")
+        mapping[ordinal] = names[0]
     return mapping, notes
 
 
@@ -563,27 +523,6 @@ def _line_swap_only(old: bytes, new: bytes, pairs: dict[bytes, set[bytes]], dept
     return False
 
 
-def _han_counter(payload_root: Path) -> Callable[[str], int]:
-    """Count CJK Unified Ideographs (U+4E00..U+9FFF) in a generated build."""
-    cache: dict[str, int] = {}
-
-    def count(name: str) -> int:
-        if name in cache:
-            return cache[name]
-        total = 0
-        try:
-            from fontTools.ttLib import TTFont  # type: ignore
-            with TTFont(payload_root / "fonts" / name, lazy=True, fontNumber=0) as font:
-                cmap = font.getBestCmap() or {}
-                total = sum(1 for point in cmap if 0x4E00 <= point <= 0x9FFF)
-        except Exception:  # missing fontTools or unreadable font: never route
-            total = 0
-        cache[name] = total
-        return total
-
-    return count
-
-
 def apply(
     template: dict[str, Any],
     slots: list[dict[str, Any]],
@@ -591,7 +530,6 @@ def apply(
     stage: Path,
     copied: dict[tuple[str, str], Path],
     copy_generated: Callable[..., Path],
-    han_count: Callable[[str], int] | None = None,
 ) -> dict[str, Any]:
     """Stage rewritten seeds. Never raises; on any failure nothing is left behind."""
     system_etc = _system_etc_root()
@@ -610,9 +548,6 @@ def apply(
             report["reason"] = "no-seed-xml"
             _log(report)
             return report
-        cjk_targets = cjk_route_targets(slots, han_count or _han_counter(payload_root))
-        report["cjkRouting"] = {str(weight): {"file": name, "han": count}
-                                for weight, (name, count) in sorted(cjk_targets.items())}
         sources: list[tuple[str, Path, str, bool]] = [
             (logical, live, "system", True) for logical, live in seeds]
         sources += [(logical, live, partition, False)
@@ -633,7 +568,7 @@ def apply(
             if _LUOSHU_MARKER.search(raw):
                 raise SourceXmlError(f"{logical} is not a stock view ({origin})")
             root = _parse_bytes(raw)
-            mapping, notes = plan_mapping(root, slots, Path(logical).name, cjk_targets)
+            mapping, notes = plan_mapping(root, slots, Path(logical).name)
             entry["changedFonts"] = len(mapping)
             entry["notes"] = notes
             if not mapping:
