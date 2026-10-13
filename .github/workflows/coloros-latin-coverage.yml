@@ -1,0 +1,43 @@
+name: ColorOS Latin coverage regression
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - common/coloros_latin_policy.py
+      - common/coloros_flipfont.sh
+      - common/coloros_global.sh
+      - common/coloros_metrics_batch.py
+      - common/legacy_v14_4/rom_adapters.sh
+      - common/legacy_v14_4/font_switch_safe.sh
+      - common/device_font_payload_policy.sh
+      - scripts/coloros_latin_coverage_test.py
+      - scripts/coloros_legacy_coverage_test.sh
+      - scripts/coloros_metrics_batch_test.py
+      - .github/workflows/coloros-latin-coverage.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  coloros:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install font test dependency
+        run: python3 -m pip install --disable-pip-version-check 'fonttools>=4.50,<5'
+      - name: Compile source and run focused ColorOS regressions
+        run: |
+          sh -n common/coloros_flipfont.sh
+          sh -n common/coloros_global.sh
+          sh -n common/legacy_v14_4/rom_adapters.sh
+          sh -n common/legacy_v14_4/font_switch_safe.sh
+          sh -n common/device_font_payload_policy.sh
+          python3 -m py_compile common/coloros_latin_policy.py common/coloros_metrics_batch.py scripts/coloros_latin_coverage_test.py
+          python3 scripts/coloros_latin_coverage_test.py
+          sh scripts/coloros_legacy_coverage_test.sh
+          sh scripts/coloros_consistency_mapping_test.sh
+          sh scripts/coloros_partition_mapping_test.sh
+          python3 scripts/coloros_metrics_batch_test.py

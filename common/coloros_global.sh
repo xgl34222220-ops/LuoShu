@@ -33,20 +33,46 @@ _coloros_oem_ui_files() {
     printf '%s\n' 'OplusOSUI-XThin.ttf OplusOSUI-Thin.ttf OplusOSUI-ExtraLight.ttf OplusOSUI-Light.ttf OplusOSUI-Regular.ttf OplusOSUI-Medium.ttf OplusOSUI-SemiBold.ttf OplusOSUI-Bold.ttf OplusOSUI-ExtraBold.ttf OplusOSUI-Black.ttf OplusSans-Thin.ttf OplusSans-ExtraLight.ttf OplusSans-Light.ttf OplusSans-Regular.ttf OplusSans-Medium.ttf OplusSans-SemiBold.ttf OplusSans-Bold.ttf OplusSans-ExtraBold.ttf OplusSans-Black.ttf OppoSans-Thin.ttf OppoSans-Light.ttf OppoSans-Regular.ttf OppoSans-Medium.ttf OppoSans-SemiBold.ttf OppoSans-Bold.ttf OppoSans-ExtraBold.ttf OppoSans-Black.ttf'
 }
 
+# >>> LUOSHU_COLOROS_LATIN_POLICY (copy of common/coloros_latin_policy.py; scripts/coloros_latin_coverage_test.py checks it)
+# ColorOS 15/16 fonts_base.xml declares the osans-solid-digits family. OSans-RC (rare-Han store)
+# and OSans-Ext (placeholder) are fallback families and always stay stock. The osans_digits group
+# is on unless config/coloros_slot_groups.conf has an exact osans_digits=0 line.
+LUOSHU_COLOROS_TARGETS_REVISION=1
+_coloros_digit_files() {
+    _coloros_osans_digits_on || return 0
+    printf '%s\n' 'OSans-Solid-Digits-VF.ttf'
+}
+_coloros_policy_keep_file() {
+    case "$1" in OSans-RC-Regular.ttf|OSans-Ext-Regular.otf|OSans-RC*|OSans-Ext*) return 0 ;; esac
+    return 1
+}
+_coloros_osans_digits_on() {
+    _lcgd_conf="${LUOSHU_COLOROS_SLOT_GROUPS_CONF:-$(_luoshu_coloros_module_dir)/config/coloros_slot_groups.conf}"
+    [ -f "$_lcgd_conf" ] || return 0
+    _lcgd_value=$(tr -d '\r' < "$_lcgd_conf" 2>/dev/null | sed -n 's/^osans_digits=\([01]\)$/\1/p' | tail -n 1)
+    [ "$_lcgd_value" != 0 ]
+}
+# <<< LUOSHU_COLOROS_LATIN_POLICY
+
 # Discover safe upright UI slots from every real OPlus partition. This covers renamed files introduced
 # by an OTA without replacing serif, emoji, symbols, monospace, icons or true italic faces.
 _coloros_discovered_ui_files() {
     while IFS='|' read -r _lcg_real _lcg_overlay; do
         [ -d "$_lcg_real" ] || continue
         for _lcg_path in "$_lcg_real"/*.ttf; do
-            [ -f "$_lcg_path" ] || continue
+            # SysFont-*.ttf are stock symlinks into the flip-font directory; the link is the slot.
+            [ -f "$_lcg_path" ] || [ -L "$_lcg_path" ] || continue
             _lcg_name=${_lcg_path##*/}
+            _coloros_policy_keep_file "$_lcg_name" && continue
             case "$_lcg_name" in
-                *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*) continue ;;
+                *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*|*Myanmar*) continue ;;
             esac
             case "$_lcg_name" in
                 SysFont*.ttf|SysSans*.ttf|OplusSans*.ttf|OplusOSUI*.ttf|OppoSans*.ttf|Opposans*.ttf|OPSans*.ttf|GoogleSans*.ttf|Roboto*.ttf|SourceSansPro*.ttf|DIN*.ttf|OPPODIN*.ttf)
                     printf '%s\n' "$_lcg_name"
+                    ;;
+                OSans-*Digits*.ttf)
+                    _coloros_osans_digits_on && printf '%s\n' "$_lcg_name"
                     ;;
             esac
         done
@@ -61,7 +87,7 @@ _coloros_vendor_files() {
 
 get_all_coloros_files() {
     {
-        for _lcg_list in "$(_coloros_core_files)" "$(_coloros_google_text_files)" "$(_coloros_vendor_files)" "$(_coloros_oem_ui_files)"; do
+        for _lcg_list in "$(_coloros_core_files)" "$(_coloros_google_text_files)" "$(_coloros_vendor_files)" "$(_coloros_oem_ui_files)" "$(_coloros_digit_files)"; do
             for _lcg_file in $_lcg_list; do printf '%s\n' "$_lcg_file"; done
         done
         _coloros_discovered_ui_files
@@ -117,7 +143,7 @@ _coloros_alias_existing_targets() {
     _lcg_count=0
     while IFS='|' read -r _lcg_real _lcg_overlay; do
         [ -n "$_lcg_real" ] && [ -n "$_lcg_overlay" ] || continue
-        [ -e "$_lcg_real/$_lcg_file" ] || continue
+        [ -e "$_lcg_real/$_lcg_file" ] || [ -L "$_lcg_real/$_lcg_file" ] || continue
         mkdir -p "$_lcg_overlay" 2>/dev/null || continue
         if _font_alias "$_lcg_anchor" "$_lcg_overlay/$_lcg_file"; then
             if type _verify_font_copy >/dev/null 2>&1; then
@@ -202,6 +228,17 @@ copy_as_coloros() {
 
     if type _log_step >/dev/null 2>&1; then
         _log_step "  ColorOS 已按真实分区覆盖 $_lcg_total 个字体目标（系统族=$_lcg_core，Google 输入族=$_lcg_google）"
+        # Read-only flip-font diagnostic (Settings/Theme font links outside /system/fonts).
+        if [ -f "$_lcg_module/common/coloros_flipfont.sh" ]; then
+            _lcg_hint=$( (. "$_lcg_module/common/coloros_flipfont.sh" && luoshu_coloros_flipfont_hint) 2>/dev/null )
+            if [ -n "$_lcg_hint" ]; then
+                while IFS= read -r _lcg_line; do
+                    [ -n "$_lcg_line" ] && _log_step "  $_lcg_line"
+                done <<EOF_LUOSHU_COLOROS_FLIP
+$_lcg_hint
+EOF_LUOSHU_COLOROS_FLIP
+            fi
+        fi
     fi
     [ "$_lcg_total" -gt 0 ]
 }

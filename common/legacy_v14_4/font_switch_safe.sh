@@ -279,17 +279,21 @@ safe_mapper_identity() {
         "$MODDIR/common/util_functions.sh" "$MODDIR/common/rom_adapters.sh"
     # Capability layer (weight anchors, optional Serif/Emoji slots) when present.
     for _smi_file in "$MODDIR/common/font_capability.py" "$MODDIR/common/font_capability.sh" \
-                     "$MODDIR/common/font_slot_options.sh"; do
+                     "$MODDIR/common/font_slot_options.sh" "$MODDIR/common/coloros_latin_policy.py"; do
         [ -f "$_smi_file" ] && set -- "$@" "$_smi_file"
     done
     _smi_code=$(safe_code_identity "$@") || return 1
     # Optional Serif/Emoji slot choices change the staged tree as well.
     if [ -s "$MODDIR/config/font_slot_options.conf" ]; then
         _smi_opts=$(safe_hash_stream < "$MODDIR/config/font_slot_options.conf")
-        printf '%s;slot-options:%s\n' "$_smi_code" "$_smi_opts"
-    else
-        printf '%s\n' "$_smi_code"
+        _smi_code="$_smi_code;slot-options:$_smi_opts"
     fi
+    # The ColorOS osans_digits group changes which digit slots are staged.
+    if [ "${IS_COLOROS:-false}" = true ] && [ -s "$MODDIR/config/coloros_slot_groups.conf" ]; then
+        _smi_groups=$(safe_hash_stream < "$MODDIR/config/coloros_slot_groups.conf")
+        _smi_code="$_smi_code;coloros-groups:$_smi_groups"
+    fi
+    printf '%s\n' "$_smi_code"
 }
 
 safe_validator_identity() {
