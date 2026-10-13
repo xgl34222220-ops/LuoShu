@@ -218,16 +218,14 @@ internal fun mergeCoverageApps(fromPackageManager: List<CoverageApp>, fromRoot: 
     val byPackage = LinkedHashMap<String, CoverageApp>()
     fromPackageManager.forEach { byPackage[it.packageName] = it }
     fromRoot.forEach { name -> byPackage.getOrPut(name) { CoverageApp(name, name, system = true) } }
-    return byPackage.values.sortedWith(compareBy<CoverageApp>({ it.system }, { it.label.lowercase() }, { it.packageName }))
+    return byPackage.values.sortedBy { (if (it.system) "1" else "0") + it.label.lowercase() + "\u0000" + it.packageName }
 }
 
-/** Search by label or package name, case-insensitive; system apps only when asked. */
-internal fun filterCoverageApps(apps: List<CoverageApp>, query: String, includeSystem: Boolean): List<CoverageApp> {
+/** Search by label or package name, case-insensitive. */
+internal fun filterCoverageApps(apps: List<CoverageApp>, query: String): List<CoverageApp> {
     val needle = query.trim().lowercase()
-    return apps.filter { app ->
-        (includeSystem || !app.system || needle.isNotEmpty()) &&
-            (needle.isEmpty() || app.label.lowercase().contains(needle) || app.packageName.lowercase().contains(needle))
-    }
+    return if (needle.isEmpty()) apps
+    else apps.filter { it.label.lowercase().contains(needle) || it.packageName.lowercase().contains(needle) }
 }
 
 internal data class CoverageScanItem(
@@ -249,7 +247,6 @@ internal data class CoverageScanResult(
     val weightLoss: Boolean,
 ) {
     val fixable: List<CoverageScanItem> get() = items.filter { it.fixes.isNotEmpty() }
-    val unfixable: List<CoverageScanItem> get() = items.filter { it.fixes.isEmpty() }
 }
 
 internal fun coverageScanCommand(): String = "sh ${RootShell.quote(HYPEROS_COVERAGE_BRIDGE)} coverage_scan"

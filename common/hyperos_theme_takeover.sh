@@ -134,9 +134,8 @@ _lht_classify() {
         "$LHT_STOCK_DIR/MiSansVF.ttf"; then
         printf 'stock\n'; return 0
     fi
-    # shellcheck disable=SC2046
-    if _lht_same_as_any "$_lht_cf" $(for _lht_p in "$LHT_FONTS"/.luoshu-font-store/*.font "$LHT_FONTS"/*.ttf \
-        "$LHT_MODULE/config/hyperos-theme-takeover"/*; do [ -f "$_lht_p" ] && printf '%s\n' "$_lht_p"; done); then
+    if _lht_same_as_any "$_lht_cf" "$LHT_FONTS"/.luoshu-font-store/*.font "$LHT_FONTS"/*.ttf \
+        "$LHT_MODULE/config/hyperos-theme-takeover"/*; then
         printf 'luoshu\n'; return 0
     fi
     # Theme engine's own Roboto (as hyperos_webview_route.sh accepts it).

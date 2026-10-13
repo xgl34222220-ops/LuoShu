@@ -144,13 +144,11 @@ class HyperOsCoverageTest {
     }
 
     @Test
-    fun appSearchMatchesLabelOrPackageAndSystemToggle() {
+    fun appSearchMatchesLabelOrPackage() {
         val apps = listOf(CoverageApp("com.tencent.mm", "微信", false), CoverageApp("com.android.systemui", "系统界面", true))
-        assertEquals(2, filterCoverageApps(apps, "", includeSystem = true).size)
-        assertEquals(listOf("com.tencent.mm"), filterCoverageApps(apps, "", includeSystem = false).map { it.packageName })
-        assertEquals(listOf("com.tencent.mm"), filterCoverageApps(apps, "微", includeSystem = true).map { it.packageName })
-        // A search still finds system apps even while they are hidden from the plain list.
-        assertEquals(listOf("com.android.systemui"), filterCoverageApps(apps, "SYSTEMUI", includeSystem = false).map { it.packageName })
+        assertEquals(2, filterCoverageApps(apps, "").size)
+        assertEquals(listOf("com.tencent.mm"), filterCoverageApps(apps, "微").map { it.packageName })
+        assertEquals(listOf("com.android.systemui"), filterCoverageApps(apps, " SYSTEMUI ").map { it.packageName })
     }
 
     @Test
@@ -163,7 +161,7 @@ class HyperOsCoverageTest {
         )
         assertEquals(listOf(HyperOsSetting.LOCKSCREEN), scan.fixes)
         assertEquals(1, scan.fixable.size)
-        assertEquals("com.example.hidden:remote", scan.unfixable.single().process)
+        assertEquals("com.example.hidden:remote", scan.items.single { it.fixes.isEmpty() }.process)
         assertTrue(scan.weightLoss)
         assertEquals(listOf(HyperOsSetting.LOCKSCREEN), pendingScanFixes(scan, HyperOsCoverageStatus()))
         assertTrue(pendingScanFixes(scan, HyperOsCoverageStatus(lockscreenStyles = true)).isEmpty())

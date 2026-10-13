@@ -5,9 +5,7 @@
 #   set <key> <0|1>            group:miui_ex | group:misans_ext |
 #                              group:lockscreen_styles | xml | theme_takeover
 #   locate <package>           JSON from common/font_coverage_locator.py
-#   scan                       JSON: every running app process not drawing
-#                              with LuoShu's font, with the settings above that
-#                              address it (read-only; the App applies them)
+#   scan                       JSON: running processes without LuoShu's font
 # Settings only write config files; they take effect after the next apply/reboot,
 # which the JSON says so the App can tell the user.
 set +e
@@ -114,7 +112,6 @@ _hcb_python_env() {
     fi
 }
 
-# 一键扫描: the same read-only locator over every running app process.
 hcb_scan() {
     _hcb_helper="$MODDIR/common/font_coverage_locator.py"
     if [ ! -f "$_hcb_helper" ] || [ ! -x "$PYBIN" ]; then

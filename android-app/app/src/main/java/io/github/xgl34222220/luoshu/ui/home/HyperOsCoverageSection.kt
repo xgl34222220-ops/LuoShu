@@ -485,7 +485,7 @@ private fun CoverageAppPickerDialog(
     var query by rememberSaveable { mutableStateOf("") }
     androidx.compose.runtime.LaunchedEffect(Unit) { model.loadApps(packageManager) }
     val all = model.apps.orEmpty()
-    val shown = remember(all, query) { filterCoverageApps(all, query, includeSystem = true) }
+    val shown = remember(all, query) { filterCoverageApps(all, query) }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
             color = tokens.cardBackground,
@@ -501,10 +501,6 @@ private fun CoverageAppPickerDialog(
                     label = { Text("搜索应用名称或包名") },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                val typed = query.trim()
-                if (isValidCoveragePackage(typed) && all.none { it.packageName == typed }) {
-                    TextButton(onClick = { onPick(typed) }) { Text("直接定位 $typed") }
-                }
                 when {
                     model.appsLoading && all.isEmpty() -> Row(
                         Modifier.fillMaxWidth().padding(24.dp),

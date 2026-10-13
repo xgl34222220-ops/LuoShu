@@ -21,9 +21,7 @@ actually hit on HyperOS, each with a concrete next step:
 * ``covered``          every mapped font is LuoShu's
 
 Nothing is modified: maps, stat and (optionally) a font table read.
-``--scan`` runs the same locate() for every running app process (bounded count
-and time) and lists the ones not drawing with LuoShu's font, each with the
-existing HyperOS coverage settings that address it (or why none can).
+``--scan``: locate() over every running app process, with fixable settings.
 Output: one JSON object on stdout.
 """
 from __future__ import annotations
@@ -335,104 +333,72 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
 
 
 SCAN_SCHEMA = "luoshu-coverage-scan-v1"
-SCAN_MAX_PROCESSES = 96
-SCAN_TIME_BUDGET_S = 45.0
-GROUP_SETTING = {"lockscreen_styles": "group:lockscreen_styles", "miui_ex": "group:miui_ex",
-                 "misans_ext": "group:misans_ext"}
-GROUP_OFF_RE = re.compile(r"（([a-z_]+) 组未开启）$")
+GROUP_OFF_RE = re.compile(r"（(lockscreen_styles|miui_ex|misans_ext) 组未开启）$")
 
 
-def running_app_processes(proc_root: Path = Path("/proc"),
-                          limit: int = SCAN_MAX_PROCESSES) -> list[tuple[str, str]]:
-    found: dict[str, str] = {}
+def running_app_processes(proc_root=Path("/proc"), limit=96):
+    found = {}
     try:
-        entries = sorted((e for e in proc_root.iterdir() if e.name.isdigit()), key=lambda e: int(e.name))
+        pids = sorted((e.name for e in proc_root.iterdir() if e.name.isdigit()), key=int)
     except OSError:
         return []
-    for entry in entries:
+    for pid in pids:
         try:
-            raw = (entry / "cmdline").read_bytes()
+            name = (proc_root / pid / "cmdline").read_bytes().split(b"\0", 1)[0].decode("utf-8", "replace")
         except OSError:
             continue
-        name = raw.split(b"\0", 1)[0].decode("utf-8", "replace").strip()
-        if not name or not PACKAGE_RE.match(name) or name in found.values():
-            continue
-        found[entry.name] = name
-        if len(found) >= limit:
-            break
+        if PACKAGE_RE.match(name) and name not in found.values() and len(found) < limit:
+            found[pid] = name
     return list(found.items())
 
 
-def suggested_fixes(result: dict[str, Any]) -> tuple[list[str], list[str]]:
-    fixes: list[str] = []
-    reasons: list[str] = []
+def suggested_fixes(result):
+    fixes, reasons = [], []
     for item in result.get("findings", []):
-        category = item.get("category")
-        if category == "covered":
-            continue
+        category, files = item["category"], item.get("files", [])
         if category == "theme-takeover":
             fixes.append("theme_takeover")
-            continue
-        if category == "outside-whitelist":
-            groups = [m.group(1) for f in item.get("files", []) if (m := GROUP_OFF_RE.search(f))]
-            keys = [GROUP_SETTING[g] for g in groups if g in GROUP_SETTING]
-            fixes.extend(keys)
-            if len(keys) < len(item.get("files", [])):
-                reasons.append("部分文件不属于任何可选字体组：" + item.get("action", ""))
-            continue
-        reasons.append(f"{item.get('title', '')}：{item.get('action', '')}")
-    return list(dict.fromkeys(fixes)), list(dict.fromkeys(r for r in reasons if r))
+        elif category == "outside-whitelist":
+            keys = ["group:" + m.group(1) for f in files if (m := GROUP_OFF_RE.search(f))]
+            fixes += keys
+            if len(keys) < len(files):
+                reasons.append("部分文件不属于可选字体组：" + item["action"])
+        elif category != "covered":
+            reasons.append(f"{item['title']}：{item['action']}")
+    return list(dict.fromkeys(fixes)), list(dict.fromkeys(reasons))
 
 
-def scan(*, module: Path | None, proc_root: Path = Path("/proc"), host_root: Path = Path("/"),
-         theme_dir: Path = Path("/data/system/theme/fonts"), groups: frozenset[str] | None = None,
-         stock_dir: Path = Path("/system/fonts"),
-         weight_probe: Callable[[Path], bool] = static_on_variable_slot,
-         limit: int = SCAN_MAX_PROCESSES, budget_s: float = SCAN_TIME_BUDGET_S,
-         clock: Callable[[], float] | None = None) -> dict[str, Any]:
+def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path("/data/system/theme/fonts"),
+         groups=None, weight_probe=static_on_variable_slot, budget_s=45.0, clock=None):
     import time
     now = clock or time.monotonic
     started = now()
-    theme = theme_state(theme_dir, module, stock_dir)
-    payload_fonts = (module / ".luoshu-payload/system/fonts") if module else Path("/nonexistent")
-    weight = weight_probe(payload_fonts)
-    processes = running_app_processes(proc_root, limit)
-    items: list[dict[str, Any]] = []
-    covered = 0
-    truncated = False
-    for pid, name in processes:
+    theme = theme_state(theme_dir, module)
+    weight = weight_probe((module / ".luoshu-payload/system/fonts") if module else Path("/nonexistent"))
+    items, covered, truncated = [], 0, False
+    for pid, name in running_app_processes(proc_root):
         if now() - started > budget_s:
             truncated = True
             break
         try:
-            result = locate(name, pid, module=module, proc_root=proc_root, host_root=host_root,
-                            theme_dir=theme_dir, groups=groups, stock_dir=stock_dir,
-                            weight_probe=lambda _p: weight, theme=theme)
-        except Exception as exc:  # one process never breaks the scan
-            items.append({"package": name.split(":", 1)[0], "process": name, "pid": pid,
-                          "verdict": "unreadable", "categories": ["unreadable"], "fixes": [],
-                          "reasons": [f"读取失败：{exc.__class__.__name__}"]})
+            result = locate(name, pid, module=module, proc_root=proc_root, host_root=host_root, theme_dir=theme_dir,
+                            groups=groups, weight_probe=lambda _p: weight, theme=theme)
+        except Exception:  # one process never breaks the scan
             continue
-        verdict = result.get("verdict", "")
-        if verdict == "no-payload":
-            return {"schema": SCAN_SCHEMA, "verdict": "no-payload", "scanned": 0, "covered": 0,
-                    "items": [], "fixes": [], "truncated": False, "theme": theme}
-        categories = [f["category"] for f in result.get("findings", [])]
+        if result["verdict"] == "no-payload":
+            return {"schema": SCAN_SCHEMA, "verdict": "no-payload", "scanned": 0, "covered": 0, "items": [], "fixes": []}
         # weight-loss is payload-wide (reported once), not a miss in this process.
-        if verdict == "covered" or (categories and set(categories) <= {"weight-loss", "covered"}):
+        found = [f for f in result["findings"] if f["category"] not in ("weight-loss", "covered")]
+        if not found:
             covered += 1
             continue
-        result["findings"] = [f for f in result["findings"] if f["category"] != "weight-loss"]
-        verdict = result["findings"][0]["category"]
+        result["findings"] = found
         fixes, reasons = suggested_fixes(result)
-        items.append({"package": name.split(":", 1)[0], "process": name, "pid": pid, "verdict": verdict,
-                      "title": result["findings"][0]["title"],
-                      "categories": [f["category"] for f in result["findings"]],
-                      "fixes": fixes, "reasons": reasons})
-    all_fixes = list(dict.fromkeys(key for item in items for key in item["fixes"]))
+        items.append({"package": name.split(":", 1)[0], "process": name, "verdict": found[0]["category"],
+                      "title": found[0]["title"], "fixes": fixes, "reasons": reasons})
     return {"schema": SCAN_SCHEMA, "verdict": "ok", "scanned": covered + len(items), "covered": covered,
-            "items": items, "fixes": all_fixes, "truncated": truncated, "theme": theme,
-            "weightLoss": bool(weight)}
+            "items": items, "fixes": list(dict.fromkeys(k for i in items for k in i["fixes"])),
+            "truncated": truncated, "weightLoss": bool(weight)}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
