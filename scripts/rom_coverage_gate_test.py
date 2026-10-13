@@ -59,11 +59,13 @@ class MapperTest(unittest.TestCase):
             for name in missing:
                 self.assertTrue(gate._reason_ok(entry['keptStock'].get(name)), (rom, name))
         hyperos = data['roms']['hyperos']
-        # Code monospace restored; only clock/tabular Mono and MiSansL3 kept on purpose.
-        for name in ('DroidSansMono.ttf', 'RobotoMono-Regular.ttf', 'NotoSansMono-Regular.ttf'):
+        # Code monospace and clock faces replaced (clock digits made tabular);
+        # only MiSansL3 kept on purpose.
+        for name in ('DroidSansMono.ttf', 'RobotoMono-Regular.ttf', 'NotoSansMono-Regular.ttf',
+                     'MiClockMono.otf', 'MitypeClockMono.otf', 'MitypeMonoVF.ttf'):
             self.assertIn(name, hyperos['replaced'])
         self.assertEqual(sorted(set(hyperos['legacyReplaced']) - set(hyperos['replaced'])),
-                         ['MiClockMono.otf', 'MiSansL3.otf', 'MitypeClockMono.otf', 'MitypeMonoVF.ttf'])
+                         ['MiSansL3.otf'])
 
     def test_reintroduced_mono_regression_is_caught(self):
         # Re-create the #290 behaviour (every *mono* kept stock) in a copy of the mapper.
