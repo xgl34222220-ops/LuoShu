@@ -205,7 +205,7 @@ HyperOS 用户可以在 App 首页的 **未覆盖界面定位** 里选择没变�
 
 分组和 XML 设置需要 **重新应用当前字体并重启** 后生效；主题接管只需重启。
 
-始终保留原厂：等宽/表格数字字体（RobotoMono、NotoSansMono、DroidSansMono、MitypeMonoVF、MiClockMono 等，避免时钟、计时器、代码错位），以及 `MiSansL3.otf`（GB18030 生僻字库，替换后生僻字会变方块）。
+等宽与时钟字体（RobotoMono、NotoSansMono、DroidSansMono、MitypeMonoVF、MiClockMono 等）均换成你的字体，时钟槽自动生成等宽数字；`NotoSansCJK-Regular.ttc` / `NotoSerifCJK-Regular.ttc` 按本机字体面编译替换（网页中文）。始终保留原厂：`MiSansL3.otf`（GB18030 生僻字库，替换后生僻字会变方块）。
 
 ### 需要手动深度检查字体加载
 

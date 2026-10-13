@@ -43,6 +43,8 @@ _targets=$({
             _root=$(_lhcc_root_for_part "$_part") || continue
             [ -d "$_root" ] || continue
             _lhcc_names_for_root "$_root"
+            type _lhcc_collection_names_for_root >/dev/null 2>&1 && \
+                _lhcc_collection_names_for_root "$_root"
         done
     else
         _hyperos_core_files

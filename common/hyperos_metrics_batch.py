@@ -15,6 +15,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 
 from fontTools.ttLib import TTFont
 from fontTools import subset
@@ -26,6 +27,7 @@ from font_inventory_scan import _is_ui_family, _safe_dynamic_partition_name
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
 from hyperos_physical_policy import (MAPPER_FAMILY_PREFIXES, classify as policy_classify,
+                                     is_clock_face,
                                      enabled_groups, preserved_dynamic_alias,
                                      safe_physical_font_name)
 from font_capability import (SCRIPT_COVERAGE_MIN, fallback_script_for_slot,
@@ -42,11 +44,10 @@ def policy_keeps_stock(name: str, groups: frozenset | None = None) -> bool:
     """Names the physical policy always keeps stock, or an optional group that is off.
 
     Inventory completion reuses measured stock slots by their own evidence; it
-    must still never hand a monospace face, MiSansL3 or a disabled group a
-    proportional user font.
+    must still never hand MiSansL3 or a disabled group a user font.
     """
     kind = policy_classify(name)
-    if kind in ("mono", "rare-han"):
+    if kind == "rare-han":
         return True
     if kind in ("miui_ex", "misans_ext", "lockscreen_styles"):
         return kind not in (enabled_groups() if groups is None else groups)
@@ -139,6 +140,132 @@ def pick_source(fonts: Path, name: str) -> Path:
     raise ValueError(f'没有可用的源字体：{name}')
 
 
+# Stock CJK collections WebView/Chromium and AOSP zh/ja/ko fallbacks read.
+# They are compiled index-preserving (same face count and order, stock
+# cmap/layout/metrics per face) with the user's outlines; mono/italic faces stay
+# stock. Never a plain alias: one SFNT under a .ttc name breaks face indexes.
+COLLECTION_TARGETS = {'NotoSansCJK-Regular.ttc': (), 'NotoSerifCJK-Regular.ttc': ('serif',)}
+WEIGHT_STEPS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
+
+
+def collection_source_for_weight(fonts: Path, weight: int) -> Path:
+    """User donor for one stock face weight: exact weight, else nearest."""
+    store = fonts / '.luoshu-font-store'
+    for step in sorted(WEIGHT_STEPS, key=lambda value: (abs(value - weight), value)):
+        for path in (fonts / f'LuoShu-{step}.ttf', store / f'wght-{step}.font', fonts / f'{step}.ttf'):
+            if nonempty(path):
+                return path
+    return pick_source(fonts, 'Regular.ttf')
+
+
+COLLECTION_CACHE_KEEP = 2  # newest compiled sets kept per target name
+
+
+def collection_cache_dir(module: Path) -> Path:
+    state = module / '.luoshu-state/cache'
+    return (state if state.is_dir() else module / 'cache') / 'hyperos-collections-v1'
+
+
+def collection_cache_key(stock: Path, sources: list[Path], logical: str, allow: tuple) -> str:
+    """Content identity of one compiled collection: stock bytes, each face's
+    donor bytes (in face order), the target, and both builder sources."""
+    import composite_collection_build as builder
+    engine = [builder.SCHEMA, builder.sha(Path(builder.__file__)), builder.sha(Path(__file__))]
+    hashes = {}
+    donors = [hashes.setdefault(path, builder.sha(path)) for path in sources]
+    return builder.canonical({'engine': engine, 'target': logical, 'allow': list(allow),
+                              'stock': builder.sha(stock), 'donors': donors})
+
+
+def sha_file(path: Path) -> str:
+    import composite_collection_build as builder
+    return builder.sha(path)
+
+
+def prune_collection_cache(directory: Path, name: str) -> None:
+    entries = sorted(directory.glob(f'*-{name}'), key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    for old in entries[COLLECTION_CACHE_KEEP:]:
+        old.unlink(missing_ok=True)
+        old.with_name(old.name + '.json').unlink(missing_ok=True)
+
+
+def build_collections(module: Path, stage: Path, names: list[str],
+                      workspace: Path) -> tuple[list, dict]:
+    """Compile each requested stock collection; a failure keeps that file stock.
+
+    Runs after the main slots are linked. The donors are the already generated
+    LuoShu-<weight> composites, and a compiled set is cached by content
+    (stock + donor hashes + builder), so repeating a switch only links it."""
+    from composite_collection_build import build as build_collection, stock_path, face_weight
+    from composite_collection_contract import collection_faces
+    fonts = stage / 'system/fonts'
+    cache_dir = collection_cache_dir(module)
+    done, skipped = [], {}
+    for part in PARTS:
+        override = os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT')
+        root = Path(override or f'/{part}/fonts')
+        for name in names:
+            if not (root / name).is_file():
+                continue
+            destination = stage / part / 'fonts' / name
+            logical = f'/{part}/fonts/{name}'
+            try:
+                # The live path may already be LuoShu's mounted build: read the
+                # unmounted stock view (tests point the root at a fixture).
+                stock = root / name if override else stock_path(module, logical)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                allow = COLLECTION_TARGETS[name]
+                sources = [collection_source_for_weight(fonts, face_weight(stock, index))
+                           for index in range(collection_faces(stock))]
+                key = collection_cache_key(stock, sources, logical, allow)
+                cached = cache_dir / f'{key[:32]}-{name}'
+                summary = cached.with_name(cached.name + '.json')
+                cache_hit = False
+                try:
+                    report = json.loads(summary.read_text(encoding='utf-8'))
+                    cache_hit = (report.get('key') == key and cached.is_file() and not cached.is_symlink()
+                                 and collection_faces(cached) == report['stockFaces']
+                                 and sha_file(cached) == report['outputSha256'])
+                except (OSError, ValueError, KeyError, TypeError):
+                    cache_hit = False
+                if cache_hit:
+                    os.utime(cached)
+                    link_copy(cached, destination)
+                else:
+                    started = time.monotonic()
+                    report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
+                                              source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
+                                              allow=allow)
+                    report = {'key': key, 'stockFaces': report['stockFaces'], 'outputSha256': report['outputSha256'],
+                              'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces']),
+                              'retainedSlots': {reason: max((face.get(field, 0) for face in report['faces']), default=0)
+                                                for reason, field in (('conflict', 'retainedConflictSlots'),
+                                                                      ('outOfFrame', 'retainedOutOfFrameSlots'))},
+                              'buildSeconds': round(time.monotonic() - started, 1),
+                              'stockBytes': stock.stat().st_size, 'outputBytes': destination.stat().st_size}
+                    try:  # caching is an optimization; a failure never touches the staged result
+                        cache_dir.mkdir(parents=True, exist_ok=True)
+                        temporary = cached.with_name(cached.name + f'.tmp.{os.getpid()}')
+                        temporary.unlink(missing_ok=True)
+                        try:  # same bytes as the staged face set; payload files are never rewritten in place
+                            os.link(destination, temporary)
+                        except OSError:
+                            shutil.copyfile(destination, temporary)
+                        os.replace(temporary, cached)
+                        summary.write_text(json.dumps(report), encoding='utf-8')
+                        prune_collection_cache(cache_dir, name)
+                    except OSError:
+                        pass
+                done.append({'slot': logical, 'mode': 'collection', 'stockFaces': report['stockFaces'],
+                             'compiledFaces': report['compiledFaces'], 'cached': cache_hit,
+                             **{field: report[field] for field in ('retainedSlots', 'buildSeconds', 'stockBytes', 'outputBytes')
+                                if field in report}})
+            except Exception as error:  # keep the ROM collection; report why
+                destination.unlink(missing_ok=True)
+                skipped[logical] = f'{type(error).__name__}: {error}'
+    return done, skipped
+
+
 def inventory_font_roots(module: Path) -> dict[str, Path]:
     """Canonical stock roots plus the scanner's safe partition manifest."""
     roots = dict(LOGICAL_FONT_ROOTS)
@@ -163,6 +290,9 @@ def inventory_completion_slot(slot: object, logical: str) -> bool:
     # exception to the generic name deny list. Admission uses the stock face's
     # own coverage evidence, whichever scan pass (XML/heuristic/verified) found it.
     numeric = _numeric_display_slot_candidate(name, metrics)
+    # Clock faces (incl. Mono/tabular ones) are explicit policy targets even
+    # though the generic name deny list rejects "mono"; they get tabular digits.
+    numeric = numeric or (is_clock_face(name) and safe_physical_font_name(name))
     if (Path(name).suffix.lower() not in {'.ttf', '.otf'} or
             slot.get('format') in {'TTC', 'OTC'} or slot.get('faceIndex', 0) != 0 or
             slot.get('style', 'normal') != 'normal' or
@@ -524,6 +654,50 @@ def write_metrics(source: Path, output: Path, contract: tuple,
 
 
 PATCHED_METRIC_TABLES = ('head', 'hhea', 'OS/2')
+DIGIT_CODEPOINTS = tuple(range(0x30, 0x3A))
+
+
+def apply_tabular_digits(path: Path) -> dict:
+    """Give a clock slot equal-width digits built from the user font, in place.
+
+    Static fonts only: every digit takes the widest digit advance. TrueType
+    digits are re-centred through the hmtx left side bearing (FreeType places
+    glyf outlines relative to it); CFF digits keep their position. Variable
+    fonts are left unchanged (HVAR/gvar would override hmtx at other weights),
+    so the user font is used as is. Outlines are never decoded or rewritten.
+    """
+    face = _pick_face(path)
+    options = {'fontNumber': face} if face >= 0 else {}
+    try:
+        with path.open('rb') as stream, TTFont(stream, lazy=True, recalcBBoxes=False,
+                                               recalcTimestamp=False, **options) as font:
+            if 'fvar' in font or 'hmtx' not in font:
+                return {'tabularDigits': 'skipped-variable' if 'fvar' in font else 'no-hmtx'}
+            cmap = font.getBestCmap() or {}
+            names = [cmap.get(code) for code in DIGIT_CODEPOINTS]
+            metrics = font['hmtx'].metrics
+            if any(name is None or name not in metrics for name in names):
+                return {'tabularDigits': 'missing-digits'}
+            advance = max(metrics[name][0] for name in names)
+            if all(metrics[name][0] == advance for name in names):
+                return {'tabularDigits': 'already-tabular', 'tabularAdvance': advance}
+            truetype = 'glyf' in font
+            for name in dict.fromkeys(names):
+                width, lsb = metrics[name]
+                shift = (advance - width) // 2 if truetype else 0
+                metrics[name] = (advance, lsb + shift)
+            for tag in ('hdmx', 'LTSH'):  # cached per-size advances would disagree
+                if tag in font:
+                    del font[tag]
+            temporary = path.with_name(path.name + '.tnum')
+            font.save(temporary, reorderTables=False)
+        os.replace(temporary, path)
+        os.chmod(path, 0o644)
+        return {'tabularDigits': 'applied', 'tabularAdvance': advance,
+                'tabularCentered': truetype}
+    except Exception as error:  # never block staging; the slot keeps the user font as is
+        path.with_name(path.name + '.tnum').unlink(missing_ok=True)
+        return {'tabularDigits': f'error:{error.__class__.__name__}'}
 
 
 def _patch_metric_tables(source: Path, output: Path, font: TTFont, descriptor: int) -> bool:
@@ -939,6 +1113,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
         raise ValueError('HyperOS 字体暂存目录不存在')
     fonts = stage / 'system/fonts'
     data = read_inventory(module)
+    collection_names = [name for name in dict.fromkeys(names) if name in COLLECTION_TARGETS]
+    names = [name for name in names if name not in COLLECTION_TARGETS]
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
@@ -1035,9 +1211,11 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             if contract[-1] != 'stock':
                 routing, stock_punctuation, routing_reason = None, frozenset(), 'invalid-stock-contract'
             align_bottom = bitmap_bottom_slot(data, logical, contract)
+            # Clock slots get equal-width digits so seconds/timers do not jump.
+            tabular = is_clock_face(dest.name)
             key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
-                   routing, stock_punctuation, align_bottom)
-            if key not in cache and dest in fallback_outputs:
+                   routing, stock_punctuation, align_bottom, tabular)
+            if key not in cache and dest in fallback_outputs and not tabular:
                 cache[key], output_reports[key] = fallback_outputs[dest]
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
@@ -1053,6 +1231,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
                                                     align_bitmap_bottom=align_bottom)
                 output_reports[key]['removedCjkMappings'] += compact_removed
+                if tabular:
+                    output_reports[key].update(apply_tabular_digits(output))
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
@@ -1074,6 +1254,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)
+        # Main slots first; the collections reuse those composites as donors.
+        collections, collections_kept = build_collections(module, stage, collection_names, outputs)
         for alias in preserved_aliases + excluded_aliases:
             # Initial generic mapping creates the alias as a regular font. Its
             # absence exposes the ROM lower symlink in OverlayFS and leaves it
@@ -1090,6 +1272,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in preserved_aliases],
                            'preservedFallbackSlots': fallback_preserved,
+                           'collections': collections,
+                           'preservedCollections': collections_kept,
                            'preservedStockAliases': sorted({
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in excluded_aliases if alias.parent.is_dir()})},

@@ -91,6 +91,84 @@ class HyperOSMetricsTest(unittest.TestCase):
         return {row['slot']: row for row in json.loads(
             (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
 
+    def stock_collection(self, name='NotoSansCJK-Regular.ttc'):
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        from composite_collection_build_test import fixture
+        from fontTools.ttLib import TTCollection
+        work = self.root / 'collection-fixture'; work.mkdir(exist_ok=True)
+        collection = TTCollection(); collection.fonts = []
+        for number, index in enumerate((0, 2, 0)):  # weights 400, 600, 400; last face mono
+            path = work / f'face-{number}.font'; fixture(path, index, mono=number == 2)
+            collection.fonts.append(TTFont(path))
+        target = self.root / 'stock/system' / name
+        collection.save(target); collection.close()
+        for weight in (400, 700):
+            fixture(self.fonts / f'LuoShu-{weight}.ttf', 1)
+        return target
+
+    def test_stock_cjk_collection_compiled_with_face_count_order_and_weights(self):
+        stock = self.stock_collection()
+        (self.root / 'stock/system/400.ttf').touch()
+        batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        output = self.fonts / 'NotoSansCJK-Regular.ttc'
+        from composite_collection_contract import collection_faces
+        self.assertEqual(collection_faces(stock), collection_faces(output))
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        core = ('slot', 'mode', 'stockFaces', 'compiledFaces', 'cached')
+        self.assertEqual([{'slot': '/system/fonts/NotoSansCJK-Regular.ttc', 'mode': 'collection',
+                           'stockFaces': 3, 'compiledFaces': 2, 'cached': False}],
+                         [{key: entry[key] for key in core} for entry in report['collections']])
+        # Size/time/retained-slot evidence travels with the device report.
+        entry = report['collections'][0]
+        self.assertEqual(output.stat().st_size, entry['outputBytes'])
+        self.assertEqual(stock.stat().st_size, entry['stockBytes'])
+        self.assertEqual({'conflict': 0, 'outOfFrame': 0}, entry['retainedSlots'])
+        self.assertGreaterEqual(entry['buildSeconds'], 0)
+        for index in range(3):
+            with TTFont(stock, fontNumber=index) as original, TTFont(output, fontNumber=index) as result:
+                self.assertEqual(original['name'].getDebugName(1), result['name'].getDebugName(1))
+                self.assertEqual(original.getBestCmap(), result.getBestCmap())
+        self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 400).name)
+        self.assertEqual('LuoShu-700.ttf', batch.collection_source_for_weight(self.fonts, 600).name)
+        self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 300).name)
+
+    def test_collection_runs_after_main_slots_and_repeat_reuses_cache(self):
+        self.stock_collection()
+        (self.root / 'stock/system/400.ttf').touch()
+        import composite_collection_build as builder
+        real = builder.build
+        seen = []
+
+        def counting(*args, **kwargs):
+            # Main slots are already linked when the collection compiles.
+            seen.append((self.fonts / '400.ttf').is_file())
+            return real(*args, **kwargs)
+
+        with patch.object(builder, 'build', counting):
+            batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+            first = (self.fonts / 'NotoSansCJK-Regular.ttc').read_bytes()
+            (self.fonts / 'NotoSansCJK-Regular.ttc').unlink()
+            batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        self.assertEqual(seen, [True])
+        self.assertEqual(first, (self.fonts / 'NotoSansCJK-Regular.ttc').read_bytes())
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertTrue(report['collections'][0]['cached'])
+        # A changed donor is a different identity: compile again.
+        with TTFont(self.fonts / 'LuoShu-700.ttf') as font:
+            font['head'].fontRevision += 1
+            font.save(self.fonts / 'LuoShu-700.ttf')
+        with patch.object(builder, 'build', counting):
+            batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        self.assertEqual(len(seen), 2)
+
+    def test_uncompilable_stock_collection_stays_stock(self):
+        (self.root / 'stock/system/NotoSerifCJK-Regular.ttc').write_bytes(b'not a collection')
+        (self.root / 'stock/system/400.ttf').touch()
+        batch.build(self.module, self.stage, ['400.ttf', 'NotoSerifCJK-Regular.ttc'])
+        self.assertFalse((self.fonts / 'NotoSerifCJK-Regular.ttc').exists())
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertIn('/system/fonts/NotoSerifCJK-Regular.ttc', report['preservedCollections'])
+
     def test_trusted_inventory_completes_oem_names_and_explicit_weights(self):
         # Names/styles match actual stock inventory omissions from Redmi/dali
         # OS3.0.303. Synthetic outlines avoid copying ROM fonts into the repo.
@@ -122,7 +200,7 @@ class HyperOSMetricsTest(unittest.TestCase):
                 self.assertEqual(font['hhea'].ascent, slots[f'/{part}/fonts/{name}']['metrics']['hhea']['ascent'])
             self.assertEqual(reports[f'/{part}/fonts/{name}']['slotSource'], 'stock-inventory')
 
-    def test_lockscreen_style_group_is_off_by_default_and_mono_stays_stock(self):
+    def test_lockscreen_style_group_is_off_by_default_and_clock_mono_is_replaced(self):
         names = (('Interscaled-Medium.otf', 500), ('ChamberiDisplay-Semibold.ttf', 600),
                  ('MitypeMonoVF.ttf', 400), ('MiSansL3.otf', 400), ('MiuiEx-Light.ttf', 300))
         for weight in (300, 500, 600):
@@ -133,10 +211,47 @@ class HyperOSMetricsTest(unittest.TestCase):
         missing = self.module / 'config/absent-groups.conf'
         with patch.dict(os.environ, {'LUOSHU_HYPEROS_SLOT_GROUPS_CONF': str(missing)}):
             result = batch.build(self.module, self.stage, [])
-        self.assertEqual(result['mapped'], 1)
+        # MitypeMonoVF is a clock face: replaced now; MiSansL3 stays stock.
+        self.assertEqual(result['mapped'], 2)
         self.assertTrue((self.stage / 'product/fonts/MiuiEx-Light.ttf').is_file())
-        for name, _weight in names[:4]:
+        self.assertTrue((self.stage / 'product/fonts/MitypeMonoVF.ttf').is_file())
+        for name in ('Interscaled-Medium.otf', 'ChamberiDisplay-Semibold.ttf', 'MiSansL3.otf'):
             self.assertFalse((self.stage / 'product/fonts' / name).exists(), name)
+
+    def test_clock_slots_get_tabular_digits_from_the_user_font(self):
+        widths = {0x30 + index: 480 + index * 20 for index in range(10)}  # proportional
+        path = self.fonts / '400.ttf'
+        fb = FontBuilder(1000, isTTF=True)
+        cmap = {cp: f'u{cp:X}' for cp in (*widths, 65)}
+        order = ['.notdef', *cmap.values()]
+        glyphs = {}
+        for name in order:
+            pen = TTGlyphPen(None)
+            pen.moveTo((40, 0)); pen.lineTo((400, 0)); pen.lineTo((400, 700)); pen.closePath()
+            glyphs[name] = pen.glyph()
+        fb.setupGlyphOrder(order); fb.setupCharacterMap(cmap); fb.setupGlyf(glyphs)
+        fb.setupHorizontalMetrics({name: (widths.get(int(name[1:], 16), 600) if name != '.notdef' else 600, 40)
+                                   for name in order})
+        fb.setupHorizontalHeader(ascent=1600, descent=-600)
+        fb.setupOS2(sTypoAscender=1600, sTypoDescender=-600, usWinAscent=1700, usWinDescent=700)
+        fb.setupNameTable({'familyName': 'Fixture', 'styleName': 'Regular'})
+        fb.setupPost(); fb.setupMaxp(); fb.save(path)
+        slots = {f'/system/fonts/{name}': slot() for name in ('MiClockMono.otf', 'Roboto-Regular.ttf')}
+        self.inventory(slots)
+        batch.build(self.module, self.stage, [Path(logical).name for logical in slots])
+        with TTFont(self.fonts / 'MiClockMono.otf') as font:
+            hmtx, cmap = font['hmtx'].metrics, font.getBestCmap()
+            advances = {hmtx[cmap[cp]][0] for cp in widths}
+            self.assertEqual(advances, {660})
+            # The narrowest digit is centred in the tabular cell (TrueType lsb shift).
+            self.assertEqual(hmtx[cmap[0x30]][1], 40 + (660 - 480) // 2)
+            self.assertEqual(hmtx[cmap[65]][0], 600)
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
+            hmtx, cmap = font['hmtx'].metrics, font.getBestCmap()
+            self.assertEqual({hmtx[cmap[cp]][0] for cp in widths}, set(widths.values()))
+        reports = self.report()
+        self.assertEqual(reports['/system/fonts/MiClockMono.otf']['tabularDigits'], 'applied')
+        self.assertNotIn('tabularDigits', reports['/system/fonts/Roboto-Regular.ttf'])
 
     def test_unavailable_completion_weight_uses_selected_regular_source(self):
         self.inventory({'/product/fonts/MiuiEx-Bold.ttf': self.verified('MiuiEx-Bold.ttf', weight=700)})

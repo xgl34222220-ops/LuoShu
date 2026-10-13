@@ -18,10 +18,16 @@ Optional slot groups (config/hyperos_slot_groups.conf, ``key=0|1`` lines):
 * ``misans_ext``        MiSansRounded*, MiSansC* (not clock), MiLanVF*  default on
 * ``lockscreen_styles`` lock screen / AOD / widget display faces  default off
 
-Always kept stock: italic/serif/emoji/symbol/icon/script faces, collections,
-MiSansL3 (GB18030 rare-character store; replacing it turns rare Han into tofu)
-and every ``*Mono*`` face (monospace / tabular clock slots must never receive a
-proportional user font).
+Always kept stock: italic/serif/emoji/symbol/icon/script faces, collections
+and MiSansL3 (GB18030 rare-character store; replacing it turns rare Han into
+tofu). Nothing is kept stock only because it is monospace or a clock face:
+
+* code monospace behind the system ``monospace`` family (DroidSansMono.ttf,
+  RobotoMono*, NotoSansMono*) is replaced like other UI text, as before v4.3;
+* clock faces (any name containing ``Clock``, plus MitypeMonoVF, InterMono*,
+  BebasNeue-Mono) are replaced too, ahead of the optional groups. The staging
+  metrics batch gives clock slots equal-width digits built from the user font
+  (static sources) so seconds do not jump.
 """
 from __future__ import annotations
 
@@ -42,7 +48,7 @@ DYNAMIC_OVERLAY_TARGET = "/data/system/fonts/theme_webview/Roboto-Regular.ttf"
 
 # Bump font_inventory_scan.HYPEROS_COVERAGE_REVISION whenever this policy changes
 # which stock files are captured, so installed inventories are rescanned.
-POLICY_REVISION = 2
+POLICY_REVISION = 4
 
 
 def preserved_dynamic_alias(data: dict, logical: str) -> bool:
@@ -74,8 +80,11 @@ _LANG_TOKENS = ("CJKJP", "CJKKR")
 # GB18030-2022 level-3 rare characters (60k+ Han). A user font does not carry
 # them, so this file stays stock and keeps serving as the rare-character store.
 _RARE_HAN_PREFIXES = ("MiSansL3",)
-# Any monospace/tabular face. Lower-case substring match.
-MONO_TOKEN = "mono"
+# Clock faces are always targets (``clock`` kind), checked before the optional
+# groups so lock screen clock faces are replaced even with lockscreen_styles off.
+# Lower-case substring match plus the clock-only Mono prefixes below.
+CLOCK_TOKEN = "clock"
+_CLOCK_MONO_PREFIXES = ("MitypeMono", "InterMono", "BebasNeue-Mono")
 
 # Clock faces keep their own (core) handling even though "MiSansC" is the
 # misans_ext prefix; checked before the group prefixes.
@@ -88,8 +97,8 @@ GROUP_PREFIXES = {
     "misans_ext": ("MiSansRounded", "MiSansC", "MiLanVF"),
     # HyperOS 3 lock screen / AOD / widget clock styles. Names come from a
     # third-party HyperOS 3 extraction (gizdev); confirm per device. InterMono
-    # and BebasNeue-Mono are listed for completeness but the mono guard above
-    # keeps them stock.
+    # and BebasNeue-Mono are clock faces: the ``clock`` kind replaces them before
+    # this group is consulted.
     "lockscreen_styles": (
         "Interscaled", "InterMono", "C800", "Qinghe", "ChamberiDisplay",
         "DelaGothicOne", "BebasNeue", "NeumaticCompressed", "GulfsDisplay",
@@ -140,7 +149,8 @@ STATIC_NAMES = (
     "NotoSans-Bold.ttf", "NotoSans-Black.ttf", "NotoSansUI-Regular.ttf",
     "NotoSansUI-Medium.ttf", "NotoSansUI-Bold.ttf", "SourceSansPro-Regular.ttf",
     "SourceSansPro-Medium.ttf", "SourceSansPro-SemiBold.ttf", "SourceSansPro-Bold.ttf",
-    "DroidSans.ttf", "MitypeVF.ttf", "MitypeClock.ttf", "MitypeClock.otf",
+    "DroidSans.ttf", "MitypeVF.ttf", "MitypeMonoVF.ttf", "MitypeClock.ttf", "MitypeClock.otf",
+    "MitypeClockMono.ttf", "MitypeClockMono.otf", "MiClockMono.ttf", "MiClockMono.otf",
     "MiClock.ttf", "MiClock.otf", "MiClockThin.ttf", "MiClockThin.otf",
     "MiSansClock.ttf", "MiSansClockVF.ttf", "AndroidClock.ttf",
     "AndroidClock_Highlight.ttf", "AndroidClock_Solid.ttf", "Clockopia.ttf",
@@ -148,11 +158,10 @@ STATIC_NAMES = (
     "Miui-Regular.ttf", "Miui-Bold.ttf",
 )
 # Files earlier builds aliased that this policy now keeps stock. Mappers delete
-# stale staged/overlay copies of these names.
+# stale staged/overlay copies of these names. Monospace and clock faces are
+# replaced again and must not be here.
 RETIRED_NAMES = (
-    "MiSansL3.otf", "MitypeMonoVF.ttf", "MitypeClockMono.ttf", "MitypeClockMono.otf",
-    "MiClockMono.ttf", "MiClockMono.otf", "RobotoMono-Regular.ttf", "DroidSansMono.ttf",
-    "NotoSansMono-Regular.ttf",
+    "MiSansL3.otf",
 )
 
 # Every family prefix any HyperOS mapper writes. A staged alias with one of these
@@ -198,11 +207,16 @@ def enabled_groups(path: Path | None = None) -> frozenset[str]:
 
 
 # ------------------------------------------------------------------ policy
+def is_clock_face(name: str) -> bool:
+    """Clock / lock screen digit faces: always replaced (with tabular digits when possible)."""
+    return CLOCK_TOKEN in name.lower() or name.startswith(_CLOCK_MONO_PREFIXES)
+
+
 def classify(name: str) -> str:
     """Return why a filename is (not) a target, independent of group settings.
 
-    ``invalid`` | ``excluded`` | ``rare-han`` | ``mono`` | ``core`` | a group id |
-    ``unlisted``.
+    ``invalid`` | ``excluded`` | ``rare-han`` | ``clock`` | ``core`` | a group id |
+    ``unlisted``. Monospace alone is not a reason to keep a file stock.
     """
     if not name or Path(name).name != name or not name.endswith((".ttf", ".otf")):
         return "invalid"
@@ -220,8 +234,8 @@ def classify(name: str) -> str:
         return "excluded"
     if name.startswith(_RARE_HAN_PREFIXES):
         return "rare-han"
-    if MONO_TOKEN in lower:
-        return "mono"
+    if is_clock_face(name):
+        return "clock"
     if not name.startswith(_CLOCK_BEFORE_GROUPS):
         for group in GROUPS:
             if name.startswith(GROUP_PREFIXES[group]):
@@ -246,7 +260,7 @@ def safe_physical_font_name(name: str, groups: frozenset[str] | set[str] | None 
     need a rescan; mappers use the configured set.
     """
     kind = classify(name)
-    if kind == "core":
+    if kind in ("core", "clock"):
         return True
     if kind in GROUP_DEFAULTS:
         active = enabled_groups() if groups is None else groups
@@ -258,16 +272,15 @@ def xml_file_allowed(name: str, generated: str = "", groups: frozenset[str] | No
                      monospace_build: bool = False) -> bool:
     """May an XML ``<font>`` node naming stock ``name`` point at ``generated``?
 
-    Mono stock files may only receive a monospace-aware build: a ``LuoShuMono*``
-    font, or a per-slot build whose role is ``mono``/``clock`` (stock-exact
-    advances, ``monospace_build=True``). Rare-Han, excluded and disabled-group
-    files never change. Names the physical policy does not list (e.g.
+    Rare-Han, excluded and disabled-group files never change; clock and
+    monospace files may take any build (``monospace_build`` is accepted for
+    call compatibility). Per-slot clock/mono builds already keep stock-exact
+    advances. Names the physical policy does not list (e.g.
     ``Roboto-Regular.ttf`` shells, OEM-only names) are left to the per-slot
     template, which already decided they are UI slots.
     """
+    del generated, monospace_build
     kind = classify(name)
-    if kind == "mono":
-        return monospace_build or generated.startswith("LuoShuMono")
     if kind in ("rare-han", "excluded"):
         return False
     if kind in GROUP_DEFAULTS:
@@ -302,12 +315,13 @@ def render_shell_block() -> str:
             + f")\n            _lhpp_group_enabled {group}\n            return $?\n            ;;")
     core = _case_list([f"{p}*" for p in _PREFIXES + _NOTO_UI_PREFIXES] + list(_UI_NAMES) + list(_NUMERIC))
     families = " ".join(_NOTO_LATIN_UI_FAMILIES)
+    clock_mono = _case_list([f"{p}*" for p in _CLOCK_MONO_PREFIXES])
     icon_fp = " ".join(_ICON_FALSE_POSITIVES)
     group_any = _case_list([f"{p}*" for g in GROUPS for p in GROUP_PREFIXES[g]])
     defaults = "; ".join(f"_LHPP_G_{g}={1 if GROUP_DEFAULTS[g] else 0}" for g in GROUPS)
     keys = "\n".join(f"                {g}) _LHPP_G_{g}=$_lhpp_v ;;" for g in GROUPS)
     statics = "\n".join(n for n in STATIC_NAMES
-                         if classify(n) == "core" or classify(n) in GROUP_DEFAULTS)
+                         if classify(n) in ("core", "clock") or classify(n) in GROUP_DEFAULTS)
     retired = " ".join(RETIRED_NAMES)
     groups_list = " ".join(GROUPS)
     body = f"""{GENERATED_BEGIN}
@@ -378,7 +392,11 @@ _lhpp_safe_name() {{
         {lang}) return 1 ;;
         {rare}) return 1 ;;
     esac
-    case "$_lhpp_lower" in *{MONO_TOKEN}*) return 1 ;; esac
+    # Clock faces are always targets (is_clock_face), ahead of the groups.
+    case "$_lhpp_lower" in *{CLOCK_TOKEN}*) return 0 ;; esac
+    case "$_lhpp_name" in
+        {clock_mono}) return 0 ;;
+    esac
     case "$_lhpp_name" in
         {clock_first}) ;;
         *)
@@ -433,7 +451,8 @@ _lhpp_retired_names() {{
 
 def policy_digest() -> str:
     """Digest of the policy data only (not of this generator's own output)."""
-    data = repr((_EXCLUDED, _ICON_FALSE_POSITIVES, _LANG_PREFIXES, _LANG_TOKENS, _RARE_HAN_PREFIXES, MONO_TOKEN,
+    data = repr((_EXCLUDED, _ICON_FALSE_POSITIVES, _LANG_PREFIXES, _LANG_TOKENS, _RARE_HAN_PREFIXES,
+                 CLOCK_TOKEN, _CLOCK_MONO_PREFIXES,
                  _CLOCK_BEFORE_GROUPS, GROUPS, sorted(GROUP_DEFAULTS.items()),
                  sorted(GROUP_PREFIXES.items()), _PREFIXES, _NOTO_UI_PREFIXES,
                  _NOTO_LATIN_UI_FAMILIES, _UI_NAMES, _NUMERIC, STATIC_NAMES, RETIRED_NAMES,

@@ -54,6 +54,17 @@
         <receiver
             android:name=".NativeImportActionReceiver"
             android:exported="false" />
+
+        <!-- 导出完整诊断 → 分享: cache/reports only, read grant per share intent. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.reports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/coverage_report_paths" />
+        </provider>
     </application>
 
 </manifest>

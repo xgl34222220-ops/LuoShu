@@ -1,0 +1,23 @@
+name: ROM coverage regression gate
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Replaced/stock file lists must not regress (scripts/rom_coverage_baseline.json)
+        run: |
+          python3 -m py_compile scripts/rom_coverage_gate.py scripts/rom_coverage_gate_test.py
+          # Fails when a fixture file moves from "replaced" to "kept stock" without a
+          # reason registered in roms.<rom>.keptStock; new replacements pass.
+          python3 scripts/rom_coverage_gate.py --check
+          python3 scripts/rom_coverage_gate_test.py

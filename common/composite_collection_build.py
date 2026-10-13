@@ -36,6 +36,7 @@ import font_inventory as stock_inventory
 SCHEMA = 'composite-collection-build-v1'
 PROTECTED = ('cmap', 'GSUB', 'GPOS', 'GDEF', 'name', 'hhea', 'OS/2', 'vhea', 'vmtx', 'VORG',
              'fvar', 'avar', 'STAT', 'MVAR', 'BASE', 'cvar', 'VVAR')
+REQUIRED_CHARACTERS = '中ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 CJK_RANGES = ((0x2E80, 0x31EF), (0x3400, 0x9FFF), (0xF900, 0xFAFF),
               (0xFF00, 0xFFEF), (0x20000, 0x323AF))
 
@@ -104,11 +105,14 @@ def _protected(font):
                       font['head'].xMax, font['head'].yMax]}
 
 
-def specialized(font):
+def specialized(font, allow=()):
+    # allow: label words a caller deliberately replaces (e.g. 'serif' for a
+    # stock serif CJK collection). Mono/italic faces always stay stock.
     names = font['name'] if 'name' in font else None
     label = ' '.join(filter(None, (names.getDebugName(i) for i in (1, 2, 16, 17)))) if names else ''
+    words = tuple(word for word in ('mono', 'serif', 'emoji', 'symbol', 'icon') if word not in allow)
     return (bool(font['post'].isFixedPitch) if 'post' in font else False) or any(
-        word in label.lower() for word in ('mono', 'serif', 'emoji', 'symbol', 'icon')) or bool(
+        word in label.lower() for word in words) or bool(
         font['head'].macStyle & 2 or ('OS/2' in font and font['OS/2'].fsSelection & 1))
 
 
@@ -187,43 +191,116 @@ def retained_vertical_deltas(font, name):
     return values
 
 
-def replace_face(font, donor, recordings):
-    if specialized(font):
-        return {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
-    kind = 'glyf' if 'glyf' in font else 'CFF ' if 'CFF ' in font else 'CFF2' if 'CFF2' in font else None
-    if kind is None:
-        raise ValueError('本机 CJK 集合包含不支持的轮廓')
+# Format/control/space code points (soft hyphen U+00AD, ZWJ, NBSP...) often
+# share a stock glyph with a visible character while the donor gives them a
+# distinct (often blank) outline. They never decide a shared slot.
+IGNORABLE_CATEGORIES = ('Cc', 'Cf', 'Zs', 'Zl', 'Zp')
+OUTLINE_TAGS = ('glyf', 'loca', 'CFF ', 'CFF2', 'hmtx', 'vmtx', 'maxp', 'gvar', 'HVAR')
+DROPPED_TAGS = ('DSIG', 'LTSH', 'hdmx', 'VDMX')
+
+
+def ignorable(cp):
+    import unicodedata
+    return unicodedata.category(chr(cp)) in IGNORABLE_CATEGORIES
+
+
+def plan_face(font, donor, allow=()):
+    """Encoded candidates of one face: {stock glyph ID: {code point: donor glyph}}.
+
+    Keyed by glyph ID, not name: faces sharing one outline table can derive
+    different names (post format 3 names come from each face's own cmap).
+    Slots that must stay stock (encoded by an uncovered or other-role
+    character) are returned in ``blocked``."""
+    if specialized(font, allow):
+        return None
+    gid = {name: index for index, name in enumerate(font.getGlyphOrder())}
     cmap, source = font.getBestCmap() or {}, donor.getBestCmap() or {}
-    source_glyphs = donor.getGlyphSet()
-    mapping, counts, uncovered = {}, dict(cjk=0, latin=0, digit=0), 0
+    candidates, uncovered = {}, 0
     for cp, target_name in sorted(cmap.items()):
-        category = role(cp)
-        if not category:
+        if not role(cp):
             continue
         source_name = source.get(cp)
         if not source_name:
             uncovered += 1
             continue
-        if target_name in mapping and mapping[target_name] != source_name:
-            previous = mapping[target_name]
-            for name in (previous, source_name):
-                if name not in recordings:
-                    recordings[name] = draw_record(source_glyphs, name)
-            if (recordings[previous].value != recordings[source_name].value or
-                    donor['hmtx'][previous] != donor['hmtx'][source_name]):
-                raise ValueError(f'原厂共享字形 U+{cp:04X} 对应不同来源轮廓，不能安全覆盖')
-        mapping[target_name] = source_name
-        counts[category] += 1
-    # A covered character can share its glyph ID with an uncovered character
-    # (or a character outside these roles). Keep that whole slot stock.
-    blocked = {name for table in font['cmap'].tables
+        candidates.setdefault(gid[target_name], {})[cp] = source_name
+    blocked = {gid[name] for table in font['cmap'].tables
                if table.isUnicode() and table.format != 14
                for cp, name in table.cmap.items() if not role(cp) or cp not in source}
-    retained_shared = len(blocked.intersection(mapping))
-    for name in blocked:
-        mapping.pop(name, None)
+    return {'candidates': candidates, 'blocked': blocked, 'uncovered': uncovered}
+
+
+def resolve_mapping(plans, donor, recordings):
+    """Merge face plans that share one outline table into one slot mapping.
+
+    A stock slot whose characters map to donor outlines that differ (inside
+    one face or across faces sharing the slot) keeps its stock outline instead
+    of failing the whole collection; ignorable characters never decide it."""
+    glyphs = donor.getGlyphSet()
+    candidates, blocked = {}, set()
+    for plan in plans:
+        blocked |= plan['blocked']
+        for target, values in plan['candidates'].items():
+            candidates.setdefault(target, {}).update(values)
+    mapping, conflicts = {}, set()
+    for target, values in candidates.items():
+        if target in blocked:
+            continue
+        def classes(items):
+            found = []
+            for cp, name in items:
+                if name not in recordings:
+                    recordings[name] = draw_record(glyphs, name)
+                key = (recordings[name].value, donor['hmtx'][name])
+                if not any(key == other for other, _ in found):
+                    found.append((key, (cp, name)))
+            return found
+        if len(set(values.values())) == 1:
+            mapping[target] = next(iter(values.values()))
+            continue
+        found = classes(sorted(values.items()))
+        if len(found) > 1:
+            visible = [(cp, name) for cp, name in sorted(values.items()) if not ignorable(cp)]
+            found = classes(visible) if visible else found
+        if len(found) != 1:
+            conflicts.add(target)
+            continue
+        mapping[target] = found[0][1][1]
+    return {'mapping': mapping, 'conflicts': conflicts, 'rejected': set()}
+
+
+def slot_summary(plan, group):
+    """Why this face's encoded slots that stayed stock did so."""
+    mapping, conflicts, rejected = group['mapping'], group['conflicts'], group['rejected']
+    kept = {gid: values for gid, values in plan['candidates'].items() if gid not in mapping}
+    conflict = sorted(min(values) for gid, values in kept.items() if gid in conflicts)
+    frame = sorted(min(values) for gid, values in kept.items() if gid in rejected)
+    return {'retainedSharedSlots': len(kept) - len(conflict) - len(frame),
+            'retainedConflictSlots': len(conflict),
+            'conflictCodepoints': [f'U+{cp:04X}' for cp in conflict[:16]],
+            'retainedOutOfFrameSlots': len(frame),
+            'outOfFrameCodepoints': [f'U+{cp:04X}' for cp in frame[:16]]}
+
+
+def replace_face(font, donor, recordings, allow=(), group=None):
+    """Replace one face. ``group`` (from resolve_mapping) lets faces that
+    share one stock outline table receive the same replacement set; slots
+    that stay stock for frame reasons are added to its ``rejected`` set."""
+    if specialized(font, allow):
+        return {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
+    kind = 'glyf' if 'glyf' in font else 'CFF ' if 'CFF ' in font else 'CFF2' if 'CFF2' in font else None
+    if kind is None:
+        raise ValueError('本机 CJK 集合包含不支持的轮廓')
+    plan = plan_face(font, donor, allow)
+    uncovered = plan['uncovered']
+    order = font.getGlyphOrder()
+    if group is None:
+        group = resolve_mapping([plan], donor, recordings)
+    mapping = {order[glyph]: name for glyph, name in group['mapping'].items()}
+    source_glyphs = donor.getGlyphSet()
+    cmap = font.getBestCmap() or {}
     counts = {category: sum(role(cp) == category and name in mapping for cp, name in cmap.items())
-              for category in counts}
+              for category in ('cjk', 'latin', 'digit')}
     if not counts['cjk']:
         return {'mode': 'retained-no-cjk-match', 'replaced': counts, 'uncovered': uncovered}
     if '.notdef' in mapping:
@@ -232,10 +309,16 @@ def replace_face(font, donor, recordings):
     scale = font['head'].unitsPerEm / donor['head'].unitsPerEm
     frame = font['head']
     converted = {}
+    # A few donor outlines (e.g. ideographic tone marks U+302A-302F) may sit
+    # outside the stock face frame. Such a slot keeps its stock outline; only
+    # a required character or a broad mismatch rejects the whole collection.
+    required = {cmap[cp] for cp in map(ord, REQUIRED_CHARACTERS) if cp in cmap}
+    rejected = []
+    applied = {}
     for target_name, source_name in mapping.items():
-        if source_name not in recordings:
-            recordings[source_name] = draw_record(source_glyphs, source_name)
-        recording = recordings[source_name]
+        # Only conflict checks keep recordings; a converted outline is cached
+        # below, so do not hold every drawn donor outline in memory as well.
+        recording = recordings.get(source_name) or draw_record(source_glyphs, source_name)
         bounds = BoundsPen(None)
         recording.replay(bounds)
         # Keep the stock line frame. A donor outside it fails before publication;
@@ -243,17 +326,20 @@ def replace_face(font, donor, recordings):
         if bounds.bounds is not None:
             x0, y0, x1, y1 = (coordinate * scale for coordinate in bounds.bounds)
             if x0 < frame.xMin - 1 or y0 < frame.yMin - 1 or x1 > frame.xMax + 1 or y1 > frame.yMax + 1:
-                raise ValueError(f'来源字形 {source_name} 超出本机原厂字体面边界')
+                rejected.append((target_name, f'来源字形 {source_name} 超出本机原厂字体面边界'))
+                continue
         width, bearing = donor['hmtx'][source_name]
         width, bearing = round(width * scale), round(bearing * scale)
         if not 0 <= width <= 65535 or not -32768 <= bearing <= 32767:
-            raise ValueError('来源水平度量超出 SFNT 范围')
+            rejected.append((target_name, '来源水平度量超出 SFNT 范围'))
+            continue
         header = font['hhea']
         outline_width = 0 if bounds.bounds is None else (bounds.bounds[2] - bounds.bounds[0]) * scale
         if (width > header.advanceWidthMax or bearing < header.minLeftSideBearing or
                 width - bearing - outline_width < header.minRightSideBearing - 1 or
                 bearing + outline_width > header.xMaxExtent + 1):
-            raise ValueError(f'来源字形 {source_name} 水平度量超出本机原厂字体面边界')
+            rejected.append((target_name, f'来源字形 {source_name} 水平度量超出本机原厂字体面边界'))
+            continue
         if kind == 'glyf':
             key = (source_name,)
             if key not in converted:
@@ -316,61 +402,194 @@ def replace_face(font, donor, recordings):
                 converted[key] = char
             top.CharStrings[target_name] = converted[key]
         font['hmtx'][target_name] = (width, bearing)
+        applied[target_name] = source_name
+    if rejected and (required.intersection(name for name, _ in rejected) or
+                     len(rejected) > max(1, len(mapping) // 100)):
+        raise ValueError(rejected[0][1])
+    if rejected:
+        guard_retained_components(font, applied)
+    mapping = applied
+    group['rejected'] = {font.getGlyphID(name) for name, _ in rejected}
+    group['mapping'] = {font.getGlyphID(name): source for name, source in mapping.items()}
+    counts = {category: sum(role(cp) == category and name in mapping for cp, name in cmap.items())
+              for category in ('cjk', 'latin', 'digit')}
     freeze_horizontal_variations(font, mapping)
-    for tag in ('DSIG', 'LTSH', 'hdmx', 'VDMX'):
+    for tag in DROPPED_TAGS:
         if tag in font:
             del font[tag]
     return {'mode': 'compiled', 'replaced': counts, 'uncovered': uncovered,
-            'retainedSharedSlots': retained_shared, 'retainedUnencodedGlyphs': True,
+            **slot_summary(plan, group), 'retainedUnencodedGlyphs': True,
             'outline': kind, 'retainedVariationAxes': 'fvar' in font,
             'replacementVariation': 'fixed-source-at-selected-weight'}
 
 
-def build(source, stock, output, workspace, request, target, progress=None):
-    source, stock, output = map(Path, (source, stock, output))
-    if source.resolve() == output.resolve() or stock.resolve() == output.resolve():
-        raise ValueError('集合输出不能覆盖来源或原厂文件')
-    before = (identity(source), identity(stock))
-    source_hash, stock_hash = sha(source), sha(stock)
+def raw_contract(font):
+    """Byte identity of the stock layout/metric tables a face keeps verbatim."""
+    tables = getattr(font.reader, 'tables', {})
+    return {'rawTables': {tag: hashlib.sha256(font.reader[tag]).hexdigest()
+                          for tag in PROTECTED if tag in tables},
+            'frame': [font['head'].unitsPerEm, font['head'].xMin, font['head'].yMin,
+                      font['head'].xMax, font['head'].yMax]}
+
+
+def contract_of(font, like):
+    return raw_contract(font) if 'rawTables' in like else protected(font)
+
+
+def changed_tables(stock, index, compiled_path):
+    """Outline tables whose compiled bytes differ from the stock face."""
+    changed = []
+    with TTFont(stock, fontNumber=index, lazy=True) as original, \
+            TTFont(compiled_path, lazy=True) as compiled:
+        for tag in OUTLINE_TAGS:
+            if tag not in original.reader.tables:
+                continue
+            if tag not in compiled.reader.tables:
+                raise ValueError('共享轮廓表在编译后缺失')
+            if compiled.reader[tag] != original.reader[tag]:
+                changed.append(tag)
+    return changed
+
+
+def reuse_face(font, reuse, face_path, group, plan):
+    """Write a face whose outline tables are byte-shared with an already
+    compiled face: its own cmap/layout/name/metrics headers stay stock, the
+    shared outline tables take the compiled bytes. No second compilation."""
+    from fontTools.ttLib.tables.DefaultTable import DefaultTable
+    from fontTools.ttLib import TTFont as _TTFont
+    changed, compiled_path = reuse
+    mapping = group['mapping']
+    # Count from the plan: loading cmap here would recompile it on save.
+    counts = dict(cjk=0, latin=0, digit=0)
+    for name, values in plan['candidates'].items():
+        if name in mapping:
+            for cp in values:
+                counts[role(cp)] += 1
+    if not counts['cjk']:
+        return {'mode': 'retained-no-cjk-match', 'replaced': counts, 'uncovered': plan['uncovered']}
+    with _TTFont(compiled_path, lazy=True, recalcBBoxes=False, recalcTimestamp=False) as compiled:
+        for tag in changed:
+            table = DefaultTable(tag)
+            table.data = compiled.reader[tag]
+            font[tag] = table
+    for tag in DROPPED_TAGS:
+        if tag in font:
+            del font[tag]
+    font.save(face_path, reorderTables=False)
+    return {'mode': 'compiled', 'replaced': counts, 'uncovered': plan['uncovered'],
+            **slot_summary(plan, group), 'retainedUnencodedGlyphs': True, 'sharedOutlineTables': True,
+            'outline': 'glyf' if 'glyf' in font.reader.tables else 'CFF ' if 'CFF ' in font.reader.tables else 'CFF2',
+            'retainedVariationAxes': 'fvar' in font,
+            'replacementVariation': 'fixed-source-at-selected-weight'}
+
+
+def face_weight(stock, index):
+    with TTFont(stock, fontNumber=index, lazy=True, recalcTimestamp=False) as font:
+        weight = font['OS/2'].usWeightClass if 'OS/2' in font else 400
+    return weight if 1 <= weight <= 1000 else 400
+
+
+def build(source, stock, output, workspace, request, target, progress=None,
+          source_for_weight=None, allow=()):
+    """source_for_weight(weight) -> donor path picks a donor per stock face
+    (by its OS/2 weight); without it every face uses ``source``."""
+    stock, output = Path(stock), Path(output)
     count = collection_faces(stock)
-    face_index = _pick_face(source, 'cjk', 400, None)
-    kwargs = {'fontNumber': face_index} if face_index >= 0 else {}
+    weights = [face_weight(stock, index) for index in range(count)]
+    sources = ([Path(source_for_weight(weight)) for weight in weights] if source_for_weight
+               else [Path(source)] * count)
+    unique = list(dict.fromkeys(sources))
+    if any(path.resolve() == output.resolve() for path in unique) or stock.resolve() == output.resolve():
+        raise ValueError('集合输出不能覆盖来源或原厂文件')
+    before = ([identity(path) for path in unique], identity(stock))
+    source_hashes, stock_hash = [sha(path) for path in unique], sha(stock)
+    faces = {path: _pick_face(path, 'cjk', weights[sources.index(path)], None) for path in unique}
     report = {'schema': SCHEMA, 'requestId': request, 'target': target,
-              'sourceSha256': source_hash, 'stockSha256': stock_hash,
-              'sourceFace': face_index, 'stockFaces': count, 'faces': []}
+              'sourceSha256': source_hashes[0], 'stockSha256': stock_hash,
+              'sourceFace': faces[unique[0]], 'stockFaces': count, 'faces': []}
     with tempfile.TemporaryDirectory(prefix='collection-', dir=workspace) as temporary:
         temporary = Path(temporary)
         face_paths = []
-        with TTFont(source, lazy=True, recalcTimestamp=False, **kwargs) as donor:
-            cmap = donor.getBestCmap() or {}
-            if any(cp not in cmap for cp in map(ord, '中ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789')):
-                raise ValueError('组合来源缺少必需的中文、英文字母或数字')
-            if not any(tag in donor for tag in ('glyf', 'CFF ', 'CFF2')):
-                raise ValueError('组合来源不包含可用轮廓')
-            recordings = {}
+        donors = {}
+        try:
+            for path in unique:
+                kwargs = {'fontNumber': faces[path]} if faces[path] >= 0 else {}
+                donor = TTFont(path, lazy=True, recalcTimestamp=False, **kwargs)
+                donors[path] = (donor, {})
+                cmap = donor.getBestCmap() or {}
+                if any(cp not in cmap for cp in map(ord, REQUIRED_CHARACTERS)):
+                    raise ValueError('组合来源缺少必需的中文、英文字母或数字')
+                if not any(tag in donor for tag in ('glyf', 'CFF ', 'CFF2')):
+                    raise ValueError('组合来源不包含可用轮廓')
+            # Faces that share one stock outline table (Noto CJK: every region
+            # face shares CFF/hmtx/vmtx) and one donor get one merged
+            # replacement set, compiled once; the other faces reuse those exact
+            # bytes so the collection can still share them.
+            plans, groups = {}, {}
             for index in range(count):
-                _progress(progress, 'collection', f'正在编译本机 CJK 集合面 {index + 1}/{count}', 95)
-                face_path = temporary / f'face-{index}.font'
                 with TTFont(stock, fontNumber=index, lazy=True, recalcBBoxes=False,
                             recalcTimestamp=False) as font:
-                    original = protected(font)
-                    details = replace_face(font, donor, recordings)
-                    if protected(font) != original:
-                        raise ValueError(f'集合面 {index} 的原厂布局契约已变化')
-                    if details['mode'] == 'compiled':
-                        font.save(face_path, reorderTables=False)
+                    plan = plan_face(font, donors[sources[index]][0], allow)
+                    if plan is None:
+                        continue
+                    plans[index] = plan
+                    tables = getattr(font.reader, 'tables', {})
+                    # Plans are keyed by glyph ID, so the shared outline/metric
+                    # tables alone decide which faces can share one compile.
+                    shared = tuple((tag, tables[tag].offset, tables[tag].length)
+                                   for tag in OUTLINE_TAGS if tag in tables)
+                    groups.setdefault((sources[index], shared), []).append(index)
+            merged, leader_of = {}, {}
+            for (path, _shared), members in groups.items():
+                donor, recordings = donors[path]
+                group = resolve_mapping([plans[index] for index in members], donor, recordings)
+                for index in members:
+                    merged[index] = group
+                    leader_of[index] = members[0]
+            built = {}
+            for index in range(count):
+                donor, recordings = donors[sources[index]]
+                _progress(progress, 'collection', f'正在编译本机 CJK 集合面 {index + 1}/{count}', 95)
+                face_path = temporary / f'face-{index}.font'
+                leader = leader_of.get(index)
+                reuse = built.get(leader) if leader is not None and leader != index else None
+                with TTFont(stock, fontNumber=index, lazy=True, recalcBBoxes=False,
+                            recalcTimestamp=False) as font:
+                    if index not in plans or reuse is not None:
+                        # Specialized and shared-outline faces copy their stock
+                        # layout tables byte for byte: prove exactly that instead
+                        # of recompiling GSUB/GPOS/vmtx for a semantic hash.
+                        original = raw_contract(font)
+                        if index not in plans:
+                            details = {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
+                        else:
+                            details = reuse_face(font, reuse, face_path, merged[index], plans[index])
                     else:
-                        # Retained faces need no expensive outline round trip.
-                        with TTFont(stock, fontNumber=index, lazy=True, recalcBBoxes=False,
-                                    recalcTimestamp=False) as untouched:
-                            untouched.save(face_path, reorderTables=False)
+                        original = protected(font)
+                        details = replace_face(font, donor, recordings, allow, merged.get(index))
+                        if protected(font) != original:
+                            raise ValueError(f'集合面 {index} 的原厂布局契约已变化')
+                        if details['mode'] == 'compiled':
+                            font.save(face_path, reorderTables=False)
+                            built[index] = (changed_tables(stock, index, face_path), face_path)
+                            recordings.clear()  # followers reuse the compiled bytes
+                if details['mode'] != 'compiled':
+                    # Retained faces need no expensive outline round trip.
+                    with TTFont(stock, fontNumber=index, lazy=True, recalcBBoxes=False,
+                                recalcTimestamp=False) as untouched:
+                        untouched.save(face_path, reorderTables=False)
                 with TTFont(face_path, lazy=True, recalcTimestamp=False) as check:
-                    if protected(check) != original:
+                    if contract_of(check, original) != original:
                         raise ValueError(f'集合面 {index} 序列化后布局契约已变化')
+                if source_for_weight:
+                    details = dict(details, stockWeight=weights[index], source=sources[index].name)
                 report['faces'].append(dict(index=index, contract=original, **details))
                 face_paths.append(face_path)
                 del font, check
                 gc.collect()
+        finally:
+            for donor, _recordings in donors.values():
+                donor.close()
         if not any(face['mode'] == 'compiled' for face in report['faces']):
             raise ValueError('集合没有可替换的常规 CJK 字体面')
         collection = TTCollection()
@@ -385,9 +604,10 @@ def build(source, stock, output, workspace, request, target, progress=None):
             raise ValueError('生成后的集合面数量变化')
         for index, face in enumerate(report['faces']):
             with TTFont(staged, fontNumber=index, lazy=True, recalcTimestamp=False) as check:
-                if protected(check) != face['contract']:
+                if contract_of(check, face['contract']) != face['contract']:
                     raise ValueError(f'集合面 {index} 合集后布局契约已变化')
-        if before != (identity(source), identity(stock)) or sha(source) != source_hash or sha(stock) != stock_hash:
+        if (before != ([identity(path) for path in unique], identity(stock)) or
+                [sha(path) for path in unique] != source_hashes or sha(stock) != stock_hash):
             raise ValueError('集合编译期间来源或原厂字体已变化')
         report['outputSha256'] = sha(staged)
         report['result'] = 'PASS'

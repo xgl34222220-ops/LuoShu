@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
+import android.content.Context
+import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -51,9 +53,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.xgl34222220.luoshu.RootShell
+import io.github.xgl34222220.luoshu.ui.logs.exportSanitizedDiagnostic
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -86,6 +90,12 @@ internal class HyperOsCoverageModel : ViewModel() {
     var scanResult by mutableStateOf<CoverageScanResult?>(null)
         private set
     var scanError by mutableStateOf("")
+        private set
+    var exportBusy by mutableStateOf(false)
+        private set
+    var exportResult by mutableStateOf<CoverageExportResult?>(null)
+        private set
+    var exportError by mutableStateOf("")
         private set
     private var loaded = false
 
@@ -215,6 +225,35 @@ internal class HyperOsCoverageModel : ViewModel() {
         }
     }
 
+    /**
+     * 导出完整诊断: refresh the existing sanitized summary first (it is embedded), then let the
+     * module write one LuoShu-coverage-full-<time>.json with the scan and every coverage fact.
+     */
+    fun exportFull() {
+        if (exportBusy) return
+        exportBusy = true
+        exportError = ""
+        exportResult = null
+        viewModelScope.launch {
+            try {
+                runCatching { exportSanitizedDiagnostic() }
+                val result = RootShell.exec(coverageExportCommand(), timeoutMs = 180_000L)
+                exportResult = parseCoverageExport(result.stdout)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                exportError = error.message ?: "导出失败，请重试。"
+            } finally {
+                exportBusy = false
+            }
+        }
+    }
+
+    fun dismissExport() {
+        exportResult = null
+        exportError = ""
+    }
+
     fun locate(packageName: String) {
         if (locateBusy) return
         if (!isValidCoveragePackage(packageName)) {
@@ -239,16 +278,42 @@ internal class HyperOsCoverageModel : ViewModel() {
     }
 }
 
-/** Home section: strong theme-store hint plus the 未覆盖界面定位 / HyperOS 覆盖设置 entry. */
+/**
+ * Share an exported report: root copies it into the app cache (the module wrote it as root on
+ * /sdcard), then a FileProvider URI goes to the system share sheet.
+ */
+internal suspend fun shareCoverageReport(context: Context, path: String): String? {
+    val name = path.substringAfterLast('/')
+    if (!name.startsWith("LuoShu-coverage-full-") || !name.endsWith(".json")) return "报告路径无效"
+    val directory = java.io.File(context.cacheDir, "reports").apply { mkdirs() }
+    val target = java.io.File(directory, name)
+    val result = RootShell.exec("cat ${RootShell.quote(path)}", timeoutMs = 30_000L)
+    if (result.code != 0 || result.stdout.isBlank()) return "无法读取报告，请确认已授予 Root 权限"
+    withContext(Dispatchers.IO) { target.writeText(result.stdout) }
+    val uri = FileProvider.getUriForFile(context, context.packageName + ".reports", target)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "application/json"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, name)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    return runCatching {
+        context.startActivity(Intent.createChooser(send, "分享完整诊断").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.exceptionOrNull()?.let { "没有可用的分享方式" }
+}
+
+/**
+ * Home section on every ROM: 未覆盖界面定位 / 一键扫描 / 导出完整诊断. The theme-store hint and
+ * the HyperOS 覆盖设置 stay HyperOS-only.
+ */
 @Composable
 internal fun HyperOsCoverageSection(model: HyperOsCoverageModel) {
     val status = model.status ?: return
-    if (!status.hyperOs) return
     val tokens = LocalMiuixTokens.current
     val shape = LuoShuSmoothShape(24.dp)
     var dialogOpen by rememberSaveable { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        themeWarningText(status.theme)?.let { warning ->
+        (if (status.hyperOs) themeWarningText(status.theme) else null)?.let { warning ->
             Surface(
                 color = tokens.cardBackground,
                 shape = shape,
@@ -285,7 +350,7 @@ internal fun HyperOsCoverageSection(model: HyperOsCoverageModel) {
                 LuoShuGlyph(Icons.Rounded.Search, null, LuoShuIconTokens.StatusGlyph, tint = MaterialTheme.colorScheme.primary)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("未覆盖界面定位", style = MaterialTheme.typography.titleSmall, color = tokens.textPrimary)
-                    Text("哪里没换字体？选界面查原因 · HyperOS 覆盖设置",
+                    Text(coverageEntrySubtitle(status),
                         style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
                 }
                 LuoShuGlyph(Icons.Rounded.ChevronRight, null, LuoShuIconTokens.ToolGlyph, tint = tokens.textSecondary)
@@ -300,9 +365,11 @@ internal fun HyperOsCoverageSection(model: HyperOsCoverageModel) {
 @Composable
 private fun HyperOsCoverageDialog(model: HyperOsCoverageModel, status: HyperOsCoverageStatus, onDismiss: () -> Unit) {
     val tokens = LocalMiuixTokens.current
-    var packageName by rememberSaveable { mutableStateOf(COVERAGE_PRESETS.first().packageName) }
+    val presets = coveragePresetsFor(status.rom)
+    var packageName by rememberSaveable { mutableStateOf(presets.first().packageName) }
     var pickerOpen by rememberSaveable { mutableStateOf(false) }
-    val packageManager = LocalContext.current.packageManager
+    val context = LocalContext.current
+    val packageManager = context.packageManager
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("未覆盖界面定位") },
@@ -313,7 +380,7 @@ private fun HyperOsCoverageDialog(model: HyperOsCoverageModel, status: HyperOsCo
             ) {
                 Text("先打开没有换字体的界面，再回到这里选择它。洛书只读取该进程实际加载的字体文件，不做任何修改。",
                     style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
-                COVERAGE_PRESETS.forEach { preset ->
+                presets.forEach { preset ->
                     val selected = preset.packageName == packageName
                     Text(
                         (if (selected) "● " else "○ ") + preset.label,
@@ -330,7 +397,7 @@ private fun HyperOsCoverageDialog(model: HyperOsCoverageModel, status: HyperOsCo
                 ) {
                     LuoShuGlyph(Icons.Rounded.Apps, null, LuoShuIconTokens.ToolGlyph, tint = MaterialTheme.colorScheme.primary)
                     Text(
-                        if (COVERAGE_PRESETS.any { it.packageName == packageName }) "从已安装应用中选择…"
+                        if (presets.any { it.packageName == packageName }) "从已安装应用中选择…"
                         else "已选：" + (pickedLabel?.let { "$it（$packageName）" } ?: packageName),
                         modifier = Modifier.padding(start = 8.dp),
                     )
@@ -365,8 +432,11 @@ private fun HyperOsCoverageDialog(model: HyperOsCoverageModel, status: HyperOsCo
                 }
                 Text("一键扫描", style = MaterialTheme.typography.titleSmall, color = tokens.textPrimary,
                     modifier = Modifier.padding(top = 8.dp))
-                Text("检测所有正在运行的应用进程，列出没有加载洛书字体的界面；能用下方覆盖设置解决的可一键应用。",
-                    style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
+                Text(
+                    "检测所有正在运行的应用进程，列出没有加载洛书字体的界面和具体文件名" +
+                        if (status.hyperOs) "；能用下方覆盖设置解决的可一键应用。" else "。",
+                    style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary,
+                )
                 OutlinedButton(onClick = { model.scan() }, enabled = !model.scanBusy,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     if (model.scanBusy) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.heightIn(max = 20.dp))
@@ -376,33 +446,26 @@ private fun HyperOsCoverageDialog(model: HyperOsCoverageModel, status: HyperOsCo
                     Text(model.scanError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 }
                 model.scanResult?.let { scan -> CoverageScanResults(scan, status, model) }
-                Text(COVERAGE_SCOPE_NOTE, style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
-                Text("HyperOS 覆盖设置", style = MaterialTheme.typography.titleSmall, color = tokens.textPrimary,
+                Text("导出完整诊断", style = MaterialTheme.typography.titleSmall, color = tokens.textPrimary,
                     modifier = Modifier.padding(top = 8.dp))
-                HyperOsSetting.entries.forEach { setting ->
-                    val checked = status.valueOf(setting)
-                    Row(
-                        Modifier.fillMaxWidth().clickable(role = Role.Switch, enabled = !model.settingBusy) {
-                            model.set(setting, !checked)
-                        }.padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(setting.title, style = MaterialTheme.typography.bodyMedium, color = tokens.textPrimary)
-                            Text(setting.hint, style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
-                        }
-                        Switch(checked = checked, onCheckedChange = null, enabled = !model.settingBusy)
-                    }
+                Text("一次生成单个文件：全进程扫描（含未替换文件名与分类）、集合与槽位挂载、主题/WebView 状态、" +
+                    "相关日志和脱敏诊断报告，无需逐条命令测试。",
+                    style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
+                OutlinedButton(onClick = { model.exportFull() }, enabled = !model.exportBusy,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                    if (model.exportBusy) CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.heightIn(max = 20.dp))
+                    else Text("导出完整诊断")
                 }
-                if (model.settingMessage.isNotBlank()) {
-                    Text(model.settingMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
-                }
+                Text(COVERAGE_SCOPE_NOTE, style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
+                if (status.hyperOs) HyperOsSettingsBlock(model, status)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
         dismissButton = { OutlinedButton(onClick = { model.load(force = true) }) { Text("刷新状态") } },
     )
+    if (model.exportResult != null || model.exportError.isNotBlank()) {
+        CoverageExportDialog(model = model, context = context)
+    }
     if (pickerOpen) {
         CoverageAppPickerDialog(
             model = model,
@@ -414,6 +477,67 @@ private fun HyperOsCoverageDialog(model: HyperOsCoverageModel, status: HyperOsCo
             },
             onDismiss = { pickerOpen = false },
         )
+    }
+}
+
+@Composable
+private fun CoverageExportDialog(model: HyperOsCoverageModel, context: Context) {
+    val tokens = LocalMiuixTokens.current
+    val result = model.exportResult
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var shareMessage by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = { model.dismissExport() },
+        title = { Text(if (result != null) "完整诊断已导出" else "导出失败") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (result != null) {
+                    Text(coverageExportSummary(result), style = MaterialTheme.typography.bodySmall, color = tokens.textPrimary)
+                    Text(result.path, style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
+                } else {
+                    Text(model.exportError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                if (shareMessage.isNotBlank()) {
+                    Text(shareMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            if (result != null) {
+                Button(onClick = {
+                    scope.launch { shareMessage = shareCoverageReport(context, result.path).orEmpty() }
+                }) { Text("分享") }
+            }
+        },
+        dismissButton = { TextButton(onClick = { model.dismissExport() }) { Text("完成") } },
+    )
+}
+
+@Composable
+private fun HyperOsSettingsBlock(model: HyperOsCoverageModel, status: HyperOsCoverageStatus) {
+    val tokens = LocalMiuixTokens.current
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("HyperOS 覆盖设置", style = MaterialTheme.typography.titleSmall, color = tokens.textPrimary,
+            modifier = Modifier.padding(top = 8.dp))
+        HyperOsSetting.entries.forEach { setting ->
+            val checked = status.valueOf(setting)
+            Row(
+                Modifier.fillMaxWidth().clickable(role = Role.Switch, enabled = !model.settingBusy) {
+                    model.set(setting, !checked)
+                }.padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(setting.title, style = MaterialTheme.typography.bodyMedium, color = tokens.textPrimary)
+                    Text(setting.hint, style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
+                }
+                Switch(checked = checked, onCheckedChange = null, enabled = !model.settingBusy)
+            }
+        }
+        if (model.settingMessage.isNotBlank()) {
+            Text(model.settingMessage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+        }
     }
 }
 
@@ -436,6 +560,10 @@ private fun CoverageScanResults(scan: CoverageScanResult, status: HyperOsCoverag
                 if (item.fixes.isNotEmpty()) {
                     Text("可自动处理：打开" + item.fixes.joinToString("、") { it.title },
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+                if (item.files.isNotEmpty()) {
+                    Text(item.files.take(4).joinToString("\n") + if (item.files.size > 4) "\n…" else "",
+                        style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)
                 }
                 item.reasons.take(2).forEach { reason ->
                     Text("无法自动处理：$reason", style = MaterialTheme.typography.bodySmall, color = tokens.textSecondary)

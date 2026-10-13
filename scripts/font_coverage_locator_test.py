@@ -71,7 +71,7 @@ class LocatorTest(unittest.TestCase):
         return locator.locate(package, pid, module=self.module, proc_root=self.proc,
                               host_root=self.host, theme_dir=self.theme,
                               groups=policy.parse_groups("") if groups is None else groups,
-                              weight_probe=lambda _path: weight)
+                              weight_probe=lambda _path: weight, rom="hyperos")
 
     def categories(self, result):
         return [item["category"] for item in result["findings"]]
@@ -116,16 +116,18 @@ class LocatorTest(unittest.TestCase):
         self.app_sees_payload()
         self.map("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")
         self.map("/system/fonts/C800.ttf", self.stock_file("C800.ttf"))
-        self.map("/system/fonts/RobotoMono-Regular.ttf", self.stock_file("RobotoMono-Regular.ttf"))
+        self.map("/system/fonts/MiSansL3.otf", self.stock_file("MiSansL3.otf"))
         self.map("/system/fonts/VendorClockX.ttf", self.stock_file("VendorClockX.ttf"))
         result = self.run_locate()
         outside = next(f for f in result["findings"] if f["category"] == "outside-whitelist")
         self.assertIn("/system/fonts/C800.ttf（lockscreen_styles 组未开启）", outside["files"])
-        self.assertIn("/system/fonts/VendorClockX.ttf", outside["files"])
-        self.assertTrue(any("RobotoMono" in item for item in result["keptByDesign"]))
+        # Clock faces are policy targets now: a stock clock is not "outside".
+        self.assertNotIn("/system/fonts/VendorClockX.ttf", outside["files"])
+        self.assertTrue(any("MiSansL3" in item for item in result["keptByDesign"]))
         # With the lock screen group on, C800 is no longer "outside".
         result = self.run_locate(groups=policy.ALL_GROUPS)
-        outside = next(f for f in result["findings"] if f["category"] == "outside-whitelist")
+        outside = next((f for f in result["findings"] if f["category"] == "outside-whitelist"),
+                       {"files": []})
         self.assertNotIn("/system/fonts/C800.ttf（lockscreen_styles 组未开启）", outside["files"])
 
     def test_embedded_font_apps_and_private_font_files(self):
@@ -237,7 +239,7 @@ class LocatorTest(unittest.TestCase):
         self.scan_fixture()
         result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
                               theme_dir=self.theme, groups=policy.parse_groups(""),
-                              weight_probe=lambda _p: False)
+                              weight_probe=lambda _p: False, rom="hyperos")
         self.assertEqual(result["verdict"], "ok")
         self.assertEqual((result["scanned"], result["covered"]), (3, 1))
         by_package = {item["package"]: item for item in result["items"]}
@@ -251,13 +253,14 @@ class LocatorTest(unittest.TestCase):
     def test_scan_weight_loss_is_global_and_budget_truncates(self):
         self.scan_fixture()
         result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
-                              theme_dir=self.theme, groups=policy.ALL_GROUPS, weight_probe=lambda _p: True)
+                              theme_dir=self.theme, groups=policy.ALL_GROUPS, weight_probe=lambda _p: True,
+                              rom="hyperos")
         self.assertTrue(result["weightLoss"])
         self.assertEqual([item["package"] for item in result["items"]], ["com.example.hidden"])
         ticks = iter([0.0, 0.0, 100.0, 100.0, 100.0])
         result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
                               theme_dir=self.theme, weight_probe=lambda _p: False, budget_s=1.0,
-                              clock=lambda: next(ticks))
+                              clock=lambda: next(ticks), rom="hyperos")
         self.assertTrue(result["truncated"])
 
     def test_scan_cli_emits_json(self):
@@ -265,16 +268,222 @@ class LocatorTest(unittest.TestCase):
         out = io.StringIO()
         with redirect_stdout(out):
             locator.main(["--scan", "--module", str(self.module), "--proc-root", str(self.proc),
-                          "--theme-dir", str(self.theme)])
+                          "--theme-dir", str(self.theme), "--rom", "hyperos"])
         payload = json.loads(out.getvalue())
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["data"]["schema"], locator.SCAN_SCHEMA)
 
+
+    def test_scan_items_carry_files_and_ignore_files_kept_by_design(self):
+        # Real device: zygote preloads every system font, so script fallbacks,
+        # emoji and the AOSP decorative families sit in every app process. They
+        # are kept by design, never "outside-whitelist" (93 processes before).
+        self.scan_fixture()
+        for name in ("NotoSansArmenian-Regular.ttf", "NotoColorEmoji.ttf", "CarroisGothicSC-Regular.ttf",
+                     "NotoSansSymbols-Regular-Subsetted.ttf", "MiSansL3.otf"):
+            self.stock_file(name)
+            root = self.proc / "100" / "root/system/fonts" / name
+            if not root.exists():
+                os.link(self.stock / name, root)
+            with (self.proc / "100" / "maps").open("a") as stream:
+                stream.write(maps_line(f"/system/fonts/{name}", self.stock / name, 0x90000 + len(name) * 0x2000))
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, groups=policy.parse_groups(""),
+                              weight_probe=lambda _p: False, rom="hyperos")
+        by_package = {item["package"]: item for item in result["items"]}
+        self.assertNotIn("com.android.systemui", by_package)
+        aod = by_package["com.miui.aod"]
+        self.assertEqual(["/system/fonts/C800.ttf（lockscreen_styles 组未开启）"], aod["files"])
+        self.assertEqual("outside-whitelist", aod["findings"][0]["category"])
+        self.assertEqual(aod["files"], aod["findings"][0]["files"])
+        result = locator.locate("com.android.systemui", "100", module=self.module, proc_root=self.proc,
+                                host_root=self.host, theme_dir=self.theme, groups=policy.parse_groups(""),
+                                weight_probe=lambda _p: False, rom="hyperos")
+        self.assertEqual("covered", result["verdict"])
+        self.assertEqual(5, len(result["keptByDesign"]))
+
+    def test_preserved_collection_reason_comes_from_metrics_report(self):
+        self.app_sees_payload()
+        self.map("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")
+        self.map("/system/fonts/NotoSansCJK-Regular.ttc", self.stock_file("NotoSansCJK-Regular.ttc"))
+        reason = "ValueError: 来源字形 uni302A 超出本机原厂字体面边界"
+        (self.module / ".luoshu-payload/.luoshu-metrics-report.json").write_text(json.dumps(
+            {"collections": [], "preservedCollections": {"/system/fonts/NotoSansCJK-Regular.ttc": reason}},
+            ensure_ascii=False))
+        result = self.run_locate()
+        self.assertEqual("collection-kept", result["verdict"])
+        self.assertIn(reason, result["findings"][0]["detail"])
+        self.assertNotIn("outside-whitelist", self.categories(result))
+        fixes, reasons = locator.suggested_fixes(result)
+        self.assertEqual([], fixes)
+        self.assertTrue(any(reason in item for item in reasons))
+        # Built this time: the collection is LuoShu's and nothing is reported.
+        (self.module / ".luoshu-payload/.luoshu-metrics-report.json").write_text('{"collections": []}')
+        result = self.run_locate()
+        self.assertNotIn("collection-kept", self.categories(result))
+
+    def test_other_rom_uses_actual_payload_and_lists_unknown_files(self):
+        self.app_sees_payload()
+        self.map("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")
+        self.map("/system/fonts/VendorUI-Regular.ttf", self.stock_file("VendorUI-Regular.ttf"))
+        self.map("/system/fonts/NotoSansThai-Regular.ttf", self.stock_file("NotoSansThai-Regular.ttf"))
+        (self.proc / PID / "maps").write_text("".join(self.maps))
+        result = locator.locate("com.android.settings", PID, module=self.module, proc_root=self.proc,
+                                host_root=self.host, theme_dir=self.theme, weight_probe=lambda _p: False,
+                                rom="other")
+        outside = next(f for f in result["findings"] if f["category"] == "outside-whitelist")
+        self.assertEqual(["/system/fonts/VendorUI-Regular.ttf"], outside["files"])
+        self.assertIn("实际替换的清单", outside["action"])
+        self.assertNotIn("HyperOS", outside["action"])
+        self.assertEqual(1, len(result["keptByDesign"]))
+        self.assertEqual("none", result["theme"]["state"])
+
     def test_every_category_has_a_guide(self):
         for category in ("theme-takeover", "outside-whitelist", "namespace-hidden", "app-embedded",
-                         "link-switched", "weight-loss", "covered", "not-running"):
+                         "link-switched", "weight-loss", "covered", "not-running", "collection-kept",
+                         "flip-font"):
             title, action = locator.GUIDE[category]
             self.assertTrue(title and action, category)
+
+
+class ColorOSLocatorTest(unittest.TestCase):
+    """ColorOS / OxygenOS: targets from coloros_global.sh, keep rules from
+    coloros_latin_policy, the OPlus flip font, and no HyperOS-only settings."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        base = Path(self.tmp.name)
+        self.module = base / "module"
+        self.payload = self.module / ".luoshu-payload/system/fonts"
+        self.payload.mkdir(parents=True)
+        (self.payload / "SysSans-En-Regular.ttf").write_bytes(b"luoshu-font" * 200)
+        self.host = base / "host"
+        (self.host / "system/fonts").mkdir(parents=True)
+        os.link(self.payload / "SysSans-En-Regular.ttf", self.host / "system/fonts/SysSans-En-Regular.ttf")
+        self.proc = base / "proc"
+        self.root = self.proc / PID / "root/system/fonts"
+        self.root.mkdir(parents=True)
+        os.link(self.payload / "SysSans-En-Regular.ttf", self.root / "SysSans-En-Regular.ttf")
+        self.stock = base / "stock"
+        self.stock.mkdir()
+        groups = base / "coloros_slot_groups.conf"
+        groups.write_text("osans_digits=0\n")
+        env = {"LUOSHU_COLOROS_SLOT_GROUPS_CONF": str(groups)}
+        old = {key: os.environ.get(key) for key in env}
+        os.environ.update(env)
+        self.addCleanup(lambda: [os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                                 for k, v in old.items()])
+        maps = [("/system/fonts/SysSans-En-Regular.ttf", self.payload / "SysSans-En-Regular.ttf")]
+        for name in ("OSans-RC-Regular.ttf", "OplusSans-Regular.ttf", "VendorDisplay-Regular.ttf",
+                     "OSans-Solid-Digits-VF.ttf", "NotoSansKhmer-Regular.ttf", "NotoColorEmoji.ttf"):
+            (self.stock / name).write_bytes(b"s" * 4096)
+            os.link(self.stock / name, self.root / name)
+            maps.append((f"/system/fonts/{name}", self.stock / name))
+        flip = self.stock / "OplusOSUI-Regular.ttf"
+        flip.write_bytes(b"f" * 200000)
+        maps.append(("/data/format_unclear/font/OplusOSUI-Regular.ttf", flip))
+        (self.proc / PID / "cmdline").write_bytes(b"com.android.launcher\0")
+        (self.proc / PID / "maps").write_text("".join(
+            maps_line(path, real, 0x7000 + 0x2000 * i) for i, (path, real) in enumerate(maps)))
+
+    def locate(self):
+        return locator.locate("com.android.launcher", PID, module=self.module, proc_root=self.proc,
+                              host_root=self.host, theme_dir=self.stock / "no-theme",
+                              weight_probe=lambda _p: False, rom="coloros")
+
+    def test_coloros_policy_classifies_targets_keep_rules_and_unknown_files(self):
+        result = self.locate()
+        self.assertEqual("coloros", result["rom"])
+        categories = [item["category"] for item in result["findings"]]
+        self.assertEqual("flip-font", categories[0])
+        self.assertNotIn("app-embedded", categories)
+        outside = next(f for f in result["findings"] if f["category"] == "outside-whitelist")
+        self.assertIn("/system/fonts/VendorDisplay-Regular.ttf", outside["files"])
+        self.assertIn("/system/fonts/OSans-Solid-Digits-VF.ttf（osans_digits 组未开启）", outside["files"])
+        self.assertFalse(any("OplusSans" in f or "OSans-RC" in f or "Noto" in f for f in outside["files"]))
+        self.assertIn("SysSans", outside["action"])
+        self.assertNotIn("HyperOS", outside["action"] + outside["title"])
+        # A ColorOS target the payload lacks is listed apart, not as outside.
+        self.assertTrue(any("OplusSans-Regular.ttf" in f for f in result["targetsNotInPayload"]))
+        kept = " ".join(result["keptByDesign"])
+        for name in ("OSans-RC-Regular.ttf", "NotoSansKhmer-Regular.ttf", "NotoColorEmoji.ttf"):
+            self.assertIn(name, kept)
+
+    def test_coloros_scan_offers_no_hyperos_switches(self):
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.stock / "no-theme", weight_probe=lambda _p: False, rom="coloros")
+        self.assertEqual("coloros", result["rom"])
+        self.assertEqual([], result["fixes"])
+        item = result["items"][0]
+        self.assertIn("/system/fonts/VendorDisplay-Regular.ttf", item["files"])
+        self.assertTrue(any("VendorDisplay-Regular.ttf" in reason for reason in item["reasons"]))
+
+    def test_rom_detection_props(self):
+        props = {"ro.build.version.oplusrom": "V16.0.0"}
+        old = os.environ.pop("LUOSHU_COVERAGE_ROM", None)
+        try:
+            self.assertEqual("coloros", locator.detect_rom(lambda key: props.get(key, "")))
+            self.assertEqual("hyperos", locator.detect_rom(lambda key: "OS2.0" if key == "ro.mi.os.version.name" else ""))
+        finally:
+            if old is not None:
+                os.environ["LUOSHU_COVERAGE_ROM"] = old
+
+
+class CoverageExportTest(LocatorTest):
+    """One file with everything: deduped issues, metrics, slots, WebView, log."""
+
+    def test_export_writes_one_sanitized_deduplicated_report(self):
+        self.scan_fixture()
+        # Two processes with the identical miss collapse into one issue.
+        (self.proc / "103").mkdir()
+        (self.proc / "103" / "root").symlink_to(self.proc / "101" / "root")
+        (self.proc / "103" / "cmdline").write_bytes(b"com.miui.aod:remote\0")
+        (self.proc / "103" / "maps").write_text((self.proc / "101" / "maps").read_text())
+        (self.proc / "300").mkdir()
+        (self.proc / "300" / "root").symlink_to(self.proc / "102" / "root")
+        (self.proc / "300" / "cmdline").write_bytes(b"webview_zygote\0")
+        (self.module / "module.prop").write_text("id=LuoShu\nversion=v3.0.0\nversionCode=300\n")
+        (self.module / ".luoshu-payload/.luoshu-metrics-report.json").write_text(json.dumps({
+            "collections": [], "preservedCollections": {"/system/fonts/NotoSerifCJK-Regular.ttc": "ValueError: x"}}))
+        (self.module / "logs").mkdir()
+        (self.module / "logs/fontswitch.log").write_text(
+            "[MIX] 应用字体 我的私人字体.ttf 来自 /sdcard/Download/a.ttf\n"
+            "[MIX] CJK 集合生成失败：MiSansVF.ttf\nunrelated line\n")
+        reports = self.tmp.name + "/reports"
+        Path(reports).mkdir()
+        (Path(reports) / "LuoShu-diagnostic-summary.txt").write_text("report=luoshu-sanitized-diagnostic-v1\n")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            locator.main(["--export", reports, "--module", str(self.module), "--proc-root", str(self.proc),
+                          "--host-root", str(self.host), "--theme-dir", str(self.theme), "--rom", "hyperos",
+                          "--device", "rootManager=KernelSU", "--device", "androidSdk=35",
+                          "--device", "bad key=x"])
+        status = json.loads(out.getvalue())
+        self.assertEqual("ok", status["status"], status)
+        path = Path(status["data"]["path"])
+        self.assertTrue(path.name.startswith("LuoShu-coverage-full-") and path.suffix == ".json")
+        data = json.loads(path.read_text())
+        self.assertEqual(locator.EXPORT_SCHEMA, data["schema"])
+        self.assertEqual("v3.0.0", data["module"]["version"])
+        self.assertEqual({"rom": "hyperos", "romLabel": "HyperOS", "rootManager": "KernelSU", "androidSdk": "35"},
+                         data["device"])
+        aod = [group for group in data["issues"] if "com.miui.aod" in group["processes"]]
+        self.assertEqual(1, len(aod))
+        self.assertEqual(["com.miui.aod", "com.miui.aod:remote"], sorted(aod[0]["processes"]))
+        self.assertEqual(["/system/fonts/C800.ttf（lockscreen_styles 组未开启）"], aod[0]["findings"][0]["files"])
+        self.assertEqual({"/system/fonts/NotoSerifCJK-Regular.ttc": "ValueError: x"},
+                         data["metrics"]["preservedCollections"])
+        self.assertEqual("luoshu", next(row for row in data["slots"]
+                                        if row["slot"] == "/system/fonts/MiSansVF.ttf")["state"])
+        self.assertEqual("hidden", data["webview"][0]["state"])
+        log = "\n".join(data["fontswitchLog"])
+        self.assertNotIn("私人字体", log)
+        self.assertNotIn("/sdcard", log)
+        self.assertIn("MiSansVF.ttf", log)
+        self.assertNotIn("unrelated", log)
+        self.assertIn("luoshu-sanitized-diagnostic-v1", data["sanitizedDiagnostic"])
+        self.assertIn("theme", data)
 
 
 if __name__ == "__main__":

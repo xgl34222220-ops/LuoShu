@@ -34,8 +34,9 @@ Optional group (``config/coloros_slot_groups.conf``, ``key=0|1`` lines):
   replaced like other measured numeric faces; set ``osans_digits=0`` to keep the
   OPlus numerals (e.g. if a proportional user font makes tabular counters jump).
 
-Monospace, clock, serif, emoji, symbol and script faces keep their existing
-rules (they are never added here).
+Serif, emoji, symbol and script faces keep their existing rules (they are
+never added here). Clock and monospace slots are replaced by the shell mappers'
+discovery like other UI text.
 """
 from __future__ import annotations
 

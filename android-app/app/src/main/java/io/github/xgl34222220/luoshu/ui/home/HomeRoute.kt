@@ -151,7 +151,8 @@ fun HomeRoute(
         state = state,
         actions = actions,
         onDeviceDetailsExpanded = { deviceDetailsExpanded = it },
-        showHyperOsCoverage = coverageReady && coverageModel.status?.hyperOs == true,
+        // 未覆盖界面定位 / 扫描 / 导出 on every ROM; HyperOS-only parts are gated inside the section.
+        showHyperOsCoverage = coverageReady && coverageModel.status != null,
         hyperOsCoverageContent = { HyperOsCoverageSection(coverageModel) },
         trustContent = {
             if (state.moduleInstalled) {

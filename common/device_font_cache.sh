@@ -109,9 +109,10 @@ _dfcache_source_key() {
         # changes the rendered overlay, so a cache built with it off must not be
         # reused with it on. It only runs where seed XML exists; other ROMs add
         # nothing and keep their existing cache identities.
+        # v3: sans-serif and zh families keep stock file names (no LuoShu* rename).
         if _dfcache_hyperos_seed_present && \
            ! grep -qx 'enabled=0' "$_dfc_module/config/hyperos_source_xml.conf" 2>/dev/null; then
-            printf 'hyperos-source-xml-v2\n'
+            printf 'hyperos-source-xml-v3\n'
         fi
         while IFS= read -r _dfc_file; do
             [ -f "$_dfc_file" ] || continue

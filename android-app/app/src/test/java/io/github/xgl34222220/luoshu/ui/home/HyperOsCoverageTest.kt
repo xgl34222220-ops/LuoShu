@@ -181,4 +181,45 @@ class HyperOsCoverageTest {
         assertTrue(scanFixMessage(listOf(HyperOsSetting.THEME_TAKEOVER),
             listOf(HyperOsSetting.THEME_TAKEOVER, HyperOsSetting.LOCKSCREEN)).contains("其余设置未能保存"))
     }
+
+    @Test
+    fun coverageEntryWorksOnEveryRomWithRomSpecificPresets() {
+        val coloros = parseHyperOsCoverageStatus("""{"status":"ok","data":{"hyperos":false,"rom":"coloros"}}""")
+        assertEquals("coloros", coloros.rom)
+        assertFalse(coloros.hyperOs)
+        assertEquals("com.android.launcher", coveragePresetsFor("coloros")[1].packageName)
+        assertFalse(coveragePresetsFor("coloros").any { it.packageName.startsWith("com.miui") })
+        assertFalse(coveragePresetsFor("other").any { it.packageName.startsWith("com.miui") })
+        assertEquals(COVERAGE_PRESETS, coveragePresetsFor("hyperos"))
+        assertFalse(coverageEntrySubtitle(coloros).contains("HyperOS"))
+        val hyper = parseHyperOsCoverageStatus("""{"status":"ok","data":{"hyperos":true}}""")
+        assertEquals("hyperos", hyper.rom)
+        assertTrue(coverageEntrySubtitle(hyper).contains("HyperOS 覆盖设置"))
+        assertEquals("other", parseHyperOsCoverageStatus("""{"status":"ok","data":{"rom":"weird"}}""").rom)
+    }
+
+    @Test
+    fun parsesExportResultAndRejectsUnexpectedPaths() {
+        assertEquals("sh '/data/adb/modules/LuoShu/common/app_bridge.sh' coverage_export", coverageExportCommand())
+        val result = parseCoverageExport(
+            """{"status":"ok","data":{"path":"/sdcard/LuoShu/reports/LuoShu-coverage-full-20261013-201500.json","bytes":20480,"issues":3,"processesWithIssues":41,"rom":"coloros"}}""",
+        )
+        assertEquals(3, result.issues)
+        assertTrue(coverageExportSummary(result).contains("41 个进程"))
+        assertTrue(coverageExportSummary(result).contains("20 KB"))
+        try {
+            parseCoverageExport("""{"status":"ok","data":{"path":"/sdcard/other.json"}}""")
+            fail("expected error")
+        } catch (error: IllegalStateException) {
+            assertTrue(error.message!!.contains("路径"))
+        }
+    }
+
+    @Test
+    fun scanItemsCarryFileNames() {
+        val scan = parseCoverageScan(
+            """{"status":"ok","data":{"verdict":"ok","scanned":2,"covered":1,"items":[{"package":"com.android.launcher","process":"com.android.launcher","verdict":"outside-whitelist","title":"t","fixes":[],"reasons":["r"],"files":["/system/fonts/VendorDisplay-Regular.ttf"]}],"fixes":[]}}""",
+        )
+        assertEquals(listOf("/system/fonts/VendorDisplay-Regular.ttf"), scan.items.single().files)
+    }
 }
