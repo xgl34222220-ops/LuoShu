@@ -89,25 +89,6 @@ class StaticFamilyTest(FontCase):
         self.assertNotEqual(plan[900].path, plan[400].path)
         self.assertNotEqual(plan[100].path, plan[400].path)
 
-    def test_family_members_join_files_by_typographic_family(self):
-        regular = build(self.dir / "HY55W.ttf", family="HanYi Foo", weight=400)
-        bold = build(self.dir / "HY-Foo-75.ttf", family="HanYi Foo 75W", weight=700)
-        with TTFont(bold) as font:
-            font["name"].setName("HanYi Foo", 16, 3, 1, 0x409)
-            font.save(self.dir / "tmp.ttf")
-        os.replace(self.dir / "tmp.ttf", bold)
-        build(self.dir / "Other-Bold.ttf", family="Other", weight=700)
-        build(self.dir / "HY-Italic.ttf", family="HanYi Foo", weight=400, italic=True)
-        members = cap.family_members([regular], self.dir)
-        self.assertEqual(sorted((Path(face.path).name, face.weight) for face in members),
-                         [("HY-Foo-75.ttf", 700), ("HY55W.ttf", 400)])
-        out = subprocess.run([sys.executable, str(ROOT / "common/font_capability.py"), "members",
-                              "--dir", str(self.dir), str(regular)], capture_output=True, text=True)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn(f"{bold}|700|0", out.stdout.splitlines())
-        # A single file with no sibling is its own family.
-        self.assertEqual(len(cap.family_members([self.dir / "Other-Bold.ttf"], self.dir)), 1)
-
     def test_generic_400_contradicted_by_style_name_uses_the_name(self):
         extra = build(self.dir / "Fam-X.ttf", style="ExtraBold", weight=400)
         regular = build(self.dir / "Fam-Y.ttf", style="Regular", weight=400)

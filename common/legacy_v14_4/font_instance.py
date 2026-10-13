@@ -92,8 +92,7 @@ def parse_axis_spec(spec: str) -> dict[str, float]:
     return result
 
 
-def materialize(source: Path, output: Path, role: str, requested_weight: int, requested_axes: dict[str, float],
-                nominal_weight: int = 0) -> dict[str, object]:
+def materialize(source: Path, output: Path, role: str, requested_weight: int, requested_axes: dict[str, float]) -> dict[str, object]:
     if not source.is_file() or source.stat().st_size < 12:
         raise InstanceError(f"字体源文件不可用：{source}")
     requested_weight = clamp_weight(requested_axes.get("wght", requested_weight))
@@ -121,10 +120,6 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
             ignored_axes = sorted(tag for tag in requested_axes if tag != "wght")
 
         final_weight = clamp_weight(location.get("wght", requested_weight))
-        # A relative weight plan instantiates e.g. wght 950 for the Bold slot;
-        # the slot's nominal weight keeps family mapping by usWeightClass exact.
-        if nominal_weight:
-            final_weight = clamp_weight(nominal_weight)
         if "OS/2" in font:
             font["OS/2"].usWeightClass = final_weight
         for tag in ("DSIG", "LTSH", "hdmx", "VDMX"):
@@ -165,15 +160,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role", choices=("cjk", "latin", "digit"), required=True)
     parser.add_argument("--weight", type=int, default=400)
     parser.add_argument("--axes", default="")
-    parser.add_argument("--nominal-weight", type=int, default=0)
     return parser.parse_args()
 
 
 def main() -> int:
     try:
         args = parse_args()
-        result = materialize(Path(args.input), Path(args.output), args.role, args.weight, parse_axis_spec(args.axes),
-                             args.nominal_weight)
+        result = materialize(Path(args.input), Path(args.output), args.role, args.weight, parse_axis_spec(args.axes))
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
     except MemoryError:

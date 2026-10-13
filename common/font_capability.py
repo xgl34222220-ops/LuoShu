@@ -389,26 +389,6 @@ def variable_source(faces: list[Face]) -> Face | None:
     return min(candidates, key=lambda item: (item.index >= 0, -(item.wght[2] - item.wght[0]), item.path))
 
 
-def family_members(seeds: Iterable[Path], directory: Path | None) -> list[Face]:
-    """Seed faces plus library files of the same typographic family (name ID
-    16, else 1). Files named differently (e.g. 55W / 75W) join their family;
-    italic, colour and unsupported faces are left out."""
-    seeds = [Path(item) for item in seeds if Path(item).is_file()]
-    faces = collect_faces(seeds)
-    families = {face.family.casefold() for face in faces if face.supported and face.family}
-    if families and directory is not None and directory.is_dir():
-        known = {path.resolve() for path in seeds}
-        for path in sorted(directory.iterdir()):
-            if (path.suffix.lower() not in (".ttf", ".otf") or not path.is_file()
-                    or path.resolve() in known):
-                continue
-            face = inspect_face(path, -1)
-            if face.supported and face.family.casefold() in families:
-                faces.append(face)
-        _resolve_collisions(faces)
-    return _usable(faces, False)
-
-
 # ---------------------------------------------------------------- materialize
 def has_fvar(path: Path) -> bool:
     try:
@@ -554,9 +534,6 @@ def main(argv: list[str] | None = None) -> int:
     p_cov = sub.add_parser("covers", help="exit 0 when the font covers the script (han|hant)")
     p_cov.add_argument("--script", choices=("han", "hant"), required=True)
     p_cov.add_argument("font")
-    p_members = sub.add_parser("members", help="path|weight|variable of one family (typographic name)")
-    p_members.add_argument("--dir", default="")
-    p_members.add_argument("fonts", nargs="+")
     p_vf = sub.add_parser("variable-source", help="path|index of the upright wght variable face")
     p_vf.add_argument("fonts", nargs="+")
     args = parser.parse_args(argv)
@@ -612,11 +589,6 @@ def main(argv: list[str] | None = None) -> int:
                 ratio = script_coverage(font.getBestCmap() or {}, args.script)
             print(f"{ratio:.3f}")
             return 0 if ratio >= SCRIPT_COVERAGE_MIN else 1
-        if args.command == "members":
-            faces = family_members(args.fonts, Path(args.dir) if args.dir else None)
-            for face in faces:
-                print(f"{face.path}|{face.weight}|{1 if face.wght else 0}")
-            return 0 if faces else 3
         if args.command == "variable-source":
             face = variable_source(collect_faces(Path(item) for item in args.fonts if Path(item).is_file()))
             if face is None:

@@ -115,7 +115,7 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual(collection_faces(stock), collection_faces(output))
         report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
         self.assertEqual([{'slot': '/system/fonts/NotoSansCJK-Regular.ttc', 'mode': 'collection',
-                           'stockFaces': 3, 'compiledFaces': 2}], report['collections'])
+                           'stockFaces': 3, 'compiledFaces': 2, 'cached': False}], report['collections'])
         for index in range(3):
             with TTFont(stock, fontNumber=index) as original, TTFont(output, fontNumber=index) as result:
                 self.assertEqual(original['name'].getDebugName(1), result['name'].getDebugName(1))
@@ -123,6 +123,35 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 400).name)
         self.assertEqual('LuoShu-700.ttf', batch.collection_source_for_weight(self.fonts, 600).name)
         self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 300).name)
+
+    def test_collection_runs_after_main_slots_and_repeat_reuses_cache(self):
+        self.stock_collection()
+        (self.root / 'stock/system/400.ttf').touch()
+        import composite_collection_build as builder
+        real = builder.build
+        seen = []
+
+        def counting(*args, **kwargs):
+            # Main slots are already linked when the collection compiles.
+            seen.append((self.fonts / '400.ttf').is_file())
+            return real(*args, **kwargs)
+
+        with patch.object(builder, 'build', counting):
+            batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+            first = (self.fonts / 'NotoSansCJK-Regular.ttc').read_bytes()
+            (self.fonts / 'NotoSansCJK-Regular.ttc').unlink()
+            batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        self.assertEqual(seen, [True])
+        self.assertEqual(first, (self.fonts / 'NotoSansCJK-Regular.ttc').read_bytes())
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertTrue(report['collections'][0]['cached'])
+        # A changed donor is a different identity: compile again.
+        with TTFont(self.fonts / 'LuoShu-700.ttf') as font:
+            font['head'].fontRevision += 1
+            font.save(self.fonts / 'LuoShu-700.ttf')
+        with patch.object(builder, 'build', counting):
+            batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        self.assertEqual(len(seen), 2)
 
     def test_uncompilable_stock_collection_stays_stock(self):
         (self.root / 'stock/system/NotoSerifCJK-Regular.ttc').write_bytes(b'not a collection')

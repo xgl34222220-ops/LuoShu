@@ -182,72 +182,9 @@ update_task() {
         "$(read_value "$TASK_FILE" root)" '' "$(read_value "$TASK_FILE" started)" "$_finished" "$_percent"
 }
 
-# One family's library files: the filename family plus every file of the same
-# typographic family (name table). Prints path|weight|variable(1/0); fails when
-# the helper is unavailable so callers keep the filename-only selection.
-family_member_rows() (
-    _fmr_family="$1"
-    set --
-    for _fmr_font in "$SOURCE_FONTS"/*.ttf "$SOURCE_FONTS"/*.otf "$SOURCE_FONTS"/*.ttc \
-                     "$SOURCE_FONTS"/*.TTF "$SOURCE_FONTS"/*.OTF "$SOURCE_FONTS"/*.TTC; do
-        [ -f "$_fmr_font" ] || continue
-        [ "$(detect_font_family "$(basename "$_fmr_font")")" = "$_fmr_family" ] || continue
-        set -- "$@" "$_fmr_font"
-    done
-    [ "$#" -gt 0 ] || exit 1
-    _fmr_module="${LUOSHU_REAL_MODDIR:-$MODDIR}"
-    _fmr_tool="$_fmr_module/common/font_capability.py"
-    [ -f "$_fmr_tool" ] && [ -x "$PYBIN" ] || exit 1
-    _fmr_memo=''
-    _fmr_scope="${LUOSHU_TASK_SCOPE_TMPDIR:-${_root:-}}"
-    if [ -n "$_fmr_scope" ] && [ -d "$_fmr_scope" ]; then
-        _fmr_memo="$_fmr_scope/family-members-$(printf '%s' "$_fmr_family" | hash_text)"
-        [ -s "$_fmr_memo" ] && { cat "$_fmr_memo"; exit 0; }
-    fi
-    _fmr_rows=$(PYTHONHOME="$PYROOT" \
-        PYTHONPATH="$_fmr_module/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
-        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$PYBIN" "$_fmr_tool" members --dir "$SOURCE_FONTS" "$@" 2>/dev/null) || exit 1
-    [ -n "$_fmr_rows" ] || exit 1
-    [ -z "$_fmr_memo" ] || printf '%s\n' "$_fmr_rows" > "$_fmr_memo" 2>/dev/null || true
-    printf '%s\n' "$_fmr_rows"
-)
-
-relative_weight() {
-    _rw_value=$(( $(safe_weight "$1") + $2 - 400 ))
-    [ "$_rw_value" -ge 1 ] || _rw_value=1
-    [ "$_rw_value" -le 1000 ] || _rw_value=1000
-    printf '%s\n' "$_rw_value"
-}
-
-# A fixed (slider-moved) role becomes a relative nine-weight plan when it can
-# vary: a wght variable source, or two or more static weights of its family.
-# A single static file stays fixed (every slot uses that file, as before).
-plan_weight_mode() {
-    [ "$2" = fixed ] || { printf '%s\n' "$2"; return 0; }
-    _pwm_rows=$(family_member_rows "$1") || _pwm_rows=''
-    if [ -n "$_pwm_rows" ]; then
-        printf '%s\n' "$_pwm_rows" | awk -F'|' '$3 == 1 { v = 1 } { p[$1] = 1 }
-            END { n = 0; for (k in p) n++; exit !(v || n >= 2) }' && { echo relative; return 0; }
-        echo fixed; return 0
-    fi
-    _pwm_source=$(find_best_source "$1" 400) || { echo fixed; return 0; }
-    is_variable_font "$_pwm_source" 2>/dev/null && echo relative || echo fixed
-}
-
 find_best_source() {
     _family="$1"
     _target="$2"
-    _fbs_rows=$(family_member_rows "$_family") || _fbs_rows=''
-    if [ -n "$_fbs_rows" ]; then
-        # Variable first (instanced per slot), else the nearest static weight.
-        printf '%s\n' "$_fbs_rows" | awk -F'|' -v target="$_target" '
-            $3 == 1 { if (variable == "") variable = $1; next }
-            { d = $2 - target; if (d < 0) d = -d
-              if (best == "" || d < distance) { best = $1; distance = d } }
-            END { if (variable != "") print variable; else if (best != "") print best; else exit 1 }'
-        return $?
-    fi
     _best=''
     _best_score=99999
     _variable=''
@@ -281,7 +218,6 @@ run_instance() (
     _destination="$2"
     _role="$3"
     _axes="$4"
-    _nominal="${5:-0}"
     _weight=$(safe_weight "$_axes")
     mkdir -p "${_destination%/*}" "$MODDIR/cache/tmp" 2>/dev/null || return 1
     PYTHONHOME="$PYROOT" \
@@ -289,8 +225,7 @@ run_instance() (
     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     TMPDIR="$MODDIR/cache/tmp" \
         "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
-        --role "$_role" --weight "$_weight" --axes "$_axes" --nominal-weight "$_nominal" \
-        >/dev/null 2>"${_destination}.err"
+        --role "$_role" --weight "$_weight" --axes "$_axes" >/dev/null 2>"${_destination}.err"
     _code=$?
     [ "$_code" -eq 0 ] && [ -s "$_destination" ] || return 1
     rm -f "${_destination}.err" 2>/dev/null || true
@@ -307,15 +242,7 @@ prepare_source() (
     _target="$5"
     _destination="$6"
     _effective="$_axes"
-    _nominal=0
-    case "$_mode" in
-        auto) _effective=$(with_weight "$_axes" "$_target") ;;
-        relative)
-            # The slider value is the Regular base; other slots keep their offset.
-            _effective=$(with_weight "$_axes" "$(relative_weight "$_axes" "$_target")")
-            _nominal="$_target"
-            ;;
-    esac
+    [ "$_mode" != auto ] || _effective=$(with_weight "$_axes" "$_target")
     _lookup=$(safe_weight "$_effective")
 
     # Snapshot each selected public source once per task. The fixed slots of a
@@ -370,7 +297,7 @@ prepare_source() (
     _generator_digest=$(hash_file "$INSTANCE_PY")
     [ -n "$_generator_digest" ] || return 1
     _prepared_key=$(printf '%s\000%s\000%s\000%s' \
-        "$_source_digest" "$_role" "$_effective,nominal=$_nominal" "$_generator_digest" | hash_text)
+        "$_source_digest" "$_role" "$_effective" "$_generator_digest" | hash_text)
     [ -n "$_prepared_key" ] || return 1
     _prepared="$_prepared_dir/${_prepared_key}.font"
     if [ -s "$_prepared" ] && font_validate "$_prepared" text; then
@@ -383,7 +310,7 @@ prepare_source() (
     rm -f "$_prepared_tmp" "${_prepared_tmp}.err" 2>/dev/null || true
     font_validate "$_snapshot" text || return 1
     if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_snapshot" "$_prepared_tmp" "$_role" "$_effective" "$_nominal" || {
+        run_instance "$_snapshot" "$_prepared_tmp" "$_role" "$_effective" || {
             rm -f "$_prepared_tmp" "${_prepared_tmp}.err"; return 1;
         }
     else
@@ -607,10 +534,6 @@ worker() {
             "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode" \
             "$_root" '' "$(read_value "$TASK_FILE" started)" '' 1 || exit 1
     fi
-    # Persisted modes stay auto/fixed; only the generation plan uses relative.
-    _cjk_plan=$(plan_weight_mode "$_cjk" "$_cjk_mode")
-    _latin_plan=$(plan_weight_mode "$_latin" "$_latin_mode")
-    _digit_plan=$(plan_weight_mode "$_digit" "$_digit_mode")
     _family=LuoShuAutoMix
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
         update_task "$_wanted" failed '无法创建自动多字重缓存' 100 "$(date +%s)"
@@ -626,15 +549,15 @@ worker() {
         update_task "$_wanted" running "正在生成 ${_weight} 字重复合字体" "$_percent" ''
         _dir="$_root/prepared/$_weight"
         mkdir -p "$_dir" 2>/dev/null || exit 1
-        luoshu_mix_phase_run prepare prepare cjk prepare prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_plan" "$_weight" "$_dir/cjk.ttf" || {
+        luoshu_mix_phase_run prepare prepare cjk prepare prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_mode" "$_weight" "$_dir/cjk.ttf" || {
             update_task "$_wanted" failed "中文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
-        luoshu_mix_phase_run prepare prepare latin prepare prepare_source latin "$_latin" "$_latin_axes" "$_latin_plan" "$_weight" "$_dir/latin.ttf" || {
+        luoshu_mix_phase_run prepare prepare latin prepare prepare_source latin "$_latin" "$_latin_axes" "$_latin_mode" "$_weight" "$_dir/latin.ttf" || {
             update_task "$_wanted" failed "英文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
-        luoshu_mix_phase_run prepare prepare digit prepare prepare_source digit "$_digit" "$_digit_axes" "$_digit_plan" "$_weight" "$_dir/digit.ttf" || {
+        luoshu_mix_phase_run prepare prepare digit prepare prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
             update_task "$_wanted" failed "数字字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }

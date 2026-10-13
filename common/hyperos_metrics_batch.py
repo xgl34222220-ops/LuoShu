@@ -157,11 +157,48 @@ def collection_source_for_weight(fonts: Path, weight: int) -> Path:
     return pick_source(fonts, 'Regular.ttf')
 
 
+COLLECTION_CACHE_KEEP = 2  # newest compiled sets kept per target name
+
+
+def collection_cache_dir(module: Path) -> Path:
+    state = module / '.luoshu-state/cache'
+    return (state if state.is_dir() else module / 'cache') / 'hyperos-collections-v1'
+
+
+def collection_cache_key(stock: Path, sources: list[Path], logical: str, allow: tuple) -> str:
+    """Content identity of one compiled collection: stock bytes, each face's
+    donor bytes (in face order), the target, and both builder sources."""
+    import composite_collection_build as builder
+    engine = [builder.SCHEMA, builder.sha(Path(builder.__file__)), builder.sha(Path(__file__))]
+    hashes = {}
+    donors = [hashes.setdefault(path, builder.sha(path)) for path in sources]
+    return builder.canonical({'engine': engine, 'target': logical, 'allow': list(allow),
+                              'stock': builder.sha(stock), 'donors': donors})
+
+
+def sha_file(path: Path) -> str:
+    import composite_collection_build as builder
+    return builder.sha(path)
+
+
+def prune_collection_cache(directory: Path, name: str) -> None:
+    entries = sorted(directory.glob(f'*-{name}'), key=lambda path: path.stat().st_mtime_ns, reverse=True)
+    for old in entries[COLLECTION_CACHE_KEEP:]:
+        old.unlink(missing_ok=True)
+        old.with_name(old.name + '.json').unlink(missing_ok=True)
+
+
 def build_collections(module: Path, stage: Path, names: list[str],
                       workspace: Path) -> tuple[list, dict]:
-    """Compile each requested stock collection; a failure keeps that file stock."""
-    from composite_collection_build import build as build_collection, stock_path
+    """Compile each requested stock collection; a failure keeps that file stock.
+
+    Runs after the main slots are linked. The donors are the already generated
+    LuoShu-<weight> composites, and a compiled set is cached by content
+    (stock + donor hashes + builder), so repeating a switch only links it."""
+    from composite_collection_build import build as build_collection, stock_path, face_weight
+    from composite_collection_contract import collection_faces
     fonts = stage / 'system/fonts'
+    cache_dir = collection_cache_dir(module)
     done, skipped = [], {}
     for part in PARTS:
         override = os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT')
@@ -176,11 +213,44 @@ def build_collections(module: Path, stage: Path, names: list[str],
                 # unmounted stock view (tests point the root at a fixture).
                 stock = root / name if override else stock_path(module, logical)
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
-                                          source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
-                                          allow=COLLECTION_TARGETS[name])
+                allow = COLLECTION_TARGETS[name]
+                sources = [collection_source_for_weight(fonts, face_weight(stock, index))
+                           for index in range(collection_faces(stock))]
+                key = collection_cache_key(stock, sources, logical, allow)
+                cached = cache_dir / f'{key[:32]}-{name}'
+                summary = cached.with_name(cached.name + '.json')
+                cache_hit = False
+                try:
+                    report = json.loads(summary.read_text(encoding='utf-8'))
+                    cache_hit = (report.get('key') == key and cached.is_file() and not cached.is_symlink()
+                                 and collection_faces(cached) == report['stockFaces']
+                                 and sha_file(cached) == report['outputSha256'])
+                except (OSError, ValueError, KeyError, TypeError):
+                    cache_hit = False
+                if cache_hit:
+                    os.utime(cached)
+                    link_copy(cached, destination)
+                else:
+                    report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
+                                              source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
+                                              allow=allow)
+                    report = {'key': key, 'stockFaces': report['stockFaces'], 'outputSha256': report['outputSha256'],
+                              'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces'])}
+                    try:  # caching is an optimization; a failure never touches the staged result
+                        cache_dir.mkdir(parents=True, exist_ok=True)
+                        temporary = cached.with_name(cached.name + f'.tmp.{os.getpid()}')
+                        temporary.unlink(missing_ok=True)
+                        try:  # same bytes as the staged face set; payload files are never rewritten in place
+                            os.link(destination, temporary)
+                        except OSError:
+                            shutil.copyfile(destination, temporary)
+                        os.replace(temporary, cached)
+                        summary.write_text(json.dumps(report), encoding='utf-8')
+                        prune_collection_cache(cache_dir, name)
+                    except OSError:
+                        pass
                 done.append({'slot': logical, 'mode': 'collection', 'stockFaces': report['stockFaces'],
-                             'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces'])})
+                             'compiledFaces': report['compiledFaces'], 'cached': cache_hit})
             except Exception as error:  # keep the ROM collection; report why
                 destination.unlink(missing_ok=True)
                 skipped[logical] = f'{type(error).__name__}: {error}'
@@ -1173,9 +1243,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'cjkRoutingReason': routing_reason,
                                 **cjk_routing_report(logical, routing_reason, routing_evidence),
                                 **output_reports[key]})
-        collections, collections_kept = build_collections(module, stage, collection_names, outputs)
         for output, dest in prepared:
             link_copy(output, dest)
+        # Main slots first; the collections reuse those composites as donors.
+        collections, collections_kept = build_collections(module, stage, collection_names, outputs)
         for alias in preserved_aliases + excluded_aliases:
             # Initial generic mapping creates the alias as a regular font. Its
             # absence exposes the ROM lower symlink in OverlayFS and leaves it

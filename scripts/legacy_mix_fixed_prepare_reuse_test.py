@@ -451,53 +451,8 @@ done
                 self.assertTrue(set(map(ord, "Aa09中文")) <= set(font.getBestCmap()))
         saved = dict(line.split("=", 1) for line in (self.module / "config/font_mix.conf").read_text().splitlines())
         self.assertEqual([saved[role] for role in ("cjk", "latin", "digit")], ["CJK", "Latin", "Digit"])
-        # Fixed (slider) variable roles now get a relative nine-weight plan.
-        self.assertEqual(len(self.instance_calls()), 27)
+        self.assertEqual(len(self.instance_calls()), 11)
         self.assertFalse(self.taskroot.exists())
-
-    def test_fixed_variable_slider_is_regular_base_for_relative_weights(self):
-        config = {"task": "relative-fixture", "state": "queued", "cjk": "CJK", "latin": "Latin", "digit": "Digit",
-                  "cjkAxes": "wght=650", "latinAxes": "wght=400", "digitAxes": "wght=400",
-                  "cjkMode": "fixed", "latinMode": "auto", "digitMode": "auto", "root": str(self.taskroot),
-                  "started": "1", "finished": "", "percent": "1"}
-        task = self.module / "config/axes_task.conf"
-        task.write_text("".join(f"{key}={value}\n" for key, value in config.items()))
-        result = subprocess.run(["sh", str(self.script), "worker", "relative-fixture"], env=self.env,
-                                capture_output=True, text=True, timeout=60)
-        self.assertEqual(result.returncode, 0, task.read_text() + result.stderr + self.child_diagnostics())
-        cjk = {int(call["--nominal-weight"]): call["--axes"] for call in self.instance_calls()
-               if call["--role"] == "cjk"}
-        # 400 -> slider 650, 700 -> 950; the instancer clamps to the axis range.
-        self.assertEqual(cjk, {weight: f"wght={min(weight + 250, 1000)}" for weight in range(100, 1000, 100)})
-        roles = {100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular", 500: "Medium",
-                 600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black"}
-        for weight, role in roles.items():
-            name = f"LuoShuAutoMix-{role}.{'ttf' if weight == 400 else 'otf'}"
-            with TTFont(self.captured / name) as font:
-                self.assertEqual(font["OS/2"].usWeightClass, weight)
-        saved = dict(line.split("=", 1) for line in task.read_text().splitlines())
-        self.assertEqual(saved["cjkMode"], "fixed")
-
-    def test_static_sibling_found_by_typographic_family(self):
-        shutil.copyfile(ROOT / "common/font_capability.py", self.module / "common/font_capability.py")
-        for name, family, weight in (("StatA-55.ttf", "Stat", 400), ("StatB-Heavy.ttf", "Stat Heavy", 700)):
-            path = self.public / "fonts" / name
-            variable_font(path)
-            with TTFont(path) as font:
-                del font["fvar"], font["gvar"]
-                font["OS/2"].usWeightClass = weight
-                font["name"].setName(family, 1, 3, 1, 0x409)
-                font["name"].setName("Stat", 16, 3, 1, 0x409)
-                font.save(path)
-        result = self.prepare('''find_best_source StatA 700
-find_best_source StatA 300
-plan_weight_mode StatA fixed
-plan_weight_mode StatA auto
-''')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        fonts = self.public / "fonts"
-        self.assertEqual(result.stdout.split(), [str(fonts / "StatB-Heavy.ttf"), str(fonts / "StatA-55.ttf"),
-                                                 "relative", "auto"])
 
     def test_weight_role_axes_and_generator_changes_do_not_reuse(self):
         result = self.prepare('''prepare_source latin Latin wght=400 auto 100 "$REUSE_ROOT/100.ttf" || exit $?
