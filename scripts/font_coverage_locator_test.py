@@ -167,6 +167,109 @@ class LocatorTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["data"]["verdict"], "not-running")
 
+    def test_luoshu_route_clone_in_theme_dir_is_not_a_theme_font(self):
+        # Real device: theme store on DEFAULT, LuoShu's early route bind serves
+        # its Roboto on /data/system/theme/fonts/Roboto-Regular.ttf.
+        self.app_sees_payload()
+        clone = self.module / "config/hyperos-webview-route/route.ttf"
+        clone.parent.mkdir(parents=True)
+        clone.write_bytes(b"r" * 300000)
+        os.link(clone, self.theme / "Roboto-Regular.ttf")
+        self.map("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")
+        result = self.run_locate()
+        self.assertEqual(result["theme"]["state"], "placeholder")
+        self.assertEqual(result["theme"]["luoshuFiles"], ["Roboto-Regular.ttf"])
+        self.assertEqual(result["verdict"], "covered")
+
+    def test_theme_engine_roboto_and_payload_copies_are_not_theme_fonts(self):
+        stock_dir = self.stock / "sysfonts"
+        stock_dir.mkdir()
+        (stock_dir / "Roboto-Regular.ttf").write_bytes(b"s" * 300000)
+        (self.theme / "Roboto-Regular.ttf").write_bytes(b"s" * 300000)
+        self.assertEqual(locator.theme_state(self.theme, self.module, stock_dir)["state"], "placeholder")
+        (self.theme / "Roboto-Regular.ttf").write_bytes(b"\0\1\0\0" + "Roboto".encode("utf-16-be") + b"\0" * 300000)
+        self.assertEqual(locator.theme_state(self.theme, self.module, stock_dir)["state"], "placeholder")
+        big = self.payload / "Roboto-Regular.ttf"
+        big.write_bytes(b"p" * 300000)
+        (self.theme / "Roboto-Regular.ttf").write_bytes(big.read_bytes())
+        self.assertEqual(locator.theme_state(self.theme, self.module, stock_dir)["state"], "placeholder")
+        (self.theme / "Roboto-Regular.ttf").write_bytes(b"t" * 300000)
+        self.assertEqual(locator.theme_state(self.theme, self.module, stock_dir)["userFiles"], ["Roboto-Regular.ttf"])
+
+    def test_takeover_owned_file_stays_user_theme(self):
+        clone = self.module / "config/hyperos-theme-takeover/Roboto-Regular.ttf"
+        clone.parent.mkdir(parents=True)
+        clone.write_bytes((self.payload / "MiSansVF.ttf").read_bytes() * 200)
+        os.link(clone, self.theme / "Roboto-Regular.ttf")
+        st = os.stat(clone)
+        (self.module / "config/hyperos-theme-takeover.journal").write_text(
+            f"boot|{self.theme / 'Roboto-Regular.ttf'}|{clone}|{st.st_dev}:{st.st_ino}\n")
+        self.assertEqual(locator.theme_state(self.theme, self.module)["state"], "user-theme")
+
+    def scan_fixture(self):
+        """Three running apps: covered, lock-screen group off, module hidden; plus noise."""
+        self.app_sees_payload()
+        procs = {"100": ("com.android.systemui", [("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")]),
+                 "101": ("com.miui.aod", [("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf"),
+                                         ("/system/fonts/C800.ttf", self.stock_file("C800.ttf"))]),
+                 "102": ("com.example.hidden", [("/system/fonts/MiSansVF.ttf", self.stock / "hidden.ttf")])}
+        (self.stock / "hidden.ttf").write_bytes(b"h" * 9999)
+        for pid, (name, maps) in procs.items():
+            root = self.proc / pid / "root"
+            (root / "system/fonts").mkdir(parents=True, exist_ok=True)
+            if pid != "102":
+                target = root / "system/fonts/MiSansVF.ttf"
+                if not target.exists():
+                    os.link(self.payload / "MiSansVF.ttf", target)
+            else:
+                os.link(self.stock / "hidden.ttf", root / "system/fonts/MiSansVF.ttf")
+            if pid == "101":
+                os.link(self.stock / "C800.ttf", root / "system/fonts/C800.ttf")
+            (self.proc / pid / "cmdline").write_bytes(name.encode() + b"\0")
+            (self.proc / pid / "maps").write_text("".join(
+                maps_line(path, real, 0x7000 + 0x2000 * i) for i, (path, real) in enumerate(maps)))
+        for pid, cmdline in (("200", b"/system/bin/surfaceflinger\0"), ("201", b"zygote64\0"),
+                             ("202", b"com.android.systemui\0")):
+            (self.proc / pid).mkdir(parents=True)
+            (self.proc / pid / "cmdline").write_bytes(cmdline)
+
+    def test_scan_lists_uncovered_processes_with_fixes_and_reasons(self):
+        self.scan_fixture()
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, groups=policy.parse_groups(""),
+                              weight_probe=lambda _p: False)
+        self.assertEqual(result["verdict"], "ok")
+        self.assertEqual((result["scanned"], result["covered"]), (3, 1))
+        by_package = {item["package"]: item for item in result["items"]}
+        self.assertEqual(set(by_package), {"com.miui.aod", "com.example.hidden"})
+        self.assertEqual(by_package["com.miui.aod"]["fixes"], ["group:lockscreen_styles"])
+        self.assertEqual(by_package["com.example.hidden"]["fixes"], [])
+        self.assertTrue(any("卸载模块" in reason for reason in by_package["com.example.hidden"]["reasons"]))
+        self.assertEqual(result["fixes"], ["group:lockscreen_styles"])
+        self.assertFalse(result["truncated"])
+
+    def test_scan_weight_loss_is_global_and_budget_truncates(self):
+        self.scan_fixture()
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, groups=policy.ALL_GROUPS, weight_probe=lambda _p: True)
+        self.assertTrue(result["weightLoss"])
+        self.assertEqual([item["package"] for item in result["items"]], ["com.example.hidden"])
+        ticks = iter([0.0, 0.0, 100.0, 100.0, 100.0])
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, weight_probe=lambda _p: False, budget_s=1.0,
+                              clock=lambda: next(ticks))
+        self.assertTrue(result["truncated"])
+
+    def test_scan_cli_emits_json(self):
+        self.scan_fixture()
+        out = io.StringIO()
+        with redirect_stdout(out):
+            locator.main(["--scan", "--module", str(self.module), "--proc-root", str(self.proc),
+                          "--theme-dir", str(self.theme)])
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["data"]["schema"], locator.SCAN_SCHEMA)
+
     def test_every_category_has_a_guide(self):
         for category in ("theme-takeover", "outside-whitelist", "namespace-hidden", "app-embedded",
                          "link-switched", "weight-loss", "covered", "not-running"):

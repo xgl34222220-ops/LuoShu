@@ -13,8 +13,8 @@ SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
-# 10.5 MiB + 64 KiB: HyperOS coverage scripts/App section add ~39 KB compressed (PR #290).
-MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11075584}"
+# 10.5 MiB + 128 KiB: HyperOS coverage (PR #290) + real-device feedback/ColorOS coverage (PR #293/#294).
+MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11141120}"
 
 sh "$ROOT/scripts/check.sh"
 [ -n "$APP_APK" ] || {

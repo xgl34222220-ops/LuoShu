@@ -814,13 +814,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     fun rebootDevice() {
         // Complete reboot is deliberately independent from font-task busy state. A stale worker
         // flag used to make the button look dead for tens of seconds even though reboot itself is
-        // immediate. The shell bridge backgrounds the reboot command, so use a short request timeout.
+        // immediate. The bridge now runs the reboot in the foreground of this request (a
+        // backgrounded reboot was reaped by the task supervisor before it took effect), so the
+        // request only returns when every reboot path failed; give svc's JVM start-up and the
+        // toybox/sys.powerctl fallbacks enough time instead of the old 4 s cut-off.
         operationMessage = "正在请求完整重启…"
         viewModelScope.launch {
-            val result = RootShell.exec("sh ${RootShell.quote(bridge)} reboot", timeoutMs = 4_000L)
-            if (result.code != 0) {
-                operationMessage = result.stderr.ifBlank { "重启请求失败" }
-            }
+            val result = RootShell.exec(fullRebootCommand(bridge), timeoutMs = FULL_REBOOT_TIMEOUT_MS)
+            rebootFailureMessage(result)?.let { operationMessage = it }
         }
     }
 

@@ -5,6 +5,7 @@
 #   set <key> <0|1>            group:miui_ex | group:misans_ext |
 #                              group:lockscreen_styles | xml | theme_takeover
 #   locate <package>           JSON from common/font_coverage_locator.py
+#   scan                       JSON: running processes without LuoShu's font
 # Settings only write config files; they take effect after the next apply/reboot,
 # which the JSON says so the App can tell the user.
 set +e
@@ -49,13 +50,14 @@ hcb_status() {
     _hcb_rom=false; _hcb_is_hyperos && _hcb_rom=true
     _hcb_xml=true
     grep -qx 'enabled=0' "$XML_CONF" 2>/dev/null && _hcb_xml=false
-    _hcb_state=none; _hcb_files=0; _hcb_user=0; _hcb_names=''; _hcb_take=0; _hcb_owned=0
+    _hcb_state=none; _hcb_files=0; _hcb_user=0; _hcb_own=0; _hcb_names=''; _hcb_take=0; _hcb_owned=0
     if [ -f "$MODDIR/common/hyperos_theme_takeover.sh" ]; then
         _hcb_kv=$(MODDIR="$MODDIR" LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_THEME_TAKEOVER_CONF="$TAKEOVER_CONF" \
             sh "$MODDIR/common/hyperos_theme_takeover.sh" status 2>/dev/null)
         _hcb_state=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^state=//p' | head -n1)
         _hcb_files=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^files=//p' | head -n1)
         _hcb_user=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^userFiles=//p' | head -n1)
+        _hcb_own=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^luoshuFiles=//p' | head -n1)
         _hcb_names=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^names=//p' | head -n1)
         _hcb_take=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^takeover=//p' | head -n1)
         _hcb_owned=$(printf '%s\n' "$_hcb_kv" | sed -n 's/^owned=//p' | head -n1)
@@ -63,11 +65,12 @@ hcb_status() {
     case "$_hcb_state" in none|placeholder|user-theme) ;; *) _hcb_state=none ;; esac
     case "$_hcb_files" in ''|*[!0-9]*) _hcb_files=0 ;; esac
     case "$_hcb_user" in ''|*[!0-9]*) _hcb_user=0 ;; esac
+    case "$_hcb_own" in ''|*[!0-9]*) _hcb_own=0 ;; esac
     printf '{"status":"ok","data":{"hyperos":%s,"groups":{"miui_ex":%s,"misans_ext":%s,"lockscreen_styles":%s},' \
         "$_hcb_rom" "$(_hcb_bool "$(_hcb_group_value miui_ex)")" \
         "$(_hcb_bool "$(_hcb_group_value misans_ext)")" "$(_hcb_bool "$(_hcb_group_value lockscreen_styles)")"
-    printf '"sourceXml":%s,"theme":{"state":"%s","files":%s,"userFiles":%s,"names":"%s","takeover":%s,"owned":%s}}}\n' \
-        "$_hcb_xml" "$_hcb_state" "$_hcb_files" "$_hcb_user" "$(_hcb_json_escape "$_hcb_names")" \
+    printf '"sourceXml":%s,"theme":{"state":"%s","files":%s,"userFiles":%s,"luoshuFiles":%s,"names":"%s","takeover":%s,"owned":%s}}}\n' \
+        "$_hcb_xml" "$_hcb_state" "$_hcb_files" "$_hcb_user" "$_hcb_own" "$(_hcb_json_escape "$_hcb_names")" \
         "$(_hcb_bool "$_hcb_take")" "$(_hcb_bool "$_hcb_owned")"
 }
 
@@ -101,6 +104,26 @@ hcb_set() {
         "$(_hcb_json_escape "$_hcb_key")" "$(_hcb_bool "$_hcb_val")" "$_hcb_reapply"
 }
 
+_hcb_python_env() {
+    if [ "$PYBIN" = "$PYROOT/bin/luoshu-python" ]; then
+        export PYTHONHOME="$PYROOT"
+        export PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"
+        export LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+}
+
+hcb_scan() {
+    _hcb_helper="$MODDIR/common/font_coverage_locator.py"
+    if [ ! -f "$_hcb_helper" ] || [ ! -x "$PYBIN" ]; then
+        printf '{"status":"error","message":"定位组件不可用，请先安装匹配版本的模块"}\n'
+        return 1
+    fi
+    _hcb_python_env
+    "$PYBIN" "$_hcb_helper" --scan --module "$MODDIR" \
+        ${LUOSHU_COVERAGE_PROC_ROOT:+--proc-root "$LUOSHU_COVERAGE_PROC_ROOT"} \
+        ${LUOSHU_COVERAGE_THEME_DIR:+--theme-dir "$LUOSHU_COVERAGE_THEME_DIR"}
+}
+
 hcb_locate() {
     _hcb_pkg="$1"
     case "$_hcb_pkg" in
@@ -113,11 +136,7 @@ hcb_locate() {
         printf '{"status":"error","message":"定位组件不可用，请先安装匹配版本的模块"}\n'
         return 1
     fi
-    if [ "$PYBIN" = "$PYROOT/bin/luoshu-python" ]; then
-        export PYTHONHOME="$PYROOT"
-        export PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"
-        export LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    fi
+    _hcb_python_env
     "$PYBIN" "$_hcb_helper" --package "$_hcb_pkg" --pid "${_hcb_pid:-}" --module "$MODDIR" \
         ${LUOSHU_COVERAGE_PROC_ROOT:+--proc-root "$LUOSHU_COVERAGE_PROC_ROOT"} \
         ${LUOSHU_COVERAGE_THEME_DIR:+--theme-dir "$LUOSHU_COVERAGE_THEME_DIR"}
@@ -127,6 +146,7 @@ case "${1:-status}" in
     status) hcb_status ;;
     set) hcb_set "${2:-}" "${3:-}" ;;
     locate) hcb_locate "${2:-}" ;;
+    scan) hcb_scan ;;
     *) printf '{"status":"error","message":"未知 HyperOS 覆盖命令"}\n' ;;
 esac
 exit 0
