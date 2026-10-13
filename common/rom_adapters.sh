@@ -629,7 +629,7 @@ copy_as_hyperos() {
             fi
             if [ -n "$rb" ]; then
                 # 斜体槽保持原厂：正体字重不再写进 Roboto-*Italic（与 legacy 路线一致）。
-                for dest_name in "Roboto-${rb}.ttf"; do
+                for dest_name in Roboto-"${rb}".ttf; do
                     _rom_exact_target_exists "$dest_name" || continue
                     if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
                         weight_count=$((weight_count + 1))
