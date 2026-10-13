@@ -269,7 +269,7 @@ EOF_SAFE_CHECKSUMS
 safe_mapper_identity() {
     # The shell wrappers do not change when a Python slot policy is fixed. All
     # code that selects donors, targets, routing or metrics belongs to the key.
-    safe_code_identity "$LEGACY_DIR/rom_adapters.sh" "$LEGACY_DIR/util_functions.sh" \
+    set -- "$LEGACY_DIR/rom_adapters.sh" "$LEGACY_DIR/util_functions.sh" \
         "$LEGACY_DIR/font_switch_safe.sh" "$LEGACY_DIR/hyperos_full_coverage.sh" \
         "$MODDIR/common/hyperos_stage_complete.sh" "$MODDIR/common/coloros_stage_complete.sh" \
         "$MODDIR/common/hyperos_metrics_batch.py" "$MODDIR/common/coloros_metrics_batch.py" \
@@ -277,6 +277,19 @@ safe_mapper_identity() {
         "$MODDIR/common/font_inventory.py" "$MODDIR/common/font_inventory_scan.py" \
         "$MODDIR/common/hyperos_physical_policy.py" "$MODDIR/common/hyperos_global.sh" \
         "$MODDIR/common/util_functions.sh" "$MODDIR/common/rom_adapters.sh"
+    # Capability layer (weight anchors, optional Serif/Emoji slots) when present.
+    for _smi_file in "$MODDIR/common/font_capability.py" "$MODDIR/common/font_capability.sh" \
+                     "$MODDIR/common/font_slot_options.sh"; do
+        [ -f "$_smi_file" ] && set -- "$@" "$_smi_file"
+    done
+    _smi_code=$(safe_code_identity "$@") || return 1
+    # Optional Serif/Emoji slot choices change the staged tree as well.
+    if [ -s "$MODDIR/config/font_slot_options.conf" ]; then
+        _smi_opts=$(safe_hash_stream < "$MODDIR/config/font_slot_options.conf")
+        printf '%s;slot-options:%s\n' "$_smi_code" "$_smi_opts"
+    else
+        printf '%s\n' "$_smi_code"
+    fi
 }
 
 safe_validator_identity() {

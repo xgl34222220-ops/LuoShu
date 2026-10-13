@@ -21,7 +21,7 @@ import org.json.JSONObject
 
 private const val IMPORT_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
 private const val MAX_IMPORT_BYTES = 268_435_456L
-private val ALLOWED_IMPORT_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
+private val ALLOWED_IMPORT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "zip")
 
 internal enum class NativeImportPhase(val wireName: String) {
     IDLE("idle"),
@@ -398,7 +398,7 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
 
 private suspend fun importOne(context: android.content.Context, uri: Uri, displayName: String): ImportOutcome {
     val extension = displayName.substringAfterLast('.', "").lowercase()
-    require(extension in ALLOWED_IMPORT_EXTENSIONS) { "仅支持 TTF、OTF、TTC 和 ZIP" }
+    require(extension in ALLOWED_IMPORT_EXTENSIONS) { "仅支持 TTF、OTF、TTC/OTC 和 ZIP" }
 
     val cacheDir = File(context.cacheDir, "native_import")
     cacheDir.mkdirs()

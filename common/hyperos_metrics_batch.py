@@ -28,6 +28,9 @@ from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_map
 from hyperos_physical_policy import (MAPPER_FAMILY_PREFIXES, classify as policy_classify,
                                      enabled_groups, preserved_dynamic_alias,
                                      safe_physical_font_name)
+from font_capability import (SCRIPT_COVERAGE_MIN, fallback_script_for_slot,
+                             is_variable_slot_name, script_coverage,
+                             weight_from_name)
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
@@ -51,21 +54,73 @@ def policy_keeps_stock(name: str, groups: frozenset | None = None) -> bool:
 
 
 def weight_for_name(name: str) -> int:
-    stem = Path(name).stem.lower()
-    if stem.isdigit() and 100 <= int(stem) <= 900:
-        return int(stem)
-    for terms, weight in ((('extrabold', 'extra-bold'), 800),
-                          (('semibold', 'semi-bold', 'demibold'), 600),
-                          (('extralight', 'extra-light'), 200),
-                          (('black', 'heavy'), 900), (('bold',), 700),
-                          (('medium',), 500), (('light',), 300), (('thin',), 100)):
-        if any(term in stem for term in terms):
-            return weight
-    return 400
+    """Slot weight from its filename (font_capability parses ExtraBold/UltraLight
+    before Bold/Light and never reads "Highlight" as Light)."""
+    return weight_from_name(name) or 400
 
 
 def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
+
+
+def _has_fvar(path: Path) -> bool:
+    try:
+        face = _pick_face(path)
+        options = {'fontNumber': face} if face >= 0 else {}
+        with TTFont(path, lazy=True, recalcBBoxes=False, recalcTimestamp=False, **options) as font:
+            return 'fvar' in font
+    except Exception:
+        return False
+
+
+def variable_slot_source(fonts: Path, name: str) -> Path | None:
+    """A declared variable slot (MiSansVF, GoogleSans-VF, ...) keeps its fvar axes.
+
+    ROM XML and the MiPro manager select weights on these files through the
+    wght axis. Feeding them a static 400 instance (LuoShu-400.ttf, wght-400)
+    makes every weight render the same. Only a source that still carries fvar
+    qualifies; without one the caller keeps the previous static choice and the
+    report says so.
+    """
+    if not is_variable_slot_name(name):
+        return None
+    store = fonts / '.luoshu-font-store'
+    for path in (store / 'variable.font', store / 'mix-composite.font', store / 'regular.font',
+                 store / 'compact-regular.font', fonts / name, fonts / 'MiSansVF.ttf',
+                 fonts / '400.ttf'):
+        if nonempty(path) and _has_fvar(path):
+            return path
+    return None
+
+
+def _script_ratio(path: Path, script: str, cache: dict) -> float:
+    try:
+        info = path.stat()
+        key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, script)
+    except OSError:
+        return 0.0
+    if key not in cache:
+        try:
+            face = _pick_face(path)
+            options = {'fontNumber': face} if face >= 0 else {}
+            with TTFont(path, lazy=True, recalcBBoxes=False, recalcTimestamp=False, **options) as font:
+                cache[key] = script_coverage(font.getBestCmap() or {}, script)
+        except Exception:
+            cache[key] = 0.0
+    return cache[key]
+
+
+def keeps_stock_fallback(source: Path, stock: Path, name: str, cache: dict) -> tuple[bool, str | None, float]:
+    """A language-specific fallback slot keeps the stock face when the stock
+    face serves that script and the donor does not, so missing glyphs (rare
+    Han, Traditional forms) still reach the ROM fallback chain."""
+    script = fallback_script_for_slot(name)
+    if script is None or not stock.is_file():
+        return False, None, 1.0
+    if _script_ratio(stock, script, cache) < SCRIPT_COVERAGE_MIN:
+        return False, script, 1.0
+    ratio = _script_ratio(source, script, cache)
+    return ratio < SCRIPT_COVERAGE_MIN, script, ratio
 
 
 def pick_source(fonts: Path, name: str) -> Path:
@@ -888,6 +943,9 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     preserved_aliases = []
     excluded_aliases = []
     borrowed = {}
+    variable_slots = {}
+    fallback_preserved = {}
+    coverage_cache = {}
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
@@ -919,15 +977,38 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 preserved_aliases.append(stage / part / 'fonts' / name)
                 continue
             if (root / name).exists():
+                source = variable_slot_source(fonts, name)
+                if source is not None:
+                    variable_slots[logical] = 'variable'
+                else:
+                    source = pick_source(fonts, name)
+                    if is_variable_slot_name(name):
+                        variable_slots[logical] = 'static-fallback'
+                keep, script, ratio = keeps_stock_fallback(source, root / name, name, coverage_cache)
+                if keep:
+                    fallback_preserved[logical] = {'script': script, 'coverage': round(ratio, 3)}
+                    excluded_aliases.append(stage / part / 'fonts' / name)
+                    continue
                 contract, reference = resolve_slot_contract(data, logical)
                 if reference:
                     borrowed[logical] = reference
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name, contract))
+                jobs.append((source, stage / part / 'fonts' / name, contract))
     # Filename discovery serves known boot-repair aliases. Trusted inventory
     # also contains XML UI faces and verified upright text with other OEM names.
     seen = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in jobs}
     seen.update('/' + dest.relative_to(stage).as_posix() for dest in preserved_aliases + excluded_aliases)
-    completed = inventory_completion_jobs(module, stage, data, seen)
+    completed = []
+    stock_roots = inventory_font_roots(module)
+    for job in inventory_completion_jobs(module, stage, data, seen):
+        part = job[1].parent.parent.name
+        stock_root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT',
+                                         str(stock_roots.get(part, Path('/') / part / 'fonts'))))
+        keep, script, ratio = keeps_stock_fallback(job[0], stock_root / job[1].name, job[1].name, coverage_cache)
+        if keep:
+            logical = '/' + job[1].relative_to(stage).as_posix()
+            fallback_preserved[logical] = {'script': script, 'coverage': round(ratio, 3)}
+            continue
+        completed.append(job)
     jobs.extend(completed)
     completed_slots = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in completed}
     if not jobs:
@@ -980,6 +1061,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 **({'metricsReferencePath': borrowed[logical]}
                                    if logical in borrowed else {}),
                                 'slotSource': 'stock-inventory' if logical in completed_slots else 'physical-mapper',
+                                **({'variableSlotSource': variable_slots[logical]}
+                                   if logical in variable_slots else {}),
                                 'referenceUpem': contract[0],
                                 'hhea': list(contract[1:4]),
                                 'typo': list(contract[4:7]),
@@ -1006,6 +1089,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                            'preservedDynamicAliases': [
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in preserved_aliases],
+                           'preservedFallbackSlots': fallback_preserved,
                            'preservedStockAliases': sorted({
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in excluded_aliases if alias.parent.is_dir()})},

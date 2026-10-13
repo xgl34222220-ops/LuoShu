@@ -7,6 +7,12 @@ from pathlib import Path
 
 from fontTools.ttLib import TTFont
 
+try:  # common/ is the script directory on device and in CI
+    from font_capability import reconcile_weight, weight_from_name
+except Exception:  # pragma: no cover
+    reconcile_weight = None
+    weight_from_name = None
+
 
 CJK_UI_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
 
@@ -45,15 +51,26 @@ def inspect(path: Path) -> tuple[str, str, int, bool, bool, bool]:
     font = TTFont(str(path), **kwargs)
     try:
         try:
-            weight = int(font["OS/2"].usWeightClass)
+            os2_weight = int(font["OS/2"].usWeightClass)
         except Exception:
-            weight = 400
-        weight = max(1, min(1000, weight))
+            os2_weight = None
         subfamily = best_subfamily(font)
+        if reconcile_weight is not None:
+            # usWeightClass wins, except the generic 400 (or a missing value)
+            # contradicted by an explicit style name such as "ExtraBold".
+            weight, _source = reconcile_weight(os2_weight, weight_from_name(subfamily))
+        else:
+            weight = os2_weight if os2_weight is not None else 400
+        weight = max(1, min(1000, weight))
+        italic = "italic" in subfamily.lower() or "oblique" in subfamily.lower()
         try:
-            italic = bool(int(font["head"].macStyle) & 0x02)
+            italic = italic or bool(int(font["head"].macStyle) & 0x02)
         except Exception:
-            italic = "italic" in subfamily.lower() or "oblique" in subfamily.lower()
+            pass
+        try:
+            italic = italic or bool(int(font["OS/2"].fsSelection) & 0x01)
+        except Exception:
+            pass
         cmap = font.getBestCmap() or {}
         supports_cjk = all(codepoint in cmap for codepoint in CJK_UI_PROBES)
         return best_family(font), subfamily, weight, italic, "fvar" in font, supports_cjk

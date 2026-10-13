@@ -47,6 +47,8 @@ common/foreign_font_modules.sh
 common/font_active_state.sh
 common/font_boot_state.sh
 common/font_axis_info.py
+common/font_capability.py
+common/font_capability.sh
 common/font_check.sh
 common/font_config_overlay.py
 common/font_config_partitions.sh
@@ -67,6 +69,7 @@ common/font_inventory.py
 common/font_inventory_scan.py
 common/font_layout_diagnostic.py
 common/font_layout_diagnostic.sh
+common/font_slot_options.sh
 common/font_slot_coverage.py
 common/stock_inventory_scan.py
 common/font_library_cache.sh

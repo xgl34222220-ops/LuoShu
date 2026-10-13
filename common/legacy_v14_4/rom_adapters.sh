@@ -12,6 +12,12 @@
 #   3. 在下面新增 get_all_<rom>_files() + copy_as_<rom>()，并在 apply_font_by_rom()
 #      里加一个分支
 
+# 字体能力层：按 OS/2 字重 / fvar 轴 / 字体面索引生成字重锚点（不可用时沿用原映射）。
+_rom_capability_helper="${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}}/common/font_capability.sh"
+[ -f "$_rom_capability_helper" ] && . "$_rom_capability_helper"
+_rom_slot_options_helper="${LUOSHU_REAL_MODDIR:-${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}}/common/font_slot_options.sh"
+[ -f "$_rom_slot_options_helper" ] && . "$_rom_slot_options_helper"
+
 # 校验字体文件复制是否成功（防御性检查）：确认目标文件存在且不是空文件/异常小文件。
 # 正常字体文件至少几十 KB 起步，如果复制后小于 1KB，大概率是复制失败或者源文件本身
 # 有问题——这种畸形字体文件如果被系统的 native 字体渲染引擎解析，容易直接把整个
@@ -76,6 +82,15 @@ _font_collection_count() (
 _font_alias() {
     anchor="$1"
     dest="$2"
+    # Emoji 文件只允许由可选 Emoji 槽显式写入；文字字体永远不覆盖 NotoColorEmoji 等。
+    case "${dest##*/}" in
+        *[Ee]moji*|*EMOJI*)
+            [ "${LUOSHU_EMOJI_SLOT_WRITE:-0}" = 1 ] || {
+                printf '[洛书] 拒绝把文字字体写入 Emoji 槽位：%s\n' "${dest##*/}" >&2
+                return 1
+            }
+            ;;
+    esac
     # A filename cannot turn a single SFNT into a collection. Inside a composite
     # request, compile a collection with the device's face count; otherwise
     # refuse before the engine commits its selection/configuration or payload.
@@ -247,6 +262,13 @@ copy_as_coloros() {
     regular_anchor=$(_font_anchor "$src" "$dest_dir" "regular") || return 1
 
     _log_step "  正在应用用户字体（ColorOS）..."
+    _lca_cap_rows=''
+    type luoshu_cap_weight_anchors >/dev/null 2>&1 && \
+        _lca_cap_rows=$(luoshu_cap_weight_anchors "$dest_dir/.luoshu-font-store" "$font_family" '' "$src")
+    if [ -n "$_lca_cap_rows" ] && luoshu_cap_is_collection "$src" && \
+       [ -s "$dest_dir/.luoshu-font-store/wght-400.font" ]; then
+        regular_anchor="$dest_dir/.luoshu-font-store/wght-400.font"
+    fi
     _lca_weights=''
     if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
         _lca_weights=$(scan_family_weights "$font_family")
@@ -269,7 +291,19 @@ copy_as_coloros() {
     for _lca_file in $_lca_targets; do
         _lca_anchor="$regular_anchor"
         _legacy_coloros_role "$_lca_file"
-        if [ "$LEGACY_COLOROS_ROLE" != regular ]; then
+        _lca_cap_anchor=''
+        if [ -n "$_lca_cap_rows" ] && [ "$LEGACY_COLOROS_ROLE" != regular ]; then
+            case "$LEGACY_COLOROS_ROLE" in
+                thin) _lca_cap_w=100 ;; extralight) _lca_cap_w=200 ;; light) _lca_cap_w=300 ;;
+                medium) _lca_cap_w=500 ;; semibold) _lca_cap_w=600 ;; bold) _lca_cap_w=700 ;;
+                extrabold) _lca_cap_w=800 ;; black) _lca_cap_w=900 ;; *) _lca_cap_w=400 ;;
+            esac
+            _lca_cap_anchor="$dest_dir/.luoshu-font-store/wght-${_lca_cap_w}.font"
+            [ -s "$_lca_cap_anchor" ] || _lca_cap_anchor=''
+        fi
+        if [ -n "$_lca_cap_anchor" ]; then
+            _lca_anchor="$_lca_cap_anchor"
+        elif [ "$LEGACY_COLOROS_ROLE" != regular ]; then
             case ",$_lca_weights," in
                 *",$LEGACY_COLOROS_ROLE,"*)
                     _lca_store="$dest_dir/.luoshu-font-store/${LEGACY_COLOROS_ROLE}.font"
@@ -350,10 +384,36 @@ copy_as_hyperos() {
     regular_anchor=$(_font_anchor "$src" "$dest_dir" "regular") || return 1
 
     _log_step "  正在应用用户字体（HyperOS/MIUI）..."
+    # 字重锚点：VF 按 wght 实例化，静态字体族按 OS/2 字重就近映射，TTC 按字体面取用。
+    _hy_cap_rows=''
+    type luoshu_cap_weight_anchors >/dev/null 2>&1 && \
+        _hy_cap_rows=$(luoshu_cap_weight_anchors "$dest_dir/.luoshu-font-store" "$font_family" \
+            '100,200,300,350,400,500,600,700,800,900' "$src")
+    _hy_store="$dest_dir/.luoshu-font-store"
+    _hy_vf_anchor="$regular_anchor"
+    if [ -n "$_hy_cap_rows" ]; then
+        if [ -s "$_hy_store/variable.font" ]; then
+            _hy_vf_anchor="$_hy_store/variable.font"
+        elif luoshu_cap_is_collection "$src" && [ -s "$_hy_store/wght-400.font" ]; then
+            _hy_vf_anchor="$_hy_store/wght-400.font"
+        fi
+        luoshu_cap_is_collection "$src" && [ -s "$_hy_store/wght-400.font" ] && \
+            regular_anchor="$_hy_store/wght-400.font"
+    fi
     bad_count=0
     for cfile in $(get_all_hyperos_files); do
         _rom_exact_target_exists "$cfile" || continue
-        if _font_alias "$regular_anchor" "$dest_dir/$cfile"; then
+        _hy_anchor="$regular_anchor"
+        if [ -n "$_hy_cap_rows" ]; then
+            if luoshu_cap_is_variable_slot "$cfile"; then
+                _hy_anchor="$_hy_vf_anchor"
+            else
+                _hy_w=$(luoshu_cap_slot_weight "$cfile")
+                [ -s "$_hy_store/wght-${_hy_w}.font" ] && _hy_anchor="$_hy_store/wght-${_hy_w}.font"
+                [ "$_hy_anchor" = "$regular_anchor" ] || weight_count=$((weight_count + 1))
+            fi
+        fi
+        if _font_alias "$_hy_anchor" "$dest_dir/$cfile"; then
             if _verify_font_copy "$dest_dir/$cfile"; then
                 core_count=$((core_count + 1))
             else
@@ -367,7 +427,10 @@ copy_as_hyperos() {
     # 多字重支持：数字文件（100~900）跟字重数值天然对应，直接精确映射；
     # Roboto 系列按字重名映射；MiSans 那 5 个核心文件本身是变量字体容器/
     # 单一设计，没法按静态字重文件拆分，固定用 Regular（已在上面覆盖过）
-    if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
+    # 能力层锚点已按真实字重完成映射时不再走文件名推断。
+    if [ -n "$_hy_cap_rows" ]; then
+        [ "$weight_count" -gt 0 ] && _log_step "  已按字体内部字重/可变轴映射 $weight_count 个字重槽位"
+    elif [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
         weights=$(scan_family_weights "$font_family")
         for w in $(echo "$weights" | tr ',' ' '); do
             [ "$w" = "regular" ] && continue
@@ -419,6 +482,7 @@ copy_as_generic() {
     src="$1"
     dest_dir="$2"
     mode="${3:-full}"
+    font_family="${4:-}"
     sys_count=0
     core_count=0
 
@@ -429,10 +493,39 @@ copy_as_generic() {
     regular_anchor=$(_font_anchor "$src" "$dest_dir" "regular") || return 1
 
     _log_step "  正在应用用户字体（通用 AOSP，未识别具体 ROM，效果不保证）..."
+    _ge_store="$dest_dir/.luoshu-font-store"
+    _ge_cap_rows=''; _ge_italic_rows=''
+    if type luoshu_cap_weight_anchors >/dev/null 2>&1; then
+        _ge_cap_rows=$(luoshu_cap_weight_anchors "$_ge_store" "$font_family" '' "$src")
+        _ge_italic_rows=$(luoshu_cap_italic_anchors "$_ge_store" "$font_family" '' "$src")
+        luoshu_cap_is_collection "$src" && [ -s "$_ge_store/wght-400.font" ] && \
+            regular_anchor="$_ge_store/wght-400.font"
+    fi
     bad_count=0
     for cfile in $(get_all_generic_files); do
         _rom_exact_target_exists "$cfile" || continue
-        if _font_alias "$regular_anchor" "$dest_dir/$cfile"; then
+        _ge_anchor="$regular_anchor"
+        case "$cfile" in
+            *[Ii]talic*|*[Oo]blique*)
+                # 斜体槽只接受用户的斜体字体面；用户没有斜体时保持原厂斜体，
+                # 不再把正体写进斜体槽（也不做合成倾斜，避免度量/字形失真）。
+                _ge_w=400
+                type luoshu_cap_slot_weight >/dev/null 2>&1 && _ge_w=$(luoshu_cap_slot_weight "$cfile")
+                [ -n "$_ge_italic_rows" ] && [ -s "$_ge_store/italic-wght-${_ge_w}.font" ] || continue
+                _ge_anchor="$_ge_store/italic-wght-${_ge_w}.font"
+                ;;
+            *)
+                if [ -n "$_ge_cap_rows" ]; then
+                    if luoshu_cap_is_variable_slot "$cfile"; then
+                        [ -s "$_ge_store/variable.font" ] && _ge_anchor="$_ge_store/variable.font"
+                    else
+                        _ge_w=$(luoshu_cap_slot_weight "$cfile")
+                        [ -s "$_ge_store/wght-${_ge_w}.font" ] && _ge_anchor="$_ge_store/wght-${_ge_w}.font"
+                    fi
+                fi
+                ;;
+        esac
+        if _font_alias "$_ge_anchor" "$dest_dir/$cfile"; then
             if _verify_font_copy "$dest_dir/$cfile"; then
                 core_count=$((core_count + 1))
             else
@@ -464,12 +557,15 @@ apply_font_by_rom() {
 
     # HyperOS 优先：避免兼容属性同时存在时误走 ColorOS 文件映射。
     if [ "$IS_HYPEROS" = "true" ]; then
-        copy_as_hyperos "$src" "$dest_dir" "$mode" "$font_family"
+        copy_as_hyperos "$src" "$dest_dir" "$mode" "$font_family" || return $?
     elif [ "$IS_COLOROS" = "true" ]; then
-        copy_as_coloros "$src" "$dest_dir" "$mode" "$font_family"
+        copy_as_coloros "$src" "$dest_dir" "$mode" "$font_family" || return $?
     else
-        copy_as_generic "$src" "$dest_dir" "$mode"
+        copy_as_generic "$src" "$dest_dir" "$mode" "$font_family" || return $?
     fi
+    # 可选衬线 / Emoji 分槽：未启用时不写任何文件，原厂保持不动。
+    type luoshu_slot_options_apply >/dev/null 2>&1 && luoshu_slot_options_apply "$dest_dir"
+    return 0
 }
 
 # 内部日志辅助：customize.sh 环境用 ui_print，font_manager.sh 环境用 echo

@@ -46,6 +46,34 @@ import_probe_metadata() {
     return 1
 }
 
+# TTC/OTC 集合按 name 表拆成独立字体面（同族共用前缀、按字重命名），之后与普通
+# TTF/OTF 一样参与字体族判断。拆分失败时输出原因并返回非 0。
+IMPORT_FACE_EXTRACTOR="${IMPORT_FACE_EXTRACTOR:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_extract_faces.py}"
+import_split_collection() {
+    _isc_file="$1"; _isc_out="$2"; _isc_label="$3"
+    [ -f "$IMPORT_FACE_EXTRACTOR" ] || { printf '字体集合拆分组件不可用\n'; return 1; }
+    if [ -n "${LUOSHU_IMPORT_PYTHON:-}" ]; then
+        _isc_json=$("$LUOSHU_IMPORT_PYTHON" "$IMPORT_FACE_EXTRACTOR" --input "$_isc_file" \
+            --output-dir "$_isc_out" --label "$_isc_label" 2>/dev/null)
+    elif [ -x "$IMPORT_PYBIN" ]; then
+        _isc_json=$(PYTHONHOME="$IMPORT_PYROOT" \
+            PYTHONPATH="$IMPORT_PYROOT/lib/python3.14:$IMPORT_PYROOT/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$IMPORT_PYROOT/lib:$IMPORT_PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$IMPORT_PYBIN" "$IMPORT_FACE_EXTRACTOR" --input "$_isc_file" \
+            --output-dir "$_isc_out" --label "$_isc_label" 2>/dev/null)
+    elif command -v python3 >/dev/null 2>&1; then
+        _isc_json=$(python3 "$IMPORT_FACE_EXTRACTOR" --input "$_isc_file" \
+            --output-dir "$_isc_out" --label "$_isc_label" 2>/dev/null)
+    else
+        printf '缺少字体处理运行时\n'; return 1
+    fi
+    case "$_isc_json" in
+        *'"status":"ok"'*) return 0 ;;
+    esac
+    printf '%s\n' "$(printf '%s' "$_isc_json" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')"
+    return 1
+}
+
 import_safe_basename() {
     _name="$1"
     case "$_name" in ''|*'/'*|*'\\'*|*'..'*) return 1 ;; esac
@@ -259,11 +287,11 @@ import_zip_package() {
     [ -n "$_module_name" ] || _module_name="${_zip_name%.*}"
     _display_name="$_module_name"
     _package_label=$(import_package_label "$_display_name")
-    _declared=$(printf '%s\n' "$_listing" | awk 'BEGIN{n=0;s=0} $1 ~ /^[0-9]+$/ && tolower($0) ~ /\.(ttf|otf|ttc)([[:space:]]|$)/ {n++; s+=$1} END{printf "%d %d",n,s}')
+    _declared=$(printf '%s\n' "$_listing" | awk 'BEGIN{n=0;s=0} $1 ~ /^[0-9]+$/ && tolower($0) ~ /\.(ttf|otf|ttc|otc)([[:space:]]|$)/ {n++; s+=$1} END{printf "%d %d",n,s}')
     set -- $_declared; _declared_count=${1:-0}; _declared_bytes=${2:-0}
     case "$_declared_count" in ''|*[!0-9]*) _declared_count=0 ;; esac
     case "$_declared_bytes" in ''|*[!0-9]*) _declared_bytes=0 ;; esac
-    if [ "$_declared_count" -le 0 ]; then printf '{"status":"error","message":"ZIP 中没有找到 TTF / OTF / TTC 字体"}\n'; return 0; fi
+    if [ "$_declared_count" -le 0 ]; then printf '{"status":"error","message":"ZIP 中没有找到 TTF / OTF / TTC / OTC 字体"}\n'; return 0; fi
     if [ "$_declared_count" -gt "$IMPORT_MAX_FILES" ] || [ "$_declared_bytes" -gt "$IMPORT_MAX_EXTRACT_BYTES" ]; then
         printf '{"status":"error","message":"字体包内容过多（最多 128 个字体、解压后 512 MB）"}\n'; return 0
     fi
@@ -271,10 +299,26 @@ import_zip_package() {
     _tmp="$IMPORT_CACHE_DIR/$(date +%s)-$$"
     rm -rf "$_tmp" 2>/dev/null || true
     mkdir -p "$_tmp" "$USER_FONTS_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建导入临时目录"}\n'; return 0; }
-    for _pat in '*.ttf' '*.otf' '*.ttc' '*.TTF' '*.OTF' '*.TTC'; do
+    for _pat in '*.ttf' '*.otf' '*.ttc' '*.otc' '*.TTF' '*.OTF' '*.TTC' '*.OTC'; do
         import_unzip -j -o "$_zip" "$_pat" -d "$_tmp" >/dev/null 2>&1 || true
     done
     find "$_tmp" -type l -exec rm -f {} \; 2>/dev/null || true
+
+    # 字体集合不再整份复制到字体库（单字体槽位只能读取第 0 个字体面）：按字体面拆分，
+    # 不支持的集合计为无效并保留原因。
+    _collection_error=''; _collection_invalid=0
+    for _f in "$_tmp"/*; do
+        [ -f "$_f" ] || continue
+        [ "$(font_detect_format "$_f" 2>/dev/null)" = TTC ] || continue
+        _isc_base=$(basename "$_f"); _isc_base="${_isc_base%.*}"
+        if _isc_reason=$(import_split_collection "$_f" "$_tmp" "$_isc_base"); then
+            :
+        else
+            _collection_invalid=$((_collection_invalid + 1))
+            _collection_error="${_isc_reason:-字体集合拆分失败}"
+        fi
+        rm -f "$_f" 2>/dev/null || true
+    done
 
     _manifest="$_tmp/.manifest"; : > "$_manifest"
     _valid=0; _invalid=0; _ignored=0
@@ -304,7 +348,16 @@ EOF_PROBE
 '             "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" "${_probe_weight:-0}" "$_italic" "$_supports_cjk" >> "$_manifest"
     done
 
-    if [ "$_valid" -le 0 ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'; return 0; fi
+    _invalid=$((_invalid + _collection_invalid))
+    if [ "$_valid" -le 0 ]; then
+        rm -rf "$_tmp"
+        if [ -n "$_collection_error" ]; then
+            printf '{"status":"error","message":"TTC/OTC 字体集合无法导入：%s"}\n' "$(json_escape "$_collection_error")"
+        else
+            printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'
+        fi
+        return 0
+    fi
 
     # 预选主文字字体：中文名称、字体族完整度和文件体积优先；VF 仅加分，不再无条件压过中文静态字重。
     _best_score=-999999; _best_path=""; _best_family=""; _best_variable=false; _best_name=""; _best_class=neutral; _best_role=regular; _best_size=0; _best_supports_cjk=false
