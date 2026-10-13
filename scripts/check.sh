@@ -79,6 +79,7 @@ sh "$ROOT/scripts/boot_unfinished_semantics_test.sh"
 sh "$ROOT/scripts/system_ota_early_test.sh"
 sh "$ROOT/scripts/uninstall_resilience_test.sh"
 sh "$ROOT/scripts/app_bridge_boot_guard_test.sh"
+sh "$ROOT/scripts/app_bridge_reboot_test.sh"
 python3 "$ROOT/scripts/customize_exit_rewrite_test.py"
 sh "$ROOT/scripts/release_skip_gate_test.sh"
 

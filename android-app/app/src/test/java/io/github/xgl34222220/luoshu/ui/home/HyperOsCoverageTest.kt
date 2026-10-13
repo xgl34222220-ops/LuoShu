@@ -109,4 +109,77 @@ class HyperOsCoverageTest {
         assertTrue(COVERAGE_SCOPE_NOTE.contains("Chrome"))
         assertEquals("com.android.systemui", COVERAGE_PRESETS.first().packageName)
     }
+
+    @Test
+    fun parsesLuoShuOwnedThemeFilesWithoutWarning() {
+        // Real device: theme store on DEFAULT, LuoShu's own route bind on Roboto-Regular.ttf.
+        val status = parseHyperOsCoverageStatus(
+            """{"status":"ok","data":{"hyperos":true,"theme":{"state":"placeholder","files":1,"userFiles":0,"luoshuFiles":1,"names":"Roboto-Regular.ttf","takeover":false,"owned":false}}}""",
+        )
+        assertEquals(1, status.theme.luoshuFiles)
+        assertFalse(status.theme.userThemeActive)
+        assertNull(themeWarningText(status.theme))
+    }
+
+    @Test
+    fun pmPackageListIsParsedAndMergedBehindPackageManagerEntries() {
+        val root = parsePmPackageList(
+            """
+            package:com.android.systemui
+            package:com.miui.aod
+            package:/data/app/x.apk=com.bad
+            garbage line
+            package:com.miui.aod
+            """.trimIndent(),
+        )
+        assertEquals(listOf("com.android.systemui", "com.miui.aod"), root)
+        val merged = mergeCoverageApps(
+            listOf(CoverageApp("com.tencent.mm", "微信", system = false),
+                CoverageApp("com.android.systemui", "系统界面", system = true)),
+            root,
+        )
+        assertEquals(listOf("com.tencent.mm", "com.miui.aod", "com.android.systemui"), merged.map { it.packageName })
+        assertEquals("系统界面", merged.first { it.packageName == "com.android.systemui" }.label)
+        assertEquals("com.miui.aod", merged.first { it.packageName == "com.miui.aod" }.label)
+    }
+
+    @Test
+    fun appSearchMatchesLabelOrPackageAndSystemToggle() {
+        val apps = listOf(CoverageApp("com.tencent.mm", "微信", false), CoverageApp("com.android.systemui", "系统界面", true))
+        assertEquals(2, filterCoverageApps(apps, "", includeSystem = true).size)
+        assertEquals(listOf("com.tencent.mm"), filterCoverageApps(apps, "", includeSystem = false).map { it.packageName })
+        assertEquals(listOf("com.tencent.mm"), filterCoverageApps(apps, "微", includeSystem = true).map { it.packageName })
+        // A search still finds system apps even while they are hidden from the plain list.
+        assertEquals(listOf("com.android.systemui"), filterCoverageApps(apps, "SYSTEMUI", includeSystem = false).map { it.packageName })
+    }
+
+    @Test
+    fun scanResultMapsFixesToExistingSettings() {
+        val scan = parseCoverageScan(
+            """{"status":"ok","data":{"schema":"luoshu-coverage-scan-v1","verdict":"ok","scanned":5,"covered":3,
+            "items":[{"package":"com.miui.aod","process":"com.miui.aod","pid":"101","verdict":"outside-whitelist","title":"读取了原厂字体","fixes":["group:lockscreen_styles"],"reasons":[]},
+                     {"package":"com.example.hidden","process":"com.example.hidden:remote","pid":"102","verdict":"namespace-hidden","title":"看不到模块","fixes":[],"reasons":["看不到模块：在 App Profile 关闭卸载模块"]}],
+            "fixes":["group:lockscreen_styles","unknown:key"],"truncated":false,"weightLoss":true}}""",
+        )
+        assertEquals(listOf(HyperOsSetting.LOCKSCREEN), scan.fixes)
+        assertEquals(1, scan.fixable.size)
+        assertEquals("com.example.hidden:remote", scan.unfixable.single().process)
+        assertTrue(scan.weightLoss)
+        assertEquals(listOf(HyperOsSetting.LOCKSCREEN), pendingScanFixes(scan, HyperOsCoverageStatus()))
+        assertTrue(pendingScanFixes(scan, HyperOsCoverageStatus(lockscreenStyles = true)).isEmpty())
+        assertTrue(coverageScanSummary(scan).contains("2 个没有"))
+        assertEquals("sh '/data/adb/modules/LuoShu/common/app_bridge.sh' coverage_scan", coverageScanCommand())
+    }
+
+    @Test
+    fun scanFixMessageSaysWhatWasTurnedOn() {
+        assertTrue(scanFixMessage(emptyList(), listOf(HyperOsSetting.LOCKSCREEN)).contains("失败"))
+        val all = scanFixMessage(listOf(HyperOsSetting.LOCKSCREEN), listOf(HyperOsSetting.LOCKSCREEN))
+        assertTrue(all.contains(HyperOsSetting.LOCKSCREEN.title))
+        assertTrue(all.contains("重新应用当前字体"))
+        assertEquals("已打开：接管主题商店字体。重启后生效。",
+            scanFixMessage(listOf(HyperOsSetting.THEME_TAKEOVER), listOf(HyperOsSetting.THEME_TAKEOVER)))
+        assertTrue(scanFixMessage(listOf(HyperOsSetting.THEME_TAKEOVER),
+            listOf(HyperOsSetting.THEME_TAKEOVER, HyperOsSetting.LOCKSCREEN)).contains("其余设置未能保存"))
+    }
 }

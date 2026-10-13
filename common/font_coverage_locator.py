@@ -21,6 +21,9 @@ actually hit on HyperOS, each with a concrete next step:
 * ``covered``          every mapped font is LuoShu's
 
 Nothing is modified: maps, stat and (optionally) a font table read.
+``--scan`` runs the same locate() for every running app process (bounded count
+and time) and lists the ones not drawing with LuoShu's font, each with the
+existing HyperOS coverage settings that address it (or why none can).
 Output: one JSON object on stdout.
 """
 from __future__ import annotations
@@ -104,25 +107,125 @@ def _split(value: str) -> list[str]:
     return [] if not value or value == "none" else [item for item in value.split(";") if item]
 
 
-def theme_state(theme_dir: Path) -> dict[str, Any]:
-    files, user = [], []
+THEME_ROBOTO_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _luoshu_theme_ids(module: Path | None) -> set[tuple[int, int]]:
+    """Identities of files LuoShu itself serves on theme paths (mirrors hyperos_theme_takeover.sh)."""
+    ids: set[tuple[int, int]] = set()
+    if module is None:
+        return ids
+    config = module / "config"
+    for name in ("hyperos-webview-route.conf", "hyperos-theme-font-namespaces.conf"):
+        try:
+            lines = (config / name).read_text(errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split("|")
+            field = parts[3] if name == "hyperos-webview-route.conf" and len(parts) > 3 else \
+                (parts[1] if name != "hyperos-webview-route.conf" and len(parts) > 1 else "")
+            bits = field.split(":")
+            if len(bits) >= 2 and bits[0].isdigit() and bits[1].isdigit():
+                ids.add((int(bits[0]), int(bits[1])))
+    for folder in ("hyperos-webview-route", "hyperos-theme-font"):
+        try:
+            entries = list((config / folder).glob("*.ttf"))
+        except OSError:
+            entries = []
+        for entry in entries:
+            identity = _stat_id(entry)
+            if identity:
+                ids.add(identity)
+    return ids
+
+
+def _takeover_ids(module: Path | None) -> set[tuple[int, int]]:
+    ids: set[tuple[int, int]] = set()
+    if module is None:
+        return ids
+    try:
+        lines = (module / "config/hyperos-theme-takeover.journal").read_text(errors="replace").splitlines()
+    except OSError:
+        return ids
+    for line in lines:
+        parts = line.split("|")
+        bits = parts[3].split(":") if len(parts) > 3 else []
+        if len(bits) >= 2 and bits[0].isdigit() and bits[1].isdigit():
+            ids.add((int(bits[0]), int(bits[1])))
+    return ids
+
+
+def _same_bytes(path: Path, candidates: list[Path]) -> bool:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return False
+    for candidate in candidates:
+        try:
+            if not candidate.is_file() or candidate.stat().st_size != size:
+                continue
+            if candidate.read_bytes() == path.read_bytes():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def classify_theme_file(entry: Path, module: Path | None, stock_dir: Path,
+                        luoshu_ids: set[tuple[int, int]], takeover_ids: set[tuple[int, int]]) -> str:
+    """user | placeholder | luoshu | stock - same rules as hyperos_theme_takeover.sh _lht_classify."""
+    identity = _stat_id(entry)
+    if identity and identity in takeover_ids:
+        return "user"  # the optional takeover only binds over a theme-store font
+    if identity and identity in luoshu_ids:
+        return "luoshu"
+    try:
+        size = entry.stat().st_size
+    except OSError:
+        return "placeholder"
+    if size <= THEME_PLACEHOLDER_MAX_BYTES:
+        return "placeholder"
+    if _same_bytes(entry, [stock_dir / "Roboto-Regular.ttf", stock_dir / entry.name, stock_dir / "MiSansVF.ttf"]):
+        return "stock"
+    if module is not None:
+        fonts = module / ".luoshu-payload/system/fonts"
+        candidates = [*sorted(fonts.glob(".luoshu-font-store/*.font")), *sorted(fonts.glob("*.ttf"))]
+        if _same_bytes(entry, candidates):
+            return "luoshu"
+    if size <= THEME_ROBOTO_MAX_BYTES:
+        try:
+            text = entry.read_bytes().replace(b"\0", b"")
+        except OSError:
+            text = b""
+        if re.search(rb"(?<![A-Za-z])Roboto", text):
+            return "stock"
+    return "user"
+
+
+def theme_state(theme_dir: Path, module: Path | None = None,
+                stock_dir: Path = Path("/system/fonts")) -> dict[str, Any]:
+    files, user, own = [], [], []
     try:
         entries = sorted(theme_dir.iterdir())
     except OSError:
         entries = []
+    luoshu_ids = _luoshu_theme_ids(module)
+    takeover_ids = _takeover_ids(module)
     for entry in entries:
         if not entry.is_file() or entry.is_symlink():
             continue
         if not entry.name.lower().endswith((".ttf", ".otf", ".ttc")):
             continue
         files.append(entry.name)
-        try:
-            if entry.stat().st_size > THEME_PLACEHOLDER_MAX_BYTES:
-                user.append(entry.name)
-        except OSError:
-            pass
+        kind = classify_theme_file(entry, module, stock_dir, luoshu_ids, takeover_ids)
+        if kind == "user":
+            user.append(entry.name)
+        elif kind == "luoshu":
+            own.append(entry.name)
     state = "user-theme" if user else ("placeholder" if files else "none")
-    return {"state": state, "files": files[:MAX_FILES], "userFiles": user[:MAX_FILES]}
+    return {"state": state, "files": files[:MAX_FILES], "userFiles": user[:MAX_FILES],
+            "luoshuFiles": own[:MAX_FILES]}
 
 
 def _stat_id(path: Path) -> tuple[int, int] | None:
@@ -193,12 +296,14 @@ def classify_stock(path: str, groups: frozenset[str] | None) -> str:
 
 def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Path("/proc"),
            host_root: Path = Path("/"), theme_dir: Path = Path("/data/system/theme/fonts"),
-           groups: frozenset[str] | None = None,
-           weight_probe: Callable[[Path], bool] = static_on_variable_slot) -> dict[str, Any]:
+           groups: frozenset[str] | None = None, stock_dir: Path = Path("/system/fonts"),
+           weight_probe: Callable[[Path], bool] = static_on_variable_slot,
+           theme: dict[str, Any] | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {"schema": SCHEMA, "package": package, "pid": pid or "",
                               "findings": []}
     findings: list[dict[str, Any]] = result["findings"]
-    theme = theme_state(theme_dir)
+    if theme is None:
+        theme = theme_state(theme_dir, module, stock_dir)
     result["theme"] = theme
     if package in EMBEDDED_FONT_APPS or package in WEB_ENGINES:
         label = EMBEDDED_FONT_APPS.get(package) or WEB_ENGINES[package]
@@ -276,9 +381,117 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
     return result
 
 
+# --- 一键扫描: every running app process, same read-only locate() per process ---------------
+SCAN_SCHEMA = "luoshu-coverage-scan-v1"
+SCAN_MAX_PROCESSES = 96
+SCAN_TIME_BUDGET_S = 45.0
+# Findings an existing HyperOS coverage setting can address; the App applies them
+# with the same hyperos_coverage_set keys as the switches in its settings list.
+GROUP_SETTING = {"lockscreen_styles": "group:lockscreen_styles", "miui_ex": "group:miui_ex",
+                 "misans_ext": "group:misans_ext"}
+GROUP_OFF_RE = re.compile(r"（([a-z_]+) 组未开启）$")
+
+
+def running_app_processes(proc_root: Path = Path("/proc"),
+                          limit: int = SCAN_MAX_PROCESSES) -> list[tuple[str, str]]:
+    """(pid, process name) of app processes: cmdline is a package name, optionally ``:suffix``."""
+    found: dict[str, str] = {}
+    try:
+        entries = sorted((e for e in proc_root.iterdir() if e.name.isdigit()), key=lambda e: int(e.name))
+    except OSError:
+        return []
+    for entry in entries:
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        name = raw.split(b"\0", 1)[0].decode("utf-8", "replace").strip()
+        if not name or not PACKAGE_RE.match(name) or name in found.values():
+            continue
+        found[entry.name] = name
+        if len(found) >= limit:
+            break
+    return list(found.items())
+
+
+def suggested_fixes(result: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """(setting keys that address findings, reasons for findings no setting can fix)."""
+    fixes: list[str] = []
+    reasons: list[str] = []
+    for item in result.get("findings", []):
+        category = item.get("category")
+        if category == "covered":
+            continue
+        if category == "theme-takeover":
+            fixes.append("theme_takeover")
+            continue
+        if category == "outside-whitelist":
+            groups = [m.group(1) for f in item.get("files", []) if (m := GROUP_OFF_RE.search(f))]
+            keys = [GROUP_SETTING[g] for g in groups if g in GROUP_SETTING]
+            fixes.extend(keys)
+            if len(keys) < len(item.get("files", [])):
+                reasons.append("部分文件不属于任何可选字体组：" + item.get("action", ""))
+            continue
+        reasons.append(f"{item.get('title', '')}：{item.get('action', '')}")
+    return list(dict.fromkeys(fixes)), list(dict.fromkeys(r for r in reasons if r))
+
+
+def scan(*, module: Path | None, proc_root: Path = Path("/proc"), host_root: Path = Path("/"),
+         theme_dir: Path = Path("/data/system/theme/fonts"), groups: frozenset[str] | None = None,
+         stock_dir: Path = Path("/system/fonts"),
+         weight_probe: Callable[[Path], bool] = static_on_variable_slot,
+         limit: int = SCAN_MAX_PROCESSES, budget_s: float = SCAN_TIME_BUDGET_S,
+         clock: Callable[[], float] | None = None) -> dict[str, Any]:
+    import time
+    now = clock or time.monotonic
+    started = now()
+    theme = theme_state(theme_dir, module, stock_dir)
+    payload_fonts = (module / ".luoshu-payload/system/fonts") if module else Path("/nonexistent")
+    weight = weight_probe(payload_fonts)
+    processes = running_app_processes(proc_root, limit)
+    items: list[dict[str, Any]] = []
+    covered = 0
+    truncated = False
+    for pid, name in processes:
+        if now() - started > budget_s:
+            truncated = True
+            break
+        try:
+            result = locate(name, pid, module=module, proc_root=proc_root, host_root=host_root,
+                            theme_dir=theme_dir, groups=groups, stock_dir=stock_dir,
+                            weight_probe=lambda _p: weight, theme=theme)
+        except Exception as exc:  # one process never breaks the scan
+            items.append({"package": name.split(":", 1)[0], "process": name, "pid": pid,
+                          "verdict": "unreadable", "categories": ["unreadable"], "fixes": [],
+                          "reasons": [f"读取失败：{exc.__class__.__name__}"]})
+            continue
+        verdict = result.get("verdict", "")
+        if verdict == "no-payload":
+            return {"schema": SCAN_SCHEMA, "verdict": "no-payload", "scanned": 0, "covered": 0,
+                    "items": [], "fixes": [], "truncated": False, "theme": theme}
+        categories = [f["category"] for f in result.get("findings", [])]
+        # weight-loss is a payload-wide property (reported once below), not a
+        # sign that this process misses LuoShu's font.
+        if verdict == "covered" or (categories and set(categories) <= {"weight-loss", "covered"}):
+            covered += 1
+            continue
+        result["findings"] = [f for f in result["findings"] if f["category"] != "weight-loss"]
+        verdict = result["findings"][0]["category"]
+        fixes, reasons = suggested_fixes(result)
+        items.append({"package": name.split(":", 1)[0], "process": name, "pid": pid, "verdict": verdict,
+                      "title": result["findings"][0]["title"],
+                      "categories": [f["category"] for f in result["findings"]],
+                      "fixes": fixes, "reasons": reasons})
+    all_fixes = list(dict.fromkeys(key for item in items for key in item["fixes"]))
+    return {"schema": SCAN_SCHEMA, "verdict": "ok", "scanned": covered + len(items), "covered": covered,
+            "items": items, "fixes": all_fixes, "truncated": truncated, "theme": theme,
+            "weightLoss": bool(weight)}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--package", required=True)
+    parser.add_argument("--package", default="")
+    parser.add_argument("--scan", action="store_true", help="scan every running app process")
     parser.add_argument("--pid", default="")
     parser.add_argument("--module", type=Path)
     parser.add_argument("--proc-root", type=Path, default=Path("/proc"))
@@ -289,6 +502,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.scan:
+        try:
+            data = scan(module=args.module, proc_root=args.proc_root, host_root=args.host_root,
+                        theme_dir=args.theme_dir)
+            print(json.dumps({"status": "ok", "data": data}, ensure_ascii=False))
+        except Exception as exc:  # diagnostics never break the caller
+            print(json.dumps({"status": "error",
+                              "message": f"扫描失败：{exc.__class__.__name__}"}, ensure_ascii=False))
+        return 0
     if not PACKAGE_RE.match(args.package or ""):
         print(json.dumps({"status": "error", "message": "包名格式不正确"}, ensure_ascii=False))
         return 0

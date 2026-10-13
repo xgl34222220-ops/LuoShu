@@ -36,6 +36,11 @@ _lht_init() {
     # an ~8.9 KiB near-glyphless sfnt; real theme fonts are far larger.
     LHT_PLACEHOLDER_MAX_BYTES="${LUOSHU_THEME_TAKEOVER_PLACEHOLDER_MAX_BYTES:-65536}"
     LHT_MAX_FILES=32
+    # Stock fonts the theme engine copies into the theme dir on the DEFAULT
+    # theme (byte copies are not a theme-store font).
+    LHT_STOCK_DIR="${LUOSHU_THEME_TAKEOVER_STOCK_DIR:-/system/fonts}"
+    # Same bound as hyperos_webview_route.sh's theme-engine Roboto check.
+    LHT_ROBOTO_MAX_BYTES="${LUOSHU_THEME_TAKEOVER_ROBOTO_MAX_BYTES:-4194304}"
 }
 
 _lht_log() {
@@ -84,25 +89,105 @@ _lht_theme_files() {
     done
 }
 
+# Identities (dev:ino) of files LuoShu itself serves on theme paths in this
+# boot: the early webview-route clone (it binds over the theme engine's Roboto
+# or the default-theme placeholder, never over a user theme) and the provider
+# watcher's per-namespace theme views. Seeing one of them through the theme
+# directory is LuoShu's own work, not a theme-store font.
+_lht_luoshu_ids() {
+    _lht_boot=$(_lht_boot_id)
+    if [ -s "$LHT_MODULE/config/hyperos-webview-route.conf" ]; then
+        awk -F'|' -v b="$_lht_boot" '$1 == b && $4 != "" {print $4}' \
+            "$LHT_MODULE/config/hyperos-webview-route.conf" 2>/dev/null
+    fi
+    if [ -s "$LHT_MODULE/config/hyperos-theme-font-namespaces.conf" ]; then
+        awk -F'|' '$2 != "" {n=split($2, p, ":"); if (n >= 2) print p[1] ":" p[2]}' \
+            "$LHT_MODULE/config/hyperos-theme-font-namespaces.conf" 2>/dev/null
+    fi
+    for _lht_c in "$LHT_MODULE/config/hyperos-webview-route"/*.ttf \
+                  "$LHT_MODULE/config/hyperos-theme-font"/*.ttf; do
+        [ -f "$_lht_c" ] && _lht_identity "$_lht_c"
+    done
+}
+
+# Byte-identical to one of the given files (size compared first, cmp only then).
+_lht_same_as_any() {
+    _lht_sa_file="$1"; shift
+    _lht_sa_size=$(_lht_size "$_lht_sa_file")
+    for _lht_sa_c in "$@"; do
+        [ -f "$_lht_sa_c" ] || continue
+        [ "$(_lht_size "$_lht_sa_c")" = "$_lht_sa_size" ] || continue
+        cmp -s "$_lht_sa_file" "$_lht_sa_c" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# One theme-dir file: user | placeholder | luoshu | stock.
+#   user        a theme-store font (the only class that triggers the warning)
+#   placeholder the ROM default-theme near-glyphless sfnt
+#   luoshu      a LuoShu clone/payload seen through the theme path
+#   stock       the theme engine's copy of ROM Roboto/MiSans (default theme)
+# The optional takeover binds only over user files, so a file it currently owns
+# stays "user": its lower file is the theme-store font.
+_lht_classify() {
+    _lht_cf="$1"
+    if _lht_journal_has "$_lht_cf" && lht_owned "$_lht_cf"; then
+        printf 'user\n'; return 0
+    fi
+    _lht_cf_id=$(_lht_identity "$_lht_cf")
+    if [ -n "$_lht_cf_id" ] && printf '%s\n' "$LHT_LUOSHU_IDS" | grep -qxF "$_lht_cf_id"; then
+        printf 'luoshu\n'; return 0
+    fi
+    _lht_cf_sz=$(_lht_size "$_lht_cf"); case "$_lht_cf_sz" in ''|*[!0-9]*) _lht_cf_sz=0 ;; esac
+    if [ "$_lht_cf_sz" -le "$LHT_PLACEHOLDER_MAX_BYTES" ]; then
+        printf 'placeholder\n'; return 0
+    fi
+    if _lht_same_as_any "$_lht_cf" "$LHT_STOCK_DIR/Roboto-Regular.ttf" "$LHT_STOCK_DIR/${_lht_cf##*/}" \
+        "$LHT_STOCK_DIR/MiSansVF.ttf"; then
+        printf 'stock\n'; return 0
+    fi
+    # shellcheck disable=SC2046
+    if _lht_same_as_any "$_lht_cf" $(for _lht_p in "$LHT_FONTS"/.luoshu-font-store/*.font "$LHT_FONTS"/*.ttf \
+        "$LHT_MODULE/config/hyperos-theme-takeover"/*; do [ -f "$_lht_p" ] && printf '%s\n' "$_lht_p"; done); then
+        printf 'luoshu\n'; return 0
+    fi
+    # The theme engine's own Roboto (Roboto-named Latin file, Roboto-sized);
+    # theme-store fonts carry their own family name and are CJK-sized.
+    if [ "$_lht_cf_sz" -le "$LHT_ROBOTO_MAX_BYTES" ] && \
+       tr -d '\000' < "$_lht_cf" 2>/dev/null | tr -c 'A-Za-z' '\n' 2>/dev/null | grep -qx 'Roboto[A-Za-z]*'; then
+        printf 'stock\n'; return 0
+    fi
+    printf 'user\n'
+}
+
 # state: none | placeholder | user-theme. Prints key=value lines.
+# Only files classified "user" make a user-theme; names lists those files when
+# there are any (so the App never shows LuoShu's own Roboto as a theme font).
 lht_detect() {
-    _lht_files=0; _lht_user=0; _lht_bytes=0; _lht_names=''
+    _lht_files=0; _lht_user=0; _lht_bytes=0; _lht_names=''; _lht_user_names=''; _lht_own=0
+    LHT_LUOSHU_IDS=$(_lht_luoshu_ids)
     while IFS= read -r _lht_f; do
         [ -n "$_lht_f" ] || continue
         _lht_files=$((_lht_files + 1))
         _lht_sz=$(_lht_size "$_lht_f"); case "$_lht_sz" in ''|*[!0-9]*) _lht_sz=0 ;; esac
         _lht_bytes=$((_lht_bytes + _lht_sz))
-        [ "$_lht_sz" -gt "$LHT_PLACEHOLDER_MAX_BYTES" ] && _lht_user=$((_lht_user + 1))
+        case "$(_lht_classify "$_lht_f")" in
+            user)
+                _lht_user=$((_lht_user + 1))
+                _lht_user_names="${_lht_user_names:+$_lht_user_names;}${_lht_f##*/}"
+                ;;
+            luoshu) _lht_own=$((_lht_own + 1)) ;;
+        esac
         _lht_names="${_lht_names:+$_lht_names;}${_lht_f##*/}"
     done <<EOF_LHT_FILES
 $(_lht_theme_files)
 EOF_LHT_FILES
-    if [ "$_lht_user" -gt 0 ]; then _lht_state=user-theme
+    if [ "$_lht_user" -gt 0 ]; then _lht_state=user-theme; _lht_names=$_lht_user_names
     elif [ "$_lht_files" -gt 0 ]; then _lht_state=placeholder
     else _lht_state=none
     fi
-    printf 'state=%s\nfiles=%s\nuserFiles=%s\nbytes=%s\nnames=%s\n' \
-        "$_lht_state" "$_lht_files" "$_lht_user" "$_lht_bytes" "$_lht_names"
+    printf 'state=%s\nfiles=%s\nuserFiles=%s\nluoshuFiles=%s\nbytes=%s\nnames=%s\n' \
+        "$_lht_state" "$_lht_files" "$_lht_user" "$_lht_own" "$_lht_bytes" "$_lht_names"
 }
 
 _lht_weight_for() {

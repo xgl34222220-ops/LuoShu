@@ -158,6 +158,81 @@ class ThemeTakeoverTest(_Fixture):
         self.assertIn('hyperos_theme_takeover.sh" owned', bridge)
 
 
+class ThemeDetectionSelfTriggerTest(_Fixture):
+    """Real-device report: theme store on DEFAULT, Home still warned "主题字体：Roboto-Regular.ttf".
+
+    LuoShu's own early webview-route bind (and the provider watcher's theme
+    view) serve a LuoShu font on /data/system/theme/fonts/Roboto-Regular.ttf;
+    the theme engine's default-theme Roboto copy is also not a theme-store font.
+    """
+
+    def big(self, path, marker=b'L', size=300000):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b'\0\1\0\0' + marker * size)
+        return path
+
+    def test_webview_route_clone_is_luoshu_not_user_theme(self):
+        clone = self.big(self.module / 'config/hyperos-webview-route/route.ttf')
+        target = self.theme / 'Roboto-Regular.ttf'
+        os.link(clone, target)
+        st = os.stat(clone)
+        (self.module / 'config/hyperos-webview-route.conf').write_text(
+            f'boot-a|{target}|{clone}|{st.st_dev}:{st.st_ino}\n')
+        status = self.status()
+        self.assertEqual((status['state'], status['userFiles'], status['luoshuFiles']), ('placeholder', '0', '1'))
+        # Even when the journal is gone, the clone file's identity is enough.
+        (self.module / 'config/hyperos-webview-route.conf').unlink()
+        self.assertEqual(self.status()['state'], 'placeholder')
+
+    def test_theme_font_bridge_namespace_view_is_luoshu(self):
+        view = self.big(self.root / 'elsewhere/view.ttf', b'V')
+        target = self.theme / 'Roboto-Regular.ttf'
+        os.link(view, target)
+        st = os.stat(view)
+        (self.module / 'config/hyperos-theme-font-namespaces.conf').write_text(
+            f'mnt:[4026531840]|{st.st_dev}:{st.st_ino}:{st.st_size}|/x/clone.ttf|{target}\n')
+        self.assertEqual(self.status()['state'], 'placeholder')
+
+    def test_payload_copy_stock_copy_and_theme_engine_roboto_are_not_user_theme(self):
+        payload = self.big(self.module / '.luoshu-payload/system/fonts/Roboto-Regular.ttf', b'P')
+        (self.theme / 'Roboto-Regular.ttf').write_bytes(payload.read_bytes())
+        self.assertEqual(self.status()['state'], 'placeholder')
+        stock = self.big(self.root / 'system/fonts/Roboto-Regular.ttf', b'S')
+        (self.theme / 'Roboto-Regular.ttf').write_bytes(stock.read_bytes())
+        out = self.run_sh('status', LUOSHU_THEME_TAKEOVER_STOCK_DIR=str(stock.parent)).stdout
+        self.assertIn('state=placeholder', out)
+        (self.theme / 'Roboto-Regular.ttf').write_bytes(
+            b'\0\1\0\0' + 'Roboto'.encode('utf-16-be') + b'\0' * 300000)
+        self.assertEqual(self.status()['state'], 'placeholder')
+
+    def test_real_theme_font_still_detected_and_names_only_user_files(self):
+        clone = self.big(self.module / 'config/hyperos-webview-route/route.ttf')
+        os.link(clone, self.theme / 'Roboto-Regular.ttf')
+        make_font(self.theme / 'Roboto-Bold.ttf', points=tuple(range(32, 127)))
+        with open(self.theme / 'Roboto-Bold.ttf', 'ab') as handle:
+            handle.write(b'\0' * 200000)
+        status = self.status()
+        self.assertEqual((status['state'], status['userFiles'], status['names']), ('user-theme', '1', 'Roboto-Bold.ttf'))
+
+    def test_takeover_owned_files_stay_user_theme(self):
+        self.user_theme()
+        self.enable()
+        self.assertEqual(self.run_sh('ensure').returncode, 0)
+        status = self.status()
+        self.assertEqual((status['state'], status['owned']), ('user-theme', '1'))
+        # Re-running ensure in the same boot must not restore its own binds.
+        self.assertEqual(self.run_sh('ensure').returncode, 0)
+        self.assertEqual((self.theme / 'Roboto-Regular.ttf').read_bytes(), self.regular)
+
+    def test_bridge_status_reports_no_warning_for_luoshu_route(self):
+        clone = self.big(self.module / 'config/hyperos-webview-route/route.ttf')
+        os.link(clone, self.theme / 'Roboto-Regular.ttf')
+        out = subprocess.run(['sh', str(ROOT / 'common/hyperos_coverage_bridge.sh'), 'status'],
+                             env={**self.env, 'IS_HYPEROS': 'true'}, capture_output=True, text=True, timeout=30).stdout
+        theme = json.loads(out)['data']['theme']
+        self.assertEqual((theme['state'], theme['userFiles'], theme['luoshuFiles']), ('placeholder', 0, 1))
+
+
 class BootRoutesTest(_Fixture):
     """common/util_functions.sh -> hyperos_boot_routes.sh runs only on the v4 route."""
 

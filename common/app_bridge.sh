@@ -265,6 +265,33 @@ manager_ready() {
     return 0
 }
 
+# Complete device reboot, never a soft (zygote/SystemUI) restart: only a real
+# boot remounts the font payload before system_server builds its font map.
+# It runs in the FOREGROUND of the App's supervised request. The old path
+# printed "ok", backgrounded `svc power reboot` and returned at once, so the
+# task supervisor (a Linux subreaper that reaps every descendant of a finished
+# request) terminated the backgrounded command within ~2 s, usually before
+# svc's app_process reached PowerManager, and the reboot silently never
+# happened. Each step blocks while the device goes down; a step that returns
+# falls through to the next one (KernelSU, Magisk and APatch all provide svc,
+# toybox reboot and setprop as root).
+full_reboot() {
+    sync 2>/dev/null || true
+    _fr_settle="${LUOSHU_REBOOT_SETTLE_SECONDS:-6}"
+    case "$_fr_settle" in ''|*[!0-9]*) _fr_settle=6 ;; esac
+    if command -v svc >/dev/null 2>&1; then
+        svc power reboot </dev/null >/dev/null 2>&1 && sleep "$_fr_settle"
+    fi
+    if command -v reboot >/dev/null 2>&1; then
+        reboot </dev/null >/dev/null 2>&1 && sleep "$_fr_settle"
+    fi
+    if command -v setprop >/dev/null 2>&1; then
+        setprop sys.powerctl reboot </dev/null >/dev/null 2>&1 && sleep "$_fr_settle"
+    fi
+    printf '{"status":"error","message":"整机重启命令没有生效，请长按电源键手动重启"}\n'
+    return 1
+}
+
 switch_task_ready() {
     [ -x "$FONT_SWITCH_TASK" ] || [ -f "$FONT_SWITCH_TASK" ] || {
         printf '{"status":"error","message":"字体切换守卫不存在"}\n'
@@ -435,7 +462,7 @@ case "${1:-status}" in
     mix_start) mix_ready || exit 1; boot_guard_allows_stage mix || exit 0; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-0}" "${9:-0}" ;;
     mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
     font-mix-cancel|mix_cancel) mix_ready || exit 1; sh "$MIX_ENGINE" cancel "${2:-}"; exit $? ;;
-    reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
+    reboot) full_reboot || exit 1 ;;
     boot_guard_status|boot_guard_reset)
         if [ ! -f "$MODDIR/common/boot_loop_guard.sh" ]; then
             printf '{"status":"error","message":"卡开机保护组件不可用"}\n'
@@ -450,7 +477,7 @@ case "${1:-status}" in
         printf '{"status":"ok","data":{"bootGuard":"%s","counter":%s,"limit":%s}}\n' \
             "$_bg_state" "$_bg_count" "$LUOSHU_BOOTLOOP_LIMIT"
         ;;
-    hyperos_coverage_status|hyperos_coverage_set|coverage_locate)
+    hyperos_coverage_status|hyperos_coverage_set|coverage_locate|coverage_scan)
         if [ ! -f "$MODDIR/common/hyperos_coverage_bridge.sh" ]; then
             printf '{"status":"error","message":"HyperOS 覆盖组件不可用"}\n'
             exit 0
@@ -459,6 +486,7 @@ case "${1:-status}" in
             hyperos_coverage_status) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" status ;;
             hyperos_coverage_set) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" set "${2:-}" "${3:-}" ;;
             coverage_locate) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" locate "${2:-}" ;;
+            coverage_scan) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" scan ;;
         esac
         ;;
     logs)
