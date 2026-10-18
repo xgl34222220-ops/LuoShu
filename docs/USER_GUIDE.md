@@ -207,6 +207,8 @@ HyperOS 用户可以在 App 首页的 **未覆盖界面定位** 里选择没变�
 
 等宽与时钟字体（RobotoMono、NotoSansMono、DroidSansMono、MitypeMonoVF、MiClockMono 等）均换成你的字体，时钟槽自动生成等宽数字；`NotoSansCJK-Regular.ttc` / `NotoSerifCJK-Regular.ttc` 按本机字体面编译替换（网页中文）。始终保留原厂：`MiSansL3.otf`（GB18030 生僻字库，替换后生僻字会变方块）。
 
+ColorOS / OxygenOS / realme UI 同样按本机字体面编译 `NotoSansCJK-Regular.ttc` / `NotoSerifCJK-Regular.ttc`（日文、韩文页面和网页里的汉字跟随你的字体，假名、韩文等你的字体没有的字保留原厂）。首次应用某个字体时需要多编译一次（之后按内容缓存，再切回同一字体直接复用）；不需要时在 `config/coloros_cjk_collections.conf` 写一行 `enabled=0`，重新应用字体即可保留原厂集合。
+
 ### 需要手动深度检查字体加载
 
 正常使用不需要运行深度验证。只有在字体显示异常、挂载状态与实际效果不一致或需要提交诊断报告时，才执行：
