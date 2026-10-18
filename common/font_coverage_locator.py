@@ -381,7 +381,9 @@ class StockPolicy:
         if path in self.preserved:
             return "kept", "ROM 动态别名/回退槽位"
         if lower.endswith((".ttc", ".otc")):
-            if self.rom == "hyperos" and name in COLLECTION_TARGETS:
+            if name in COLLECTION_TARGETS and (self.rom == "hyperos" or (
+                    self.rom == "coloros" and coloros_policy is not None
+                    and coloros_policy.cjk_collections_enabled(self._module))):
                 return "outside", "CJK 集合在替换范围，但本次负载没有生成（未记录原因，请重新应用）"
             return "kept", "多语言字体集合"
         if policy is not None:

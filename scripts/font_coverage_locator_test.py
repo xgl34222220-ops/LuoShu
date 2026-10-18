@@ -410,6 +410,20 @@ class ColorOSLocatorTest(unittest.TestCase):
         for name in ("OSans-RC-Regular.ttf", "NotoSansKhmer-Regular.ttf", "NotoColorEmoji.ttf"):
             self.assertIn(name, kept)
 
+    def test_coloros_cjk_collection_follows_the_collections_switch(self):
+        judge = locator.StockPolicy("coloros", self.module, metrics={}, coloros_names=frozenset())
+        verdict = judge.judge("/system/fonts/NotoSansCJK-Regular.ttc")
+        self.assertEqual("outside", verdict[0])
+        (self.module / "config").mkdir(exist_ok=True)
+        (self.module / "config/coloros_cjk_collections.conf").write_text("enabled=0\n")
+        self.assertEqual(("kept", "多语言字体集合"),
+                         locator.StockPolicy("coloros", self.module, metrics={}, coloros_names=frozenset())
+                         .judge("/system/fonts/NotoSansCJK-Regular.ttc"))
+        kept = {"preservedCollections": {"/system/fonts/NotoSansCJK-Regular.ttc": "ValueError: x"}}
+        self.assertEqual("collection", locator.StockPolicy("coloros", self.module, metrics=kept,
+                                                           coloros_names=frozenset())
+                         .judge("/system/fonts/NotoSansCJK-Regular.ttc")[0])
+
     def test_coloros_scan_offers_no_hyperos_switches(self):
         result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
                               theme_dir=self.stock / "no-theme", weight_probe=lambda _p: False, rom="coloros")
