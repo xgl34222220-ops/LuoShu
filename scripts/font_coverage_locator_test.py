@@ -484,6 +484,43 @@ class CoverageExportTest(LocatorTest):
         self.assertNotIn("unrelated", log)
         self.assertIn("luoshu-sanitized-diagnostic-v1", data["sanitizedDiagnostic"])
         self.assertIn("theme", data)
+        self.assertEqual({}, data["sectionErrors"])
+
+    def _export(self, metrics):
+        self.scan_fixture()
+        (self.module / ".luoshu-payload/.luoshu-metrics-report.json").write_text(json.dumps(metrics))
+        reports = Path(self.tmp.name) / "reports-real"
+        out = io.StringIO()
+        with redirect_stdout(out):
+            locator.main(["--export", str(reports), "--module", str(self.module), "--proc-root", str(self.proc),
+                          "--host-root", str(self.host), "--theme-dir", str(self.theme), "--rom", "hyperos"])
+        status = json.loads(out.getvalue())
+        self.assertEqual("ok", status["status"], status)
+        return json.loads(Path(status["data"]["path"]).read_text())
+
+    def test_export_reads_real_metrics_report_with_slot_list(self):
+        # hyperos_metrics_batch writes `slots` as a list of {"slot": ...} rows;
+        # treating it as a dict raised TypeError on device (导出失败：TypeError).
+        data = self._export({"schema": "luoshu-slot-metrics-v1",
+                             "slots": [{"slot": "/system/fonts/MiSansVF.ttf", "variableSlotSource": "x"},
+                                       {"slot": "/system/fonts/Roboto-Regular.ttf"}, "junk"],
+                             "collections": [], "preservedCollections": {}})
+        self.assertEqual({}, data["sectionErrors"])
+        self.assertTrue(data["metrics"]["available"])
+        self.assertEqual(["/system/fonts/MiSansVF.ttf"],
+                         sorted(locator.metric_slots({"slots": [{"slot": "/system/fonts/MiSansVF.ttf"}]})))
+
+    def test_export_survives_a_broken_section(self):
+        original = locator.webview_visibility
+        locator.webview_visibility = lambda *a, **k: (_ for _ in ()).throw(TypeError("boom /sdcard/x"))
+        try:
+            data = self._export({"slots": {"/system/fonts/MiSansVF.ttf": {}}})
+        finally:
+            locator.webview_visibility = original
+        self.assertEqual([], data["webview"])
+        self.assertTrue(data["sectionErrors"]["webview"].startswith("TypeError@"))
+        self.assertNotIn("sdcard", json.dumps(data["sectionErrors"]))
+        self.assertTrue(data["issues"])
 
 
 if __name__ == "__main__":

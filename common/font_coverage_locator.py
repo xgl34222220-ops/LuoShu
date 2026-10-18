@@ -690,12 +690,26 @@ def mountinfo_fonts(proc_root: Path = Path("/proc"), pid: str = "self", limit: i
     return keep[:limit]
 
 
+def metric_slots(metrics: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """`slots` in .luoshu-metrics-report.json is a list of {"slot": ...} rows
+    (older/fixture reports used a {logical: info} dict); accept both."""
+    raw = metrics.get("slots")
+    if isinstance(raw, dict):
+        return {str(key): value if isinstance(value, dict) else {} for key, value in raw.items()}
+    rows: dict[str, dict[str, Any]] = {}
+    if isinstance(raw, list):
+        for row in raw:
+            if isinstance(row, dict) and isinstance(row.get("slot"), str):
+                rows[row["slot"]] = row
+    return rows
+
+
 def weight_loss_slots(module: Path | None, metrics: dict[str, Any]) -> list[str]:
     """Variable slots (MiSansVF-style or recorded variableSlotSource) given a static file."""
     root = (module / ".luoshu-payload") if module else None
     if root is None or not root.is_dir():
         return []
-    slots = metrics.get("slots") if isinstance(metrics.get("slots"), dict) else {}
+    slots = metric_slots(metrics)
     wanted = {logical for logical, info in slots.items()
               if isinstance(info, dict) and info.get("variableSlotSource")}
     for path in root.glob("*/fonts/*.ttf"):
@@ -776,6 +790,16 @@ def read_module_prop(module: Path | None) -> dict[str, str]:
     return values
 
 
+def _where(exc: BaseException) -> str:
+    """ExcType@file:line of the innermost LuoShu frame (no message: may hold paths)."""
+    import traceback
+    frames = [frame for frame in traceback.extract_tb(exc.__traceback__)]
+    frame = frames[-1] if frames else None
+    if frame is None:
+        return exc.__class__.__name__
+    return f"{exc.__class__.__name__}@{Path(frame.filename).name}:{frame.lineno}"
+
+
 def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device: dict[str, str] | None = None,
            proc_root: Path = Path("/proc"), host_root: Path = Path("/"),
            theme_dir: Path = Path("/data/system/theme/fonts"), groups=None,
@@ -788,16 +812,28 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
     payload = audit.PayloadIndex(module)
     metrics = load_metrics(module)
     stamp = now or time.strftime("%Y%m%d-%H%M%S")
-    allowed = set(payload.names) | {Path(path).name for path in (metrics.get("slots") or {})}
+    allowed = set(payload.names) | {Path(path).name for path in metric_slots(metrics)}
     for root in ("system", "system_ext", "product"):
         try:
             allowed |= {entry.name for entry in (host_root / root / "fonts").iterdir()}
         except OSError:
             pass
     sanitize = Sanitizer(allowed)
-    scanned = scan(module=module, proc_root=proc_root, host_root=host_root, theme_dir=theme_dir, groups=groups,
-                   weight_probe=weight_probe, budget_s=budget_s, clock=clock, rom=rom, coloros_names=coloros_names)
-    theme = theme_state(theme_dir, module) if rom == "hyperos" else {"state": "n/a"}
+    errors: dict[str, str] = {}
+
+    def safe(name: str, build, default):
+        # One broken section never costs the whole report.
+        try:
+            return build()
+        except Exception as exc:  # noqa: BLE001 - diagnostics never break the caller
+            errors[name] = _where(exc)
+            return default
+
+    scanned = safe("scan", lambda: scan(module=module, proc_root=proc_root, host_root=host_root, theme_dir=theme_dir, groups=groups,
+                   weight_probe=weight_probe, budget_s=budget_s, clock=clock, rom=rom, coloros_names=coloros_names),
+                   {"verdict": "error", "items": []})
+    theme = safe("theme", lambda: theme_state(theme_dir, module), {"state": "error"}) \
+        if rom == "hyperos" else {"state": "n/a"}
     flip = None
     if rom == "coloros" and module is not None:
         try:
@@ -816,7 +852,7 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
         "module": read_module_prop(module),
         "device": {"rom": rom, "romLabel": ROM_LABELS[rom], **(device or {})},
         "scan": {key: value for key, value in scanned.items() if key != "items"},
-        "issues": dedupe_items(scanned.get("items", [])),
+        "issues": safe("issues", lambda: dedupe_items(scanned.get("items", [])), []),
         "metrics": {
             "available": bool(metrics),
             "collections": metrics.get("collections") or [],
@@ -824,17 +860,18 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
             "preservedFallbackSlots": metrics.get("preservedFallbackSlots") or {},
             "preservedDynamicAliases": metrics.get("preservedDynamicAliases") or [],
             "preservedStockAliases": metrics.get("preservedStockAliases") or [],
-            "weightLossSlots": weight_loss_slots(module, metrics),
+            "weightLossSlots": safe("weightLossSlots", lambda: weight_loss_slots(module, metrics), []),
         },
-        "slots": slot_mounts(module, payload, host_root),
-        "mountinfo": [sanitize(line) for line in mountinfo_fonts(proc_root)],
+        "slots": safe("slots", lambda: slot_mounts(module, payload, host_root), []),
+        "mountinfo": safe("mountinfo", lambda: [sanitize(line) for line in mountinfo_fonts(proc_root)], []),
         "theme": theme,
         **({"colorosFlipFont": flip} if flip is not None else {}),
-        "webview": webview_visibility(module, payload, proc_root, host_root),
-        "fontswitchLog": recent_log(module, sanitize),
+        "webview": safe("webview", lambda: webview_visibility(module, payload, proc_root, host_root), []),
+        "fontswitchLog": safe("fontswitchLog", lambda: recent_log(module, sanitize), []),
         "sanitizedDiagnostic": sanitize(summary_text) if summary_text else "not-generated",
         "privacy": "设备标识、账号、聊天内容、用户路径与来源字体名已省略；系统字体槽位与应用内字体资源名可能保留",
     }
+    report["sectionErrors"] = errors
     report["counts"] = {"issues": len(report["issues"]),
                         "processesWithIssues": sum(len(group["processes"]) for group in report["issues"]),
                         "slots": len(report["slots"]),
@@ -877,7 +914,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"status": "ok", "data": data}, ensure_ascii=False))
         except Exception as exc:  # diagnostics never break the caller
             print(json.dumps({"status": "error",
-                              "message": f"导出失败：{exc.__class__.__name__}"}, ensure_ascii=False))
+                              "message": f"导出失败：{_where(exc)}"}, ensure_ascii=False))
         return 0
     if args.scan:
         try:
