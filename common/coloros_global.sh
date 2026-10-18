@@ -54,6 +54,24 @@ _coloros_osans_digits_on() {
 }
 # <<< LUOSHU_COLOROS_LATIN_POLICY
 
+# Stock CJK collections are compiled index-preserving (same face count/order, stock
+# cmap/layout per face) at stage completion by coloros_metrics_batch.py, never aliased
+# by this mapper. Only an exact enabled=0 line in config/coloros_cjk_collections.conf
+# turns it off (python copy: coloros_latin_policy.cjk_collections_enabled).
+_coloros_cjk_collections_on() {
+    _lccc_conf="${LUOSHU_COLOROS_CJK_COLLECTIONS_CONF:-$(_luoshu_coloros_module_dir)/config/coloros_cjk_collections.conf}"
+    [ -f "$_lccc_conf" ] || return 0
+    _lccc_value=$(tr -d '\r' < "$_lccc_conf" 2>/dev/null | sed -n 's/^enabled=\([01]\)$/\1/p' | tail -n 1)
+    [ "$_lccc_value" != 0 ]
+}
+coloros_collection_names_for_root() {
+    _coloros_cjk_collections_on || return 0
+    for _lccn in NotoSansCJK-Regular.ttc NotoSerifCJK-Regular.ttc; do
+        [ -f "$1/$_lccn" ] && printf '%s\n' "$_lccn"
+    done
+    return 0
+}
+
 # Discover safe upright UI slots from every real OPlus partition. This covers renamed files introduced
 # by an OTA without replacing serif, emoji, symbols, icons or true italic faces. Clock and monospace
 # slots (AndroidClock*, DroidSansMono, RobotoMono*) take the user font like other UI text.

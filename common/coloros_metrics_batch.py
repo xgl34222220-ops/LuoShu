@@ -26,7 +26,8 @@ from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_c
                                   read_inventory, write_metrics, compact_routed_source,
                                   _cjk_routing, prepare_cjk_routing, cjk_routing_report,
                                   inventory_font_roots as font_roots,
-                                  inventory_completion_jobs)
+                                  inventory_completion_jobs, build_collections,
+                                  COLLECTION_TARGETS)
 
 
 def eligible_slot(slot: object, logical: str, groups: frozenset | None = None) -> bool:
@@ -59,14 +60,21 @@ def sibling_eligible_name(path: Path) -> bool:
         return False
 
 
-def write_report(stage: Path, slots: list[dict]) -> None:
+def collections_enabled(module: Path) -> bool:
+    return coloros_latin_policy.cjk_collections_enabled(module)
+
+
+def write_report(stage: Path, slots: list[dict], collections: list | None = None,
+                 kept: dict | None = None) -> None:
     report = stage / '.luoshu-metrics-report.json'
     descriptor, temporary_name = tempfile.mkstemp(prefix=report.name + '.tmp.', dir=stage)
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, 'w', encoding='utf-8') as stream:
             json.dump({'schema': 'luoshu-slot-metrics-v1',
-                       'romKind': 'coloros', 'slots': slots},
+                       'romKind': 'coloros', 'slots': slots,
+                       'collections': collections or [],
+                       'preservedCollections': kept or {}},
                       stream, ensure_ascii=False)
         temporary.chmod(0o644)
         os.replace(temporary, report)
@@ -322,7 +330,18 @@ def build(module: Path, stage: Path) -> dict:
             link_copy(output, destination)
         for alias in preserved_stock_aliases:
             alias.unlink(missing_ok=True)
-        write_report(stage, reports)
+        # Stock CJK collections (ja/ko and WebView/Chromium CJK fallback) get
+        # the same index-preserving compilation as on HyperOS, after the main
+        # slots so the untouched store anchors are the donors. A collection the
+        # stage already holds (proven mix build) is kept; any failure leaves the
+        # ROM file. Content-cached, so a repeated switch only links it.
+        collections, collections_kept = [], {}
+        if collections_enabled(module):
+            staged = {path.name for partition in roots for path in (stage / partition / 'fonts').glob('*.ttc')}
+            names = [name for name in COLLECTION_TARGETS if name not in staged]
+            if names:
+                collections, collections_kept = build_collections(module, stage, names, outputs)
+        write_report(stage, reports, collections, collections_kept)
     finally:
         shutil.rmtree(outputs, ignore_errors=True)
     return {'mapped': len(jobs), 'generated': len(cache),
