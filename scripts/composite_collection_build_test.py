@@ -162,6 +162,67 @@ class CollectionBuildTest(unittest.TestCase):
             self.assertEqual(builder.protected(original), builder.protected(result))
             self.assertNotEqual(outline(original, 'A'), outline(result, 'A'))
 
+    def replace_donor_glyph(self, char, draw):
+        with TTFont(self.source) as font:
+            pen = TTGlyphPen(None); draw(pen)
+            name = font.getBestCmap()[ord(char)]
+            font['glyf'][name] = pen.glyph()
+            font.save(self.source)
+        with TTFont(self.source) as font:
+            from fontTools.pens.boundsPen import BoundsPen
+            bounds = BoundsPen(font.getGlyphSet()); font.getGlyphSet()[name].draw(bounds)
+            return bounds.bounds
+
+    def test_true_type_contour_without_on_curve_points_converts_into_cff_stock(self):
+        # Round strokes in many TrueType fonts have no on-curve point at all;
+        # Qu2Cu refused them and the whole collection stayed stock.
+        def ring(pen):
+            pen.qCurveTo((100, 100), (500, 100), (500, 600), (100, 600), None); pen.closePath()
+        expected = self.replace_donor_glyph('中', ring)
+        self.collection((dict(index=0, cff=True), dict(index=2, cff=True)))
+        report = self.run_build()
+        self.assertTrue(all(face['mode'] == 'compiled' for face in report['faces']))
+        from fontTools.pens.boundsPen import BoundsPen
+        with TTFont(self.output, fontNumber=0) as result:
+            glyphs = result.getGlyphSet(); bounds = BoundsPen(glyphs)
+            glyphs[result.getBestCmap()[ord('中')]].draw(bounds)
+        # Exact elevation: the cubic outline has the donor's own extrema.
+        for got, want in zip(bounds.bounds, expected):
+            self.assertAlmostEqual(got, want, delta=1)
+
+    def test_off_curve_point_outside_frame_with_curve_inside_is_still_replaced(self):
+        # The fast control-box check fails here (off-curve y=800 > frame 700),
+        # the exact curve maximum is 700, so the slot must not stay stock.
+        def arch(pen):
+            pen.moveTo((20, 0)); pen.lineTo((600, 0)); pen.lineTo((600, 600))
+            pen.qCurveTo((310, 800), (20, 600)); pen.closePath()
+        self.replace_donor_glyph('中', arch)
+        self.collection()
+        report = self.run_build()
+        self.assertEqual([0, 0], [face['retainedOutOfFrameSlots'] for face in report['faces']])
+        with TTFont(self.stock, fontNumber=0) as original, TTFont(self.output, fontNumber=0) as result:
+            self.assertNotEqual(outline(original, '中'), outline(result, '中'))
+
+    def test_second_cff_collection_reuses_converted_donor_outlines(self):
+        # Sans then Serif in one stage process: the same donor glyphs are not
+        # drawn or converted again, and the output bytes stay identical.
+        self.collection((dict(index=0, cff=True), dict(index=2, cff=True)))
+        builder.OUTLINE_CACHE.clear()
+        self.run_build()
+        first = self.output.read_bytes()
+        self.assertTrue(builder.OUTLINE_CACHE)
+        with patch.object(builder, 'cff_charstring', side_effect=AssertionError('converted again')), \
+                patch.object(builder, 'draw_record', side_effect=AssertionError('drawn again')):
+            self.run_build()
+        self.assertEqual(first, self.output.read_bytes())
+        builder.OUTLINE_CACHE.clear()
+        self.run_build()
+        self.assertEqual(first, self.output.read_bytes())
+        # A different donor never takes the cached outlines of the first one.
+        fixture(self.source, 3)
+        self.run_build()
+        self.assertTrue(all(key[0] == builder.sha(self.source) for key in builder.OUTLINE_CACHE))
+
     def test_true_type_stock_accepts_cff_donor(self):
         fixture(self.source, 1, cff=True); self.collection()
         self.run_build()
@@ -468,8 +529,8 @@ class CollectionBuildTest(unittest.TestCase):
 
     def test_source_change_during_build_cannot_publish(self):
         self.collection(); original=builder.replace_face
-        def modify(*args):
-            result=original(*args)
+        def modify(*args, **kwargs):
+            result=original(*args, **kwargs)
             with self.source.open('ab') as stream: stream.write(b'changed')
             return result
         self.output.write_bytes(b'previous generation')
