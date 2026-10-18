@@ -1104,6 +1104,77 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
     return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
+FONT_SUFFIXES = ('.ttf', '.otf', '.ttc', '.otc')
+
+
+def _file_digest(path: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def prune_orphan_aliases(stage: Path, stock_roots: dict[str, Path] | None = None) -> list[str]:
+    """Remove staged font names this ROM does not have (no stock file to cover).
+
+    The composite mapper aliases a fixed HyperOS list (100..900.ttf,
+    GoogleSans*-Regular.ttf, ...) whether or not the ROM ships them. Per-file
+    mounts never expose such a name (no lower file), so it only enlarges the
+    payload and every cached/retired copy, and shows up as a "missing" slot.
+    Removal is lossless only: an orphan goes when its bytes are kept elsewhere
+    in the stage (same inode, or same size and SHA-256 as a retained file such
+    as the .luoshu-font-store anchor). A sole copy (e.g. a weight source that
+    boot repair may still read) is kept.
+    """
+    roots = stock_roots or {}
+    orphans: list[Path] = []
+    retained: list[Path] = []
+    for part in dict.fromkeys((*PARTS, *roots)):
+        staged = stage / part / 'fonts'
+        if not staged.is_dir() or staged.is_symlink():
+            continue
+        root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', str(roots.get(part, f'/{part}/fonts'))))
+        for entry in sorted(staged.rglob('*')):
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            top = entry.parent == staged
+            if (top and entry.suffix.lower() in FONT_SUFFIXES and not entry.name.startswith('LuoShu-')
+                    and not (root / entry.name).exists() and not (root / entry.name).is_symlink()):
+                orphans.append(entry)
+            else:
+                retained.append(entry)
+    if not orphans:
+        return []
+    kept_inodes = set()
+    kept_by_size: dict[int, list[Path]] = {}
+    for path in retained:
+        info = path.stat()
+        kept_inodes.add((info.st_dev, info.st_ino))
+        kept_by_size.setdefault(info.st_size, []).append(path)
+    digests: dict[tuple[int, int], str] = {}
+
+    def digest(path: Path) -> str:
+        info = path.stat()
+        key = (info.st_dev, info.st_ino)
+        if key not in digests:
+            digests[key] = _file_digest(path)
+        return digests[key]
+
+    removed = []
+    for path in orphans:
+        info = path.stat()
+        duplicate = (info.st_dev, info.st_ino) in kept_inodes
+        if not duplicate and info.st_size in kept_by_size:
+            mine = digest(path)
+            duplicate = any(digest(other) == mine for other in kept_by_size[info.st_size])
+        if duplicate:
+            path.unlink()
+            removed.append('/' + path.relative_to(stage).as_posix())
+    return removed
+
+
 def build(module: Path, stage: Path, names: list[str]) -> dict:
     resolved = stage.resolve()
     live = (module / '.luoshu-payload').resolve()
@@ -1202,6 +1273,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     prepared = []
     slot_report = []
     fallback = 0
+    collections, collections_kept, pruned = [], {}, []
     try:
         cjk_fallback, fallback_outputs, routing_evidence = prepare_cjk_routing(data, jobs, stage, outputs)
         for source, dest, contract in jobs:
@@ -1261,6 +1333,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             # absence exposes the ROM lower symlink in OverlayFS and leaves it
             # untouched in per-file bind mode. Framework changes keep working.
             alias.unlink(missing_ok=True)
+        # Last: collections and completion read staged weight aliases as donors.
+        pruned = prune_orphan_aliases(stage, stock_roots)
         report = stage / '.luoshu-metrics-report.json'
         descriptor, temporary_name = tempfile.mkstemp(prefix=report.name + '.tmp.', dir=stage)
         temporary = Path(temporary_name)
@@ -1274,6 +1348,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                            'preservedFallbackSlots': fallback_preserved,
                            'collections': collections,
                            'preservedCollections': collections_kept,
+                           'prunedOrphanAliases': pruned,
                            'preservedStockAliases': sorted({
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in excluded_aliases if alias.parent.is_dir()})},
@@ -1287,7 +1362,12 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
         # alias. Keeping these temporary names after success only enlarges
         # cached payload copies and accumulates on repeated stage completion.
         shutil.rmtree(outputs, ignore_errors=True)
-    return {'mapped': len(jobs), 'generated': len(cache), 'fallbackSlots': fallback}
+    # Printed into fontswitch.log by the stage helper: the apply log then shows
+    # which CJK collections were compiled or kept stock and why.
+    return {'mapped': len(jobs), 'generated': len(cache), 'fallbackSlots': fallback,
+            'collections': [entry.get('slot') for entry in collections],
+            'preservedCollections': collections_kept,
+            'prunedOrphanAliases': len(pruned)}
 
 
 def main() -> int:

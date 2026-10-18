@@ -2,6 +2,7 @@
 """Behavioral regressions for actual HyperOS staging and boot repair."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -426,7 +427,7 @@ _luoshu_atomic_tree_visible "$FIXTURE_SOURCE" "$FIXTURE_VISIBLE" bind
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
         with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('outline rebuild')):
             result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
-        self.assertEqual(result, {'mapped': 1, 'generated': 1, 'fallbackSlots': 0})
+        self.assertEqual({key: result[key] for key in ('mapped', 'generated', 'fallbackSlots')}, {'mapped': 1, 'generated': 1, 'fallbackSlots': 0})
         report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
         self.assertEqual(report['slots'][0]['metricsSource'], 'stock')
         self.assertEqual(report['slots'][0]['slot'], '/system/fonts/MiSansVF.ttf')
@@ -470,6 +471,29 @@ _luoshu_atomic_tree_visible "$FIXTURE_SOURCE" "$FIXTURE_VISIBLE" bind
                 with TTFont(self.stage / part / 'fonts/MiSansVF.ttf') as font:
                     self.assertEqual(font['hhea'].ascent, 1100)
                     self.assertIn(65, font.getBestCmap())
+
+    def test_orphan_composite_aliases_are_pruned_only_when_lossless(self):
+        # Device export 2026-10-18: the composite mapper's fixed HyperOS list left
+        # 100..900.ttf and GoogleSans*-Regular.ttf in the payload of a ROM that
+        # ships none of them (never visible, slot state "missing").
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
+        store = self.fonts / '.luoshu-font-store'; store.mkdir()
+        anchor = store / 'mix-composite.font'
+        font_file(anchor)
+        orphans = ['100.ttf', '900.ttf', 'GoogleSans-Regular.ttf', 'GoogleSansText-Regular.ttf']
+        for name in orphans:
+            os.link(anchor, self.fonts / name)
+        shutil.copyfile(anchor, self.fonts / '350.ttf')       # copy fallback: same bytes
+        font_file(self.fonts / 'Lonely-Regular.ttf', top=650)   # sole copy: kept
+        (self.root / 'stock/system/400.ttf').touch()            # real slot: kept
+        batch.build(self.module, self.stage, ['MiSansVF.ttf', '400.ttf'])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(sorted(f'/system/fonts/{name}' for name in orphans + ['350.ttf']),
+                         sorted(report['prunedOrphanAliases']))
+        for name in orphans + ['350.ttf']:
+            self.assertFalse((self.fonts / name).exists(), name)
+        for kept in ('Lonely-Regular.ttf', '400.ttf', 'MiSansVF.ttf', '.luoshu-font-store/mix-composite.font'):
+            self.assertTrue((self.fonts / kept).is_file(), kept)
 
     def test_failed_stage_completion_releases_temporary_fonts(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})

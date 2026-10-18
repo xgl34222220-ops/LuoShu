@@ -134,7 +134,7 @@ class RoutingTest(unittest.TestCase):
     def assert_routing_and_compact_outlines(self, cff=False, variable=False):
         self.default_pair(cff, variable)
         result = self.build()
-        self.assertEqual(result, {'mapped': 2, 'generated': 2, 'fallbackSlots': 0})
+        self.assertEqual({key: result[key] for key in ('mapped', 'generated', 'fallbackSlots')}, {'mapped': 2, 'generated': 2, 'fallbackSlots': 0})
         with TTFont(self.fonts / '400.ttf', lazy=True) as source, \
                 TTFont(self.fonts / 'Roboto-Regular.ttf', lazy=True) as primary, \
                 TTFont(self.fonts / 'MiSansVF.ttf', lazy=True) as fallback:
