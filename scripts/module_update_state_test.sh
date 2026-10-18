@@ -174,6 +174,68 @@ test "$(cat "$TARGET/config/active_font.conf")" = MissingFont
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
 grep -q '^mode=preserve-selection$' "$TARGET/config/font-payload-rebuild-pending.conf"
 
+# HyperOS/ColorOS physical payloads carry their stage metrics report (compiled
+# CJK collections, preservedCollections reasons) across an update. Without it,
+# or after a builder change, the inherited payload keeps working this boot but
+# is marked for one explicit apply. The previous switch log is carried too.
+hyper_fixture() {
+    _hf="$1"
+    mkdir -p "$_hf/config" "$_hf/system/fonts" "$_hf/product/fonts" "$_hf/common" "$_hf/logs"
+    printf 'id=LuoShu\nversion=hyper\n' >"$_hf/module.prop"
+    printf 'mix\n' >"$_hf/config/active_font.conf"
+    printf 'cjk=Qsal\nlatin=Latin\ndigit=Digit\n' >"$_hf/config/font_mix.conf"
+    printf 'schema=%s\nfont=mix\n' "$SCHEMA" >"$_hf/config/font-payload-schema.conf"
+    printf 'payload\n' >"$_hf/system/fonts/MiSansVF.ttf"
+    printf 'payload\n' >"$_hf/product/fonts/MiSansVF.ttf"
+    printf 'builder\n' >"$_hf/common/composite_collection_build.py"
+    printf '[SAFE-TIMING] task=t event=begin phase=source_lookup_validation uptime=1.00\n' >"$_hf/logs/fontswitch.log"
+}
+HYPER="$TMP/hyper"; HYPER_NEW="$TMP/hyper-new"
+hyper_fixture "$HYPER"
+mkdir -p "$HYPER/.luoshu-payload" "$HYPER_NEW/config" "$HYPER_NEW/common"
+printf 'builder\n' >"$HYPER_NEW/common/composite_collection_build.py"
+printf '{"schema":"luoshu-slot-metrics-v1","collections":[]}\n' >"$HYPER/.luoshu-payload/.luoshu-metrics-report.json"
+luoshu_migrate_active_install "$HYPER" "$HYPER_NEW"
+test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
+test -f "$HYPER_NEW/system/fonts/MiSansVF.ttf"
+grep -q luoshu-slot-metrics-v1 "$HYPER_NEW/.luoshu-payload/.luoshu-metrics-report.json"
+test ! -e "$HYPER_NEW/config/font-payload-rebuild-pending.conf"
+grep -q 'phase=source_lookup_validation' "$HYPER_NEW/logs/fontswitch.log"
+grep -q '\[UPDATE\] module updated' "$HYPER_NEW/logs/fontswitch.log"
+
+# A migration view (symlinked partitions only) reads the report from the real module.
+VIEW="$TMP/hyper-view"; VIEW_NEW="$TMP/hyper-view-new"
+mkdir -p "$VIEW/config" "$VIEW_NEW/config" "$VIEW_NEW/common"
+cp "$HYPER/module.prop" "$VIEW/module.prop"; cp "$HYPER/config/"* "$VIEW/config/"
+ln -s "$HYPER/system" "$VIEW/system"; ln -s "$HYPER/product" "$VIEW/product"
+printf 'builder\n' >"$VIEW_NEW/common/composite_collection_build.py"
+LUOSHU_UPDATE_REAL_OLD_MOD="$HYPER" luoshu_migrate_active_install "$VIEW" "$VIEW_NEW"
+test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
+test -f "$VIEW_NEW/.luoshu-payload/.luoshu-metrics-report.json"
+
+NOREPORT="$TMP/hyper-noreport"; NOREPORT_NEW="$TMP/hyper-noreport-new"
+hyper_fixture "$NOREPORT"
+mkdir -p "$NOREPORT_NEW/config" "$NOREPORT_NEW/common"
+printf 'builder\n' >"$NOREPORT_NEW/common/composite_collection_build.py"
+luoshu_migrate_active_install "$NOREPORT" "$NOREPORT_NEW"
+test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
+test -f "$NOREPORT_NEW/system/fonts/MiSansVF.ttf"
+grep -q '^state=awaiting-explicit-apply$' "$NOREPORT_NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^mode=preserve-current$' "$NOREPORT_NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^reason=font-builder-changed$' "$NOREPORT_NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^detail=metrics-report-missing$' "$NOREPORT_NEW/config/font-payload-rebuild-pending.conf"
+
+CHANGED="$TMP/hyper-changed"; CHANGED_NEW="$TMP/hyper-changed-new"
+hyper_fixture "$CHANGED"
+mkdir -p "$CHANGED/.luoshu-payload" "$CHANGED_NEW/config" "$CHANGED_NEW/common"
+printf '{}\n' >"$CHANGED/.luoshu-payload/.luoshu-metrics-report.json"
+printf 'faster builder\n' >"$CHANGED_NEW/common/composite_collection_build.py"
+luoshu_migrate_active_install "$CHANGED" "$CHANGED_NEW"
+test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
+test -f "$CHANGED_NEW/system/fonts/MiSansVF.ttf"
+test ! -e "$CHANGED_NEW/.luoshu-payload/.luoshu-metrics-report.json"
+grep -q '^detail=builder-files-changed$' "$CHANGED_NEW/config/font-payload-rebuild-pending.conf"
+
 FRESH="$TMP/fresh"
 mkdir -p "$FRESH"
 set +e
