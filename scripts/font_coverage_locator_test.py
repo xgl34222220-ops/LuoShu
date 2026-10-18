@@ -536,6 +536,50 @@ class CoverageExportTest(LocatorTest):
         self.assertNotIn("sdcard", json.dumps(data["sectionErrors"]))
         self.assertTrue(data["issues"])
 
+    def test_missing_report_names_the_inherited_payload_instead_of_no_reason(self):
+        # Device export 2026-10-18: no .luoshu-metrics-report.json at all after a
+        # module update kept the old composite payload; the note said "未记录原因".
+        judge = locator.StockPolicy("hyperos", self.module, metrics={})
+        kind, note = judge.judge("/system/fonts/NotoSansCJK-Regular.ttc")
+        self.assertEqual("outside", kind)
+        self.assertIn("缺少度量/集合报告", note)
+        (self.module / "config").mkdir(exist_ok=True)
+        (self.module / "config/font-payload-rebuild-pending.conf").write_text(
+            "state=awaiting-explicit-apply\nreason=font-builder-changed\ndetail=metrics-report-missing\n")
+        kind, note = locator.StockPolicy("hyperos", self.module, metrics={}).judge(
+            "/system/fonts/NotoSerifCJK-Regular.ttc")
+        self.assertIn("模块更新后沿用了旧版本生成的字体负载", note)
+        self.assertNotIn("未记录原因", note)
+
+    def test_export_carries_the_last_apply_with_phase_timings(self):
+        (self.module / "logs").mkdir(exist_ok=True)
+        (self.module / "logs/fontswitch.log").write_text("\n".join([
+            "[SAFE-TIMING] task=old event=begin phase=map_rom uptime=1.0",
+            "[SAFE-TIMING] task=old event=end phase=map_rom status=completed uptime=2.0 elapsedMs=1000",
+            "[SAFE-TIMING] task=new event=begin phase=source_lookup_validation uptime=5.0",
+            "stage output for /sdcard/LuoShu/fonts/私人字体.ttf",
+            '{"mapped": 40, "generated": 12, "collections": ["/system/fonts/NotoSansCJK-Regular.ttc"]}',
+            "[SAFE-TIMING] task=new event=end phase=source_lookup_validation status=completed uptime=5.4 elapsedMs=400",
+            "[SAFE-TIMING] task=new event=begin phase=complete_hyperos uptime=5.4",
+            "[SAFE-TIMING] task=new event=end phase=complete_hyperos status=completed uptime=75.4 elapsedMs=70000",
+            "[2026-10-18 09:18:13] [WEBVIEW-ROUTE] already bound",
+        ]) + "\n")
+        data = self._export({"collections": []})
+        last = data["lastApply"]
+        self.assertTrue(last["found"])
+        self.assertEqual(7, last["lineCount"])
+        self.assertEqual([("source_lookup_validation", 400), ("complete_hyperos", 70000)],
+                         [(row["phase"], row["elapsedMs"]) for row in last["phases"]])
+        self.assertEqual(70400, last["totalPhaseMs"])
+        joined = "\n".join(last["lines"])
+        self.assertIn('"mapped": 40', joined)          # unfiltered stage output stays
+        self.assertNotIn("task=old", joined)
+        self.assertNotIn("/sdcard", joined)
+        self.assertNotIn("私人字体", joined)
+        self.assertEqual({}, data["sectionErrors"])
+        (self.module / "logs/fontswitch.log").write_text("[WEBVIEW-ROUTE] only\n")
+        self.assertFalse(locator.last_apply_log(self.module, str)["found"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

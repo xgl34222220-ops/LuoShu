@@ -313,6 +313,29 @@ DECORATIVE_PREFIXES = ("CarroisGothic", "ComingSoon", "DancingScript", "CutiveMo
 COLOROS_FLIP_PREFIXES = ("OplusOSUI-", "ColorOSUI-")
 
 
+def rebuild_pending(module: Path | None) -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        text = (module / "config/font-payload-rebuild-pending.conf").read_text(errors="replace") if module else ""
+    except OSError:
+        text = ""
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key in ("state", "reason", "detail", "font"):
+            values[key] = value.strip()
+    return values
+
+
+def missing_collection_note(metrics: dict[str, Any], module: Path | None) -> str:
+    """Why a CJK collection the ROM policy replaces is absent from the payload."""
+    if metrics:
+        return "CJK 集合在替换范围，但本次负载没有生成（报告未记录原因，请重新应用）"
+    pending = rebuild_pending(module)
+    if pending.get("detail") == "metrics-report-missing" or pending.get("reason") == "font-builder-changed":
+        return "模块更新后沿用了旧版本生成的字体负载（不含 CJK 集合），请在洛书中重新应用一次字体"
+    return "负载缺少度量/集合报告（多为旧版本生成或模块更新后沿用的负载），请在洛书中重新应用一次字体"
+
+
 def load_metrics(module: Path | None) -> dict[str, Any]:
     try:
         data = json.loads((module / METRICS_REPORT).read_text(encoding="utf-8")) if module else {}
@@ -384,7 +407,7 @@ class StockPolicy:
             if name in COLLECTION_TARGETS and (self.rom == "hyperos" or (
                     self.rom == "coloros" and coloros_policy is not None
                     and coloros_policy.cjk_collections_enabled(self._module))):
-                return "outside", "CJK 集合在替换范围，但本次负载没有生成（未记录原因，请重新应用）"
+                return "outside", missing_collection_note(self.metrics, self._module)
             return "kept", "多语言字体集合"
         if policy is not None:
             kind = policy.classify(name)
@@ -780,6 +803,76 @@ def recent_log(module: Path | None, sanitize: Callable[[str], str], lines: int =
     return [sanitize(line)[:400] for line in picked[-lines:]]
 
 
+_KV = re.compile(r"(\w+)=(\S+)")
+
+
+def _timing_record(line: str) -> tuple[str, dict[str, str]] | None:
+    if "[SAFE-TIMING]" in line:
+        kind = "safe"
+    elif "[MIX-PHASE]" in line:
+        kind = "mix"
+    else:
+        return None
+    values = dict(_KV.findall(line.split("]", 1)[-1] if kind == "safe" else line.split("[MIX-PHASE]", 1)[1]))
+    key = values.get("task") if kind == "safe" else values.get("request")
+    return (kind, values) if key and values.get("event") in ("begin", "end") else None
+
+
+def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_lines: int = 800) -> dict[str, Any]:
+    """The newest font apply in fontswitch.log: every line from its first stage
+    marker on (no keyword filter, so stage output and errors stay) plus per-phase
+    durations parsed from [SAFE-TIMING]/[MIX-PHASE] records."""
+    try:
+        raw = (module / "logs/fontswitch.log").read_text(errors="replace").splitlines()[-20000:] if module else []
+    except OSError:
+        raw = []
+    safe_task = mix_request = None
+    for line in reversed(raw):
+        record = _timing_record(line)
+        if record and record[0] == "safe" and safe_task is None:
+            safe_task = record[1]["task"]
+        elif record and record[0] == "mix" and mix_request is None:
+            mix_request = record[1]["request"]
+        if safe_task and mix_request:
+            break
+
+    def first(kind: str, key: str, value: str | None) -> int | None:
+        if value is None:
+            return None
+        for index, line in enumerate(raw):
+            record = _timing_record(line)
+            if record and record[0] == kind and record[1].get(key) == value:
+                return index
+        return None
+
+    starts = [index for index in (first("safe", "task", safe_task), first("mix", "request", mix_request))
+              if index is not None]
+    if not starts:
+        return {"found": False, "lines": [], "phases": [],
+                "note": "日志里没有应用字体的阶段记录（模块更新前的日志未保留，或之后尚未应用字体）"}
+    # A composite apply that hands off to the safe switch logs both; keep both.
+    start = min(starts) if len(starts) == 2 and abs(starts[0] - starts[1]) < 4000 else max(starts)
+    window = raw[start:]
+    phases = []
+    for line in window:
+        record = _timing_record(line)
+        if not record or record[1].get("event") != "end" or not record[1].get("elapsedMs", "").isdigit():
+            continue
+        kind, values = record
+        if kind == "safe":
+            phases.append({"source": "safe-switch", "phase": values.get("phase", "?"),
+                           "status": values.get("status", "completed"), "elapsedMs": int(values["elapsedMs"])})
+        else:
+            phases.append({"source": "mix", "phase": f"{values.get('component', '?')}/{values.get('phase', '?')}",
+                           "unit": values.get("unit", ""), "weight": values.get("weight", ""),
+                           "status": values.get("result", "unknown"), "elapsedMs": int(values["elapsedMs"])})
+    lines = window if len(window) <= max_lines else window[:200] + ["…（中间省略）…"] + window[-(max_lines - 201):]
+    return {"found": True, "lineCount": len(window), "truncated": len(window) > max_lines,
+            "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
+            "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
+            or sum(row["elapsedMs"] for row in phases)}
+
+
 def read_module_prop(module: Path | None) -> dict[str, str]:
     values = {}
     try:
@@ -870,6 +963,8 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
         **({"colorosFlipFont": flip} if flip is not None else {}),
         "webview": safe("webview", lambda: webview_visibility(module, payload, proc_root, host_root), []),
         "fontswitchLog": safe("fontswitchLog", lambda: recent_log(module, sanitize), []),
+        "lastApply": safe("lastApply", lambda: last_apply_log(module, sanitize), {}),
+        "rebuildPending": safe("rebuildPending", lambda: rebuild_pending(module), {}),
         "sanitizedDiagnostic": sanitize(summary_text) if summary_text else "not-generated",
         "privacy": "设备标识、账号、聊天内容、用户路径与来源字体名已省略；系统字体槽位与应用内字体资源名可能保留",
     }
