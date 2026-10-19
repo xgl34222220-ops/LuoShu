@@ -270,4 +270,29 @@ for migrator in canonical compatibility; do
     )
 done
 
+# Content-addressed collection and prepared-instance caches survive even a
+# builder-incompatible update, including when cache/ is the .luoshu-state link.
+CACHED="$TMP/cached"
+CACHED_NEW="$TMP/cached-new"
+mkdir -p "$CACHED/.luoshu-state/cache/hyperos-collections-v1" \
+    "$CACHED/.luoshu-state/cache/axes-mix/prepared-v1" "$CACHED_NEW"
+ln -s .luoshu-state/cache "$CACHED/cache"
+printf 'ttc\n' >"$CACHED/cache/hyperos-collections-v1/abc-NotoSansCJK-Regular.ttc"
+printf '{}\n' >"$CACHED/cache/hyperos-collections-v1/abc-NotoSansCJK-Regular.ttc.json"
+printf 'inst\n' >"$CACHED/cache/axes-mix/prepared-v1/k.font"
+printf 'sha\n' >"$CACHED/cache/axes-mix/prepared-v1/k.font.sha256"
+luoshu_migrate_update_cache "$CACHED" "$CACHED_NEW" false false
+grep -qx ttc "$CACHED_NEW/cache/hyperos-collections-v1/abc-NotoSansCJK-Regular.ttc"
+test -f "$CACHED_NEW/cache/hyperos-collections-v1/abc-NotoSansCJK-Regular.ttc.json"
+grep -qx inst "$CACHED_NEW/cache/axes-mix/prepared-v1/k.font"
+test -f "$CACHED_NEW/cache/axes-mix/prepared-v1/k.font.sha256"
+test ! -L "$CACHED_NEW/cache"
+# A state directory without the compatibility link is still found.
+rm -f "$CACHED/cache"
+CACHED_NEW2="$TMP/cached-new2"
+mkdir -p "$CACHED_NEW2"
+luoshu_migrate_update_cache "$CACHED" "$CACHED_NEW2" true
+grep -qx ttc "$CACHED_NEW2/cache/hyperos-collections-v1/abc-NotoSansCJK-Regular.ttc"
+grep -qx inst "$CACHED_NEW2/cache/axes-mix/prepared-v1/k.font"
+
 echo 'Module updates preserve selection, reject incompatible generated payloads, and rebuild before commit.'

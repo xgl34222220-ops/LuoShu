@@ -773,5 +773,24 @@ class SharedTableCollectionTest(unittest.TestCase):
         self.assertEqual(glyf[0], glyf[1])
 
 
+class CollectionCacheKeyTest(unittest.TestCase):
+    def test_key_depends_on_builder_schema_and_inputs_not_batch_driver(self):
+        import hyperos_metrics_batch as batch
+        with tempfile.TemporaryDirectory() as tmp:
+            stock, donor = Path(tmp, 'stock.ttc'), Path(tmp, 'donor.ttf')
+            stock.write_bytes(b'stock'); donor.write_bytes(b'donor')
+            hashed = []
+            real = builder.sha
+            with patch.object(builder, 'sha', side_effect=lambda path: hashed.append(Path(path).resolve()) or real(path)):
+                key = batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',))
+            self.assertNotIn(Path(batch.__file__).resolve(), hashed)
+            self.assertIn(Path(builder.__file__).resolve(), hashed)
+            self.assertEqual(key, batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',)))
+            with patch.object(builder, 'SCHEMA', 'changed'):
+                self.assertNotEqual(key, batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',)))
+            donor.write_bytes(b'other')
+            self.assertNotEqual(key, batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',)))
+
+
 if __name__ == '__main__':
     unittest.main()

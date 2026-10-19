@@ -168,9 +168,11 @@ def collection_cache_dir(module: Path) -> Path:
 
 def collection_cache_key(stock: Path, sources: list[Path], logical: str, allow: tuple) -> str:
     """Content identity of one compiled collection: stock bytes, each face's
-    donor bytes (in face order), the target, and both builder sources."""
+    donor bytes (in face order), the target, and the collection builder. The
+    batch driver's own source is deliberately excluded: it only selects inputs,
+    which are already part of the key, so unrelated edits keep caches valid."""
     import composite_collection_build as builder
-    engine = [builder.SCHEMA, builder.sha(Path(builder.__file__)), builder.sha(Path(__file__))]
+    engine = [builder.SCHEMA, builder.sha(Path(builder.__file__))]
     hashes = {}
     donors = [hashes.setdefault(path, builder.sha(path)) for path in sources]
     return builder.canonical({'engine': engine, 'target': logical, 'allow': list(allow),
