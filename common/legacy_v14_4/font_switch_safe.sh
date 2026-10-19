@@ -708,6 +708,7 @@ safe_exit_cleanup() {
     safe_timing_phase worker_cleanup
     luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true
     cleanup_stage; prewarm_lock_cleanup; lock_cleanup
+    luoshu_wake_lock_release safe_switch
     safe_timing_phase_end finished
     if [ "$SAFE_TIMING_ENABLED" = true ] && safe_timing_clock; then
         safe_timing_elapsed "$SAFE_TIMING_START_S" "$SAFE_TIMING_START_MS"
@@ -1156,8 +1157,12 @@ switch_font() {
 case "${1:-}" in
     action)
         case "${2:-}" in
-            switch) switch_font "${3:-}"; exit $? ;;
-            prewarm) prewarm_font "${3:-}"; exit $? ;;
+            # Keep the CPU awake while the payload is built and mounted
+            # (released by safe_exit_cleanup; expires by itself if killed).
+            switch) luoshu_wake_lock_acquire safe_switch 1800 || true
+                switch_font "${3:-}"; exit $? ;;
+            prewarm) luoshu_wake_lock_acquire safe_switch 1800 || true
+                prewarm_font "${3:-}"; exit $? ;;
             prewarm-start) prewarm_start "${3:-}"; exit $? ;;
             *) safe_error '安全切换核心只接管字体应用/预热动作'; exit 2 ;;
         esac

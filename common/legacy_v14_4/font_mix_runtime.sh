@@ -78,8 +78,13 @@ mark_interrupted_task() {
 
 monitor_task() {
     _wanted="$1"
-    _monitor_limit="${LUOSHU_MIX_MONITOR_TIMEOUT:-720}"
-    case "$_monitor_limit" in ''|*[!0-9]*) _monitor_limit=720 ;; esac
+    _monitor_limit="${LUOSHU_MIX_MONITOR_TIMEOUT:-1200}"
+    case "$_monitor_limit" in ''|*[!0-9]*) _monitor_limit=1200 ;; esac
+    # The commit (HyperOS collections, transaction, live mount) must not stall
+    # in deep sleep when the screen turns off; see luoshu_wake_lock_acquire.
+    if luoshu_wake_lock_acquire mix_monitor "$((_monitor_limit + 15))"; then
+        trap 'luoshu_wake_lock_release mix_monitor' EXIT
+    fi
     _loops=0
     while [ "$_loops" -lt "$_monitor_limit" ]; do
         _task="$(read_task_value task)"
@@ -159,8 +164,10 @@ case "${1:-status}" in
         if [ "$_rc" -eq 0 ]; then
             _task=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response" 2>/dev/null | tail -n1)
             if [ -n "$_task" ]; then
-                _monitor_timeout="${LUOSHU_MIX_MONITOR_TIMEOUT:-720}"
-                case "$_monitor_timeout" in ''|*[!0-9]*) _monitor_timeout=720 ;; esac
+                # Covers the whole commit: complete_hyperos (two uncached CJK
+                # collections take minutes on a phone) + transaction + live mount.
+                _monitor_timeout="${LUOSHU_MIX_MONITOR_TIMEOUT:-1200}"
+                case "$_monitor_timeout" in ''|*[!0-9]*) _monitor_timeout=1200 ;; esac
                 if ! LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS="$((_monitor_timeout + 15))" \
                     luoshu_start_detached "$LUOSHU_TASKS_DIR/mix-monitor-$_task.pid" "$_task.monitor" "$LOG_FILE" \
                     sh "$0" monitor "$_task"; then
