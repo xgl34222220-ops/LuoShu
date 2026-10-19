@@ -727,7 +727,8 @@ commit_mix_stage_if_needed() {
         return 1
     fi
     rm -f "$STAGED_NEXT_STATE" 2>/dev/null || true
-    if ! write_next_selection || ! write_legacy_mix_mode || ! luoshu_next_transaction_mix_receipt "$REALMOD" || ! luoshu_next_transaction_commit "$REALMOD"; then
+    if ! write_next_selection || ! write_legacy_mix_mode || ! clear_rebuild_pending || \
+       ! luoshu_next_transaction_mix_receipt "$REALMOD" || ! luoshu_next_transaction_commit "$REALMOD"; then
         luoshu_next_transaction_rollback "$REALMOD" >/dev/null 2>&1 || true
         return 1
     fi
@@ -778,6 +779,16 @@ write_legacy_mix_mode() {
         printf 'enabled=true\ncore=v14.4.0\nfont=mix\npipeline=atomic-next-boot-composite\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || return 1
     chmod 0600 "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
+}
+
+clear_rebuild_pending() {
+    # A module update that changed a font builder asks for one explicit apply
+    # (state=awaiting-explicit-apply). This commit is that apply: drop the
+    # request inside the next-payload transaction (a rollback restores it), as
+    # the safe switch does. It used to survive a successful composite apply.
+    rm -f "$REALMOD/config/font-payload-rebuild-pending.conf" \
+          "$REALMOD/config/font-payload-reapply-notified.conf" 2>/dev/null || true
+    [ ! -e "$REALMOD/config/font-payload-rebuild-pending.conf" ]
 }
 
 finalize_mix_stage() {
