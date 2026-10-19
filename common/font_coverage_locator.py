@@ -71,6 +71,15 @@ WEB_ENGINES = {
     "com.android.webview": "Android WebView",
 }
 THEME_PLACEHOLDER_MAX_BYTES = 65536
+# AndroidX EmojiCompat downloads Noto_COLR_Emoji_Compat from the Google font
+# provider into nearly every modern app; it only draws emoji, so it is never
+# evidence that an app renders its text with its own fonts.
+EMOJI_COMPAT_RE = re.compile(r"^Noto_?COLR_?Emoji_?Compat", re.IGNORECASE)
+# APK font resources that are icon/symbol sets, not text faces.
+ICON_FONT_RE = re.compile(r"icon|symbol|emoji|awesome|glyph|material", re.IGNORECASE)
+APK_PREFIXES = ("/data/app/", "/system/", "/system_ext/", "/product/", "/vendor/",
+                "/my_product/", "/oplus_product/", "/mi_ext/")
+APK_ARCHIVES_MAX = 8
 MAX_FILES = 48  # findings list every file (the App shows the first few)
 
 GUIDE = {
@@ -443,12 +452,66 @@ class StockPolicy:
         return "outside", ""
 
 
+def app_apk_paths(proc_root: Path, pid: str, limit: int = APK_ARCHIVES_MAX) -> list[str]:
+    """Installed APKs (base + splits) the process has mapped, in map order."""
+    found: list[str] = []
+    try:
+        with (proc_root / pid / "maps").open("r", errors="replace") as stream:
+            for line in stream:
+                parts = line.split(None, 5)
+                path = parts[5].strip() if len(parts) == 6 else ""
+                if (not path.endswith(".apk") or not path.startswith(APK_PREFIXES)
+                        or ".." in path.split("/") or path in found):
+                    continue
+                found.append(path)
+                if len(found) >= limit:
+                    break
+    except OSError:
+        return []
+    return found
+
+
+def _default_apk_reader(path: Path) -> dict[str, Any]:
+    from font_layout_diagnostic import apk_font_names  # central directory only
+    return apk_font_names(path)
+
+
+def apk_font_evidence(proc_root: Path, pid: str, host_root: Path = Path("/"),
+                      reader: Callable[[Path], dict[str, Any]] | None = None,
+                      deadline: float | None = None) -> dict[str, Any]:
+    """Font resources (res/font, assets) inside the app's own APKs. Reads only
+    each archive's central directory (font_layout_diagnostic.apk_font_names)."""
+    import time
+    reader = reader or _default_apk_reader
+    paths = app_apk_paths(proc_root, pid)
+    assets: list[str] = []
+    statuses: list[str] = []
+    truncated = False
+    for path in paths:
+        if deadline is not None and time.monotonic() > deadline:
+            truncated = True
+            break
+        try:
+            info = reader(host_root / path.lstrip("/"))
+        except Exception:  # noqa: BLE001 - one archive never breaks the locator
+            info = {"status": "unreadable-archive", "fontAssets": []}
+        statuses.append(str(info.get("status", "")))
+        truncated = truncated or bool(info.get("truncated"))
+        assets.extend(name for name in info.get("fontAssets") or [] if isinstance(name, str))
+    assets = sorted(set(assets))
+    return {"archives": len(paths), "statuses": statuses, "fontAssets": assets[:MAX_FILES],
+            "textFontAssets": [name for name in assets if not ICON_FONT_RE.search(name.rsplit("/", 1)[-1])][:MAX_FILES],
+            "truncated": truncated or len(assets) > MAX_FILES}
+
+
 def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Path("/proc"),
            host_root: Path = Path("/"), theme_dir: Path = Path("/data/system/theme/fonts"),
            groups: frozenset[str] | None = None, stock_dir: Path = Path("/system/fonts"),
            weight_probe: Callable[[Path], bool] = static_on_variable_slot,
            theme: dict[str, Any] | None = None, rom: str | None = None,
-           stock_policy: StockPolicy | None = None) -> dict[str, Any]:
+           stock_policy: StockPolicy | None = None,
+           apk_reader: Callable[[Path], dict[str, Any]] | None = None,
+           apk_deadline: float | None = None, apk_scan: bool = True) -> dict[str, Any]:
     rom = rom if rom in ROMS else detect_rom()
     result: dict[str, Any] = {"schema": SCHEMA, "package": package, "pid": pid or "",
                               "rom": rom, "findings": []}
@@ -496,6 +559,8 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
     stock_paths = _split(report.get("app.stockPaths", ""))
     replaced = _split(report.get("app.replacedSlotStockPaths", ""))
     others = _split(report.get("app.otherFiles", ""))
+    emoji_compat = [name for name in others if EMOJI_COMPAT_RE.match(name)]
+    others = [name for name in others if name not in emoji_compat]
     luoshu_hits = int(report.get("app.luoshuHits", "0") or 0)
 
     if theme["state"] == "user-theme" and (theme_paths or not luoshu_hits):
@@ -539,12 +604,27 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
             "；".join(f"{path.rsplit('/', 1)[-1]}：{reason}" for path, reason in collections))
     if outside:
         add("outside-whitelist", outside)
+    kept += [f"{name}（按设计保留：EmojiCompat 下载的表情字体，只绘制表情，不代表应用自带文字字体）"
+             for name in emoji_compat]
     if kept:
         result["keptByDesign"] = kept[:MAX_FILES]
     if pending:
         result["targetsNotInPayload"] = pending[:MAX_FILES]
-    if others and not any(f["category"] == "app-embedded" for f in findings):
-        add("app-embedded", others, "进程自行打开了应用内或下载的字体文件")
+    evidence = apk_font_evidence(proc_root, pid, host_root, apk_reader, apk_deadline) if apk_scan else None
+    if evidence and evidence["fontAssets"]:
+        result["apkFontAssets"] = evidence
+    text_assets = evidence["textFontAssets"] if evidence else []
+    embedded = next((f for f in findings if f["category"] == "app-embedded"), None)
+    if others and embedded is None:
+        embedded = add("app-embedded", others, "进程自行打开了应用内或下载的字体文件")
+    if text_assets:
+        detail = ("安装包内含文字字体资源（res/font、assets）：应用很可能用自带字体绘制英文/数字，"
+                  "系统字体只负责其余文字（如中文），这部分洛书无法替换（不做 Hook）")
+        if embedded is None:
+            add("app-embedded", text_assets, detail)
+        else:
+            embedded["files"] = list(dict.fromkeys([*embedded["files"], *text_assets]))[:MAX_FILES]
+            embedded["detail"] = "；".join(part for part in (embedded["detail"], detail) if part)
     stock_on_slot = [item for item in replaced if not item.endswith(":loaded-before-mount")]
     if stock_on_slot and not hidden and not switched:
         add("link-switched", stock_on_slot, "已替换槽位仍映射原厂 inode")
@@ -613,6 +693,8 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
     weight = weight_probe((module / ".luoshu-payload/system/fonts") if module else Path("/nonexistent"))
     judge = StockPolicy(rom, module, audit.PayloadIndex(module), groups, coloros_names=coloros_names)
     items, covered, truncated = [], 0, False
+    # APK central directories are cheap, but cap their share of the scan.
+    apk_deadline = time.monotonic() + max(1.0, min(12.0, budget_s / 4))
     for pid, name in running_app_processes(proc_root):
         if now() - started > budget_s:
             truncated = True
@@ -620,7 +702,7 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
         try:
             result = locate(name, pid, module=module, proc_root=proc_root, host_root=host_root, theme_dir=theme_dir,
                             groups=groups, weight_probe=lambda _p: weight, theme=theme, rom=rom,
-                            stock_policy=judge)
+                            stock_policy=judge, apk_deadline=apk_deadline)
         except Exception:  # one process never breaks the scan
             continue
         if result["verdict"] == "no-payload":
@@ -639,7 +721,8 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
                                     "files": f["files"]} for f in found],
                       "files": list(dict.fromkeys(file for f in found for file in f["files"])),
                       "keptByDesign": result.get("keptByDesign", []),
-                      "targetsNotInPayload": result.get("targetsNotInPayload", [])})
+                      "targetsNotInPayload": result.get("targetsNotInPayload", []),
+                      **({"apkFontAssets": result["apkFontAssets"]} if "apkFontAssets" in result else {})})
     return {"schema": SCAN_SCHEMA, "verdict": "ok", "rom": rom, "romLabel": ROM_LABELS[rom],
             "scanned": covered + len(items), "covered": covered,
             "items": items, "fixes": list(dict.fromkeys(k for i in items for k in i["fixes"])),
@@ -789,6 +872,7 @@ def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = json.dumps([[f["category"], f["files"]] for f in item.get("findings", [])], ensure_ascii=False)
         group = groups.setdefault(key, {"findings": item.get("findings", []), "reasons": item.get("reasons", []),
                                         "fixes": item.get("fixes", []), "keptByDesign": item.get("keptByDesign", []),
+                                        **({"apkFontAssets": item["apkFontAssets"]} if "apkFontAssets" in item else {}),
                                         "processes": []})
         group["processes"].append(item["process"])
     return sorted(groups.values(), key=lambda group: -len(group["processes"]))

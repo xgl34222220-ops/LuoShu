@@ -142,6 +142,60 @@ class LocatorTest(unittest.TestCase):
         embedded = next(f for f in result["findings"] if f["category"] == "app-embedded")
         self.assertEqual(embedded["files"], ["wechat.ttf"])
 
+    def test_emoji_compat_download_is_not_app_embedded_evidence(self):
+        self.app_sees_payload()
+        emoji = self.stock / "Noto_COLR_Emoji_Compat-400-100_0-0_0.ttf"
+        emoji.write_bytes(b"e" * 100)
+        self.map("/data/user_de/0/com.google.android.gms/files/fonts/opentype/Noto_COLR_Emoji_Compat-400-100_0-0_0.ttf", emoji)
+        result = self.run_locate(package="com.anthropic.claude")
+        self.assertNotIn("app-embedded", self.categories(result))
+        self.assertEqual(result["verdict"], "covered")
+        self.assertTrue(any("Noto_COLR_Emoji_Compat" in line and "EmojiCompat" in line
+                            for line in result["keptByDesign"]))
+
+    def apk(self, entries):
+        import zipfile
+        real = self.host / "data/app/~~x/com.example.app-1/base.apk"
+        real.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(real, "w") as archive:
+            archive.writestr("classes.dex", b"dex")
+            for name in entries:
+                archive.writestr(name, b"font")
+        self.map("/data/app/~~x/com.example.app-1/base.apk", real)
+        return real
+
+    def test_apk_text_font_resources_are_app_embedded_evidence(self):
+        self.app_sees_payload()
+        self.apk(["res/font/anthropic_sans.ttf", "assets/fonts/MaterialIcons-Regular.ttf", "res/raw/x.txt"])
+        result = self.run_locate(package="com.example.app")
+        embedded = next(f for f in result["findings"] if f["category"] == "app-embedded")
+        self.assertEqual(embedded["files"], ["res/font/anthropic_sans.ttf"])
+        self.assertIn("英文/数字", embedded["detail"])
+        evidence = result["apkFontAssets"]
+        self.assertEqual(evidence["archives"], 1)
+        self.assertEqual(evidence["fontAssets"], ["assets/fonts/MaterialIcons-Regular.ttf", "res/font/anthropic_sans.ttf"])
+
+    def test_apk_icon_fonts_only_and_expired_budget_do_not_flag(self):
+        self.app_sees_payload()
+        self.apk(["assets/fonts/MaterialIcons-Regular.ttf"])
+        result = self.run_locate(package="com.example.app")
+        self.assertNotIn("app-embedded", self.categories(result))
+        self.assertEqual(result["apkFontAssets"]["textFontAssets"], [])
+        (self.proc / PID / "maps").write_text("".join(self.maps))
+        expired = locator.apk_font_evidence(self.proc, PID, self.host, deadline=0.0)
+        self.assertTrue(expired["truncated"])
+        self.assertEqual(expired["fontAssets"], [])
+
+    def test_apk_paths_reject_unexpected_locations(self):
+        (self.proc / PID).mkdir(parents=True, exist_ok=True)
+        (self.proc / PID / "maps").write_text(
+            "7000-8000 r--p 0 fd:01 1 /data/app/a/base.apk\n"
+            "8000-9000 r--p 0 fd:01 1 /data/app/a/base.apk\n"
+            "9000-a000 r--p 0 fd:01 2 /sdcard/evil.apk\n"
+            "a000-b000 r--p 0 fd:01 3 /data/app/../x.apk\n"
+            "b000-c000 r--p 0 fd:01 4 /system/app/Foo/Foo.apk\n")
+        self.assertEqual(locator.app_apk_paths(self.proc, PID), ["/data/app/a/base.apk", "/system/app/Foo/Foo.apk"])
+
     def test_weight_loss_on_static_font(self):
         self.app_sees_payload()
         self.map("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf")
