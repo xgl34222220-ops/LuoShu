@@ -278,8 +278,16 @@ run_instance() {
         export LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         export TMPDIR="${TMPDIR:-$MODDIR/cache/tmp}"
         mkdir -p "$TMPDIR" 2>/dev/null || true
-        "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
-            --role "$_role" --weight "$_weight" --axes "$_axes"
+        # Latin/digit roles only contribute LATIN|DIGIT code points to the
+        # composite: subset before instancing (a CJK VF used for Latin took 42s).
+        case "$_role" in
+            latin|digit)
+                "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
+                    --role "$_role" --weight "$_weight" --axes "$_axes" --subset latin-digit ;;
+            *)
+                "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
+                    --role "$_role" --weight "$_weight" --axes "$_axes" ;;
+        esac
     ) >"$_report" 2>"$_error"
     _code=$?
     if [ "$_code" -ne 0 ] || [ ! -s "$_destination" ]; then
@@ -342,10 +350,14 @@ prepare_instance_cached() {
     _pic_generator=$(prepared_hash_file "$INSTANCE_PY")
     _pic_face_role=''
     [ "$_pic_format" != TTC ] || _pic_face_role="$_pic_role"
+    # Latin and digit instances are subset to the same code points, so they may
+    # share an entry; a CJK instance of the same source never may.
+    _pic_scope=full
+    case "$_pic_role" in latin|digit) _pic_scope=latin-digit ;; esac
     _pic_key=''
     if [ -n "$_pic_digest" ] && [ -n "$_pic_generator" ]; then
-        _pic_key=$(printf 'luoshu-prepared-instance-v1\000%s\000%s\000%s\000%s\000%s' \
-            "$_pic_digest" "$_pic_face_role" "$(safe_weight "$_pic_axes")" "$_pic_axes" "$_pic_generator" | prepared_hash_text)
+        _pic_key=$(printf 'luoshu-prepared-instance-v2\000%s\000%s\000%s\000%s\000%s\000%s' \
+            "$_pic_digest" "$_pic_face_role" "$(safe_weight "$_pic_axes")" "$_pic_axes" "$_pic_generator" "$_pic_scope" | prepared_hash_text)
     fi
     if [ -n "$_pic_key" ]; then
         _pic_cached="$PREPARED_CACHE/${_pic_key}.font"

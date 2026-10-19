@@ -143,6 +143,29 @@ class PreparedInstanceCache(unittest.TestCase):
         self.assertIn("[MIX-PREPARE] reused instance",
                       (self.module / "logs/fontswitch.log").read_text())
 
+    def test_latin_and_digit_are_subset_but_cjk_of_the_same_source_is_not(self):
+        out = self.root / "same-source"
+        variable_font(self.public / "MixedFixture-VF.ttf", 700,
+                      set(range(32, 127)) | set(range(0xA0, 0x250)) | set(map(ord, "中文字体系统默认洛书汉字国一的。")))
+        script = (f". '{self.harness}'\n"
+                  f"prepare_slot latin MixedFixture-VF wght=400 '{out}' LuoShuMixLatin || exit 12\n"
+                  f"prepare_slot digit MixedFixture-VF wght=400 '{out}' LuoShuMixDigit || exit 13\n"
+                  f"prepare_slot cjk MixedFixture-VF wght=400 '{out}' LuoShuMixCJK || exit 11\n")
+        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        # latin+digit share one subset instance; cjk is a separate full one.
+        self.assertEqual(self.instance_calls(), 2)
+        fonts = out / "fonts"
+        with TTFont(fonts / "LuoShuMixLatin-Regular.ttf") as font:
+            cmap = font.getBestCmap()
+            self.assertNotIn("fvar", font)
+            self.assertNotIn(ord("中"), cmap)
+            self.assertTrue(all(cp in cmap for cp in range(32, 127)))
+        with TTFont(fonts / "LuoShuMixCJK-Regular.ttf") as font:
+            self.assertIn(ord("中"), font.getBestCmap())
+        self.assertEqual(self.digest(fonts / "LuoShuMixLatin-Regular.ttf"),
+                         self.digest(fonts / "LuoShuMixDigit-Regular.ttf"))
+
     def test_axes_source_and_generator_changes_are_new_identities(self):
         self.request("request-1")
         script = (f". '{self.harness}'\n"
