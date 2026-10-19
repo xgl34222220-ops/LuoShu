@@ -218,11 +218,13 @@ def cff_charstring(recording, width, cff2, scale, reverse, private, subrs):
     return pen.getCharString(private=private, globalSubrs=subrs)
 
 
-# Converted CFF outline bodies (control box, Type 2 bytes without width) keyed
-# by (donor sha256, glyph, scale, donor is TrueType). Sans and Serif CJK
+# Converted CFF outline bodies (control box, Type 2 bytes without width, with
+# endchar) keyed by (donor sha256, glyph, scale, donor is TrueType); CFF2 faces
+# take the same bytes minus endchar. Sans and Serif CJK
 # collections compiled one after another in one stage process take the same
 # per-weight donors, so the second collection skips drawing and converting.
 OUTLINE_CACHE = {}
+ENDCHAR = b'\x0e'  # Type 2 endchar; absent in CFF2 charstrings
 
 
 def width_prefix(value):
@@ -382,7 +384,11 @@ def replace_face(font, donor, recordings, allow=(), group=None, donor_key=None):
         # Only conflict checks keep recordings; a converted outline is cached
         # below, so do not hold every drawn donor outline in memory as well.
         recording = recordings.get(source_name)
-        shared_key = (donor_key, source_name, scale, 'glyf' in donor) if donor_key and kind == 'CFF ' else None
+        # CFF and CFF2 encode path operators identically; only the CFF width
+        # prefix and the trailing endchar differ. One cache entry therefore
+        # serves a static CFF collection and a variable CFF2 collection alike
+        # (Android 16 ships NotoSansCJK as CFF2 and NotoSerifCJK as CFF).
+        shared_key = (donor_key, source_name, scale, 'glyf' in donor) if donor_key and kind != 'glyf' else None
         shared = OUTLINE_CACHE.get(shared_key) if shared_key else None
         if recording is None and shared is None:
             recording = draw_record(source_glyphs, source_name)
@@ -474,8 +480,18 @@ def replace_face(font, donor, recordings, allow=(), group=None, donor_key=None):
                     char = T2CharString(bytecode=prefix + shared[1], private=private,
                                         globalSubrs=cff.GlobalSubrs)
                 else:
-                    char = cff_charstring(recording, encoded_width, True, scale,
-                                          'glyf' in donor, private, cff.GlobalSubrs)
+                    if shared is None:
+                        char = cff_charstring(recording, None, False, scale, 'glyf' in donor,
+                                              private, cff.GlobalSubrs)
+                        char.compile()
+                        shared = (box, char.bytecode)
+                        if shared_key:
+                            OUTLINE_CACHE[shared_key] = shared
+                    body = shared[1]
+                    if not body.endswith(ENDCHAR):
+                        raise ValueError('CFF 轮廓缓存缺少 endchar，不能转换为 CFF2')
+                    char = T2CharString(bytecode=body[:-1], private=private,
+                                        globalSubrs=cff.GlobalSubrs)
                 if selector is not None:
                     char.fdSelectIndex = selector
                 converted[key] = char

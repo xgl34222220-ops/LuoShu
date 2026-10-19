@@ -223,6 +223,38 @@ class CollectionBuildTest(unittest.TestCase):
         self.run_build()
         self.assertTrue(all(key[0] == builder.sha(self.source) for key in builder.OUTLINE_CACHE))
 
+    def test_cff2_and_cff_collections_share_converted_donor_outlines(self):
+        # Android 16: NotoSansCJK is CFF2 and NotoSerifCJK is CFF. Whichever is
+        # compiled first, the other reuses the cached outline bodies and its
+        # output bytes match a cold build of that collection.
+        variable = self.root / 'variable.font'; variable_fixture(variable, cff2=True)
+        variable_stock = self.root / 'variable.ttc'
+        collection = TTCollection(); collection.fonts = [TTFont(variable)]
+        collection.save(variable_stock); collection.close()
+        static_stock = self.stock
+        self.collection((dict(index=0, cff=True), dict(index=2, cff=True)))
+
+        def build(stock):
+            builder.build(self.source, stock, self.output, self.workspace,
+                          'request-collection', '/system/fonts/NotoSansCJK-Regular.ttc')
+            return self.output.read_bytes()
+
+        cold = {}
+        for stock in (variable_stock, static_stock):
+            builder.OUTLINE_CACHE.clear(); cold[stock] = build(stock)
+        for first, second in ((variable_stock, static_stock), (static_stock, variable_stock)):
+            builder.OUTLINE_CACHE.clear()
+            self.assertEqual(cold[first], build(first))
+            with patch.object(builder, 'cff_charstring', side_effect=AssertionError('converted again')), \
+                    patch.object(builder, 'draw_record', side_effect=AssertionError('drawn again')):
+                self.assertEqual(cold[second], build(second))
+        with TTFont(self.output, fontNumber=0) as result:
+            self.assertIn('CFF2', result)
+            from fontTools.pens.recordingPen import RecordingPen
+            pen = RecordingPen(); result.getGlyphSet()[result.getBestCmap()[ord('中')]].draw(pen)
+            self.assertTrue(pen.value)
+        builder.OUTLINE_CACHE.clear()
+
     def test_true_type_stock_accepts_cff_donor(self):
         fixture(self.source, 1, cff=True); self.collection()
         self.run_build()
