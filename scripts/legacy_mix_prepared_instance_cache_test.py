@@ -166,6 +166,44 @@ class PreparedInstanceCache(unittest.TestCase):
         self.assertEqual(self.digest(fonts / "LuoShuMixLatin-Regular.ttf"),
                          self.digest(fonts / "LuoShuMixDigit-Regular.ttf"))
 
+    def test_subset_instance_decodes_only_kept_glyphs_and_matches_eager_output(self):
+        sys.path.insert(0, str(LEGACY))
+        import font_instance
+        from fontTools.ttLib.tables import _g_l_y_f
+        han = set(range(0x4E00, 0x4E00 + 3000))
+        latin = set(range(32, 127)) | set(range(0xA0, 0x250))
+        source = self.root / "LargeCJK-VF.ttf"
+        variable_font(source, 700, latin | han)
+        expanded = []
+        real = _g_l_y_f.Glyph.expand
+
+        def counting(glyph, glyfTable):
+            if getattr(glyph, "data", b""):  # still compiled: a real decode
+                expanded.append(1)
+            return real(glyph, glyfTable)
+
+        lazy_out, eager_out = self.root / "lazy.ttf", self.root / "eager.ttf"
+        _g_l_y_f.Glyph.expand = counting
+        try:
+            font_instance.materialize(source, lazy_out, "latin", 500, {"wght": 500.0}, "latin-digit")
+        finally:
+            _g_l_y_f.Glyph.expand = real
+        # The ~520 kept Latin glyphs are decoded, never the 3000 Han glyphs.
+        self.assertLess(len(expanded), 1500)
+        # Same result as loading eagerly before subsetting (the old path).
+        original = font_instance.TTFont
+
+        def eager(*args, **kwargs):
+            kwargs["lazy"] = False
+            return original(*args, **kwargs)
+
+        font_instance.TTFont = eager
+        try:
+            font_instance.materialize(source, eager_out, "latin", 500, {"wght": 500.0}, "latin-digit")
+        finally:
+            font_instance.TTFont = original
+        self.assertEqual(lazy_out.read_bytes(), eager_out.read_bytes())
+
     def test_axes_source_and_generator_changes_are_new_identities(self):
         self.request("request-1")
         script = (f". '{self.harness}'\n"

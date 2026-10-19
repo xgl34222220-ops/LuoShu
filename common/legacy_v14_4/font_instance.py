@@ -115,7 +115,13 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
     requested_weight = clamp_weight(requested_axes.get("wght", requested_weight))
     face = pick_face(source, role, requested_weight)
     kwargs: dict[str, object] = {
-        "lazy": False,
+        # A full instance needs every table anyway. A latin/digit subset must
+        # not load eagerly: lazy=False makes fontTools expand every glyf glyph
+        # and decode every gvar entry of a CJK variable font at open time
+        # (device: 35.6 s for a Latin role; host NotoSansSC VF 10.5 s, 478 MB),
+        # only for the subsetter to discard all but ~800 glyphs. Default
+        # laziness decodes just the kept glyphs; the output is byte-identical.
+        "lazy": None if subset else False,
         "recalcTimestamp": False,
         "recalcBBoxes": True,
     }
