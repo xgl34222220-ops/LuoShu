@@ -28,6 +28,7 @@ from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_c
                                   inventory_font_roots as font_roots,
                                   inventory_completion_jobs, build_collections,
                                   COLLECTION_TARGETS, prune_orphan_aliases)
+import hyperos_metrics_batch as _shared_stage
 
 
 def eligible_slot(slot: object, logical: str, groups: frozenset | None = None) -> bool:
@@ -186,6 +187,8 @@ def stock_collection_contract(logical: str, slot: dict, selected: list[FontRoot]
 
 
 def build(module: Path, stage: Path) -> dict:
+    # Collections reuse the HyperOS step timer; label its lines for ColorOS.
+    _shared_stage.STEPS.__init__('coloros')
     live = (module / '.luoshu-payload').resolve()
     resolved = stage.resolve()
     if resolved == module.resolve() or resolved == live or live in resolved.parents:

@@ -133,6 +133,43 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual('LuoShu-700.ttf', batch.collection_source_for_weight(self.fonts, 600).name)
         self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 300).name)
 
+    def test_stage_completion_reports_each_step_with_awake_time(self):
+        self.stock_collection()
+        (self.root / 'stock/system/400.ttf').touch()
+        import contextlib, io
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            summary = batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        steps = [row['step'] for row in report['steps']]
+        for name in ('read_inventory', 'plan_slots', 'cjk_routing_proof', 'slot_metrics', 'link_slots',
+                     'collection_key', 'collection_cache_check', 'collection_build',
+                     'collection_cache_publish', 'alias_cleanup', 'prune_orphan_aliases'):
+            self.assertIn(name, steps)
+        build = next(row for row in report['steps'] if row['step'] == 'collection_build')
+        self.assertEqual('/system/fonts/NotoSansCJK-Regular.ttc', build['slot'])
+        self.assertTrue(all(type(row['elapsedMs']) is int and row['status'] == 'ok' for row in report['steps']))
+        self.assertGreaterEqual(report['stepsElapsedMs'], 0)
+        self.assertIn('suspendedMs', summary)
+        self.assertTrue(summary['slowestSteps'])
+        # Every step reaches the apply log as it finishes, not only at the end.
+        lines = [line for line in stderr.getvalue().splitlines() if line.startswith('[STAGE-STEP]')]
+        self.assertEqual(len(report['steps']), len(lines))
+        self.assertIn('component=hyperos step=collection_build', '\n'.join(lines))
+        # The converted-outline cache is released after the collections.
+        import composite_collection_build as builder
+        self.assertEqual({}, builder.OUTLINE_CACHE)
+
+    def test_failed_step_is_logged_as_failed(self):
+        timer = batch.StepTimer('hyperos')
+        import contextlib, io
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(ValueError):
+            with timer.step('collection_build', slot='/system/fonts/NotoSansCJK-Regular.ttc'):
+                raise ValueError('boom')
+        self.assertEqual('failed', timer.rows[0]['status'])
+        self.assertIn('status=failed', stderr.getvalue())
+
     def test_collection_runs_after_main_slots_and_repeat_reuses_cache(self):
         self.stock_collection()
         (self.root / 'stock/system/400.ttf').touch()

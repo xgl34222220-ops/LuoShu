@@ -902,6 +902,28 @@ def _timing_record(line: str) -> tuple[str, dict[str, str]] | None:
     return (kind, values) if key and values.get("event") in ("begin", "end") else None
 
 
+def stage_steps(window: list[str]) -> list[dict[str, Any]]:
+    """Sub-steps of complete_hyperos/complete_coloros ([STAGE-STEP] lines from
+    hyperos_metrics_batch.py): which slot, collection or proof took the time.
+    elapsedMs is awake time; suspendedMs is deep sleep inside that step."""
+    steps = []
+    for line in window:
+        if "[STAGE-STEP]" not in line:
+            continue
+        values = dict(_KV.findall(line.split("[STAGE-STEP]", 1)[1]))
+        if not values.get("step") or not values.get("elapsedMs", "").isdigit():
+            continue
+        row: dict[str, Any] = {"component": values.get("component", "hyperos"), "step": values["step"],
+                               "status": values.get("status", "ok"), "elapsedMs": int(values["elapsedMs"])}
+        if values.get("suspendedMs", "").isdigit():
+            row["suspendedMs"] = int(values["suspendedMs"])
+        slot = values.get("slot", "")
+        if re.fullmatch(r"/[A-Za-z0-9_]+/fonts/[A-Za-z0-9_.+-]+", slot):
+            row["slot"] = slot
+        steps.append(row)
+    return steps
+
+
 def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_lines: int = 800) -> dict[str, Any]:
     """The newest font apply in fontswitch.log: every line from its first stage
     marker on (no keyword filter, so stage output and errors stay) plus per-phase
@@ -953,6 +975,7 @@ def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_line
     lines = window if len(window) <= max_lines else window[:200] + ["…（中间省略）…"] + window[-(max_lines - 201):]
     return {"found": True, "lineCount": len(window), "truncated": len(window) > max_lines,
             "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
+            "stageSteps": stage_steps(window),
             "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
             or sum(row["elapsedMs"] for row in phases)}
 

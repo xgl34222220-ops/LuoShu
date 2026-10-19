@@ -635,5 +635,31 @@ class CoverageExportTest(LocatorTest):
         self.assertFalse(locator.last_apply_log(self.module, str)["found"])
 
 
+    def test_last_apply_breaks_complete_hyperos_into_stage_steps(self):
+        (self.module / "logs").mkdir(exist_ok=True)
+        (self.module / "logs/fontswitch.log").write_text("\n".join([
+            "[MIX-PHASE] schema=1 request=r1 component=finalize phase=complete_hyperos unit=fixed "
+            "weight=fixed event=begin uptimeSeconds=10.0",
+            "[STAGE-STEP] component=hyperos step=cjk_routing_proof elapsedMs=2051 status=ok outputs=5",
+            "[STAGE-STEP] component=hyperos step=slot_metrics elapsedMs=99 status=ok "
+            "slot=/product/fonts/MiClock.otf bytes=1",
+            "[STAGE-STEP] component=hyperos step=collection_build elapsedMs=90600 suspendedMs=435000 "
+            "status=ok slot=/system/fonts/NotoSansCJK-Regular.ttc",
+            "[STAGE-STEP] component=hyperos step=slot_metrics elapsedMs=5 status=ok slot=/sdcard/私人.ttf",
+            "[STAGE-STEP] component=hyperos step=broken elapsedMs=x",
+            "[MIX-PHASE] schema=1 request=r1 component=finalize phase=complete_hyperos unit=fixed "
+            "weight=fixed event=end uptimeSeconds=550.0 elapsedMs=540000 result=ok",
+        ]) + "\n")
+        last = locator.last_apply_log(self.module, str)
+        self.assertEqual([("finalize/complete_hyperos", 540000)],
+                         [(row["phase"], row["elapsedMs"]) for row in last["phases"]])
+        self.assertEqual(540000, last["totalPhaseMs"])  # sub-steps never double count
+        steps = last["stageSteps"]
+        self.assertEqual(["cjk_routing_proof", "slot_metrics", "collection_build", "slot_metrics"],
+                         [row["step"] for row in steps])
+        self.assertEqual(435000, steps[2]["suspendedMs"])
+        self.assertEqual("/system/fonts/NotoSansCJK-Regular.ttc", steps[2]["slot"])
+        self.assertNotIn("slot", steps[3])  # only system slot paths are exported
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
