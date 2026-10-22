@@ -36,6 +36,16 @@ MOUNTS="$MODDIR/config/google-font-provider-namespaces.conf"
 INSPECT_CACHE="$CACHE/inspected-targets-v1.conf"
 REFRESH_QUEUE="$MODDIR/config/google-font-refresh-pending.conf"
 LOG="${LUOSHU_LOG_DIR:-$MODDIR/logs}/google-font-provider.log"
+# FontManagerService updatable fonts (Emoji, Google-delivered fonts) carry
+# hasVerity: hwui aborts an app whose visible file lost fs-verity or changed
+# head.fontRevision / PostScript name. Replacements of these paths are sealed
+# and verified; without fs-verity support the target is left authentic.
+# The protected-target handling follows 字域 Ziyu v1.4.8 (GPL-3.0-only).
+PROTECTED_PREFIX="${LUOSHU_GOOGLE_FONT_PROTECTED_PREFIX:-/data/fonts/}"
+VERITY_TOOL="${LUOSHU_FONT_VERITY_TOOL:-$MODDIR/common/font_verity.sh}"
+# Cross-namespace consumers reach the module through init's root.
+NS_VERITY_TOOL="${LUOSHU_FONT_VERITY_NS_TOOL:-/proc/1/root$VERITY_TOOL}"
+VERITY_UNSUPPORTED="$CACHE/verity-unsupported.boot"
 
 # One writer owns all provider/theme journals and the deferred-refresh queue.
 # The service lock is separate so concurrent one-shot entries do not race a
@@ -149,6 +159,43 @@ _gfp_valid_font() {
     _gfp_bytes=$(_gfp_size "$1")
     case "$_gfp_bytes" in ''|*[!0-9]*) return 1 ;; esac
     [ "$_gfp_bytes" -ge 1024 ]
+}
+
+_gfp_protected_target() {
+    case "$1" in "$PROTECTED_PREFIX"*) return 0 ;; esac
+    return 1
+}
+
+_gfp_schema_for_target() {
+    if _gfp_protected_target "$1"; then
+        printf '%s\n' provider-v4-verity
+    else
+        printf '%s\n' provider-v3
+    fi
+}
+
+_gfp_verity() {
+    [ -f "$VERITY_TOOL" ] || return 1
+    sh "$VERITY_TOOL" "$@"
+}
+
+_gfp_boot_id() {
+    cat "${LUOSHU_PROC_ROOT:-/proc}/sys/kernel/random/boot_id" 2>/dev/null || \
+        cat /proc/sys/kernel/random/boot_id 2>/dev/null
+}
+
+# fs-verity support is a kernel/filesystem property: once a seal reported
+# "unsupported" this boot, protected targets are skipped without Python.
+_gfp_verity_unsupported() {
+    [ -s "$VERITY_UNSUPPORTED" ] || return 1
+    _gfp_vu_boot=$(_gfp_boot_id)
+    [ -n "$_gfp_vu_boot" ] && [ "$(cat "$VERITY_UNSUPPORTED" 2>/dev/null)" = "$_gfp_vu_boot" ]
+}
+
+_gfp_mark_verity_unsupported() {
+    _gfp_mvu_boot=$(_gfp_boot_id)
+    [ -n "$_gfp_mvu_boot" ] || return 0
+    printf '%s\n' "$_gfp_mvu_boot" > "$VERITY_UNSUPPORTED" 2>/dev/null || true
 }
 
 _gfp_python_worker() {
@@ -345,6 +392,9 @@ _gfp_build_clone() {
     _gfp_target="$1"
     _gfp_weight_value="$2"
     _gfp_source="$3"
+    _gfp_schema=$(_gfp_schema_for_target "$_gfp_target")
+    _gfp_protected=0
+    _gfp_protected_target "$_gfp_target" && _gfp_protected=1
     _gfp_source_hash=$(_gfp_hash "$_gfp_source")
     _gfp_target_hash=$(_gfp_hash "$_gfp_target")
     [ -n "$_gfp_source_hash" ] && [ -n "$_gfp_target_hash" ] || return 1
@@ -354,7 +404,7 @@ _gfp_build_clone() {
     if [ -s "$STATE" ]; then
         while IFS='|' read -r _gfp_old_target _gfp_old_clone _gfp_old_target_hash \
             _gfp_old_clone_hash _gfp_old_source_hash _gfp_old_weight _gfp_old_schema _gfp_old_identity; do
-            [ "$_gfp_old_schema" = provider-v3 ] || continue
+            [ "$_gfp_old_schema" = "$_gfp_schema" ] || continue
             [ "$_gfp_old_target" = "$_gfp_target" ] || continue
             [ "$_gfp_old_source_hash" = "$_gfp_source_hash" ] || continue
             [ "$_gfp_old_weight" = "$_gfp_weight_value" ] || continue
@@ -363,18 +413,34 @@ _gfp_build_clone() {
                 [ "$_gfp_target_hash" = "$_gfp_old_clone_hash" ] || continue
             _gfp_valid_font "$_gfp_old_clone" || continue
             [ "$(_gfp_hash "$_gfp_old_clone")" = "$_gfp_old_clone_hash" ] || continue
+            [ "$_gfp_protected" != 1 ] || _gfp_verity check "$_gfp_old_clone" >/dev/null 2>&1 || continue
             printf '%s\n' "$_gfp_old_clone"
             return 0
         done < "$STATE"
     fi
-    _gfp_key=$(printf 'provider-v3\n%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
+    _gfp_key=$(printf '%s\n%s\n%s\n%s\n' "$_gfp_schema" "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
     [ -n "$_gfp_key" ] || return 1
     _gfp_output="$CACHE/${_gfp_key}.ttf"
+    # A protected clone that is not (or no longer) sealed must be rebuilt;
+    # binding it would make hwui abort with "verity bit was removed".
+    if [ "$_gfp_protected" = 1 ] && _gfp_valid_font "$_gfp_output" && \
+        ! _gfp_verity check "$_gfp_output" >/dev/null 2>&1; then
+        rm -f "$_gfp_output" 2>/dev/null || true
+    fi
     if ! _gfp_valid_font "$_gfp_output"; then
         _gfp_tmp="${_gfp_output}.tmp.$$"
         rm -f "$_gfp_tmp" 2>/dev/null || true
-        _gfp_result=$(_gfp_python --source "$_gfp_source" --target "$_gfp_target" --output "$_gfp_tmp" --weight "$_gfp_weight_value" 2>> "$LOG")
+        if [ "$_gfp_protected" = 1 ]; then
+            _gfp_result=$(_gfp_python --source "$_gfp_source" --target "$_gfp_target" --output "$_gfp_tmp" --weight "$_gfp_weight_value" --protected 2>> "$LOG")
+        else
+            _gfp_result=$(_gfp_python --source "$_gfp_source" --target "$_gfp_target" --output "$_gfp_tmp" --weight "$_gfp_weight_value" 2>> "$LOG")
+        fi
         _gfp_rc=$?
+        if [ "$_gfp_protected" = 1 ] && [ "$_gfp_rc" -eq 3 ]; then
+            rm -f "$_gfp_tmp" 2>/dev/null || true
+            _gfp_log "跳过受保护字体（设备不支持 fs-verity，保留原文件）：target=$_gfp_target result=$_gfp_result"
+            return 3
+        fi
         if [ "$_gfp_rc" -ne 0 ] || ! _gfp_valid_font "$_gfp_tmp"; then
             rm -f "$_gfp_tmp" 2>/dev/null || true
             _gfp_log "跳过 provider 字体：target=$_gfp_target weight=$_gfp_weight_value result=$_gfp_result"
@@ -492,8 +558,15 @@ _gfp_mount_in_pid() {
     _gfp_proc_source="/proc/1/root$_gfp_source"
     _gfp_stage_dir="${LUOSHU_GOOGLE_FONT_STAGE_DIR:-/data/local/tmp}"
     _gfp_ns_shell="${LUOSHU_GOOGLE_FONT_NS_SHELL:-/system/bin/sh}"
+    _gfp_ns_protected=0
+    _gfp_protected_target "$_gfp_target" && _gfp_ns_protected=1
     _gfp_mount_detail=$(nsenter -t "$_gfp_pid" -m -- "$_gfp_ns_shell" -c '
         plain="$1"; proc_src="$2"; dst="$3"; stage_dir="$4"; owner_pid="$5"; regular_only="$6"
+        protected="$7"; verity_tool="$8"
+        # Protected (/data/fonts) binds: the replacement inode must be sealed
+        # before bind and the visible file must measure the same digest after
+        # bind; otherwise the bind is rolled back immediately.
+        verity() { sh "$verity_tool" "$@"; }
         if [ "$regular_only" = 1 ] && [ -L "$dst" ]; then
             printf "target-is-symlink"; exit 1
         fi
@@ -505,6 +578,12 @@ _gfp_mount_in_pid() {
 
         bind_one() {
             src="$1"
+            expected_verity=
+            if [ "$protected" = 1 ]; then
+                expected_verity=$(verity seal "$src" 2>&1) || {
+                    printf "replacement-not-sealed:%s" "$(one_line "$expected_verity")"; return 1; }
+                [ -n "$expected_verity" ] || { printf "replacement-not-sealed:empty-digest"; return 1; }
+            fi
             first=$(mount --bind "$src" "$dst" 2>&1)
             first_rc=$?
             if [ "$first_rc" -ne 0 ]; then
@@ -517,12 +596,21 @@ _gfp_mount_in_pid() {
             fi
             mount -o remount,bind,ro "$dst" 2>/dev/null || \
                 mount -o bind,remount,ro "$dst" 2>/dev/null || true
+            if [ "$protected" = 1 ] && [ "$(verity check "$dst" 2>/dev/null)" != "$expected_verity" ]; then
+                umount "$dst" >/dev/null 2>&1 || { printf "verity-verification-and-rollback-failed"; return 1; }
+                printf "visible-verity-verification-failed"; return 1
+            fi
             return 0
+        }
+
+        visible_ok() {
+            cmp -s "$1" "$dst" 2>/dev/null || return 1
+            [ "$protected" != 1 ] || verity check "$dst" >/dev/null 2>&1
         }
 
         plain_detail=source-not-visible
         if [ -f "$plain" ]; then
-            if cmp -s "$plain" "$dst" 2>/dev/null; then
+            if visible_ok "$plain"; then
                 printf "ok:already"
                 exit 0
             fi
@@ -532,6 +620,7 @@ _gfp_mount_in_pid() {
                 exit 0
             fi
             [ -n "$plain_detail" ] || plain_detail=bind-failed
+            case "$plain_detail" in *rollback-failed*) printf "%s" "$plain_detail"; exit 1 ;; esac
         fi
 
         stage_detail=procroot-source-not-readable
@@ -550,7 +639,7 @@ _gfp_mount_in_pid() {
                 elif command -v toybox >/dev/null 2>&1; then
                     toybox chcon --reference="$dst" "$stage" 2>/dev/null || true
                 fi
-                if cmp -s "$stage" "$dst" 2>/dev/null; then
+                if visible_ok "$stage"; then
                     rm -f "$stage" 2>/dev/null || true
                     printf "ok:already"
                     exit 0
@@ -563,6 +652,7 @@ _gfp_mount_in_pid() {
                     exit 0
                 fi
                 [ -n "$stage_detail" ] || stage_detail=bind-failed
+                case "$stage_detail" in *rollback-failed*) printf "%s" "$stage_detail"; exit 1 ;; esac
             else
                 stage_detail=stage-copy-failed
                 rm -f "$stage" 2>/dev/null || true
@@ -570,7 +660,8 @@ _gfp_mount_in_pid() {
         fi
         printf "plain=%s; staging=%s" "$(one_line "$plain_detail")" "$(one_line "$stage_detail")"
         exit 1
-    ' sh "$_gfp_source" "$_gfp_proc_source" "$_gfp_target" "$_gfp_stage_dir" "$_gfp_pid" "$_gfp_regular_only" 2>&1)
+    ' sh "$_gfp_source" "$_gfp_proc_source" "$_gfp_target" "$_gfp_stage_dir" "$_gfp_pid" "$_gfp_regular_only" \
+        "$_gfp_ns_protected" "$NS_VERITY_TOOL" 2>&1)
     _gfp_mount_rc=$?
     case "$_gfp_mount_detail" in
         ok:plain) _gfp_mount_mode=plain; _gfp_mount_detail=; return 0 ;;
@@ -771,7 +862,20 @@ _gfp_mount_target() {
         _gfp_mount_mode=already
     else
         _gfp_clear_owned_pid "$_gfp_mt_pid" "$_gfp_mt_target" || { _gfp_mount_detail=owned-unmount-failed; return 1; }
-        _gfp_mount_in_pid "$_gfp_mt_pid" "$_gfp_mt_clone" "$_gfp_mt_target" || return 1
+        if ! _gfp_mount_in_pid "$_gfp_mt_pid" "$_gfp_mt_clone" "$_gfp_mt_target"; then
+            case "$_gfp_mount_detail" in
+                *rollback-failed*)
+                    # The unverified layer could not be removed. Journal it so
+                    # restore/the next pass can retire it as our own mount.
+                    _gfp_mt_bad=$(_gfp_identity "$_gfp_mt_proc/$_gfp_mt_pid/root$_gfp_mt_target")
+                    if [ -n "$_gfp_mt_bad" ] && [ -n "$_gfp_mt_ns" ] &&
+                        cmp -s "$_gfp_mt_clone" "$_gfp_mt_proc/$_gfp_mt_pid/root$_gfp_mt_target"; then
+                        printf '%s|%s|%s|%s\n' "$_gfp_mt_ns" "$_gfp_mt_target" "$_gfp_mt_bad" "$_gfp_mt_clone" >> "$MOUNTS" || true
+                    fi
+                    ;;
+            esac
+            return 1
+        fi
         _gfp_mt_id=$(_gfp_identity "$_gfp_mt_proc/$_gfp_mt_pid/root$_gfp_mt_target")
         [ "$_gfp_mount_mode" = already ] || _gfp_queue_all_consumers "$_gfp_mt_previous"
     fi
@@ -825,6 +929,31 @@ $_gfp_cached
     done
 }
 
+# Binds made by earlier versions over protected paths are unsealed and carry
+# the donor's fontRevision. Retire every owned protected bind whose clone is
+# not a sealed provider-v4-verity record before target metadata is read, so a
+# new clone is never built from (or stacked on) an old clone.
+_gfp_retire_unsealed_protected() {
+    [ -s "$MOUNTS" ] || return 0
+    if [ -f "$STATE" ]; then
+        _gfp_ru_targets=$(awk -F '|' -v prefix="$PROTECTED_PREFIX" \
+            'FILENAME == ARGV[1] {if ($7 == "provider-v4-verity") sealed[$1 "|" $2]=1; next}
+             NF == 4 && index($2, prefix) == 1 && !(($2 "|" $4) in sealed) && !seen[$2]++ {print $2}' \
+            "$STATE" "$MOUNTS")
+    else
+        _gfp_ru_targets=$(awk -F '|' -v prefix="$PROTECTED_PREFIX" \
+            'NF == 4 && index($2, prefix) == 1 && !seen[$2]++ {print $2}' "$MOUNTS")
+    fi
+    [ -n "$_gfp_ru_targets" ] || return 0
+    _gfp_ru_pids="1 $_gfp_namespace_pid_list"
+    for _gfp_ru_target in $_gfp_ru_targets; do
+        for _gfp_ru_pid in $_gfp_ru_pids; do
+            _gfp_clear_owned_pid "$_gfp_ru_pid" "$_gfp_ru_target" || return 1
+        done
+    done
+    _gfp_log '已撤销未封装 fs-verity 的旧受保护字体挂载，按原厂修订号重新生成'
+}
+
 _gfp_apply_internal() {
     [ "$(_gfp_active_font)" != default ] || return 2
     mkdir -p "$CACHE" "$MODDIR/logs" 2>/dev/null || return 1
@@ -857,13 +986,23 @@ _gfp_apply_internal() {
     _gfp_ns_failed=0
     _gfp_ns_first_error=
     _gfp_missing_first=
+    _gfp_protected_skipped=0
     _gfp_namespace_pid_list=
     if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
         _gfp_namespace_pid_list=$(_gfp_unique_namespace_pids)
+        if ! _gfp_retire_unsealed_protected; then
+            rm -f "$_gfp_targets_file" "$_gfp_state_tmp" 2>/dev/null || true
+            _gfp_log 'provider bridge 未生效：无法撤销旧的受保护字体挂载'
+            return 1
+        fi
     fi
     while IFS="$(printf '\t')" read -r _gfp_target _gfp_weight_value; do
         _gfp_valid_font "$_gfp_target" || continue
         _gfp_found=$((_gfp_found + 1))
+        if _gfp_protected_target "$_gfp_target" && _gfp_verity_unsupported; then
+            _gfp_protected_skipped=$((_gfp_protected_skipped + 1))
+            continue
+        fi
         _gfp_source=$(_gfp_source_for_weight "$_gfp_weight_value")
         if [ -z "$_gfp_source" ]; then
             _gfp_missing_sources=$((_gfp_missing_sources + 1))
@@ -873,6 +1012,12 @@ _gfp_apply_internal() {
         fi
         _gfp_clone=$(_gfp_build_clone "$_gfp_target" "$_gfp_weight_value" "$_gfp_source")
         _gfp_clone_rc=$?
+        if [ "$_gfp_clone_rc" -eq 3 ] && _gfp_protected_target "$_gfp_target"; then
+            # Safe fallback: no fs-verity means no replacement for this file.
+            _gfp_mark_verity_unsupported
+            _gfp_protected_skipped=$((_gfp_protected_skipped + 1))
+            continue
+        fi
         if [ "$_gfp_clone_rc" -ne 0 ] || ! _gfp_valid_font "$_gfp_clone"; then
             _gfp_failed=$((_gfp_failed + 1))
             continue
@@ -918,15 +1063,17 @@ _gfp_apply_internal() {
         fi
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || [ "$_gfp_target_mounts" -gt 0 ]; then
             _gfp_mounted=$((_gfp_mounted + 1))
-            printf '%s|%s|%s|%s|%s|%s|provider-v3|%s\n' "$_gfp_target" "$_gfp_clone" \
+            printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$_gfp_target" "$_gfp_clone" \
                 "$_gfp_original_target_hash" "$(_gfp_hash "$_gfp_clone")" \
-                "$_gfp_selected_hash" "$_gfp_weight_value" "$_gfp_original_identity" >> "$_gfp_state_tmp"
+                "$_gfp_selected_hash" "$_gfp_weight_value" "$(_gfp_schema_for_target "$_gfp_target")" \
+                "$_gfp_original_identity" >> "$_gfp_state_tmp"
         else
             _gfp_failed=$((_gfp_failed + 1))
         fi
     done < "$_gfp_targets_file"
     rm -f "$_gfp_targets_file" 2>/dev/null || true
     _gfp_diag="命名空间=attempted:$_gfp_ns_attempted plain:$_gfp_ns_plain staging:$_gfp_ns_staging already:$_gfp_ns_already failed:$_gfp_ns_failed 缺源=$_gfp_missing_sources"
+    [ "$_gfp_protected_skipped" -eq 0 ] || _gfp_diag="$_gfp_diag 受保护跳过(无fs-verity)=$_gfp_protected_skipped"
     [ -n "$_gfp_ns_first_error" ] && _gfp_diag="$_gfp_diag 首个挂载错误=$_gfp_ns_first_error"
     [ -n "$_gfp_missing_first" ] && _gfp_diag="$_gfp_diag 首个缺源=$_gfp_missing_first"
     if [ "$_gfp_mounted" -gt 0 ]; then
@@ -951,7 +1098,8 @@ _gfp_apply_internal() {
     fi
     rm -f "$_gfp_state_tmp" 2>/dev/null || true
     _gfp_log "provider bridge 未生效：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
-    [ "$_gfp_found" -gt 0 ] && return 1
+    # Only protected targets on a device without fs-verity: nothing to do.
+    [ "$_gfp_found" -gt "$_gfp_protected_skipped" ] && return 1
     return 2
 }
 

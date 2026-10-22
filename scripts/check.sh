@@ -332,6 +332,8 @@ python3 "$ROOT/scripts/google_font_provider_lifecycle_test.py"
 python3 "$ROOT/scripts/google_font_refresh_test.py"
 python3 "$ROOT/scripts/google_font_guard_resume_test.py"
 python3 "$ROOT/scripts/google_font_provider_journal_test.py"
+# /data/fonts 受保护字体替换：fs-verity 封装、原厂 fontRevision、PostScript 名一致，不支持 verity 时安全放弃。
+python3 "$ROOT/scripts/font_verity_protected_test.py"
 python3 "$ROOT/scripts/hyperos_theme_font_bridge_test.py"
 python3 "$ROOT/scripts/hyperos_webview_route_test.py"
 # HyperOS coverage: single-source filename policy (generated shell blocks must be

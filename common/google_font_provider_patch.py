@@ -3,6 +3,15 @@
 
 The provider cache is never modified. The generated clone is stored inside the module
 and later bind-mounted over the provider file in the consumer mount namespaces.
+
+Protected targets (FontManagerService updatable fonts under /data/fonts) carry
+``hasVerity``: hwui aborts every app that opens such a font when the visible
+file lacks fs-verity, has another ``head.fontRevision`` or another PostScript
+name. For those targets the clone copies the original revision, keeps the
+PostScript name identical, is verified after saving and is sealed with
+fs-verity. If the device cannot seal it, no clone is produced (exit code 3),
+so the bridge leaves the authentic file visible instead of risking an abort.
+The verity/revision handling follows 字域 Ziyu v1.4.8 (GPL-3.0-only).
 """
 from __future__ import annotations
 
@@ -26,8 +35,75 @@ PROVIDER_FAMILIES = {
 }
 
 
+PROTECTED_PREFIX = "/data/fonts/"
+EXIT_VERITY_UNSUPPORTED = 3
+
+
 class ProviderPatchError(RuntimeError):
     pass
+
+
+class ProtectedVerityUnsupported(ProviderPatchError):
+    pass
+
+
+def is_protected_target(path: Path) -> bool:
+    return str(path).replace("\\", "/").startswith(PROTECTED_PREFIX)
+
+
+def postscript_names(font: TTFont) -> set[str]:
+    if "name" not in font:
+        return set()
+    names = set()
+    for record in font["name"].names:
+        if record.nameID != 6:
+            continue
+        try:
+            names.add(record.toUnicode())
+        except UnicodeDecodeError:
+            names.add(bytes(record.string).hex())
+    return names
+
+
+def font_revision(font: TTFont) -> float | None:
+    return float(font["head"].fontRevision) if "head" in font else None
+
+
+def apply_protected_identity(source: TTFont, target: TTFont) -> None:
+    """Make hwui's hasVerity identity checks match the original update font."""
+    if "head" not in source or "head" not in target:
+        raise ProviderPatchError("protected-head-table-missing")
+    source["head"].fontRevision = target["head"].fontRevision
+    expected = postscript_names(target)
+    if not expected:
+        raise ProviderPatchError("protected-target-postscript-name-missing")
+    if postscript_names(source) != expected:
+        raise ProviderPatchError("protected-postscript-name-mismatch")
+    if "CFF " in source:
+        # FreeType may report the CFF FontName for CFF-flavoured fonts.
+        cff = source["CFF "].cff
+        if len(cff.fontNames) == 1 and len(expected) == 1:
+            cff.fontNames = [next(iter(expected))]
+
+
+def verify_protected_output(output: Path, target: TTFont) -> None:
+    with open_font(output, lazy=True) as written:
+        if font_revision(written) != font_revision(target):
+            raise ProviderPatchError("protected-font-revision-mismatch")
+        if postscript_names(written) != postscript_names(target):
+            raise ProviderPatchError("protected-postscript-name-mismatch")
+
+
+def seal_protected_output(output: Path) -> str:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import font_verity
+    finally:
+        sys.path.pop(0)
+    try:
+        return font_verity.seal(output)
+    except font_verity.VerityUnsupported as exc:
+        raise ProtectedVerityUnsupported(f"fs-verity-unsupported: {exc}") from exc
 
 
 def open_font(path: Path, *, lazy: bool = False) -> TTFont:
@@ -137,7 +213,10 @@ def atomic_save(font: TTFont, output: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) -> dict[str, Any]:
+def patch(source_path: Path, target_path: Path, output_path: Path, weight: int,
+          protected: bool | None = None) -> dict[str, Any]:
+    if protected is None:
+        protected = is_protected_target(target_path)
     source = open_font(source_path)
     target = open_font(target_path)
     try:
@@ -164,8 +243,19 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
         source = instantiate_for_target(source, target, weight)
         copy_target_names(source, target)
         normalize_weight(source, weight)
+        if protected:
+            apply_protected_identity(source, target)
         atomic_save(source, output_path)
-        return {
+        verity_digest = None
+        if protected:
+            try:
+                verify_protected_output(output_path, target)
+                verity_digest = seal_protected_output(output_path)
+            except BaseException:
+                # Never leave an unsealed or mismatching protected clone behind.
+                output_path.unlink(missing_ok=True)
+                raise
+        result = {
             "status": "ok",
             "source": str(source_path),
             "target": str(target_path),
@@ -176,6 +266,14 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
             "variationMode": "native" if "fvar" in source else "static-instance",
             "outputBytes": output_path.stat().st_size,
         }
+        if protected:
+            result.update({
+                "protected": True,
+                "fontRevision": font_revision(target),
+                "postScriptName": sorted(postscript_names(target)),
+                "verity": verity_digest,
+            })
+        return result
     finally:
         try:
             source.close()
@@ -191,6 +289,8 @@ def main() -> int:
     parser.add_argument("--target", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--weight", type=int)
+    parser.add_argument("--protected", action="store_true",
+                        help="target is a FontManagerService hasVerity font (/data/fonts)")
     args = parser.parse_args()
     if args.inspect_targets is not None:
         seen: set[str] = set()
@@ -214,7 +314,11 @@ def main() -> int:
     if any(value is None for value in (args.source, args.target, args.output, args.weight)):
         parser.error("--source, --target, --output and --weight are required for patching")
     try:
-        result = patch(args.source, args.target, args.output, args.weight)
+        result = patch(args.source, args.target, args.output, args.weight,
+                       protected=True if args.protected else None)
+    except ProtectedVerityUnsupported as exc:
+        print(json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False, separators=(",", ":")))
+        return EXIT_VERITY_UNSUPPORTED
     except Exception as exc:
         print(json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False, separators=(",", ":")))
         return 1
