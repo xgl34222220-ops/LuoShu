@@ -450,23 +450,30 @@ class BridgeApplyFallbackTest(unittest.TestCase):
                    "LUOSHU_GOOGLE_FONT_PROTECTED_PREFIX": str(protected) + "/",
                    "LUOSHU_GOOGLE_FONT_DRY_RUN": "1",
                    "LUOSHU_GOOGLE_FONT_RETRIES": "1"}
-            # Force the patcher's protected branch on this (non-/data) path and
-            # make the real seal report "unsupported" via a sitecustomize shim.
-            shim = root / "shim"
-            shim.mkdir()
-            (shim / "sitecustomize.py").write_text(
-                "import errno, sys\n"
+            # The bridge forces the patcher's protected branch on this
+            # (non-/data) path. A wrapper interpreter makes the real seal
+            # report "unsupported" regardless of the CI filesystem, which
+            # may itself support fs-verity.
+            runner = root / "runner.py"
+            runner.write_text(
+                "import errno, runpy, sys\n"
                 "sys.path.insert(0, %r)\n"
                 "import font_verity\n"
                 "def _seal(path):\n"
                 "    raise font_verity.VerityUnsupported(errno.ENOTTY, 'no fs-verity')\n"
-                "font_verity.seal = _seal\n" % str(module / "common"))
-            env["PYTHONPATH"] = str(shim)
+                "font_verity.seal = _seal\n"
+                "sys.argv = sys.argv[1:]\n"
+                "runpy.run_path(sys.argv[0], run_name='__main__')\n" % str(module / "common"))
+            wrapper = bin_dir / "python"
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{runner}" "$@"\n')
+            wrapper.chmod(0o755)
+            env["LUOSHU_GOOGLE_FONT_PYTHON"] = str(wrapper)
             result = subprocess.run(["sh", str(module / "common/google_font_provider_bridge.sh"), "apply"],
                                     env=env, capture_output=True, text=True, timeout=110)
-            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            logs = list(module.rglob("google-font-provider.log"))
+            log = logs[0].read_text() if logs else ""
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr + log)
             self.assertEqual(target.read_bytes(), original)
-            log = next(module.rglob("google-font-provider.log")).read_text()
             self.assertIn("设备不支持 fs-verity", log)
             self.assertIn("受保护跳过(无fs-verity)=1", log)
             self.assertFalse((module / "config/google-font-provider-mounts.conf").exists())
