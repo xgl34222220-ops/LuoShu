@@ -88,6 +88,23 @@ class UmountVisibilityTest(unittest.TestCase):
         self.assertEqual(2, summary["moduleFontMounts"])  # overlay source KSU; bind root /adb/modules
         self.assertEqual(["/dev/block/dm-40", "KSU"], summary["luoshuSources"])
 
+    def test_real_coloros_bind_mode_mountinfo(self):
+        # Shape of a ColorOS 17 / KernelSU export (2026-10-22): per-file binds of
+        # fonts and font XML from .luoshu-payload, the captured stock lower and the
+        # payload-to-module-dir binds that are not font targets.
+        text = STOCK + "".join(
+            f"{200 + i} 30 254:40 {root} {target} rw,nosuid,nodev,noatime - f2fs /dev/block/dm-40 rw\n"
+            for i, (root, target) in enumerate([
+                ("/adb/modules/LuoShu/.luoshu-payload/system_ext/etc/fonts_base.xml", "/system_ext/etc/fonts_base.xml"),
+                ("/adb/modules/LuoShu/.luoshu-payload/system", "/data/adb/modules/LuoShu/system"),
+                ("/adb/modules/LuoShu/.luoshu-payload/system/fonts/SysSans-Hans-Regular.ttf",
+                 "/system/fonts/SysSans-Hans-Regular.ttf"),
+                ("/adb/modules/LuoShu/.luoshu-payload/system/etc/fonts.xml", "/system/etc/fonts.xml"),
+                ("/adb/modules/LuoShu/.luoshu-payload/system/etc/font_fallback.xml", "/system/etc/font_fallback.xml"),
+            ])) + "260 30 253:5 /system/fonts /data/adb/luoshu/self-mount/lower/system-fonts ro - erofs /dev/block/dm-5 ro\n"
+        summary = uv.mount_summary(uv.parse_mountinfo(text), uv.module_markers(self.module))
+        self.assertEqual((4, 4, 4), (summary["fontMounts"], summary["luoshuMounts"], summary["moduleFontMounts"]))
+
     def test_bind_root_counts_as_root_trace(self):
         rows = uv.parse_mountinfo(LUOSHU_BIND)
         self.assertTrue(uv._is_root_trace(rows[0]))

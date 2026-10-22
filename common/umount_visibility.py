@@ -131,8 +131,12 @@ def parse_mountinfo(text: str) -> list[dict[str, str]]:
 
 
 def _is_font_target(target: str) -> bool:
+    """Font directories/files and font config XML (fonts.xml, font_fallback.xml,
+    ColorOS fonts_base.xml ...): WebView/Flutter read the XML themselves."""
     parts = target.rstrip("/").split("/")
-    return "fonts" in parts or "font" in parts or target.lower().endswith(FONT_SUFFIXES)
+    name = parts[-1].lower() if parts else ""
+    return "fonts" in parts or "font" in parts or name.endswith(FONT_SUFFIXES) \
+        or (name.startswith("font") and name.endswith(".xml"))
 
 
 def _is_luoshu(row: dict[str, str], markers: tuple[str, ...]) -> bool:
