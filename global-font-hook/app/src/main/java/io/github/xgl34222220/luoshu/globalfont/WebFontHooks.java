@@ -39,8 +39,10 @@ final class WebFontHooks {
             }
         };
         // Default client (no client set, or subclasses that call super / only override the String form).
+        Deopt.method(WebViewClient.class, "shouldInterceptRequest", WebView.class, WebResourceRequest.class);
         XposedHelpers.findAndHookMethod(WebViewClient.class, "shouldInterceptRequest",
                 WebView.class, WebResourceRequest.class, intercept);
+        Deopt.method(WebView.class, "setWebViewClient", WebViewClient.class);
         XposedHelpers.findAndHookMethod(WebView.class, "setWebViewClient", WebViewClient.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
@@ -54,6 +56,7 @@ final class WebFontHooks {
                         continue;
                     }
                     if (HOOKED.add(c)) {
+                        Deopt.member(m);
                         XposedBridge.hookMethod(m, intercept);
                         Log.v("webview client hooked: " + c.getName());
                     }

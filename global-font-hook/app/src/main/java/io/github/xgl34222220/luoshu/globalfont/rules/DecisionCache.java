@@ -34,9 +34,14 @@ public final class DecisionCache {
 
     /** Resolve by name first; fall back to the cached deep-inspection verdict. */
     public FontDecision resolveByName(String key, String... names) {
+        return resolveByName(key, false, names);
+    }
+
+    /** {@link #resolveByName(String, String...)} honouring the mono switch (callers key it separately). */
+    public FontDecision resolveByName(String key, boolean monoSlot, String... names) {
         FontDecision cached = get(key);
         if (cached != null) return cached;
-        FontDecision d = FontNameRules.classifyAll(names);
+        FontDecision d = FontNameRules.classifyAll(monoSlot, names);
         if (d != FontDecision.UNKNOWN) put(key, d);
         return d;
     }

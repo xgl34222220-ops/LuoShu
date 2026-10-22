@@ -34,6 +34,15 @@ public final class SettingsActivity extends Activity {
 
         root.addView(toggle(R.string.toggle_enabled, ModuleConfig.KEY_ENABLED, ModuleConfig.DEFAULT_ENABLED));
         root.addView(toggle(R.string.toggle_app_fonts, ModuleConfig.KEY_APP_FONTS, ModuleConfig.DEFAULT_APP_FONTS));
+        Switch mono = toggle(R.string.toggle_mono_slot, ModuleConfig.KEY_MONO_SLOT, ModuleConfig.DEFAULT_MONO_SLOT);
+        root.addView(mono);
+        if (MonoProbe.systemMonospaceIsFixedPitch()) {
+            root.addView(text(getString(R.string.mono_slot_hint), 13));
+        } else {
+            // LuoShu's mono slot is not really fixed pitch: mapping code fonts onto it would break alignment.
+            mono.setEnabled(false);
+            root.addView(text(getString(R.string.mono_slot_unavailable), 13));
+        }
         root.addView(toggle(R.string.toggle_web_fonts, ModuleConfig.KEY_WEB_FONTS, ModuleConfig.DEFAULT_WEB_FONTS));
         root.addView(toggle(R.string.toggle_web_unknown, ModuleConfig.KEY_WEB_BLOCK_UNKNOWN, ModuleConfig.DEFAULT_WEB_BLOCK_UNKNOWN));
         root.addView(toggle(R.string.toggle_verbose, ModuleConfig.KEY_VERBOSE, ModuleConfig.DEFAULT_VERBOSE));
