@@ -24,7 +24,8 @@
 
 ## 3. 始终保留原厂
 
-- 所有 `*Mono*`（`RobotoMono*`、`NotoSansMono*`、`DroidSansMono.ttf`、`MitypeMonoVF`、`MitypeClockMono`、`MiClockMono`、`InterMono-*`、`BebasNeue-Mono` …），legacy v14.4 与 v4 一致。锁屏组中的 `InterMono`/`BebasNeue-Mono` 也受此保护。
+- （#295 起）等宽与时钟字体（`RobotoMono*`、`NotoSansMono*`、`DroidSansMono.ttf`、`MitypeMonoVF`、`MitypeClockMono`、`MiClockMono`、`InterMono-*`、`BebasNeue-Mono` …）改为替换；`NotoSansCJK-Regular.ttc`、`NotoSerifCJK-Regular.ttc` 在暂存时按本机字体面数量与顺序编译替换（每面按字重取用户字体，等宽/斜体面保留）。
+- 日文/韩文/其他文字语种字体（`MiSansJP*`、`*Japanese*`、`*Korean*`、`*Tibetan*`、`*Telugu*` …）。
 - `MiSansL3.otf`（GB18030-2022 三级生僻字，官方 FAQ：https://hyperos.mi.com/font/zh/faq ）。
 
 ## 4. XML

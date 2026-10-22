@@ -130,6 +130,30 @@ luoshu_terminate_task_tree() (
     done
 )
 
+# Android suspends the SoC (deep sleep) once the screen is off, even while a
+# root shell is in the middle of applying a font. One device export showed
+# 435 s of a 541.7 s complete_hyperos phase spent asleep (proc uptime vs the
+# supervisor's monotonic clock); the wall-clock waiter then gave up during
+# live_mount. A named kernel wake lock with a timeout keeps the CPU running for
+# one apply and expires by itself if the holder is killed. Best effort: without
+# /sys/power/wake_lock the apply simply runs as before.
+luoshu_wake_lock_acquire() {
+    case "${1:-}" in ''|*[!A-Za-z0-9_]*) return 2 ;; esac
+    _lwla_seconds="${2:-1800}"
+    case "$_lwla_seconds" in ''|*[!0-9]*) _lwla_seconds=1800 ;; esac
+    _lwla_root="${LUOSHU_WAKE_LOCK_ROOT:-/sys/power}"
+    [ -w "$_lwla_root/wake_lock" ] || return 1
+    printf 'luoshu_%s %s000000000\n' "$1" "$_lwla_seconds" > "$_lwla_root/wake_lock" 2>/dev/null
+}
+
+luoshu_wake_lock_release() {
+    case "${1:-}" in ''|*[!A-Za-z0-9_]*) return 2 ;; esac
+    _lwlr_root="${LUOSHU_WAKE_LOCK_ROOT:-/sys/power}"
+    [ -w "$_lwlr_root/wake_unlock" ] || return 0
+    printf 'luoshu_%s\n' "$1" > "$_lwlr_root/wake_unlock" 2>/dev/null || true
+    return 0
+}
+
 luoshu_start_detached() {
     _lsd_pid_file="$1"
     _lsd_task="$2"

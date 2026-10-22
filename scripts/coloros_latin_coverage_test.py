@@ -32,8 +32,10 @@ FLIP = ROOT / 'common/coloros_flipfont.sh'
 MAPPED = ('SysSans-En-Regular.ttf', 'Roboto-Regular.ttf', 'OPSans-En-Regular.ttf',
           'SysSans-Hans-Regular.ttf', 'RobotoStatic-Regular.ttf')
 SYMLINK_SLOTS = ('SysFont-Regular.ttf', 'SysFont-Static-Regular.ttf', 'SysFont-Hans-Regular.ttf')
-STOCK_ONLY = ('OSans-RC-Regular.ttf', 'OSans-Ext-Regular.otf', 'DroidSansMono.ttf',
-              'AndroidClock.ttf', 'SysFont-Myanmar.ttf', 'Oplus-Serif.ttf', 'CutiveMono.ttf')
+STOCK_ONLY = ('OSans-RC-Regular.ttf', 'OSans-Ext-Regular.otf', 'SysFont-Myanmar.ttf',
+              'Oplus-Serif.ttf', 'CutiveMono.ttf')
+# Monospace and clock faces are replaced (clock digits get tabular widths).
+MONO_CLOCK = ('DroidSansMono.ttf', 'AndroidClock.ttf')
 DIGITS = 'OSans-Solid-Digits-VF.ttf'
 
 
@@ -138,7 +140,7 @@ apply_font_by_rom "{user}/Demo-Regular.ttf" "{dest}" quick Demo
 
     def test_digits_and_symlinked_latin_slots_are_mapped(self):
         staged, log = self.run_mapper(None)
-        for name in (*MAPPED, *SYMLINK_SLOTS, DIGITS):
+        for name in (*MAPPED, *SYMLINK_SLOTS, DIGITS, *MONO_CLOCK):
             self.assertTrue(staged.get(name), f'{name} 未换成用户字体\n{log}')
         for name in STOCK_ONLY:
             self.assertNotIn(name, staged, f'{name} 应保留原厂\n{log}')
@@ -187,7 +189,7 @@ copy_as_coloros "{user}/Demo-Regular.ttf" "{module}/system/fonts" quick Demo
 
     def test_digits_and_symlinked_latin_slots_are_mapped(self):
         staged, files, log = self.run_mapper(None)
-        for name in (*MAPPED, *SYMLINK_SLOTS, DIGITS):
+        for name in (*MAPPED, *SYMLINK_SLOTS, DIGITS, *MONO_CLOCK):
             self.assertTrue(staged.get(name), f'{name} 未换成用户字体\n{log}')
         for name in STOCK_ONLY:
             self.assertNotIn(name, staged, f'{name} 应保留原厂\n{log}')

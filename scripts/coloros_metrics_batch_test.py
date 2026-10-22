@@ -918,5 +918,93 @@ class ColorOSRoutingTest(unittest.TestCase):
                 self.assertEqual(latin['hhea'].ascent, self.slots[self.GOOGLE]['metrics']['hhea']['ascent'])
 
 
+class ColorOSCollectionTest(unittest.TestCase):
+    """NotoSansCJK/NotoSerifCJK on ColorOS: same index-preserving build as HyperOS."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        from composite_collection_build_test import fixture
+        self.fixture = fixture
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.module = self.root / 'module'
+        self.stage = self.module / '.luoshu-payload-next'
+        self.fonts = self.stage / 'system/fonts'
+        (self.fonts / '.luoshu-font-store').mkdir(parents=True)
+        (self.module / 'config').mkdir()
+        (self.module / 'config/device_font_inventory.json').write_text(json.dumps({
+            'schema': 'device-font-inventory-v1', 'inventoryRevision': 1,
+            'state': 'ready', 'buildKey': 'coloros-fixture', 'slots': {}}))
+        env = {'LUOSHU_BUILD_KEY': 'coloros-fixture'}
+        import hyperos_metrics_batch
+        for part in hyperos_metrics_batch.PARTS:
+            root = self.root / 'stock' / part; root.mkdir(parents=True)
+            env[f'LUOSHU_{part.upper()}_FONTS_ROOT'] = str(root)
+        patcher = patch.dict(os.environ, env); patcher.start(); self.addCleanup(patcher.stop)
+        # The legacy ColorOS mapper keeps the untouched user font as this anchor.
+        fixture(self.fonts / '.luoshu-font-store/regular.font', 1)
+        self.stock = self.root / 'stock/system/NotoSansCJK-Regular.ttc'
+        collection = TTCollection(); collection.fonts = []
+        for number, index in enumerate((0, 2, 0)):
+            path = self.root / f'face-{number}.font'; fixture(path, index, mono=number == 2)
+            collection.fonts.append(TTFont(path))
+        collection.save(self.stock); collection.close()
+
+    def report(self):
+        return json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+
+    def test_stock_noto_cjk_collection_is_compiled_from_the_store_anchor(self):
+        batch.build(self.module, self.stage)
+        output = self.fonts / 'NotoSansCJK-Regular.ttc'
+        from composite_collection_contract import collection_faces
+        self.assertEqual(collection_faces(self.stock), collection_faces(output))
+        report = self.report()
+        self.assertEqual(['/system/fonts/NotoSansCJK-Regular.ttc'], [row['slot'] for row in report['collections']])
+        self.assertEqual(2, report['collections'][0]['compiledFaces'])
+        self.assertEqual({}, report['preservedCollections'])
+        with TTFont(self.stock, fontNumber=0) as original, TTFont(output, fontNumber=0) as result:
+            self.assertEqual(original.getBestCmap(), result.getBestCmap())
+        with TTFont(self.stock, fontNumber=2) as original, TTFont(output, fontNumber=2) as result:
+            name = original.getBestCmap()[ord('中')]
+            self.assertEqual(original['glyf'][name].coordinates, result['glyf'][name].coordinates)
+
+    def test_exact_enabled_zero_keeps_the_rom_collection(self):
+        (self.module / 'config/coloros_cjk_collections.conf').write_text('enabled=1\nenabled=0\n')
+        batch.build(self.module, self.stage)
+        self.assertFalse((self.fonts / 'NotoSansCJK-Regular.ttc').exists())
+        self.assertEqual([], self.report()['collections'])
+        for text in ('enabled = 0\n', 'enabled=no\n', 'enabled=0\nenabled=1\n', ''):
+            (self.module / 'config/coloros_cjk_collections.conf').write_text(text)
+            self.assertTrue(batch.collections_enabled(self.module), text)
+
+    def test_shell_listing_matches_python_rule(self):
+        script = ROOT / 'common/coloros_global.sh'
+        conf = self.module / 'config/coloros_cjk_collections.conf'
+        for text, expected in (('', 'NotoSansCJK-Regular.ttc'), ('enabled=0\r\n', ''),
+                               ('enabled=0\nenabled=1\n', 'NotoSansCJK-Regular.ttc')):
+            conf.write_text(text)
+            listed = subprocess.run(['sh', '-c', '. "$1"; coloros_collection_names_for_root "$2"', 'sh',
+                                     str(script), str(self.stock.parent)], check=True, text=True,
+                                    capture_output=True, env={**os.environ, 'MODULE_DIR': str(self.module)}).stdout.split()
+            self.assertEqual(expected.split(), listed)
+            self.assertEqual(bool(expected), batch.collections_enabled(self.module))
+
+    def test_collection_already_staged_by_the_mix_build_is_not_rebuilt(self):
+        staged = self.fonts / 'NotoSansCJK-Regular.ttc'
+        shutil.copyfile(self.stock, staged)
+        requested = []
+        with patch.object(batch, 'build_collections',
+                          side_effect=lambda module, stage, names, work: (requested.extend(names) or ([], {}))):
+            batch.build(self.module, self.stage)
+        self.assertEqual(['NotoSerifCJK-Regular.ttc'], requested)
+        self.assertEqual(self.stock.read_bytes(), staged.read_bytes())
+
+    def test_uncompilable_collection_stays_stock_and_is_reported(self):
+        self.stock.write_bytes(b'ttcf' + bytes(60))
+        batch.build(self.module, self.stage)
+        self.assertFalse((self.fonts / 'NotoSansCJK-Regular.ttc').exists())
+        self.assertIn('/system/fonts/NotoSansCJK-Regular.ttc', self.report()['preservedCollections'])
+
+
 if __name__ == '__main__':
     unittest.main()

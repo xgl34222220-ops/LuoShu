@@ -34,8 +34,13 @@ Optional group (``config/coloros_slot_groups.conf``, ``key=0|1`` lines):
   replaced like other measured numeric faces; set ``osans_digits=0`` to keep the
   OPlus numerals (e.g. if a proportional user font makes tabular counters jump).
 
-Monospace, clock, serif, emoji, symbol and script faces keep their existing
-rules (they are never added here).
+Stock CJK collections (``NotoSansCJK-Regular.ttc``/``NotoSerifCJK-Regular.ttc``) are
+compiled index-preserving at stage completion (``coloros_metrics_batch.py``, same
+builder as HyperOS); ``config/coloros_cjk_collections.conf`` ``enabled=0`` keeps them.
+
+Serif, emoji, symbol and script faces keep their existing rules (they are
+never added here). Clock and monospace slots are replaced by the shell mappers'
+discovery like other UI text.
 """
 from __future__ import annotations
 
@@ -93,6 +98,27 @@ def enabled_groups(path: Path | None = None) -> frozenset[str]:
     except OSError:
         text = ""
     return parse_groups(text)
+
+
+def cjk_collections_enabled(module: Path | None = None) -> bool:
+    """Whether stage completion compiles NotoSansCJK/NotoSerifCJK index-preserving.
+
+    ``config/coloros_cjk_collections.conf``: only an exact ``enabled=0`` line
+    (last one wins) turns it off. Shell copy: ``_coloros_cjk_collections_on``
+    in coloros_global.sh (scripts/coloros_metrics_batch_test.py compares both).
+    """
+    raw = os.environ.get("LUOSHU_COLOROS_CJK_COLLECTIONS_CONF", "").strip()
+    if raw:
+        path = Path(raw)
+    else:
+        base = module if module is not None else groups_config_path().parent.parent
+        path = Path(base) / "config" / "coloros_cjk_collections.conf"
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").replace("\r", "").split("\n")
+    except OSError:
+        return True
+    values = [line for line in lines if line in ("enabled=0", "enabled=1")]
+    return not values or values[-1] != "enabled=0"
 
 
 def classify(name: str) -> str:

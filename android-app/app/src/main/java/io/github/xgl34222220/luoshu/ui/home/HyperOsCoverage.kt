@@ -4,9 +4,10 @@ import io.github.xgl34222220.luoshu.RootShell
 import org.json.JSONObject
 
 /**
- * Contract for the HyperOS coverage bridge (common/hyperos_coverage_bridge.sh via app_bridge.sh):
- * theme-store font detection, optional slot groups, seed-XML rewrite, theme takeover and the
- * per-package 未覆盖界面定位. Pure functions so they are unit tested without a device.
+ * Contract for the coverage bridge (common/hyperos_coverage_bridge.sh via app_bridge.sh):
+ * 未覆盖界面定位 / 一键扫描 / 导出完整诊断 on every ROM, plus the HyperOS-only theme-store
+ * detection, optional slot groups, seed-XML rewrite and theme takeover. Pure functions so they
+ * are unit tested without a device.
  */
 internal const val HYPEROS_COVERAGE_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
 
@@ -25,6 +26,8 @@ internal data class HyperOsThemeState(
 
 internal data class HyperOsCoverageStatus(
     val hyperOs: Boolean = false,
+    /** hyperos | coloros | other: picks presets and wording; settings stay HyperOS-only. */
+    val rom: String = "other",
     val miuiEx: Boolean = true,
     val miSansExt: Boolean = true,
     val lockscreenStyles: Boolean = false,
@@ -49,7 +52,7 @@ internal data class CoverageLocateResult(
 
 internal data class CoveragePreset(val label: String, val packageName: String)
 
-/** Common places users report as "not changed", mapped to the process that draws them. */
+/** Common places users report as "not changed", mapped to the process that draws them (HyperOS). */
 internal val COVERAGE_PRESETS = listOf(
     CoveragePreset("状态栏 / 通知 / 控制中心 / 锁屏", "com.android.systemui"),
     CoveragePreset("息屏显示（AOD）", "com.miui.aod"),
@@ -60,12 +63,42 @@ internal val COVERAGE_PRESETS = listOf(
     CoveragePreset("微信", "com.tencent.mm"),
 )
 
+private val COLOROS_COVERAGE_PRESETS = listOf(
+    CoveragePreset("状态栏 / 通知 / 控制中心 / 锁屏", "com.android.systemui"),
+    CoveragePreset("桌面 / 小部件", "com.android.launcher"),
+    CoveragePreset("设置", "com.android.settings"),
+    CoveragePreset("微信", "com.tencent.mm"),
+)
+
+private val GENERIC_COVERAGE_PRESETS = listOf(
+    CoveragePreset("状态栏 / 通知 / 快捷设置 / 锁屏", "com.android.systemui"),
+    CoveragePreset("设置", "com.android.settings"),
+    CoveragePreset("微信", "com.tencent.mm"),
+)
+
+/** Presets for the ROM the module reported; the picker covers every other app. */
+internal fun coveragePresetsFor(rom: String): List<CoveragePreset> = when (rom) {
+    "hyperos" -> COVERAGE_PRESETS
+    "coloros" -> COLOROS_COVERAGE_PRESETS
+    else -> GENERIC_COVERAGE_PRESETS
+}
+
+internal fun coverageRomLabel(rom: String): String = when (rom) {
+    "hyperos" -> "HyperOS"
+    "coloros" -> "ColorOS / OxygenOS"
+    else -> "当前系统"
+}
+
+/** Home entry subtitle: HyperOS also links its coverage settings. */
+internal fun coverageEntrySubtitle(status: HyperOsCoverageStatus): String =
+    "哪里没换字体？选界面查原因 · 一键扫描与导出" + if (status.hyperOs) " · HyperOS 覆盖设置" else ""
+
 /** Settings keys accepted by the bridge, in display order. */
 internal enum class HyperOsSetting(val key: String, val title: String, val hint: String) {
     MIUI_EX("group:miui_ex", "MiuiEx / Miui 字体", "旧版 MIUI 与主题引擎使用的 MiuiEx-*、Miui-* 文件（默认开）"),
     MISANS_EXT("group:misans_ext", "MiSans 圆体 / 紧凑 / MiLanVF", "MiSansRounded*、MiSansC*、MiLanVF*（默认开）"),
     LOCKSCREEN("group:lockscreen_styles", "锁屏 / 息屏 / 小部件样式字体",
-        "Interscaled、C800、Qinghe、ChamberiDisplay、DelaGothicOne 等设计样式字体（默认关，开启会改变这些样式的设计字形；等宽样式始终保留原厂）"),
+        "Interscaled、C800、Qinghe、ChamberiDisplay、DelaGothicOne 等设计样式字体（默认关，开启会改变这些样式的设计字形；InterMono、BebasNeue-Mono 等宽样式始终替换）"),
     SOURCE_XML("xml", "改写 HyperOS 字体配置 XML",
         "覆盖 hyper/miui 种子 XML、fonts_customization.xml；校验失败自动整体回退原厂（默认开）"),
     THEME_TAKEOVER("theme_takeover", "接管主题商店字体",
@@ -115,17 +148,20 @@ internal fun bridgeJson(raw: String): JSONObject {
 private fun bridgeData(raw: String): JSONObject {
     val json = bridgeJson(raw)
     if (json.optString("status") != "ok") {
-        throw IllegalStateException(json.optString("message").ifBlank { "HyperOS 覆盖组件没有返回结果" })
+        throw IllegalStateException(json.optString("message").ifBlank { "覆盖定位组件没有返回结果" })
     }
-    return json.optJSONObject("data") ?: throw IllegalStateException("HyperOS 覆盖组件返回格式不正确")
+    return json.optJSONObject("data") ?: throw IllegalStateException("覆盖定位组件返回格式不正确")
 }
 
 internal fun parseHyperOsCoverageStatus(raw: String): HyperOsCoverageStatus {
     val data = bridgeData(raw)
     val groups = data.optJSONObject("groups") ?: JSONObject()
     val theme = data.optJSONObject("theme") ?: JSONObject()
+    val hyperOs = data.optBoolean("hyperos", false)
     return HyperOsCoverageStatus(
-        hyperOs = data.optBoolean("hyperos", false),
+        hyperOs = hyperOs,
+        rom = data.optString("rom").takeIf { it in setOf("hyperos", "coloros", "other") }
+            ?: if (hyperOs) "hyperos" else "other",
         miuiEx = groups.optBoolean("miui_ex", true),
         miSansExt = groups.optBoolean("misans_ext", true),
         lockscreenStyles = groups.optBoolean("lockscreen_styles", false),
@@ -235,6 +271,8 @@ internal data class CoverageScanItem(
     val title: String,
     val fixes: List<HyperOsSetting>,
     val reasons: List<String>,
+    /** Every unreplaced file of this process, with its classification note. */
+    val files: List<String> = emptyList(),
 )
 
 internal data class CoverageScanResult(
@@ -250,6 +288,37 @@ internal data class CoverageScanResult(
 }
 
 internal fun coverageScanCommand(): String = "sh ${RootShell.quote(HYPEROS_COVERAGE_BRIDGE)} coverage_scan"
+
+internal fun coverageExportCommand(): String = "sh ${RootShell.quote(HYPEROS_COVERAGE_BRIDGE)} coverage_export"
+
+/** 导出完整诊断: one sanitized JSON under /sdcard/LuoShu/reports. */
+internal data class CoverageExportResult(
+    val path: String,
+    val bytes: Long,
+    val issues: Int,
+    val processesWithIssues: Int,
+)
+
+internal fun parseCoverageExport(raw: String): CoverageExportResult {
+    val data = bridgeData(raw)
+    val path = data.optString("path")
+    if (!path.startsWith("/") || !path.substringAfterLast('/').startsWith("LuoShu-coverage-full-")) {
+        throw IllegalStateException("诊断已执行，但没有返回保存路径")
+    }
+    return CoverageExportResult(
+        path = path,
+        bytes = data.optLong("bytes", 0L),
+        issues = data.optInt("issues", 0),
+        processesWithIssues = data.optInt("processesWithIssues", 0),
+    )
+}
+
+internal fun coverageExportSummary(result: CoverageExportResult): String {
+    val size = if (result.bytes >= 1024) "${result.bytes / 1024} KB" else "${result.bytes} B"
+    val issues = if (result.issues == 0) "未发现未覆盖的进程。"
+    else "共 ${result.issues} 类问题，涉及 ${result.processesWithIssues} 个进程（相同文件集合已合并）。"
+    return "$issues 文件 $size，已按现有规则脱敏，可直接分享给开发者。"
+}
 
 internal fun hyperOsSettingForKey(key: String): HyperOsSetting? = HyperOsSetting.entries.firstOrNull { it.key == key }
 
@@ -272,6 +341,7 @@ internal fun parseCoverageScan(raw: String): CoverageScanResult {
                         title = item.optString("title"),
                         fixes = item.optJSONArray("fixes").strings().mapNotNull(::hyperOsSettingForKey),
                         reasons = item.optJSONArray("reasons").strings(),
+                        files = item.optJSONArray("files").strings(),
                     ),
                 )
             }

@@ -1,11 +1,13 @@
 #!/system/bin/sh
-# App bridge for HyperOS coverage: status, settings and the per-package locator.
-#   status                     JSON: ROM, optional slot groups, seed-XML rewrite,
-#                              theme-store font detection and takeover state
-#   set <key> <0|1>            group:miui_ex | group:misans_ext |
+# App bridge for font coverage: status, HyperOS settings and the locator.
+#   status                     JSON: ROM (hyperos/coloros/other), HyperOS optional
+#                              slot groups, seed-XML rewrite, theme-store state
+#   set <key> <0|1>            HyperOS only: group:miui_ex | group:misans_ext |
 #                              group:lockscreen_styles | xml | theme_takeover
-#   locate <package>           JSON from common/font_coverage_locator.py
-#   scan                       JSON: running processes without LuoShu's font
+#   locate <package>           JSON from common/font_coverage_locator.py (any ROM)
+#   scan                       JSON: running processes without LuoShu's font (any ROM)
+#   export                     JSON {path,bytes}: one sanitized full coverage report
+#                              /sdcard/LuoShu/reports/LuoShu-coverage-full-<time>.json
 # Settings only write config files; they take effect after the next apply/reboot,
 # which the JSON says so the App can tell the user.
 set +e
@@ -28,6 +30,17 @@ _hcb_is_hyperos() {
     [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)$(getprop ro.miui.ui.version.name 2>/dev/null)" ]
 }
 
+# hyperos | coloros | other. Same markers as util_functions / mix_router.
+_hcb_rom() {
+    case "${LUOSHU_COVERAGE_ROM:-}" in hyperos|coloros|other) printf '%s\n' "$LUOSHU_COVERAGE_ROM"; return 0 ;; esac
+    if _hcb_is_hyperos; then printf 'hyperos\n'; return 0; fi
+    if [ -n "$(getprop ro.build.version.oplusrom 2>/dev/null)$(getprop ro.build.version.opporom 2>/dev/null)$(getprop ro.oxygen.version 2>/dev/null)" ] || \
+       [ -d /data/oplus/os ] || [ -d /system_ext/oplus ]; then
+        printf 'coloros\n'; return 0
+    fi
+    printf 'other\n'
+}
+
 # Same defaults/rule as hyperos_physical_policy.parse_groups.
 _hcb_group_value() {
     case "$1" in lockscreen_styles) _hcb_default=0 ;; *) _hcb_default=1 ;; esac
@@ -48,6 +61,7 @@ _hcb_write() {
 
 hcb_status() {
     _hcb_rom=false; _hcb_is_hyperos && _hcb_rom=true
+    _hcb_family=$(_hcb_rom)
     _hcb_xml=true
     grep -qx 'enabled=0' "$XML_CONF" 2>/dev/null && _hcb_xml=false
     _hcb_state=none; _hcb_files=0; _hcb_user=0; _hcb_own=0; _hcb_names=''; _hcb_take=0; _hcb_owned=0
@@ -66,8 +80,8 @@ hcb_status() {
     case "$_hcb_files" in ''|*[!0-9]*) _hcb_files=0 ;; esac
     case "$_hcb_user" in ''|*[!0-9]*) _hcb_user=0 ;; esac
     case "$_hcb_own" in ''|*[!0-9]*) _hcb_own=0 ;; esac
-    printf '{"status":"ok","data":{"hyperos":%s,"groups":{"miui_ex":%s,"misans_ext":%s,"lockscreen_styles":%s},' \
-        "$_hcb_rom" "$(_hcb_bool "$(_hcb_group_value miui_ex)")" \
+    printf '{"status":"ok","data":{"hyperos":%s,"rom":"%s","groups":{"miui_ex":%s,"misans_ext":%s,"lockscreen_styles":%s},' \
+        "$_hcb_rom" "$_hcb_family" "$(_hcb_bool "$(_hcb_group_value miui_ex)")" \
         "$(_hcb_bool "$(_hcb_group_value misans_ext)")" "$(_hcb_bool "$(_hcb_group_value lockscreen_styles)")"
     printf '"sourceXml":%s,"theme":{"state":"%s","files":%s,"userFiles":%s,"luoshuFiles":%s,"names":"%s","takeover":%s,"owned":%s}}}\n' \
         "$_hcb_xml" "$_hcb_state" "$_hcb_files" "$_hcb_user" "$_hcb_own" "$(_hcb_json_escape "$_hcb_names")" \
@@ -119,7 +133,7 @@ hcb_scan() {
         return 1
     fi
     _hcb_python_env
-    "$PYBIN" "$_hcb_helper" --scan --module "$MODDIR" \
+    "$PYBIN" "$_hcb_helper" --scan --module "$MODDIR" --rom "$(_hcb_rom)" \
         ${LUOSHU_COVERAGE_PROC_ROOT:+--proc-root "$LUOSHU_COVERAGE_PROC_ROOT"} \
         ${LUOSHU_COVERAGE_THEME_DIR:+--theme-dir "$LUOSHU_COVERAGE_THEME_DIR"}
 }
@@ -137,16 +151,60 @@ hcb_locate() {
         return 1
     fi
     _hcb_python_env
-    "$PYBIN" "$_hcb_helper" --package "$_hcb_pkg" --pid "${_hcb_pid:-}" --module "$MODDIR" \
+    "$PYBIN" "$_hcb_helper" --package "$_hcb_pkg" --pid "${_hcb_pid:-}" --module "$MODDIR" --rom "$(_hcb_rom)" \
         ${LUOSHU_COVERAGE_PROC_ROOT:+--proc-root "$LUOSHU_COVERAGE_PROC_ROOT"} \
+        ${LUOSHU_COVERAGE_THEME_DIR:+--theme-dir "$LUOSHU_COVERAGE_THEME_DIR"}
+}
+
+_hcb_root_manager() {
+    if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
+        printf 'APatch\n'
+    elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
+        printf 'KernelSU\n'
+    elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
+        printf 'Magisk\n'
+    else
+        printf 'Root\n'
+    fi
+}
+
+# One file with every coverage fact (sanitized like the existing diagnostic).
+hcb_export() {
+    _hcb_helper="$MODDIR/common/font_coverage_locator.py"
+    if [ ! -f "$_hcb_helper" ] || [ ! -x "$PYBIN" ]; then
+        printf '{"status":"error","message":"诊断组件不可用，请先安装匹配版本的模块"}\n'
+        return 1
+    fi
+    _hcb_dir="${LUOSHU_COVERAGE_REPORT_DIR:-/sdcard/LuoShu/reports}"
+    mkdir -p "$_hcb_dir" 2>/dev/null || { printf '{"status":"error","message":"无法创建报告目录"}\n'; return 1; }
+    _hcb_family=$(_hcb_rom)
+    case "$_hcb_family" in
+        hyperos) _hcb_romver="$(getprop ro.mi.os.version.name 2>/dev/null)$(getprop ro.miui.ui.version.name 2>/dev/null)" ;;
+        coloros) _hcb_romver="$(getprop ro.build.version.oplusrom 2>/dev/null)$(getprop ro.oxygen.version 2>/dev/null)" ;;
+        *) _hcb_romver="$(getprop ro.build.version.release 2>/dev/null)" ;;
+    esac
+    _hcb_python_env
+    "$PYBIN" "$_hcb_helper" --export "$_hcb_dir" --module "$MODDIR" --rom "$_hcb_family" \
+        --device "romVersion=${_hcb_romver:-unknown}" \
+        --device "androidSdk=$(getprop ro.build.version.sdk 2>/dev/null)" \
+        --device "rootManager=$(_hcb_root_manager)" \
+        ${LUOSHU_COVERAGE_PROC_ROOT:+--proc-root "$LUOSHU_COVERAGE_PROC_ROOT"} \
+        ${LUOSHU_COVERAGE_HOST_ROOT:+--host-root "$LUOSHU_COVERAGE_HOST_ROOT"} \
         ${LUOSHU_COVERAGE_THEME_DIR:+--theme-dir "$LUOSHU_COVERAGE_THEME_DIR"}
 }
 
 case "${1:-status}" in
     status) hcb_status ;;
-    set) hcb_set "${2:-}" "${3:-}" ;;
+    set)
+        if [ "$(_hcb_rom)" != hyperos ]; then
+            printf '{"status":"error","message":"该设置仅适用于 HyperOS"}\n'
+        else
+            hcb_set "${2:-}" "${3:-}"
+        fi
+        ;;
     locate) hcb_locate "${2:-}" ;;
     scan) hcb_scan ;;
-    *) printf '{"status":"error","message":"未知 HyperOS 覆盖命令"}\n' ;;
+    export) hcb_export ;;
+    *) printf '{"status":"error","message":"未知覆盖定位命令"}\n' ;;
 esac
 exit 0

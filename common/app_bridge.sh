@@ -469,9 +469,11 @@ case "${1:-status}" in
         printf '{"status":"ok","data":{"bootGuard":"%s","counter":%s,"limit":%s}}\n' \
             "$_bg_state" "$_bg_count" "$LUOSHU_BOOTLOOP_LIMIT"
         ;;
-    hyperos_coverage_status|hyperos_coverage_set|coverage_locate|coverage_scan)
+    hyperos_coverage_status|hyperos_coverage_set|coverage_locate|coverage_scan|coverage_export)
+        # One bridge for every ROM: locate/scan/export never depend on HyperOS
+        # components; only the HyperOS settings are refused on other ROMs.
         if [ ! -f "$MODDIR/common/hyperos_coverage_bridge.sh" ]; then
-            printf '{"status":"error","message":"HyperOS 覆盖组件不可用"}\n'
+            printf '{"status":"error","message":"覆盖定位组件不可用，请先安装匹配版本的模块"}\n'
             exit 0
         fi
         case "$1" in
@@ -479,6 +481,7 @@ case "${1:-status}" in
             hyperos_coverage_set) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" set "${2:-}" "${3:-}" ;;
             coverage_locate) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" locate "${2:-}" ;;
             coverage_scan) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" scan ;;
+            coverage_export) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" export ;;
         esac
         ;;
     logs)

@@ -103,8 +103,13 @@ latinHash=latin-b
 digitHash=digit-b
 compositeHash=composite-b
 EOF_MANIFEST_B
+# A module update that changed a font builder asked for one explicit apply.
+# A committed composite apply is that apply: the request must not survive it.
+printf 'state=awaiting-explicit-apply\nreason=font-builder-changed\nfont=mix\n' \
+    > "$MODULE/config/font-payload-rebuild-pending.conf"
 MODDIR="$MODULE" sh "$ROUTER" finalize > "$TMP/second-generation.out" 2>&1
 grep -q '"status":"ok"' "$TMP/second-generation.out"
+test ! -e "$MODULE/config/font-payload-rebuild-pending.conf"
 grep -q '^newer-composite$' "$MODULE/.luoshu-payload-next/system/fonts/MiSansVF.ttf"
 grep -q '^requestId=request-b$' "$MODULE/config/font-payload-next.conf"
 grep -q '^latin=LatinB$' "$MODULE/config/font-payload-next.conf"

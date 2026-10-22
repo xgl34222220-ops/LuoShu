@@ -35,6 +35,11 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 WORKER_PID="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/axes_worker.pid"
 AUTO_WORKER_PID="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/auto_multiweight_worker.pid"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
+# Outer budget (awake seconds) of one axes apply: prepare + composite engine +
+# the commit monitor (LUOSHU_MIX_MONITOR_TIMEOUT, default 1200) with margin, so
+# this supervisor never ends before the monitor it waits for (live_mount).
+MIX_WORKER_TIMEOUT="${LUOSHU_MIX_WORKER_TIMEOUT:-2400}"
+case "$MIX_WORKER_TIMEOUT" in ''|*[!0-9]*) MIX_WORKER_TIMEOUT=2400 ;; esac
 
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -88,13 +93,16 @@ wait_child_cleanup() {
     _wcc_monitor="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix-monitor-$_wcc_task.pid"
     # The monitor commits the next-boot payload (HyperOS/ColorOS slot metrics,
     # transaction, live mount) before it exits; that is real work and can take
-    # far longer than the old 300 x 0.1 s poll budget. Bound by wall time, and
-    # keep the expensive Python identity probe out of the 10 Hz loop so it does
-    # not compete for CPU with the commit being waited on.
-    _wcc_limit="${LUOSHU_MIX_CHILD_CLEANUP_TIMEOUT:-600}"
-    case "$_wcc_limit" in ''|*[!0-9]*) _wcc_limit=600 ;; esac
-    _wcc_started=$(date +%s 2>/dev/null)
-    case "$_wcc_started" in ''|*[!0-9]*) _wcc_started=0 ;; esac
+    # far longer than the old 300 x 0.1 s poll budget. Keep the expensive Python
+    # identity probe out of the 5 Hz loop so it does not compete for CPU with
+    # the commit being waited on.
+    # The budget is awake time (poll count x 0.2 s; sleep does not advance
+    # while the phone is suspended), not wall clock: a device slept ~475 s in
+    # one apply and the old date-based 600 s limit expired mid live_mount, so
+    # the outer supervisor killed the commit. It also never expires while the
+    # commit monitor still runs: the monitor's own supervisor bounds it.
+    _wcc_limit="${LUOSHU_MIX_CHILD_CLEANUP_TIMEOUT:-$(( ${LUOSHU_MIX_MONITOR_TIMEOUT:-1200} + 120 ))}"
+    case "$_wcc_limit" in ''|*[!0-9]*) _wcc_limit=1320 ;; esac
     _wcc_tries=0
     while :; do
         if [ $((_wcc_tries % 10)) -ne 0 ] && \
@@ -108,9 +116,9 @@ wait_child_cleanup() {
             fi
             return 0
         fi
-        _wcc_now=$(date +%s 2>/dev/null)
-        case "$_wcc_now" in ''|*[!0-9]*) _wcc_now=$((_wcc_started + _wcc_tries / 5)) ;; esac
-        [ $((_wcc_now - _wcc_started)) -lt "$_wcc_limit" ] || return 124
+        if [ $((_wcc_tries / 5)) -ge "$_wcc_limit" ] && ! _wcc_pid_running "$_wcc_monitor"; then
+            return 124
+        fi
         sleep .2 2>/dev/null || sleep 1
         _wcc_tries=$((_wcc_tries + 1))
     done
@@ -278,8 +286,16 @@ run_instance() {
         export LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         export TMPDIR="${TMPDIR:-$MODDIR/cache/tmp}"
         mkdir -p "$TMPDIR" 2>/dev/null || true
-        "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
-            --role "$_role" --weight "$_weight" --axes "$_axes"
+        # Latin/digit roles only contribute LATIN|DIGIT code points to the
+        # composite: subset before instancing (a CJK VF used for Latin took 42s).
+        case "$_role" in
+            latin|digit)
+                "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
+                    --role "$_role" --weight "$_weight" --axes "$_axes" --subset latin-digit ;;
+            *)
+                "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
+                    --role "$_role" --weight "$_weight" --axes "$_axes" ;;
+        esac
     ) >"$_report" 2>"$_error"
     _code=$?
     if [ "$_code" -ne 0 ] || [ ! -s "$_destination" ]; then
@@ -342,10 +358,14 @@ prepare_instance_cached() {
     _pic_generator=$(prepared_hash_file "$INSTANCE_PY")
     _pic_face_role=''
     [ "$_pic_format" != TTC ] || _pic_face_role="$_pic_role"
+    # Latin and digit instances are subset to the same code points, so they may
+    # share an entry; a CJK instance of the same source never may.
+    _pic_scope=full
+    case "$_pic_role" in latin|digit) _pic_scope=latin-digit ;; esac
     _pic_key=''
     if [ -n "$_pic_digest" ] && [ -n "$_pic_generator" ]; then
-        _pic_key=$(printf 'luoshu-prepared-instance-v1\000%s\000%s\000%s\000%s\000%s' \
-            "$_pic_digest" "$_pic_face_role" "$(safe_weight "$_pic_axes")" "$_pic_axes" "$_pic_generator" | prepared_hash_text)
+        _pic_key=$(printf 'luoshu-prepared-instance-v2\000%s\000%s\000%s\000%s\000%s\000%s' \
+            "$_pic_digest" "$_pic_face_role" "$(safe_weight "$_pic_axes")" "$_pic_axes" "$_pic_generator" "$_pic_scope" | prepared_hash_text)
     fi
     if [ -n "$_pic_key" ]; then
         _pic_cached="$PREPARED_CACHE/${_pic_key}.font"
@@ -435,6 +455,14 @@ worker() {
     _wanted="$1"
     export LUOSHU_MIX_PHASE_OUTER_TASK="$_wanted"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
+    # Keep the CPU awake for this apply (prepare, engine, commit wait); the
+    # kernel drops the lock by itself at the worker budget if we are killed.
+    if type luoshu_wake_lock_acquire >/dev/null 2>&1 && \
+       luoshu_wake_lock_acquire mix_worker "$MIX_WORKER_TIMEOUT"; then
+        trap 'luoshu_wake_lock_release mix_worker' EXIT
+        printf '[%s] [WAKE-LOCK] held for apply task=%s limit=%ss\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_wanted" "$MIX_WORKER_TIMEOUT" >> "$LOG_FILE" 2>/dev/null || true
+    fi
     _cjk=$(read_value "$TASK_FILE" cjk)
     _latin=$(read_value "$TASK_FILE" latin)
     _digit=$(read_value "$TASK_FILE" digit)
@@ -630,7 +658,7 @@ start_mix() {
     write_task "$_request" queued '任务已进入后台队列' "$_cjk" "$_latin" "$_digit" \
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" '' "$(date +%s)" '' 1
     if type luoshu_start_detached >/dev/null 2>&1; then
-        LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS=900
+        LUOSHU_SCOPE_HANDOFF=1 LUOSHU_TASK_TIMEOUT_SECONDS="$MIX_WORKER_TIMEOUT"
         export LUOSHU_SCOPE_HANDOFF LUOSHU_TASK_TIMEOUT_SECONDS
         luoshu_start_detached "$WORKER_PID" "$_request" "$LOG_FILE" sh "$0" worker "$_request" || {
             update_task "$_request" failed '无法启动独立后台任务' 100 '' "$(date +%s)"
@@ -690,7 +718,7 @@ case "${1:-config}" in
     config) config_json ;;
     worker)
         if [ "${LUOSHU_TASK_SCOPE_PIDFILE:-}" != "$WORKER_PID" ]; then
-            exec sh "$(luoshu_scope_runner)" run --pid-file "$WORKER_PID" --task "$2" --timeout 900 -- sh "$0" "$@"
+            exec sh "$(luoshu_scope_runner)" run --pid-file "$WORKER_PID" --task "$2" --timeout "$MIX_WORKER_TIMEOUT" -- sh "$0" "$@"
         fi
         worker "$2"
         ;;

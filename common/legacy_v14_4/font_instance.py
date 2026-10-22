@@ -21,6 +21,22 @@ from fontTools.varLib.instancer import instantiateVariableFont
 CJK_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字国一的。"))
 LATIN_PROBES = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGIT_PROBES = tuple(map(ord, "0123456789"))
+# Same ranges as composite_font.LATIN_CODEPOINTS | DIGIT_CODEPOINTS: the only
+# code points the composite imports from a latin or digit source. Kept local so
+# this helper stays importable without the composite engine.
+LATIN_DIGIT_CODEPOINTS = frozenset(
+    set(range(0x0020, 0x007F))
+    | set(range(0x00A0, 0x0250))
+    | set(range(0x0300, 0x0370))
+    | set(range(0x1E00, 0x1F00))
+    | set(range(0x2000, 0x2070))
+    | set(range(0x2070, 0x207A))
+    | set(range(0x2080, 0x208A))
+    | set(range(0x20A0, 0x20D0))
+    | set(range(0x2100, 0x2150))
+    | set(range(0xFF10, 0xFF1A))
+)
+SUBSET_SCOPES = ("latin-digit",)
 AXIS_TAG_RE = re.compile(r"^[ -~]{1,4}$")
 
 
@@ -92,13 +108,20 @@ def parse_axis_spec(spec: str) -> dict[str, float]:
     return result
 
 
-def materialize(source: Path, output: Path, role: str, requested_weight: int, requested_axes: dict[str, float]) -> dict[str, object]:
+def materialize(source: Path, output: Path, role: str, requested_weight: int, requested_axes: dict[str, float],
+                subset: str = "") -> dict[str, object]:
     if not source.is_file() or source.stat().st_size < 12:
         raise InstanceError(f"字体源文件不可用：{source}")
     requested_weight = clamp_weight(requested_axes.get("wght", requested_weight))
     face = pick_face(source, role, requested_weight)
     kwargs: dict[str, object] = {
-        "lazy": False,
+        # A full instance needs every table anyway. A latin/digit subset must
+        # not load eagerly: lazy=False makes fontTools expand every glyf glyph
+        # and decode every gvar entry of a CJK variable font at open time
+        # (device: 35.6 s for a Latin role; host NotoSansSC VF 10.5 s, 478 MB),
+        # only for the subsetter to discard all but ~800 glyphs. Default
+        # laziness decodes just the kept glyphs; the output is byte-identical.
+        "lazy": None if subset else False,
         "recalcTimestamp": False,
         "recalcBBoxes": True,
     }
@@ -106,6 +129,20 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
         kwargs["fontNumber"] = face
     font = TTFont(str(source), **kwargs)
     variable = "fvar" in font
+    subset_glyphs = None
+    if subset:
+        if subset not in SUBSET_SCOPES or role not in ("latin", "digit"):
+            font.close()
+            raise InstanceError(f"不支持的子集范围：{subset}（{role}）")
+        # A latin/digit role only contributes these code points to the
+        # composite, so instancing a whole CJK variable font spends most of the
+        # time on glyphs that are discarded. Subset first (the closure keeps
+        # components and layout alternates), then pin the axes.
+        subset_glyphs = subset_to_codepoints(font, LATIN_DIGIT_CODEPOINTS)
+        probes = LATIN_PROBES if role == "latin" else DIGIT_PROBES
+        if not all(cp in (font.getBestCmap() or {}) for cp in probes):
+            font.close()
+            raise InstanceError("子集化后缺少必要的拉丁/数字字符")
     location: dict[str, float] = {}
     ignored_axes: list[str] = []
     try:
@@ -147,10 +184,44 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
             "variable": variable,
             "location": location,
             "ignoredAxes": ignored_axes,
+            "subset": subset or None,
+            "subsetGlyphs": subset_glyphs,
             "size": output.stat().st_size,
         }
     finally:
         font.close()
+
+
+def subset_to_codepoints(font: TTFont, codepoints) -> int:
+    from fontTools import subset as ft_subset
+    options = ft_subset.Options()
+    options.layout_features = ["*"]
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.name_legacy = True
+    options.notdef_outline = True
+    options.notdef_glyph = True
+    options.glyph_names = True
+    options.legacy_kern = True
+    options.hinting = True
+    options.drop_tables = []
+    options.passthrough_tables = True
+    options.prune_unicode_ranges = False
+    options.prune_codepage_ranges = False
+    options.recalc_bounds = False
+    options.recalc_timestamp = False
+    options.canonical_order = False
+    options.symbol_cmap = True
+    options.legacy_cmap = True
+    options.ignore_missing_unicodes = True
+    cmap = font.getBestCmap() or {}
+    wanted = [cp for cp in codepoints if cp in cmap]
+    if not wanted:
+        raise InstanceError("字体不含任何拉丁/数字字符，无法子集化")
+    subsetter = ft_subset.Subsetter(options=options)
+    subsetter.populate(unicodes=wanted)
+    subsetter.subset(font)
+    return len(font.getGlyphOrder())
 
 
 def parse_args() -> argparse.Namespace:
@@ -160,13 +231,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role", choices=("cjk", "latin", "digit"), required=True)
     parser.add_argument("--weight", type=int, default=400)
     parser.add_argument("--axes", default="")
+    parser.add_argument("--subset", choices=SUBSET_SCOPES, default="")
     return parser.parse_args()
 
 
 def main() -> int:
     try:
         args = parse_args()
-        result = materialize(Path(args.input), Path(args.output), args.role, args.weight, parse_axis_spec(args.axes))
+        result = materialize(Path(args.input), Path(args.output), args.role, args.weight, parse_axis_spec(args.axes), args.subset)
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
     except MemoryError:
