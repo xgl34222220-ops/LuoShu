@@ -25,6 +25,7 @@ Output is a flat `key=value` conf.  Nothing is modified: maps and stat only.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import os
 import re
@@ -279,6 +280,38 @@ def _parse_targets(values: list[str]) -> list[tuple[str, str, str]]:
     return result
 
 
+# A process that exits between the pid listing and the maps read is not an
+# unreadable process: /proc/<pid> is gone (ENOENT), the task is dying (ESRCH),
+# or the pid now belongs to another program.
+EXITED_ERRNOS = frozenset({errno.ENOENT, errno.ESRCH})
+
+
+def _process_name(proc_root: Path, pid: str) -> str:
+    return (proc_root / pid / "cmdline").read_bytes().split(b"\0", 1)[0].decode("utf-8", "replace")
+
+
+def process_exited(proc_root: Path, pid: str, package: str = "", error: OSError | None = None) -> bool:
+    if error is not None and error.errno in EXITED_ERRNOS:
+        return True
+    try:
+        if not (proc_root / pid).is_dir():
+            return True
+    except OSError:
+        return False
+    if not package:
+        return False
+    try:
+        name = _process_name(proc_root, pid)
+    except OSError as exc:
+        return exc.errno in EXITED_ERRNOS
+    # Zombies show an empty cmdline; a reused pid shows another program.
+    return not name or name.split(":", 1)[0] != package.split(":", 1)[0]
+
+
+def _errno_name(error: OSError) -> str:
+    return errno.errorcode.get(error.errno or 0, error.__class__.__name__)
+
+
 def build_report(args: argparse.Namespace, stat: StatFn = os.stat) -> dict[str, str]:
     payload = PayloadIndex(args.module, stat)
     report: dict[str, str] = {"schema": SCHEMA, "time": str(int(time.time())),
@@ -294,8 +327,15 @@ def build_report(args: argparse.Namespace, stat: StatFn = os.stat) -> dict[str, 
         maps = Path(args.proc_root) / pid / "maps"
         try:
             text = maps.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            report[f"{name}.state"] = "maps-unreadable"
+        except OSError as exc:
+            if process_exited(Path(args.proc_root), pid, package, exc):
+                report[f"{name}.state"] = "exited"
+            else:
+                report[f"{name}.state"] = "maps-unreadable"
+                report[f"{name}.mapsError"] = _errno_name(exc)
+            continue
+        if not text.strip() and process_exited(Path(args.proc_root), pid, package):
+            report[f"{name}.state"] = "exited"
             continue
         entries, memfd = parse_maps(text)
         items = classify(entries, payload, args.visible_root, stat)
