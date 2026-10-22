@@ -169,6 +169,7 @@ uninstall.sh
 action.sh
 boot-completed.sh
 late-load.sh
+emulated-soft-reboot.sh
 magic
 common/font_next_transaction.sh
 common/font_live_switch.sh

@@ -49,3 +49,12 @@
 - 使用这些字体生成的复合输出中由原字体权利人拥有的字形数据。
 
 使用者必须自行确认字体的使用、修改和再分发权限。不要在 Issue、PR、Release 或其他公开渠道上传无授权字体。
+
+## 字域 Ziyu（KernelSU 软重启阶段）
+
+- 用途：KernelSU `emulated-soft-reboot` 阶段释放洛书自有挂载并重置同 boot 挂载决策。
+- 来源：字域 Ziyu v1.4.8，作者 酷安@柔性体，仓库 [`shishui611-art/Ziyu`](https://github.com/shishui611-art/Ziyu)（参考时 main 为 `5694469c601abac864c19ce5ddd882dd1751c651`）。字域本身是洛书的衍生项目。
+- 参考文件：`emulated-soft-reboot.sh`（阶段钩子结构、boot_id 校验、逆序回滚并允许惰性卸载、`state=ready|failed` 阶段记录）；`common/soft_reboot.sh`、`common/mount_provider_reload.sh` 仅用于确认 ksud 阶段顺序。
+- 洛书侧文件：`emulated-soft-reboot.sh`、`.luoshu-runtime/core/emulated-soft-reboot.sh`。
+- 改动说明：按洛书的 self-mount / module-view 日志重写；增加“仅当路径最上层为洛书挂载才卸载”的所有权检查与 `KSU=true` 门控；未移植 provider 软重载、NoMount、mountify 清理与 ksud 软重启请求（这些会操作其他模块的挂载）。
+- 许可证：GPL-3.0-only（与洛书一致），见根目录 [`LICENSE`](LICENSE)。
