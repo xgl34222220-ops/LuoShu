@@ -5,6 +5,9 @@ on:
     paths:
       - common/google_font_*.py
       - common/google_font_*.sh
+      - common/font_verity.py
+      - common/font_verity.sh
+      - scripts/font_verity_protected_test.py
       - scripts/google_font_*test.py
       - .github/workflows/google-font-guard-regression.yml
 permissions:
@@ -25,3 +28,11 @@ jobs:
           python3 -m py_compile common/google_font_watch_wait.py
           python3 scripts/google_font_guard_resume_test.py
           python3 scripts/google_font_watch_test.py
+      - name: Protected /data/fonts replacement (fs-verity, fontRevision, PostScript name)
+        run: |
+          python3 -m pip install --quiet 'fonttools>=4.47'
+          sudo apt-get install -y -qq fonts-dejavu-core >/dev/null 2>&1 || true
+          sh -n common/font_verity.sh
+          python3 -m py_compile common/font_verity.py common/google_font_provider_patch.py
+          python3 scripts/font_verity_protected_test.py
+          python3 scripts/google_font_provider_journal_test.py

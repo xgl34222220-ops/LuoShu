@@ -322,7 +322,7 @@ class Collector:
         owned = []
         for line in sources:
             v = line.split('|')
-            if len(v) != 8 or v[6] != 'provider-v3' or not self.valid_target(v[0]):
+            if len(v) != 8 or v[6] not in ('provider-v3', 'provider-v4-verity') or not self.valid_target(v[0]):
                 continue
             clone = self.clone_path(v[1])
             if clone is None:

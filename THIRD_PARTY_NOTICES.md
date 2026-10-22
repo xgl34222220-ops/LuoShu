@@ -39,6 +39,15 @@
 - 许可证：GPL-3.0-only，与洛书相同，全文见根目录 [`LICENSE`](LICENSE)。
 - 洛书改动：缺少 Unicode cmap / hmtx、轮廓格式不支持、CID 字体缺 FDArray 时，在修改任何表之前返回 `skipped`，不再抛错中断构建；CID 编号耗尽记为 `unresolved`；报告增加 `schema` 字段；命令行去掉硬链接复制分支，统一完整复制。字形追加、可变字体只复用已有空格、宽度 unitsPerEm/4 等核心逻辑保持原样。
 
+## 字域 Ziyu
+
+- 来源：字域 Ziyu v1.4.8，作者 酷安@柔性体，仓库 [`shishui611-art/Ziyu`](https://github.com/shishui611-art/Ziyu)（字域本身是洛书 refactor-v3.0.0 的 GPL 衍生）。
+- 许可证：GPL-3.0-only，与洛书一致，完整文本见根目录 [`LICENSE`](LICENSE)。
+- 移植内容（受保护字体 fs-verity）：
+  - `common/font_verity.py`、`common/font_verity.sh`：移植自字域同名文件。洛书改动：所有权按模块自身路径判定（含 `modules_update` 和 `/proc/1/root` 前缀），区分「内核/文件系统不支持 fs-verity」（退出码 3），`FS_IOC_ENABLE_VERITY` 使用 4096 字节块并在旧内核上回退到页大小。
+  - `common/google_font_provider_patch.py`：受保护目标（`/data/fonts/`）复制原厂 `head.fontRevision`、校验 PostScript 名一致、保存后复核并 seal；思路来自字域同名文件，洛书新增 PS 名校验、复核和不支持时不产出克隆。
+  - `common/google_font_provider_bridge.sh`：受保护目标 bind 前 seal、bind 后比对可见文件的 verity 摘要、不一致立即 umount 回滚、回滚失败登记日志，撤销旧的未封装挂载；思路来自字域同名文件的 verity 分支。洛书改为仅受保护目标使用 `provider-v4-verity` 缓存键，其他目标保持 `provider-v3` 不变；设备不支持 fs-verity 时放弃该目标并按启动记录，不再重复尝试。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：
