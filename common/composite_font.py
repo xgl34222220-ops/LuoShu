@@ -29,6 +29,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 
 from font_metrics_normalize import normalize_font_metrics
+from font_space_compat import ensure_space_glyphs
 from legacy_v14_4.composite_layout import (_role_transform, clear_imported_metric_variations,
                                          enclose_imported_bounds, manual_tune, validate_required_ink)
 
@@ -329,6 +330,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             if tag in base:
                 del base[tag]
         _set_names(base)
+        space_compatibility = ensure_space_glyphs(base)
         metrics = normalize_font_metrics(base)
         _progress(args.progress, "save", "正在写入完整复合字体", 60)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +354,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "replaced": {"latin": latin_replaced, "digit": digit_replaced},
             "missingCounts": {"latin": len(latin_missing), "digit": len(digit_missing)},
             "metrics": metrics,
+            "spaceCompatibility": space_compatibility,
             "validation": validation,
         }
         if any(tune):

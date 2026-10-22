@@ -31,6 +31,14 @@
 
 洛书修改了示例的包名、配色、分层、尺寸和导航状态接入；底层库及原示例的许可证与署名不变。
 
+## 字域 Ziyu：缺失空白字形补全
+
+- 文件：`common/font_space_compat.py`（由 `common/device_font_slot_build_base.py`、`common/composite_font.py`、`common/font_instance.py` 调用）。
+- 来源：字域 Ziyu v1.4.8，作者 酷安@柔性体，仓库 [`shishui611-art/Ziyu`](https://github.com/shishui611-art/Ziyu)，原文件 `common/font_space_compat.py`。该文件在字域提交 [`025e6428`](https://github.com/shishui611-art/Ziyu/commit/025e64286b3daf286bdb887d514c570ea9353e03)（ziyu-v1.2.20）首次加入，最后修改于 [`d9b9b618`](https://github.com/shishui611-art/Ziyu/commit/d9b9b61898b0ff00f0db5d7d149ab2ec81b8a8fd)；v1.4.8 发行包与字域 main [`5694469c`](https://github.com/shishui611-art/Ziyu/commit/5694469c601abac864c19ce5ddd882dd1751c651)（2026-10-18）内容一致。
+- 溯源：字域是洛书的衍生项目，但洛书仓库全部分支历史中没有 `luoshuSpace` 字形名或同类代码，该功能为字域新增，因此按字域署名。
+- 许可证：GPL-3.0-only，与洛书相同，全文见根目录 [`LICENSE`](LICENSE)。
+- 洛书改动：缺少 Unicode cmap / hmtx、轮廓格式不支持、CID 字体缺 FDArray 时，在修改任何表之前返回 `skipped`，不再抛错中断构建；CID 编号耗尽记为 `unresolved`；报告增加 `schema` 字段；命令行去掉硬链接复制分支，统一完整复制。字形追加、可变字体只复用已有空格、宽度 unitsPerEm/4 等核心逻辑保持原样。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：

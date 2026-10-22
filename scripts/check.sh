@@ -23,6 +23,7 @@ python3 -m py_compile \
   "$ROOT/common/composite_font.py" \
   "$ROOT/common/font_instance.py" \
   "$ROOT/common/font_metrics_normalize.py" \
+  "$ROOT/common/font_space_compat.py" \
   "$ROOT/common/font_coverage.py" \
   "$ROOT/common/font_axis_info.py" \
   "$ROOT/common/font_role_check.py" \
@@ -376,6 +377,7 @@ sh "$ROOT/scripts/device_font_payload_runtime_test.sh"
 sh "$ROOT/scripts/device_font_transaction_guard_test.sh"
 sh "$ROOT/scripts/font_config_variable_weight_test.sh"
 python3 "$ROOT/scripts/font_metrics_normalization_test.py"
+python3 "$ROOT/scripts/font_space_compat_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/legacy_composite_layout_test.py"
 python3 "$ROOT/scripts/composite_latin_cjk_alignment_test.py"
 python3 "$ROOT/scripts/hyperos_layout_freetype_test.py"
