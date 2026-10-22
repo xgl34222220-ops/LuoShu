@@ -2,6 +2,7 @@
 """Behavioral regressions for actual HyperOS staging and boot repair."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -131,6 +132,43 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 400).name)
         self.assertEqual('LuoShu-700.ttf', batch.collection_source_for_weight(self.fonts, 600).name)
         self.assertEqual('LuoShu-400.ttf', batch.collection_source_for_weight(self.fonts, 300).name)
+
+    def test_stage_completion_reports_each_step_with_awake_time(self):
+        self.stock_collection()
+        (self.root / 'stock/system/400.ttf').touch()
+        import contextlib, io
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            summary = batch.build(self.module, self.stage, ['400.ttf', 'NotoSansCJK-Regular.ttc'])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        steps = [row['step'] for row in report['steps']]
+        for name in ('read_inventory', 'plan_slots', 'cjk_routing_proof', 'slot_metrics', 'link_slots',
+                     'collection_key', 'collection_cache_check', 'collection_build',
+                     'collection_cache_publish', 'alias_cleanup', 'prune_orphan_aliases'):
+            self.assertIn(name, steps)
+        build = next(row for row in report['steps'] if row['step'] == 'collection_build')
+        self.assertEqual('/system/fonts/NotoSansCJK-Regular.ttc', build['slot'])
+        self.assertTrue(all(type(row['elapsedMs']) is int and row['status'] == 'ok' for row in report['steps']))
+        self.assertGreaterEqual(report['stepsElapsedMs'], 0)
+        self.assertIn('suspendedMs', summary)
+        self.assertTrue(summary['slowestSteps'])
+        # Every step reaches the apply log as it finishes, not only at the end.
+        lines = [line for line in stderr.getvalue().splitlines() if line.startswith('[STAGE-STEP]')]
+        self.assertEqual(len(report['steps']), len(lines))
+        self.assertIn('component=hyperos step=collection_build', '\n'.join(lines))
+        # The converted-outline cache is released after the collections.
+        import composite_collection_build as builder
+        self.assertEqual({}, builder.OUTLINE_CACHE)
+
+    def test_failed_step_is_logged_as_failed(self):
+        timer = batch.StepTimer('hyperos')
+        import contextlib, io
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(ValueError):
+            with timer.step('collection_build', slot='/system/fonts/NotoSansCJK-Regular.ttc'):
+                raise ValueError('boom')
+        self.assertEqual('failed', timer.rows[0]['status'])
+        self.assertIn('status=failed', stderr.getvalue())
 
     def test_collection_runs_after_main_slots_and_repeat_reuses_cache(self):
         self.stock_collection()
@@ -426,7 +464,7 @@ _luoshu_atomic_tree_visible "$FIXTURE_SOURCE" "$FIXTURE_VISIBLE" bind
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
         with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('outline rebuild')):
             result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
-        self.assertEqual(result, {'mapped': 1, 'generated': 1, 'fallbackSlots': 0})
+        self.assertEqual({key: result[key] for key in ('mapped', 'generated', 'fallbackSlots')}, {'mapped': 1, 'generated': 1, 'fallbackSlots': 0})
         report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
         self.assertEqual(report['slots'][0]['metricsSource'], 'stock')
         self.assertEqual(report['slots'][0]['slot'], '/system/fonts/MiSansVF.ttf')
@@ -470,6 +508,29 @@ _luoshu_atomic_tree_visible "$FIXTURE_SOURCE" "$FIXTURE_VISIBLE" bind
                 with TTFont(self.stage / part / 'fonts/MiSansVF.ttf') as font:
                     self.assertEqual(font['hhea'].ascent, 1100)
                     self.assertIn(65, font.getBestCmap())
+
+    def test_orphan_composite_aliases_are_pruned_only_when_lossless(self):
+        # Device export 2026-10-18: the composite mapper's fixed HyperOS list left
+        # 100..900.ttf and GoogleSans*-Regular.ttf in the payload of a ROM that
+        # ships none of them (never visible, slot state "missing").
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
+        store = self.fonts / '.luoshu-font-store'; store.mkdir()
+        anchor = store / 'mix-composite.font'
+        font_file(anchor)
+        orphans = ['100.ttf', '900.ttf', 'GoogleSans-Regular.ttf', 'GoogleSansText-Regular.ttf']
+        for name in orphans:
+            os.link(anchor, self.fonts / name)
+        shutil.copyfile(anchor, self.fonts / '350.ttf')       # copy fallback: same bytes
+        font_file(self.fonts / 'Lonely-Regular.ttf', top=650)   # sole copy: kept
+        (self.root / 'stock/system/400.ttf').touch()            # real slot: kept
+        batch.build(self.module, self.stage, ['MiSansVF.ttf', '400.ttf'])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(sorted(f'/system/fonts/{name}' for name in orphans + ['350.ttf']),
+                         sorted(report['prunedOrphanAliases']))
+        for name in orphans + ['350.ttf']:
+            self.assertFalse((self.fonts / name).exists(), name)
+        for kept in ('Lonely-Regular.ttf', '400.ttf', 'MiSansVF.ttf', '.luoshu-font-store/mix-composite.font'):
+            self.assertTrue((self.fonts / kept).is_file(), kept)
 
     def test_failed_stage_completion_releases_temporary_fonts(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})

@@ -143,6 +143,67 @@ class PreparedInstanceCache(unittest.TestCase):
         self.assertIn("[MIX-PREPARE] reused instance",
                       (self.module / "logs/fontswitch.log").read_text())
 
+    def test_latin_and_digit_are_subset_but_cjk_of_the_same_source_is_not(self):
+        out = self.root / "same-source"
+        variable_font(self.public / "MixedFixture-VF.ttf", 700,
+                      set(range(32, 127)) | set(range(0xA0, 0x250)) | set(map(ord, "中文字体系统默认洛书汉字国一的。")))
+        script = (f". '{self.harness}'\n"
+                  f"prepare_slot latin MixedFixture-VF wght=400 '{out}' LuoShuMixLatin || exit 12\n"
+                  f"prepare_slot digit MixedFixture-VF wght=400 '{out}' LuoShuMixDigit || exit 13\n"
+                  f"prepare_slot cjk MixedFixture-VF wght=400 '{out}' LuoShuMixCJK || exit 11\n")
+        result = subprocess.run(["sh", "-c", script], capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        # latin+digit share one subset instance; cjk is a separate full one.
+        self.assertEqual(self.instance_calls(), 2)
+        fonts = out / "fonts"
+        with TTFont(fonts / "LuoShuMixLatin-Regular.ttf") as font:
+            cmap = font.getBestCmap()
+            self.assertNotIn("fvar", font)
+            self.assertNotIn(ord("中"), cmap)
+            self.assertTrue(all(cp in cmap for cp in range(32, 127)))
+        with TTFont(fonts / "LuoShuMixCJK-Regular.ttf") as font:
+            self.assertIn(ord("中"), font.getBestCmap())
+        self.assertEqual(self.digest(fonts / "LuoShuMixLatin-Regular.ttf"),
+                         self.digest(fonts / "LuoShuMixDigit-Regular.ttf"))
+
+    def test_subset_instance_decodes_only_kept_glyphs_and_matches_eager_output(self):
+        sys.path.insert(0, str(LEGACY))
+        import font_instance
+        from fontTools.ttLib.tables import _g_l_y_f
+        han = set(range(0x4E00, 0x4E00 + 3000))
+        latin = set(range(32, 127)) | set(range(0xA0, 0x250))
+        source = self.root / "LargeCJK-VF.ttf"
+        variable_font(source, 700, latin | han)
+        expanded = []
+        real = _g_l_y_f.Glyph.expand
+
+        def counting(glyph, glyfTable):
+            if getattr(glyph, "data", b""):  # still compiled: a real decode
+                expanded.append(1)
+            return real(glyph, glyfTable)
+
+        lazy_out, eager_out = self.root / "lazy.ttf", self.root / "eager.ttf"
+        _g_l_y_f.Glyph.expand = counting
+        try:
+            font_instance.materialize(source, lazy_out, "latin", 500, {"wght": 500.0}, "latin-digit")
+        finally:
+            _g_l_y_f.Glyph.expand = real
+        # The ~520 kept Latin glyphs are decoded, never the 3000 Han glyphs.
+        self.assertLess(len(expanded), 1500)
+        # Same result as loading eagerly before subsetting (the old path).
+        original = font_instance.TTFont
+
+        def eager(*args, **kwargs):
+            kwargs["lazy"] = False
+            return original(*args, **kwargs)
+
+        font_instance.TTFont = eager
+        try:
+            font_instance.materialize(source, eager_out, "latin", 500, {"wght": 500.0}, "latin-digit")
+        finally:
+            font_instance.TTFont = original
+        self.assertEqual(lazy_out.read_bytes(), eager_out.read_bytes())
+
     def test_axes_source_and_generator_changes_are_new_identities(self):
         self.request("request-1")
         script = (f". '{self.harness}'\n"
@@ -204,10 +265,11 @@ class WaitChildCleanup(unittest.TestCase):
             "    _p=$(luoshu_pid_value \"$1\"); [ -n \"$_p\" ] && kill -0 \"$_p\" 2>/dev/null\n"
             "}\n" + extract(["_wcc_pid_running", "wait_child_cleanup"]))
 
-    def run_wait(self, monitor_seconds: float, timeout: str | None = None) -> tuple[int, float]:
+    def run_wait(self, monitor_seconds: float, timeout: str | None = None,
+                 pid_name: str = "mix-monitor-child.pid") -> tuple[int, float]:
         monitor = subprocess.Popen(["sleep", str(monitor_seconds)])
         self.addCleanup(monitor.kill)
-        (self.tasks / "mix-monitor-child.pid").write_text(f"{monitor.pid}\n")
+        (self.tasks / pid_name).write_text(f"{monitor.pid}\n")
         env = dict(os.environ)
         if timeout is not None:
             env["LUOSHU_MIX_CHILD_CLEANUP_TIMEOUT"] = timeout
@@ -229,8 +291,10 @@ class WaitChildCleanup(unittest.TestCase):
         probes = len(self.probes.read_text().splitlines())
         self.assertLessEqual(probes, 12, probes)
 
-    def test_wall_clock_bound_still_reports_unconfirmed_cleanup(self):
-        code, elapsed = self.run_wait(30.0, timeout="2")
+    def test_budget_still_reports_unconfirmed_engine_cleanup(self):
+        # A live commit monitor is never abandoned (its own supervisor bounds
+        # it); a stuck engine with no monitor still ends at the awake budget.
+        code, elapsed = self.run_wait(30.0, timeout="2", pid_name="mix_worker.pid")
         self.assertEqual(code, 124)
         self.assertLess(elapsed, 6.0)
 

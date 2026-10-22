@@ -40,6 +40,14 @@ ColorOS 上不少应用中文已换成用户字体，英文和数字仍是原厂
 
 等宽（`DroidSansMono`、`CutiveMono`）、时钟（`AndroidClock`）、衬线、缅文等原有保留规则不变。
 
+## CJK 集合（2026-10-18）
+
+- `NotoSansCJK-Regular.ttc` / `NotoSerifCJK-Regular.ttc` 此前在 ColorOS 上一律保留原厂（基线理由“TTC 多字面集合”）。现在 `coloros_metrics_batch.py` 在主槽位处理完后调用与 HyperOS 相同的 `build_collections`：按本机字体面数量与顺序编译，每面保留原厂 cmap/GSUB/GPOS/name/行距，等宽/斜体面保留原厂，供体取暂存目录里未改写的锚点（`.luoshu-font-store/wght-*.font`、`mix-composite.font` 或 `regular.font`）。
+- 暂存目录里已经有经过证明的集合（组合流程编译的）时不再重复编译；任何失败只保留该集合原厂并写入报告 `preservedCollections`。
+- 结果按“原厂字节 + 各面供体 sha256 + 编译器源码”缓存（与 HyperOS 共用 `hyperos-collections-v1`），重复切换只做硬链接。
+- `config/coloros_cjk_collections.conf`：只有精确的 `enabled=0`（最后一行为准）关闭；Python 规则在 `coloros_latin_policy.cjk_collections_enabled`，shell 副本 `coloros_collection_names_for_root` 供 `rom_coverage_gate.py` 使用，测试比对两者。安全切换缓存身份加入 `composite_collection_build.py` 与该配置。
+- 覆盖定位：ColorOS 上集合未生成时报“在替换范围但本次负载没有生成”，关闭后按“多语言字体集合”保留。
+
 ## 开关
 
 `config/coloros_slot_groups.conf`（不存在时用默认值）：

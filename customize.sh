@@ -130,6 +130,10 @@ fi
 # cannot bind-mount the old private payload. That must never abort a module install:
 # build a temporary read-only-style migration view with symlinked partition trees.
 _lc_real_old_mod="$LUOSHU_OLD_MOD"
+# The update migrator may receive a symlinked migration view; it reads the
+# payload metrics report, switch log and builder sources from the real module.
+LUOSHU_UPDATE_REAL_OLD_MOD="$LUOSHU_OLD_MOD"
+export LUOSHU_UPDATE_REAL_OLD_MOD
 _lc_old_view=''
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     if ! luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1; then

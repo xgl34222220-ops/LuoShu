@@ -16,6 +16,7 @@ import struct
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 
 from fontTools.ttLib import TTFont
 from fontTools import subset
@@ -38,6 +39,61 @@ PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
 # MAPPER_FAMILY_PREFIXES (families the HyperOS physical mappers write aliases
 # for) comes from hyperos_physical_policy.py, the single filename source.
+
+
+def _boottime() -> float:
+    """CLOCK_BOOTTIME keeps counting while the phone is suspended; monotonic
+    does not. Their difference over a step is the time the SoC slept."""
+    try:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    except (AttributeError, OSError):
+        return time.monotonic()
+
+
+class StepTimer:
+    """Per-step time of one stage completion (device exports showed a
+    multi-minute complete_hyperos with no breakdown). Each finished step is
+    printed at once as a [STAGE-STEP] line, so a killed run still shows how
+    far it got, and the list is kept for the metrics report. elapsedMs is
+    awake time; suspendedMs (only when present) is deep sleep inside the step,
+    which the shell phase timers (proc uptime) count as elapsed."""
+
+    def __init__(self, component: str = 'hyperos') -> None:
+        self.component = component
+        self.rows: list[dict] = []
+        self.started = time.monotonic()
+        self.started_boot = _boottime()
+
+    def record(self, name: str, began: float, began_boot: float, status: str, **extra) -> None:
+        awake = time.monotonic() - began
+        slept = max(0.0, (_boottime() - began_boot) - awake)
+        row = {'step': name, 'elapsedMs': round(awake * 1000), 'status': status,
+               **({'suspendedMs': round(slept * 1000)} if slept >= 0.5 else {}),
+               **{key: value for key, value in extra.items() if value is not None}}
+        self.rows.append(row)
+        fields = ' '.join(f'{key}={str(value).replace(" ", "_")}' for key, value in row.items())
+        print(f'[STAGE-STEP] component={self.component} {fields}', file=sys.stderr, flush=True)
+
+    @contextmanager
+    def step(self, name: str, **extra):
+        began, began_boot = time.monotonic(), _boottime()
+        status = 'ok'
+        try:
+            yield extra
+        except BaseException:
+            status = 'failed'
+            raise
+        finally:
+            self.record(name, began, began_boot, status, **extra)
+
+    def total_ms(self) -> int:
+        return round((time.monotonic() - self.started) * 1000)
+
+    def suspended_ms(self) -> int:
+        return max(0, round(((_boottime() - self.started_boot) - (time.monotonic() - self.started)) * 1000))
+
+
+STEPS = StepTimer()
 
 
 def policy_keeps_stock(name: str, groups: frozenset | None = None) -> bool:
@@ -168,9 +224,11 @@ def collection_cache_dir(module: Path) -> Path:
 
 def collection_cache_key(stock: Path, sources: list[Path], logical: str, allow: tuple) -> str:
     """Content identity of one compiled collection: stock bytes, each face's
-    donor bytes (in face order), the target, and both builder sources."""
+    donor bytes (in face order), the target, and the collection builder. The
+    batch driver's own source is deliberately excluded: it only selects inputs,
+    which are already part of the key, so unrelated edits keep caches valid."""
     import composite_collection_build as builder
-    engine = [builder.SCHEMA, builder.sha(Path(builder.__file__)), builder.sha(Path(__file__))]
+    engine = [builder.SCHEMA, builder.sha(Path(builder.__file__))]
     hashes = {}
     donors = [hashes.setdefault(path, builder.sha(path)) for path in sources]
     return builder.canonical({'engine': engine, 'target': logical, 'allow': list(allow),
@@ -215,27 +273,31 @@ def build_collections(module: Path, stage: Path, names: list[str],
                 stock = root / name if override else stock_path(module, logical)
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 allow = COLLECTION_TARGETS[name]
-                sources = [collection_source_for_weight(fonts, face_weight(stock, index))
-                           for index in range(collection_faces(stock))]
-                key = collection_cache_key(stock, sources, logical, allow)
+                with STEPS.step('collection_key', slot=logical):
+                    sources = [collection_source_for_weight(fonts, face_weight(stock, index))
+                               for index in range(collection_faces(stock))]
+                    key = collection_cache_key(stock, sources, logical, allow)
                 cached = cache_dir / f'{key[:32]}-{name}'
                 summary = cached.with_name(cached.name + '.json')
                 cache_hit = False
-                try:
-                    report = json.loads(summary.read_text(encoding='utf-8'))
-                    cache_hit = (report.get('key') == key and cached.is_file() and not cached.is_symlink()
-                                 and collection_faces(cached) == report['stockFaces']
-                                 and sha_file(cached) == report['outputSha256'])
-                except (OSError, ValueError, KeyError, TypeError):
-                    cache_hit = False
+                with STEPS.step('collection_cache_check', slot=logical) as info:
+                    try:
+                        report = json.loads(summary.read_text(encoding='utf-8'))
+                        cache_hit = (report.get('key') == key and cached.is_file() and not cached.is_symlink()
+                                     and collection_faces(cached) == report['stockFaces']
+                                     and sha_file(cached) == report['outputSha256'])
+                    except (OSError, ValueError, KeyError, TypeError):
+                        cache_hit = False
+                    info['hit'] = int(cache_hit)
                 if cache_hit:
                     os.utime(cached)
                     link_copy(cached, destination)
                 else:
                     started = time.monotonic()
-                    report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
-                                              source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
-                                              allow=allow)
+                    with STEPS.step('collection_build', slot=logical):
+                        report = build_collection(None, stock, destination, workspace, 'hyperos-stage', logical,
+                                                  source_for_weight=lambda weight: collection_source_for_weight(fonts, weight),
+                                                  allow=allow)
                     report = {'key': key, 'stockFaces': report['stockFaces'], 'outputSha256': report['outputSha256'],
                               'compiledFaces': sum(face['mode'] == 'compiled' for face in report['faces']),
                               'retainedSlots': {reason: max((face.get(field, 0) for face in report['faces']), default=0)
@@ -244,6 +306,7 @@ def build_collections(module: Path, stage: Path, names: list[str],
                               'buildSeconds': round(time.monotonic() - started, 1),
                               'stockBytes': stock.stat().st_size, 'outputBytes': destination.stat().st_size}
                     try:  # caching is an optimization; a failure never touches the staged result
+                        publish, publish_boot = time.monotonic(), _boottime()
                         cache_dir.mkdir(parents=True, exist_ok=True)
                         temporary = cached.with_name(cached.name + f'.tmp.{os.getpid()}')
                         temporary.unlink(missing_ok=True)
@@ -254,6 +317,7 @@ def build_collections(module: Path, stage: Path, names: list[str],
                         os.replace(temporary, cached)
                         summary.write_text(json.dumps(report), encoding='utf-8')
                         prune_collection_cache(cache_dir, name)
+                        STEPS.record('collection_cache_publish', publish, publish_boot, 'ok', slot=logical)
                     except OSError:
                         pass
                 done.append({'slot': logical, 'mode': 'collection', 'stockFaces': report['stockFaces'],
@@ -1104,6 +1168,77 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
     return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
+FONT_SUFFIXES = ('.ttf', '.otf', '.ttc', '.otc')
+
+
+def _file_digest(path: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1 << 20), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def prune_orphan_aliases(stage: Path, stock_roots: dict[str, Path] | None = None) -> list[str]:
+    """Remove staged font names this ROM does not have (no stock file to cover).
+
+    The composite mapper aliases a fixed HyperOS list (100..900.ttf,
+    GoogleSans*-Regular.ttf, ...) whether or not the ROM ships them. Per-file
+    mounts never expose such a name (no lower file), so it only enlarges the
+    payload and every cached/retired copy, and shows up as a "missing" slot.
+    Removal is lossless only: an orphan goes when its bytes are kept elsewhere
+    in the stage (same inode, or same size and SHA-256 as a retained file such
+    as the .luoshu-font-store anchor). A sole copy (e.g. a weight source that
+    boot repair may still read) is kept.
+    """
+    roots = stock_roots or {}
+    orphans: list[Path] = []
+    retained: list[Path] = []
+    for part in dict.fromkeys((*PARTS, *roots)):
+        staged = stage / part / 'fonts'
+        if not staged.is_dir() or staged.is_symlink():
+            continue
+        root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', str(roots.get(part, f'/{part}/fonts'))))
+        for entry in sorted(staged.rglob('*')):
+            if entry.is_symlink() or not entry.is_file():
+                continue
+            top = entry.parent == staged
+            if (top and entry.suffix.lower() in FONT_SUFFIXES and not entry.name.startswith('LuoShu-')
+                    and not (root / entry.name).exists() and not (root / entry.name).is_symlink()):
+                orphans.append(entry)
+            else:
+                retained.append(entry)
+    if not orphans:
+        return []
+    kept_inodes = set()
+    kept_by_size: dict[int, list[Path]] = {}
+    for path in retained:
+        info = path.stat()
+        kept_inodes.add((info.st_dev, info.st_ino))
+        kept_by_size.setdefault(info.st_size, []).append(path)
+    digests: dict[tuple[int, int], str] = {}
+
+    def digest(path: Path) -> str:
+        info = path.stat()
+        key = (info.st_dev, info.st_ino)
+        if key not in digests:
+            digests[key] = _file_digest(path)
+        return digests[key]
+
+    removed = []
+    for path in orphans:
+        info = path.stat()
+        duplicate = (info.st_dev, info.st_ino) in kept_inodes
+        if not duplicate and info.st_size in kept_by_size:
+            mine = digest(path)
+            duplicate = any(digest(other) == mine for other in kept_by_size[info.st_size])
+        if duplicate:
+            path.unlink()
+            removed.append('/' + path.relative_to(stage).as_posix())
+    return removed
+
+
 def build(module: Path, stage: Path, names: list[str]) -> dict:
     resolved = stage.resolve()
     live = (module / '.luoshu-payload').resolve()
@@ -1112,7 +1247,11 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     if not stage.is_dir():
         raise ValueError('HyperOS 字体暂存目录不存在')
     fonts = stage / 'system/fonts'
-    data = read_inventory(module)
+    STEPS.__init__('hyperos')  # one report per stage completion
+    with STEPS.step('read_inventory'):
+        data = read_inventory(module)
+    planning = STEPS.step('plan_slots')
+    planning.__enter__()
     collection_names = [name for name in dict.fromkeys(names) if name in COLLECTION_TARGETS]
     names = [name for name in names if name not in COLLECTION_TARGETS]
     jobs = []
@@ -1186,6 +1325,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             continue
         completed.append(job)
     jobs.extend(completed)
+    planning.__exit__(None, None, None)
     completed_slots = {'/' + dest.relative_to(stage).as_posix() for _source, dest, _contract in completed}
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
@@ -1202,8 +1342,13 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     prepared = []
     slot_report = []
     fallback = 0
+    collections, collections_kept, pruned = [], {}, []
     try:
-        cjk_fallback, fallback_outputs, routing_evidence = prepare_cjk_routing(data, jobs, stage, outputs)
+        with STEPS.step('cjk_routing_proof') as info:
+            cjk_fallback, fallback_outputs, routing_evidence = prepare_cjk_routing(data, jobs, stage, outputs)
+            info.update(outputs=routing_evidence.get('finalFallbackOutputs'),
+                        glyphsDrawn=routing_evidence.get('glyphsDrawn'),
+                        candidates=routing_evidence.get('candidateCodepoints'))
         for source, dest, contract in jobs:
             stat = source.stat()
             logical = '/' + dest.relative_to(stage).as_posix()
@@ -1224,15 +1369,19 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                     source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
                                   routing, stock_punctuation)
                     if source_key not in compact_sources:
-                        compact_sources[source_key] = compact_routed_source(
-                            source, outputs / f'source-{len(compact_sources)}.font',
-                            routing, stock_punctuation)
+                        with STEPS.step('compact_routed_source', slot=logical):
+                            compact_sources[source_key] = compact_routed_source(
+                                source, outputs / f'source-{len(compact_sources)}.font',
+                                routing, stock_punctuation)
                     metric_source, compact_removed = compact_sources[source_key]
-                output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
-                                                    align_bitmap_bottom=align_bottom)
+                with STEPS.step('slot_metrics', slot=logical) as info:
+                    output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
+                                                        align_bitmap_bottom=align_bottom)
+                    info['bytes'] = output.stat().st_size
                 output_reports[key]['removedCjkMappings'] += compact_removed
                 if tabular:
-                    output_reports[key].update(apply_tabular_digits(output))
+                    with STEPS.step('tabular_digits', slot=logical):
+                        output_reports[key].update(apply_tabular_digits(output))
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
@@ -1252,15 +1401,23 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'cjkRoutingReason': routing_reason,
                                 **cjk_routing_report(logical, routing_reason, routing_evidence),
                                 **output_reports[key]})
-        for output, dest in prepared:
-            link_copy(output, dest)
+        with STEPS.step('link_slots', count=len(prepared)):
+            for output, dest in prepared:
+                link_copy(output, dest)
         # Main slots first; the collections reuse those composites as donors.
         collections, collections_kept = build_collections(module, stage, collection_names, outputs)
-        for alias in preserved_aliases + excluded_aliases:
-            # Initial generic mapping creates the alias as a regular font. Its
-            # absence exposes the ROM lower symlink in OverlayFS and leaves it
-            # untouched in per-file bind mode. Framework changes keep working.
-            alias.unlink(missing_ok=True)
+        # The converted-outline cache only serves collections of this run.
+        release_collection_memory()
+        with STEPS.step('alias_cleanup'):
+            for alias in preserved_aliases + excluded_aliases:
+                # Initial generic mapping creates the alias as a regular font. Its
+                # absence exposes the ROM lower symlink in OverlayFS and leaves it
+                # untouched in per-file bind mode. Framework changes keep working.
+                alias.unlink(missing_ok=True)
+        # Last: collections and completion read staged weight aliases as donors.
+        with STEPS.step('prune_orphan_aliases') as info:
+            pruned = prune_orphan_aliases(stage, stock_roots)
+            info['removed'] = len(pruned)
         report = stage / '.luoshu-metrics-report.json'
         descriptor, temporary_name = tempfile.mkstemp(prefix=report.name + '.tmp.', dir=stage)
         temporary = Path(temporary_name)
@@ -1274,6 +1431,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                            'preservedFallbackSlots': fallback_preserved,
                            'collections': collections,
                            'preservedCollections': collections_kept,
+                           'prunedOrphanAliases': pruned,
+                           'steps': STEPS.rows,
+                           'stepsElapsedMs': STEPS.total_ms(),
+                           'stepsSuspendedMs': STEPS.suspended_ms(),
                            'preservedStockAliases': sorted({
                                '/' + alias.relative_to(stage).as_posix()
                                for alias in excluded_aliases if alias.parent.is_dir()})},
@@ -1287,7 +1448,27 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
         # alias. Keeping these temporary names after success only enlarges
         # cached payload copies and accumulates on repeated stage completion.
         shutil.rmtree(outputs, ignore_errors=True)
-    return {'mapped': len(jobs), 'generated': len(cache), 'fallbackSlots': fallback}
+    # Printed into fontswitch.log by the stage helper: the apply log then shows
+    # which CJK collections were compiled or kept stock and why.
+    return {'mapped': len(jobs), 'generated': len(cache), 'fallbackSlots': fallback,
+            'collections': [entry.get('slot') for entry in collections],
+            'preservedCollections': collections_kept,
+            'prunedOrphanAliases': len(pruned),
+            'elapsedMs': STEPS.total_ms(),
+            'suspendedMs': STEPS.suspended_ms(),
+            'slowestSteps': [f"{row['step']}:{row.get('slot', '-')}:{row['elapsedMs']}"
+                             for row in sorted(STEPS.rows, key=lambda row: -row['elapsedMs'])][:5]}
+
+
+def release_collection_memory() -> None:
+    """Drop the converted-outline cache once every collection is compiled.
+
+    It holds every converted donor outline; keeping it while the remaining
+    steps run only adds memory pressure on the phone."""
+    module = sys.modules.get('composite_collection_build')
+    cache = getattr(module, 'OUTLINE_CACHE', None)
+    if isinstance(cache, dict):
+        cache.clear()
 
 
 def main() -> int:

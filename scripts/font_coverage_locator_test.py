@@ -66,12 +66,24 @@ class LocatorTest(unittest.TestCase):
             os.link(path, visible)
         return path
 
+    def pm(self, args):
+        """Fake package manager: self.packages maps package -> list of APK paths."""
+        packages = getattr(self, "packages", {})
+        if args[:2] == ["list", "packages"]:
+            third = "-3" in args
+            return "".join(f"package:{paths[0]}={name}\n" for name, paths in packages.items()
+                           if paths and (not third or paths[0].startswith("/data/app/")))
+        if args[0] == "path":
+            return "".join(f"package:{path}\n" for path in packages.get(args[1], []))
+        return ""
+
     def run_locate(self, package="com.android.systemui", pid=PID, groups=None, weight=False):
         (self.proc / PID / "maps").write_text("".join(self.maps))
         return locator.locate(package, pid, module=self.module, proc_root=self.proc,
                               host_root=self.host, theme_dir=self.theme,
                               groups=policy.parse_groups("") if groups is None else groups,
-                              weight_probe=lambda _path: weight, rom="hyperos")
+                              weight_probe=lambda _path: weight, rom="hyperos",
+                              package_apks=locator.PackageApks(self.pm))
 
     def categories(self, result):
         return [item["category"] for item in result["findings"]]
@@ -141,6 +153,126 @@ class LocatorTest(unittest.TestCase):
         result = self.run_locate(package="com.example.reader")
         embedded = next(f for f in result["findings"] if f["category"] == "app-embedded")
         self.assertEqual(embedded["files"], ["wechat.ttf"])
+
+    def test_emoji_compat_download_is_not_app_embedded_evidence(self):
+        self.app_sees_payload()
+        emoji = self.stock / "Noto_COLR_Emoji_Compat-400-100_0-0_0.ttf"
+        emoji.write_bytes(b"e" * 100)
+        self.map("/data/user_de/0/com.google.android.gms/files/fonts/opentype/Noto_COLR_Emoji_Compat-400-100_0-0_0.ttf", emoji)
+        result = self.run_locate(package="com.anthropic.claude")
+        self.assertNotIn("app-embedded", self.categories(result))
+        self.assertEqual(result["verdict"], "covered")
+        self.assertTrue(any("Noto_COLR_Emoji_Compat" in line and "EmojiCompat" in line
+                            for line in result["keptByDesign"]))
+
+    def apk(self, entries, device_path="/data/app/~~x/com.example.app-1/base.apk", mapped=True):
+        import zipfile
+        real = self.host / device_path.lstrip("/")
+        real.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(real, "w") as archive:
+            archive.writestr("classes.dex", b"dex")
+            for name in entries:
+                archive.writestr(name, b"font")
+        if mapped:
+            self.map(device_path, real)
+        return real
+
+    def test_apk_body_font_is_app_layer_and_special_faces_are_kept(self):
+        self.app_sees_payload()
+        self.apk(["res/font/anthropic_sans.ttf", "assets/fonts/MaterialIcons-Regular.ttf",
+                  "assets/fonts/WeChatNum-Bold.ttf", "res/raw/x.txt"])
+        result = self.run_locate(package="com.example.app")
+        body = next(f for f in result["findings"] if f["category"] == "app-body-font")
+        self.assertEqual(body["files"], ["res/font/anthropic_sans.ttf"])
+        self.assertEqual("App 内置正文字体（系统层无法替换）", body["title"])
+        self.assertIn("英文/数字", body["detail"])
+        self.assertIn("不是系统字体槽未覆盖", body["detail"])
+        self.assertNotIn("app-embedded", self.categories(result))
+        evidence = result["apkFontAssets"]
+        self.assertEqual(evidence["archives"], 1)
+        self.assertEqual(evidence["bodyFontAssets"], ["res/font/anthropic_sans.ttf"])
+        self.assertEqual(evidence["specialFontAssets"],
+                         ["assets/fonts/MaterialIcons-Regular.ttf", "assets/fonts/WeChatNum-Bold.ttf"])
+        self.assertTrue(any("WeChatNum" in line and "按设计保留" in line for line in result["keptByDesign"]))
+        layers = result["layers"]
+        self.assertEqual(["res/font/anthropic_sans.ttf"], layers["appBuiltinBodyFonts"]["files"])
+        self.assertEqual("系统字体槽未覆盖", layers["systemSlotsUncovered"]["label"])
+        self.assertEqual([], layers["systemSlotsUncovered"]["files"])
+
+    def test_icon_or_clock_fonts_only_and_expired_budget_do_not_flag(self):
+        self.app_sees_payload()
+        self.apk(["assets/fonts/MaterialIcons-Regular.ttf", "assets/fonts/MiClock-Light.otf",
+                  "assets/watermarks/font/C800.ttf", "assets/fonts/Mitype2018-clock.otf",
+                  "assets/jlatexmath/fonts/cmr10.ttf", "assets/font/clock_number.otf",
+                  "assets/BarlowSemiCondensed_Num.otf", "assets/miui_digit.ttf"])
+        result = self.run_locate(package="com.example.app")
+        self.assertEqual(result["verdict"], "covered")
+        self.assertEqual(result["apkFontAssets"]["bodyFontAssets"], [])
+        self.assertEqual(8, len(result["apkFontAssets"]["specialFontAssets"]))
+        expired = locator.apk_font_evidence("com.example.app", ["/data/app/~~x/com.example.app-1/base.apk"],
+                                            self.host, deadline=0.0)
+        self.assertTrue(expired["truncated"])
+        self.assertEqual(expired["fontAssets"], [])
+
+    def test_other_apps_apks_mapped_by_systemui_are_not_its_evidence(self):
+        # Real export: SystemUI, GMS and NFC listed Claude's anthropic_sans.ttf,
+        # the union of 8 mapped APKs (other apps' resources/icons).
+        self.app_sees_payload()
+        self.apk(["assets/composeResources/claude.theme.generated.resources/font/anthropic_sans.ttf"],
+                 "/data/app/~~y/com.anthropic.claude-2/base.apk")
+        self.apk(["assets/fonts/MiClock-Light.otf"], "/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk")
+        self.packages = {"com.android.systemui": ["/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk"],
+                         "com.anthropic.claude": ["/data/app/~~y/com.anthropic.claude-2/base.apk"]}
+        result = self.run_locate(package="com.android.systemui")
+        self.assertEqual(result["verdict"], "covered")
+        self.assertEqual(["MiuiSystemUI.apk"], result["apkFontAssets"]["apks"])
+        self.assertNotIn("anthropic", json.dumps(result))
+        # Claude itself keeps its own body font as app-layer evidence.
+        result = self.run_locate(package="com.anthropic.claude")
+        self.assertEqual(result["verdict"], "app-body-font")
+        self.assertIn("anthropic_sans.ttf", result["findings"][0]["files"][0])
+        # A package the package manager does not know contributes nothing.
+        self.packages = {}
+        result = self.run_locate(package="com.android.nfc")
+        self.assertNotIn("apkFontAssets", result)
+
+    def test_not_running_app_is_located_from_its_installed_apks(self):
+        self.apk(["assets/fonts/XHS-Sans-Regular.ttf", "assets/fonts/XHS-Number.ttf"],
+                 "/data/app/~~z/com.xingin.xhs-9/base.apk", mapped=False)
+        self.apk(["res/font/xhs_medium.otf"], "/data/app/~~z/com.xingin.xhs-9/split_feature.apk", mapped=False)
+        self.packages = {"com.xingin.xhs": ["/data/app/~~z/com.xingin.xhs-9/base.apk",
+                                            "/data/app/~~z/com.xingin.xhs-9/split_feature.apk"]}
+        result = self.run_locate(package="com.xingin.xhs", pid="")
+        self.assertEqual(result["verdict"], "app-body-font")
+        self.assertEqual("not-running", result["slotCheck"])
+        self.assertEqual(["app-body-font", "not-running"], self.categories(result))
+        self.assertEqual(["assets/fonts/XHS-Sans-Regular.ttf", "res/font/xhs_medium.otf"],
+                         result["layers"]["appBuiltinBodyFonts"]["files"])
+        self.assertEqual(["base.apk", "split_feature.apk"], result["apkFontAssets"]["apks"])
+        # Without APK evidence a stopped app still says only "not running".
+        self.packages = {}
+        self.assertEqual(self.run_locate(package="com.xingin.xhs", pid="")["verdict"], "not-running")
+
+    def test_package_listing_parses_paths_with_equals_signs(self):
+        listing = ("package:/data/app/~~AbC==/com.xingin.xhs-Zx_y==/base.apk=com.xingin.xhs\n"
+                   "package:/system/priv-app/Settings/Settings.apk=com.android.settings\n"
+                   "package:/sdcard/evil.apk=com.evil\n")
+        apks = locator.PackageApks(lambda args: listing)
+        self.assertEqual({"com.xingin.xhs": "/data/app/~~AbC==/com.xingin.xhs-Zx_y==/base.apk",
+                          "com.android.settings": "/system/priv-app/Settings/Settings.apk"}, apks.bases())
+        self.assertTrue(apks.owns("com.android.settings:remote", "/system/priv-app/Settings/Settings.apk"))
+        self.assertTrue(apks.owns("com.xingin.xhs", "/data/app/~~AbC==/com.xingin.xhs-Zx_y==/split_a.apk"))
+        self.assertFalse(apks.owns("com.android.settings", "/data/app/~~AbC==/com.xingin.xhs-Zx_y==/base.apk"))
+
+    def test_apk_paths_reject_unexpected_locations(self):
+        (self.proc / PID).mkdir(parents=True, exist_ok=True)
+        (self.proc / PID / "maps").write_text(
+            "7000-8000 r--p 0 fd:01 1 /data/app/a/base.apk\n"
+            "8000-9000 r--p 0 fd:01 1 /data/app/a/base.apk\n"
+            "9000-a000 r--p 0 fd:01 2 /sdcard/evil.apk\n"
+            "a000-b000 r--p 0 fd:01 3 /data/app/../x.apk\n"
+            "b000-c000 r--p 0 fd:01 4 /system/app/Foo/Foo.apk\n")
+        self.assertEqual(locator.app_apk_paths(self.proc, PID), ["/data/app/a/base.apk", "/system/app/Foo/Foo.apk"])
 
     def test_weight_loss_on_static_font(self):
         self.app_sees_payload()
@@ -262,6 +394,44 @@ class LocatorTest(unittest.TestCase):
                               theme_dir=self.theme, weight_probe=lambda _p: False, budget_s=1.0,
                               clock=lambda: next(ticks), rom="hyperos")
         self.assertTrue(result["truncated"])
+
+    def test_scan_separates_app_body_fonts_from_slot_misses_and_ignores_rom_widget_fonts(self):
+        self.scan_fixture()
+        import zipfile
+        def archive(device_path, entries):
+            real = self.host / device_path.lstrip("/")
+            real.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(real, "w") as handle:
+                for name in entries:
+                    handle.writestr(name, b"f")
+            return real
+        # SystemUI ships clock faces and maps Claude's APK for an icon: neither is a miss.
+        ui = archive("/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk",
+                     ["assets/fonts/MiClock-Light.otf", "assets/fonts/Mitype2018-clock.otf"])
+        claude = archive("/data/app/~~c/com.anthropic.claude-1/base.apk",
+                         ["assets/composeResources/claude.theme.generated.resources/font/anthropic_sans.ttf"])
+        with (self.proc / "100" / "maps").open("a") as stream:
+            stream.write(maps_line("/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk", ui, 0x50000))
+            stream.write(maps_line("/data/app/~~c/com.anthropic.claude-1/base.apk", claude, 0x60000))
+        (self.proc / "110" / "root/system/fonts").mkdir(parents=True)
+        os.link(self.payload / "MiSansVF.ttf", self.proc / "110" / "root/system/fonts/MiSansVF.ttf")
+        (self.proc / "110" / "cmdline").write_bytes(b"com.anthropic.claude\0")
+        (self.proc / "110" / "maps").write_text(
+            maps_line("/system/fonts/MiSansVF.ttf", self.payload / "MiSansVF.ttf", 0x7000)
+            + maps_line("/data/app/~~c/com.anthropic.claude-1/base.apk", claude, 0x9000))
+        self.packages = {"com.android.systemui": ["/system_ext/priv-app/MiuiSystemUI/MiuiSystemUI.apk"],
+                         "com.anthropic.claude": ["/data/app/~~c/com.anthropic.claude-1/base.apk"]}
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, groups=policy.parse_groups(""),
+                              weight_probe=lambda _p: False, rom="hyperos",
+                              package_apks=locator.PackageApks(self.pm))
+        by_package = {item["package"]: item for item in result["items"]}
+        self.assertNotIn("com.android.systemui", by_package)
+        self.assertEqual("app-body-font", by_package["com.anthropic.claude"]["verdict"])
+        self.assertEqual((4, 1), (result["scanned"], result["covered"]))
+        self.assertEqual((1, 2), (result["appBuiltinOnly"], result["systemSlotUncovered"]))
+        self.assertEqual("App 内置正文字体（系统层无法替换）",
+                         by_package["com.anthropic.claude"]["layers"]["appBuiltinBodyFonts"]["label"])
 
     def test_scan_cli_emits_json(self):
         self.scan_fixture()
@@ -410,6 +580,20 @@ class ColorOSLocatorTest(unittest.TestCase):
         for name in ("OSans-RC-Regular.ttf", "NotoSansKhmer-Regular.ttf", "NotoColorEmoji.ttf"):
             self.assertIn(name, kept)
 
+    def test_coloros_cjk_collection_follows_the_collections_switch(self):
+        judge = locator.StockPolicy("coloros", self.module, metrics={}, coloros_names=frozenset())
+        verdict = judge.judge("/system/fonts/NotoSansCJK-Regular.ttc")
+        self.assertEqual("outside", verdict[0])
+        (self.module / "config").mkdir(exist_ok=True)
+        (self.module / "config/coloros_cjk_collections.conf").write_text("enabled=0\n")
+        self.assertEqual(("kept", "多语言字体集合"),
+                         locator.StockPolicy("coloros", self.module, metrics={}, coloros_names=frozenset())
+                         .judge("/system/fonts/NotoSansCJK-Regular.ttc"))
+        kept = {"preservedCollections": {"/system/fonts/NotoSansCJK-Regular.ttc": "ValueError: x"}}
+        self.assertEqual("collection", locator.StockPolicy("coloros", self.module, metrics=kept,
+                                                           coloros_names=frozenset())
+                         .judge("/system/fonts/NotoSansCJK-Regular.ttc")[0])
+
     def test_coloros_scan_offers_no_hyperos_switches(self):
         result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
                               theme_dir=self.stock / "no-theme", weight_probe=lambda _p: False, rom="coloros")
@@ -486,6 +670,35 @@ class CoverageExportTest(LocatorTest):
         self.assertIn("theme", data)
         self.assertEqual({}, data["sectionErrors"])
 
+    def test_export_lists_installed_apps_with_body_fonts_even_when_not_running(self):
+        import zipfile
+        real = self.host / "data/app/~~z/com.xingin.xhs-9/base.apk"
+        real.parent.mkdir(parents=True)
+        with zipfile.ZipFile(real, "w") as handle:
+            handle.writestr("assets/fonts/XHS-Sans-Regular.ttf", b"f")
+            handle.writestr("assets/fonts/XHS-Number.ttf", b"f")
+        clock = self.host / "data/app/~~k/com.example.clock-1/base.apk"
+        clock.parent.mkdir(parents=True)
+        with zipfile.ZipFile(clock, "w") as handle:
+            handle.writestr("assets/fonts/MiClock-Light.otf", b"f")
+        self.packages = {"com.xingin.xhs": ["/data/app/~~z/com.xingin.xhs-9/base.apk"],
+                         "com.example.clock": ["/data/app/~~k/com.example.clock-1/base.apk"],
+                         "com.android.settings": ["/system/priv-app/Settings/Settings.apk"]}
+        self.scan_fixture()
+        reports = Path(self.tmp.name) / "reports-apps"
+        reports.mkdir()
+        locator.export(module=self.module, out_dir=reports, rom="hyperos", proc_root=self.proc,
+                       host_root=self.host, theme_dir=self.theme, package_apks=locator.PackageApks(self.pm),
+                       now="x")
+        data = json.loads(next(reports.glob("LuoShu-coverage-full-*.json")).read_text())
+        apps = data["installedAppFonts"]
+        self.assertEqual(2, apps["installed"])  # third-party only (-3)
+        self.assertEqual([{"package": "com.xingin.xhs", "layer": "app",
+                           "label": "App 内置正文字体（系统层无法替换）",
+                           "bodyFontAssets": ["assets/fonts/XHS-Sans-Regular.ttf"], "specialFontAssets": 1}],
+                         apps["apps"])
+        self.assertEqual({}, data["sectionErrors"])
+
     def _export(self, metrics):
         self.scan_fixture()
         (self.module / ".luoshu-payload/.luoshu-metrics-report.json").write_text(json.dumps(metrics))
@@ -522,6 +735,76 @@ class CoverageExportTest(LocatorTest):
         self.assertNotIn("sdcard", json.dumps(data["sectionErrors"]))
         self.assertTrue(data["issues"])
 
+    def test_missing_report_names_the_inherited_payload_instead_of_no_reason(self):
+        # Device export 2026-10-18: no .luoshu-metrics-report.json at all after a
+        # module update kept the old composite payload; the note said "未记录原因".
+        judge = locator.StockPolicy("hyperos", self.module, metrics={})
+        kind, note = judge.judge("/system/fonts/NotoSansCJK-Regular.ttc")
+        self.assertEqual("outside", kind)
+        self.assertIn("缺少度量/集合报告", note)
+        (self.module / "config").mkdir(exist_ok=True)
+        (self.module / "config/font-payload-rebuild-pending.conf").write_text(
+            "state=awaiting-explicit-apply\nreason=font-builder-changed\ndetail=metrics-report-missing\n")
+        kind, note = locator.StockPolicy("hyperos", self.module, metrics={}).judge(
+            "/system/fonts/NotoSerifCJK-Regular.ttc")
+        self.assertIn("模块更新后沿用了旧版本生成的字体负载", note)
+        self.assertNotIn("未记录原因", note)
+
+    def test_export_carries_the_last_apply_with_phase_timings(self):
+        (self.module / "logs").mkdir(exist_ok=True)
+        (self.module / "logs/fontswitch.log").write_text("\n".join([
+            "[SAFE-TIMING] task=old event=begin phase=map_rom uptime=1.0",
+            "[SAFE-TIMING] task=old event=end phase=map_rom status=completed uptime=2.0 elapsedMs=1000",
+            "[SAFE-TIMING] task=new event=begin phase=source_lookup_validation uptime=5.0",
+            "stage output for /sdcard/LuoShu/fonts/私人字体.ttf",
+            '{"mapped": 40, "generated": 12, "collections": ["/system/fonts/NotoSansCJK-Regular.ttc"]}',
+            "[SAFE-TIMING] task=new event=end phase=source_lookup_validation status=completed uptime=5.4 elapsedMs=400",
+            "[SAFE-TIMING] task=new event=begin phase=complete_hyperos uptime=5.4",
+            "[SAFE-TIMING] task=new event=end phase=complete_hyperos status=completed uptime=75.4 elapsedMs=70000",
+            "[2026-10-18 09:18:13] [WEBVIEW-ROUTE] already bound",
+        ]) + "\n")
+        data = self._export({"collections": []})
+        last = data["lastApply"]
+        self.assertTrue(last["found"])
+        self.assertEqual(7, last["lineCount"])
+        self.assertEqual([("source_lookup_validation", 400), ("complete_hyperos", 70000)],
+                         [(row["phase"], row["elapsedMs"]) for row in last["phases"]])
+        self.assertEqual(70400, last["totalPhaseMs"])
+        joined = "\n".join(last["lines"])
+        self.assertIn('"mapped": 40', joined)          # unfiltered stage output stays
+        self.assertNotIn("task=old", joined)
+        self.assertNotIn("/sdcard", joined)
+        self.assertNotIn("私人字体", joined)
+        self.assertEqual({}, data["sectionErrors"])
+        (self.module / "logs/fontswitch.log").write_text("[WEBVIEW-ROUTE] only\n")
+        self.assertFalse(locator.last_apply_log(self.module, str)["found"])
+
+
+    def test_last_apply_breaks_complete_hyperos_into_stage_steps(self):
+        (self.module / "logs").mkdir(exist_ok=True)
+        (self.module / "logs/fontswitch.log").write_text("\n".join([
+            "[MIX-PHASE] schema=1 request=r1 component=finalize phase=complete_hyperos unit=fixed "
+            "weight=fixed event=begin uptimeSeconds=10.0",
+            "[STAGE-STEP] component=hyperos step=cjk_routing_proof elapsedMs=2051 status=ok outputs=5",
+            "[STAGE-STEP] component=hyperos step=slot_metrics elapsedMs=99 status=ok "
+            "slot=/product/fonts/MiClock.otf bytes=1",
+            "[STAGE-STEP] component=hyperos step=collection_build elapsedMs=90600 suspendedMs=435000 "
+            "status=ok slot=/system/fonts/NotoSansCJK-Regular.ttc",
+            "[STAGE-STEP] component=hyperos step=slot_metrics elapsedMs=5 status=ok slot=/sdcard/私人.ttf",
+            "[STAGE-STEP] component=hyperos step=broken elapsedMs=x",
+            "[MIX-PHASE] schema=1 request=r1 component=finalize phase=complete_hyperos unit=fixed "
+            "weight=fixed event=end uptimeSeconds=550.0 elapsedMs=540000 result=ok",
+        ]) + "\n")
+        last = locator.last_apply_log(self.module, str)
+        self.assertEqual([("finalize/complete_hyperos", 540000)],
+                         [(row["phase"], row["elapsedMs"]) for row in last["phases"]])
+        self.assertEqual(540000, last["totalPhaseMs"])  # sub-steps never double count
+        steps = last["stageSteps"]
+        self.assertEqual(["cjk_routing_proof", "slot_metrics", "collection_build", "slot_metrics"],
+                         [row["step"] for row in steps])
+        self.assertEqual(435000, steps[2]["suspendedMs"])
+        self.assertEqual("/system/fonts/NotoSansCJK-Regular.ttc", steps[2]["slot"])
+        self.assertNotIn("slot", steps[3])  # only system slot paths are exported
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

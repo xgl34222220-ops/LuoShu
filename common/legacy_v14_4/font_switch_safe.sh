@@ -279,7 +279,8 @@ safe_mapper_identity() {
         "$MODDIR/common/util_functions.sh" "$MODDIR/common/rom_adapters.sh"
     # Capability layer (weight anchors, optional Serif/Emoji slots) when present.
     for _smi_file in "$MODDIR/common/font_capability.py" "$MODDIR/common/font_capability.sh" \
-                     "$MODDIR/common/font_slot_options.sh" "$MODDIR/common/coloros_latin_policy.py"; do
+                     "$MODDIR/common/font_slot_options.sh" "$MODDIR/common/coloros_latin_policy.py" \
+                     "$MODDIR/common/composite_collection_build.py"; do
         [ -f "$_smi_file" ] && set -- "$@" "$_smi_file"
     done
     _smi_code=$(safe_code_identity "$@") || return 1
@@ -287,6 +288,11 @@ safe_mapper_identity() {
     if [ -s "$MODDIR/config/font_slot_options.conf" ]; then
         _smi_opts=$(safe_hash_stream < "$MODDIR/config/font_slot_options.conf")
         _smi_code="$_smi_code;slot-options:$_smi_opts"
+    fi
+    # The ColorOS stage compiles stock CJK collections unless this turns it off.
+    if [ "${IS_COLOROS:-false}" = true ] && [ -s "$MODDIR/config/coloros_cjk_collections.conf" ]; then
+        _smi_cjk=$(safe_hash_stream < "$MODDIR/config/coloros_cjk_collections.conf")
+        _smi_code="$_smi_code;cjk-collections:$_smi_cjk"
     fi
     # The ColorOS osans_digits group changes which digit slots are staged.
     if [ "${IS_COLOROS:-false}" = true ] && [ -s "$MODDIR/config/coloros_slot_groups.conf" ]; then
@@ -702,6 +708,7 @@ safe_exit_cleanup() {
     safe_timing_phase worker_cleanup
     luoshu_next_transaction_rollback "$MODDIR" >/dev/null 2>&1 || true
     cleanup_stage; prewarm_lock_cleanup; lock_cleanup
+    luoshu_wake_lock_release safe_switch
     safe_timing_phase_end finished
     if [ "$SAFE_TIMING_ENABLED" = true ] && safe_timing_clock; then
         safe_timing_elapsed "$SAFE_TIMING_START_S" "$SAFE_TIMING_START_MS"
@@ -1149,6 +1156,11 @@ switch_font() {
 
 case "${1:-}" in
     action)
+        # Keep the CPU awake while the payload is built and mounted
+        # (released by safe_exit_cleanup; expires by itself if killed).
+        case "${2:-}" in
+            switch|prewarm) luoshu_wake_lock_acquire safe_switch 1800 || true ;;
+        esac
         case "${2:-}" in
             switch) switch_font "${3:-}"; exit $? ;;
             prewarm) prewarm_font "${3:-}"; exit $? ;;

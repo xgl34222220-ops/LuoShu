@@ -208,11 +208,27 @@ luoshu_migrate_update_cache() {
     # regular files from config/*, silently dropping the entire device alignment cache on update.
     # Metric/source caches are content-addressed and safe across releases. A device payload cache is
     # retained only when its payload schema and physical-font builder agree.
-    for _relative in cache/auto-multiweight-mix/source-meta-v1 config/metrics_cache config/font-config-source; do
-        [ -d "$_old/$_relative" ] || continue
+    # hyperos-collections-v1 entries are keyed by the collection builder,
+    # its schema and the stock/donor bytes and are re-verified on use, and
+    # axes-mix/prepared-v1 instances are keyed by source bytes, axes and the
+    # font_instance.py digest with a sha256 receipt. Neither depends on the
+    # payload schema, so both survive every update (a rebuild after a builder
+    # change simply misses and the module's own pruning bounds the size).
+    for _relative in cache/auto-multiweight-mix/source-meta-v1 cache/hyperos-collections-v1 \
+        cache/axes-mix/prepared-v1 config/metrics_cache config/font-config-source; do
+        _lmuc_source="$_old/$_relative"
+        case "$_relative" in
+            cache/*)
+                if [ ! -d "$_lmuc_source" ] && [ -d "$_old/.luoshu-state/$_relative" ] &&
+                   [ ! -L "$_old/.luoshu-state/$_relative" ]; then
+                    _lmuc_source="$_old/.luoshu-state/$_relative"
+                fi
+                ;;
+        esac
+        [ -d "$_lmuc_source" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || true
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
-        luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
+        luoshu_copy_update_tree "$_lmuc_source" "$_new/$_relative" || true
     done
     if [ "$_schema_compatible" = true ] && [ "$_builder_compatible" = true ]; then
         if [ -d "$_old/config/device-font-cache" ]; then

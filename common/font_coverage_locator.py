@@ -71,6 +71,13 @@ WEB_ENGINES = {
     "com.android.webview": "Android WebView",
 }
 THEME_PLACEHOLDER_MAX_BYTES = 65536
+# AndroidX EmojiCompat downloads Noto_COLR_Emoji_Compat from the Google font
+# provider into nearly every modern app; it only draws emoji, so it is never
+# evidence that an app renders its text with its own fonts.
+EMOJI_COMPAT_RE = re.compile(r"^Noto_?COLR_?Emoji_?Compat", re.IGNORECASE)
+APK_PREFIXES = ("/data/app/", "/system/", "/system_ext/", "/product/", "/vendor/",
+                "/my_product/", "/oplus_product/", "/mi_ext/")
+APK_ARCHIVES_MAX = 8
 MAX_FILES = 48  # findings list every file (the App shows the first few)
 
 GUIDE = {
@@ -86,6 +93,9 @@ GUIDE = {
     "app-embedded": (
         "该应用使用自带字体或独立网页内核",
         "微信、QQ、支付宝等内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内，洛书无法替换（主模块不做 Hook）。"),
+    "app-body-font": (
+        "App 内置正文字体（系统层无法替换）",
+        "这是应用自己打包的英文/数字正文字体，不是系统字体槽未覆盖；洛书主模块不做 Hook，无法替换。中文等其余文字仍使用洛书字体。"),
     "link-switched": (
         "进程在洛书挂载前加载了字体，或开机后系统切换了字体链接",
         "强行停止该应用（系统界面可重启）后再看；若每次开机都出现，请导出诊断反馈。"),
@@ -313,6 +323,29 @@ DECORATIVE_PREFIXES = ("CarroisGothic", "ComingSoon", "DancingScript", "CutiveMo
 COLOROS_FLIP_PREFIXES = ("OplusOSUI-", "ColorOSUI-")
 
 
+def rebuild_pending(module: Path | None) -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        text = (module / "config/font-payload-rebuild-pending.conf").read_text(errors="replace") if module else ""
+    except OSError:
+        text = ""
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if sep and key in ("state", "reason", "detail", "font"):
+            values[key] = value.strip()
+    return values
+
+
+def missing_collection_note(metrics: dict[str, Any], module: Path | None) -> str:
+    """Why a CJK collection the ROM policy replaces is absent from the payload."""
+    if metrics:
+        return "CJK 集合在替换范围，但本次负载没有生成（报告未记录原因，请重新应用）"
+    pending = rebuild_pending(module)
+    if pending.get("detail") == "metrics-report-missing" or pending.get("reason") == "font-builder-changed":
+        return "模块更新后沿用了旧版本生成的字体负载（不含 CJK 集合），请在洛书中重新应用一次字体"
+    return "负载缺少度量/集合报告（多为旧版本生成或模块更新后沿用的负载），请在洛书中重新应用一次字体"
+
+
 def load_metrics(module: Path | None) -> dict[str, Any]:
     try:
         data = json.loads((module / METRICS_REPORT).read_text(encoding="utf-8")) if module else {}
@@ -381,8 +414,10 @@ class StockPolicy:
         if path in self.preserved:
             return "kept", "ROM 动态别名/回退槽位"
         if lower.endswith((".ttc", ".otc")):
-            if self.rom == "hyperos" and name in COLLECTION_TARGETS:
-                return "outside", "CJK 集合在替换范围，但本次负载没有生成（未记录原因，请重新应用）"
+            if name in COLLECTION_TARGETS and (self.rom == "hyperos" or (
+                    self.rom == "coloros" and coloros_policy is not None
+                    and coloros_policy.cjk_collections_enabled(self._module))):
+                return "outside", missing_collection_note(self.metrics, self._module)
             return "kept", "多语言字体集合"
         if policy is not None:
             kind = policy.classify(name)
@@ -418,12 +453,218 @@ class StockPolicy:
         return "outside", ""
 
 
+def app_apk_paths(proc_root: Path, pid: str, limit: int = 64) -> list[str]:
+    """Installed APKs the process has mapped, in map order. SystemUI, the
+    launcher, GMS and NFC map other apps' APKs too (their icons/resources), so
+    this is never evidence by itself: see own_apk_paths."""
+    found: list[str] = []
+    try:
+        with (proc_root / pid / "maps").open("r", errors="replace") as stream:
+            for line in stream:
+                parts = line.split(None, 5)
+                path = parts[5].strip() if len(parts) == 6 else ""
+                if (not path.endswith(".apk") or not path.startswith(APK_PREFIXES)
+                        or ".." in path.split("/") or path in found):
+                    continue
+                found.append(path)
+                if len(found) >= limit:
+                    break
+    except OSError:
+        return []
+    return found
+
+
+def _safe_apk_path(path: str) -> bool:
+    return path.endswith(".apk") and path.startswith(APK_PREFIXES) and ".." not in path.split("/")
+
+
+def _run_pm(args: list[str], timeout: float) -> str:
+    import subprocess
+    for command in (["pm", *args], ["cmd", "package", *args]):
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout
+    return ""
+
+
+class PackageApks:
+    """Which APKs belong to which package, from the package manager.
+
+    One `pm list packages -f` (base APK of every package) serves a whole scan;
+    `pm path <pkg>` (base + splits) serves a single, possibly not running, app.
+    Tests inject `runner(args) -> stdout`.
+    """
+
+    def __init__(self, runner: Callable[[list[str]], str] | None = None, timeout: float = 15.0):
+        self.runner = runner or (lambda args: _run_pm(args, timeout))
+        self._bases: dict[str, str] | None = None
+        self._third_party: dict[str, str] | None = None
+        self._paths: dict[str, list[str]] = {}
+
+    @staticmethod
+    def _parse_listing(text: str) -> dict[str, str]:
+        bases = {}
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("package:"):
+                continue
+            # package:/data/app/~~x==/com.a-y==/base.apk=com.a ; paths may hold '='
+            path, _, package = line[len("package:"):].rpartition("=")
+            if PACKAGE_RE.match(package) and ":" not in package and _safe_apk_path(path):
+                bases[package] = path
+        return bases
+
+    def bases(self) -> dict[str, str]:
+        if self._bases is None:
+            self._bases = self._parse_listing(self.runner(["list", "packages", "-f"]))
+        return self._bases
+
+    def third_party(self) -> dict[str, str]:
+        """User-installed packages and their base APKs (one pm call)."""
+        if self._third_party is None:
+            self._third_party = self._parse_listing(self.runner(["list", "packages", "-f", "-3"]))
+        return self._third_party
+
+    def paths(self, package: str) -> list[str]:
+        package = package.split(":", 1)[0]
+        if package not in self._paths:
+            found = []
+            for line in self.runner(["path", package]).splitlines():
+                path = line.strip()[len("package:"):] if line.strip().startswith("package:") else ""
+                if _safe_apk_path(path) and path not in found:
+                    found.append(path)
+            self._paths[package] = found
+        return self._paths[package]
+
+    def owns(self, package: str, path: str) -> bool:
+        """base.apk or a split in the package's own install directory."""
+        package = package.split(":", 1)[0]
+        base = self.bases().get(package)
+        if base is None:
+            return path in self.paths(package)
+        directory = base.rsplit("/", 1)[0]
+        name = path.rsplit("/", 1)[-1]
+        return path == base or (path.rsplit("/", 1)[0] == directory and name.startswith("split_"))
+
+
+def own_apk_paths(package: str, mapped: list[str], apks: PackageApks,
+                  limit: int = APK_ARCHIVES_MAX) -> list[str]:
+    """Only the app's own archives are evidence about the app's fonts."""
+    package = package.split(":", 1)[0]
+    own = []
+    for path in mapped:
+        directory = path.rsplit("/", 2)
+        # /data/app/[~~x/]<package>-<suffix>/base.apk needs no package manager.
+        if path.startswith("/data/app/") and len(directory) == 3 and \
+                directory[1].rsplit("/", 1)[-1].startswith(package + "-"):
+            owned = True
+        else:
+            owned = apks.owns(package, path)
+        if owned:
+            own.append(path)
+            if len(own) >= limit:
+                break
+    return own
+
+
+# Clock, numeral, watermark, formula and icon faces: special-purpose fonts an
+# app (system or not) draws one widget with. They are not the app's body text
+# and never mean "the system font was not applied" (device export 2026-10-19:
+# SystemUI, launcher, clock, weather, calendar, settings, security center and
+# camera watermarks were reported only for these).
+SPECIAL_FONT_RE = re.compile(
+    r"mitype|miclock|miui_?digit|clock|watermark|latex|math|wechatnum|digit|number|(?<![a-z])num(?![a-z])"
+    r"|icon|symbol|emoji|awesome|glyph|material|weui|cupertino", re.IGNORECASE)
+
+
+def classify_font_asset(name: str) -> str:
+    """'special' (clock/number/decoration/formula/icon) or 'body' (text face)."""
+    return "special" if SPECIAL_FONT_RE.search(name) else "body"
+
+
+def _default_apk_reader(path: Path) -> dict[str, Any]:
+    from font_layout_diagnostic import apk_font_names  # central directory only
+    return apk_font_names(path)
+
+
+def apk_font_evidence(package: str, paths: list[str], host_root: Path = Path("/"),
+                      reader: Callable[[Path], dict[str, Any]] | None = None,
+                      deadline: float | None = None) -> dict[str, Any]:
+    """Font resources (res/font, assets) inside the app's OWN APKs, split into
+    body text faces and special-purpose faces. Central directories only."""
+    import time
+    reader = reader or _default_apk_reader
+    assets: list[str] = []
+    statuses: list[str] = []
+    truncated = False
+    for path in paths:
+        if deadline is not None and time.monotonic() > deadline:
+            truncated = True
+            break
+        try:
+            info = reader(host_root / path.lstrip("/"))
+        except Exception:  # noqa: BLE001 - one archive never breaks the locator
+            info = {"status": "unreadable-archive", "fontAssets": []}
+        statuses.append(str(info.get("status", "")))
+        truncated = truncated or bool(info.get("truncated"))
+        assets.extend(name for name in info.get("fontAssets") or [] if isinstance(name, str))
+    assets = sorted(set(assets))
+    return {"package": package.split(":", 1)[0], "archives": len(statuses),
+            "apks": [path.rsplit("/", 1)[-1] for path in paths][:APK_ARCHIVES_MAX], "statuses": statuses,
+            "fontAssets": assets[:MAX_FILES],
+            "bodyFontAssets": [name for name in assets if classify_font_asset(name) == "body"][:MAX_FILES],
+            "specialFontAssets": [name for name in assets if classify_font_asset(name) == "special"][:MAX_FILES],
+            "truncated": truncated or len(assets) > MAX_FILES}
+
+
+# Which side of the line a finding is on: "app" means the app draws that text
+# with fonts it ships itself (no system font slot can reach it); "system-slot"
+# means a system font slot or its mount did not take LuoShu's font.
+APP_LAYER = ("app-embedded", "app-body-font")
+SYSTEM_SLOT_LAYER = ("theme-takeover", "outside-whitelist", "namespace-hidden", "link-switched",
+                     "weight-loss", "collection-kept", "flip-font")
+
+
+def layer_summary(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    app = [f for f in findings if f["category"] in APP_LAYER]
+    slot = [f for f in findings if f["category"] in SYSTEM_SLOT_LAYER]
+    return {
+        "appBuiltinBodyFonts": {"label": "App 内置正文字体（系统层无法替换）",
+                                "files": list(dict.fromkeys(x for f in app for x in f["files"]))[:MAX_FILES]},
+        "systemSlotsUncovered": {"label": "系统字体槽未覆盖",
+                                 "categories": [f["category"] for f in slot],
+                                 "files": list(dict.fromkeys(x for f in slot for x in f["files"]))[:MAX_FILES]},
+    }
+
+
+def _apk_findings(result: dict[str, Any], evidence: dict[str, Any] | None, add, rom: str) -> None:
+    if not evidence or not evidence["fontAssets"]:
+        return
+    result["apkFontAssets"] = evidence
+    special = evidence["specialFontAssets"]
+    if special:
+        result["keptByDesign"] = (result.get("keptByDesign", []) + [
+            f"{name}（按设计保留：应用安装包内的时钟/数字/装饰/公式/图标专用字体，不是正文字体，也不是系统字体槽）"
+            for name in special])[:MAX_FILES]
+    body = evidence["bodyFontAssets"]
+    if body:
+        add("app-body-font", body,
+            "安装包（" + "、".join(evidence["apks"][:3]) + "）内含正文文字字体：应用用它绘制英文/数字，"
+            "系统字体只负责其余文字（如中文）。这不是系统字体槽未覆盖，洛书在系统层无法替换（不做 Hook）")
+
+
 def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Path("/proc"),
            host_root: Path = Path("/"), theme_dir: Path = Path("/data/system/theme/fonts"),
            groups: frozenset[str] | None = None, stock_dir: Path = Path("/system/fonts"),
            weight_probe: Callable[[Path], bool] = static_on_variable_slot,
            theme: dict[str, Any] | None = None, rom: str | None = None,
-           stock_policy: StockPolicy | None = None) -> dict[str, Any]:
+           stock_policy: StockPolicy | None = None,
+           apk_reader: Callable[[Path], dict[str, Any]] | None = None,
+           apk_deadline: float | None = None, apk_scan: bool = True,
+           package_apks: PackageApks | None = None) -> dict[str, Any]:
     rom = rom if rom in ROMS else detect_rom()
     result: dict[str, Any] = {"schema": SCHEMA, "package": package, "pid": pid or "",
                               "rom": rom, "findings": []}
@@ -441,9 +682,23 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
     if package in EMBEDDED_FONT_APPS or package in WEB_ENGINES:
         label = EMBEDDED_FONT_APPS.get(package) or WEB_ENGINES[package]
         add("app-embedded", [], label)
+    apks = package_apks or PackageApks()
     if not pid or not pid.isdigit():
-        findings.insert(0, finding("not-running", rom=rom))
-        result["verdict"] = "not-running"
+        # Slots are only checked on a live process, but the app's own APKs
+        # (pm path) already show whether it ships its own body text fonts.
+        if apk_scan:
+            _apk_findings(result, apk_font_evidence(package, apks.paths(package)[:APK_ARCHIVES_MAX],
+                                                    host_root, apk_reader, apk_deadline), add, rom)
+        result["slotCheck"] = "not-running"
+        if any(f["category"] in APP_LAYER for f in findings):
+            item = finding("not-running", rom=rom)
+            item["detail"] = "系统字体槽需在应用运行时检测；安装包证据已列出"
+            findings.append(item)
+            result["verdict"] = findings[0]["category"]
+        else:
+            findings.insert(0, finding("not-running", rom=rom))
+            result["verdict"] = "not-running"
+        result["layers"] = layer_summary(findings)
         return result
     visible = str(proc_root / pid / "root")
     args = SimpleNamespace(target=[f"app={pid}@{package}"], proc_root=str(proc_root),
@@ -471,6 +726,8 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
     stock_paths = _split(report.get("app.stockPaths", ""))
     replaced = _split(report.get("app.replacedSlotStockPaths", ""))
     others = _split(report.get("app.otherFiles", ""))
+    emoji_compat = [name for name in others if EMOJI_COMPAT_RE.match(name)]
+    others = [name for name in others if name not in emoji_compat]
     luoshu_hits = int(report.get("app.luoshuHits", "0") or 0)
 
     if theme["state"] == "user-theme" and (theme_paths or not luoshu_hits):
@@ -514,12 +771,18 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
             "；".join(f"{path.rsplit('/', 1)[-1]}：{reason}" for path, reason in collections))
     if outside:
         add("outside-whitelist", outside)
+    kept += [f"{name}（按设计保留：EmojiCompat 下载的表情字体，只绘制表情，不代表应用自带文字字体）"
+             for name in emoji_compat]
     if kept:
         result["keptByDesign"] = kept[:MAX_FILES]
     if pending:
         result["targetsNotInPayload"] = pending[:MAX_FILES]
-    if others and not any(f["category"] == "app-embedded" for f in findings):
+    embedded = next((f for f in findings if f["category"] == "app-embedded"), None)
+    if others and embedded is None:
         add("app-embedded", others, "进程自行打开了应用内或下载的字体文件")
+    if apk_scan:
+        own = own_apk_paths(package, app_apk_paths(proc_root, pid), apks)
+        _apk_findings(result, apk_font_evidence(package, own, host_root, apk_reader, apk_deadline), add, rom)
     stock_on_slot = [item for item in replaced if not item.endswith(":loaded-before-mount")]
     if stock_on_slot and not hidden and not switched:
         add("link-switched", stock_on_slot, "已替换槽位仍映射原厂 inode")
@@ -532,6 +795,7 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
     if not findings:
         add("covered")
     result["verdict"] = findings[0]["category"]
+    result["layers"] = layer_summary(findings)
     return result
 
 
@@ -578,7 +842,7 @@ def suggested_fixes(result):
 
 def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path("/data/system/theme/fonts"),
          groups=None, weight_probe=static_on_variable_slot, budget_s=45.0, clock=None, rom=None,
-         coloros_names=None):
+         coloros_names=None, package_apks=None, apk_reader=None):
     import time
     now = clock or time.monotonic
     started = now()
@@ -588,6 +852,10 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
     weight = weight_probe((module / ".luoshu-payload/system/fonts") if module else Path("/nonexistent"))
     judge = StockPolicy(rom, module, audit.PayloadIndex(module), groups, coloros_names=coloros_names)
     items, covered, truncated = [], 0, False
+    app_only = 0
+    # APK central directories are cheap, but cap their share of the scan.
+    apk_deadline = time.monotonic() + max(1.0, min(12.0, budget_s / 4))
+    apks = package_apks or PackageApks()
     for pid, name in running_app_processes(proc_root):
         if now() - started > budget_s:
             truncated = True
@@ -595,7 +863,8 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
         try:
             result = locate(name, pid, module=module, proc_root=proc_root, host_root=host_root, theme_dir=theme_dir,
                             groups=groups, weight_probe=lambda _p: weight, theme=theme, rom=rom,
-                            stock_policy=judge)
+                            stock_policy=judge, apk_deadline=apk_deadline, package_apks=apks,
+                            apk_reader=apk_reader)
         except Exception:  # one process never breaks the scan
             continue
         if result["verdict"] == "no-payload":
@@ -607,6 +876,7 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
             covered += 1
             continue
         result["findings"] = found
+        app_only += all(f["category"] in APP_LAYER for f in found)
         fixes, reasons = suggested_fixes(result)
         items.append({"package": name.split(":", 1)[0], "process": name, "verdict": found[0]["category"],
                       "title": found[0]["title"], "fixes": fixes, "reasons": reasons,
@@ -614,9 +884,14 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
                                     "files": f["files"]} for f in found],
                       "files": list(dict.fromkeys(file for f in found for file in f["files"])),
                       "keptByDesign": result.get("keptByDesign", []),
-                      "targetsNotInPayload": result.get("targetsNotInPayload", [])})
+                      "targetsNotInPayload": result.get("targetsNotInPayload", []),
+                      "layers": layer_summary(found),
+                      **({"apkFontAssets": result["apkFontAssets"]} if "apkFontAssets" in result else {})})
     return {"schema": SCAN_SCHEMA, "verdict": "ok", "rom": rom, "romLabel": ROM_LABELS[rom],
             "scanned": covered + len(items), "covered": covered,
+            # Of the processes not covered: only app-shipped body fonts (no
+            # system slot can reach them) vs. a system font slot problem.
+            "appBuiltinOnly": app_only, "systemSlotUncovered": len(items) - app_only,
             "items": items, "fixes": list(dict.fromkeys(k for i in items for k in i["fixes"])),
             "truncated": truncated, "weightLoss": bool(weight)}
 
@@ -764,6 +1039,8 @@ def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         key = json.dumps([[f["category"], f["files"]] for f in item.get("findings", [])], ensure_ascii=False)
         group = groups.setdefault(key, {"findings": item.get("findings", []), "reasons": item.get("reasons", []),
                                         "fixes": item.get("fixes", []), "keptByDesign": item.get("keptByDesign", []),
+                                        **({"apkFontAssets": item["apkFontAssets"]} if "apkFontAssets" in item else {}),
+                                        **({"layers": item["layers"]} if "layers" in item else {}),
                                         "processes": []})
         group["processes"].append(item["process"])
     return sorted(groups.values(), key=lambda group: -len(group["processes"]))
@@ -776,6 +1053,99 @@ def recent_log(module: Path | None, sanitize: Callable[[str], str], lines: int =
         raw = []
     picked = [line for line in raw if LOG_KEYWORDS.search(line)]
     return [sanitize(line)[:400] for line in picked[-lines:]]
+
+
+_KV = re.compile(r"(\w+)=(\S+)")
+
+
+def _timing_record(line: str) -> tuple[str, dict[str, str]] | None:
+    if "[SAFE-TIMING]" in line:
+        kind = "safe"
+    elif "[MIX-PHASE]" in line:
+        kind = "mix"
+    else:
+        return None
+    values = dict(_KV.findall(line.split("]", 1)[-1] if kind == "safe" else line.split("[MIX-PHASE]", 1)[1]))
+    key = values.get("task") if kind == "safe" else values.get("request")
+    return (kind, values) if key and values.get("event") in ("begin", "end") else None
+
+
+def stage_steps(window: list[str]) -> list[dict[str, Any]]:
+    """Sub-steps of complete_hyperos/complete_coloros ([STAGE-STEP] lines from
+    hyperos_metrics_batch.py): which slot, collection or proof took the time.
+    elapsedMs is awake time; suspendedMs is deep sleep inside that step."""
+    steps = []
+    for line in window:
+        if "[STAGE-STEP]" not in line:
+            continue
+        values = dict(_KV.findall(line.split("[STAGE-STEP]", 1)[1]))
+        if not values.get("step") or not values.get("elapsedMs", "").isdigit():
+            continue
+        row: dict[str, Any] = {"component": values.get("component", "hyperos"), "step": values["step"],
+                               "status": values.get("status", "ok"), "elapsedMs": int(values["elapsedMs"])}
+        if values.get("suspendedMs", "").isdigit():
+            row["suspendedMs"] = int(values["suspendedMs"])
+        slot = values.get("slot", "")
+        if re.fullmatch(r"/[A-Za-z0-9_]+/fonts/[A-Za-z0-9_.+-]+", slot):
+            row["slot"] = slot
+        steps.append(row)
+    return steps
+
+
+def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_lines: int = 800) -> dict[str, Any]:
+    """The newest font apply in fontswitch.log: every line from its first stage
+    marker on (no keyword filter, so stage output and errors stay) plus per-phase
+    durations parsed from [SAFE-TIMING]/[MIX-PHASE] records."""
+    try:
+        raw = (module / "logs/fontswitch.log").read_text(errors="replace").splitlines()[-20000:] if module else []
+    except OSError:
+        raw = []
+    safe_task = mix_request = None
+    for line in reversed(raw):
+        record = _timing_record(line)
+        if record and record[0] == "safe" and safe_task is None:
+            safe_task = record[1]["task"]
+        elif record and record[0] == "mix" and mix_request is None:
+            mix_request = record[1]["request"]
+        if safe_task and mix_request:
+            break
+
+    def first(kind: str, key: str, value: str | None) -> int | None:
+        if value is None:
+            return None
+        for index, line in enumerate(raw):
+            record = _timing_record(line)
+            if record and record[0] == kind and record[1].get(key) == value:
+                return index
+        return None
+
+    starts = [index for index in (first("safe", "task", safe_task), first("mix", "request", mix_request))
+              if index is not None]
+    if not starts:
+        return {"found": False, "lines": [], "phases": [],
+                "note": "日志里没有应用字体的阶段记录（模块更新前的日志未保留，或之后尚未应用字体）"}
+    # A composite apply that hands off to the safe switch logs both; keep both.
+    start = min(starts) if len(starts) == 2 and abs(starts[0] - starts[1]) < 4000 else max(starts)
+    window = raw[start:]
+    phases = []
+    for line in window:
+        record = _timing_record(line)
+        if not record or record[1].get("event") != "end" or not record[1].get("elapsedMs", "").isdigit():
+            continue
+        kind, values = record
+        if kind == "safe":
+            phases.append({"source": "safe-switch", "phase": values.get("phase", "?"),
+                           "status": values.get("status", "completed"), "elapsedMs": int(values["elapsedMs"])})
+        else:
+            phases.append({"source": "mix", "phase": f"{values.get('component', '?')}/{values.get('phase', '?')}",
+                           "unit": values.get("unit", ""), "weight": values.get("weight", ""),
+                           "status": values.get("result", "unknown"), "elapsedMs": int(values["elapsedMs"])})
+    lines = window if len(window) <= max_lines else window[:200] + ["…（中间省略）…"] + window[-(max_lines - 201):]
+    return {"found": True, "lineCount": len(window), "truncated": len(window) > max_lines,
+            "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
+            "stageSteps": stage_steps(window),
+            "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
+            or sum(row["elapsedMs"] for row in phases)}
 
 
 def read_module_prop(module: Path | None) -> dict[str, str]:
@@ -800,12 +1170,40 @@ def _where(exc: BaseException) -> str:
     return f"{exc.__class__.__name__}@{Path(frame.filename).name}:{frame.lineno}"
 
 
+def installed_app_fonts(apks: PackageApks, host_root: Path = Path("/"),
+                        reader: Callable[[Path], dict[str, Any]] | None = None,
+                        budget_s: float = 12.0, limit: int = 400) -> dict[str, Any]:
+    """User-installed apps that ship their own body text fonts, running or not.
+
+    The scan only sees running processes (Xiaohongshu was in neither export).
+    One `pm list packages -f -3` plus each base APK's central directory; only
+    apps with body text fonts are listed (special clock/number/icon faces are
+    counted, not listed)."""
+    import time
+    deadline = time.monotonic() + budget_s
+    packages = sorted(apks.third_party().items())
+    apps, checked, truncated = [], 0, False
+    for package, base in packages[:limit]:
+        if time.monotonic() > deadline:
+            truncated = True
+            break
+        evidence = apk_font_evidence(package, [base], host_root, reader)
+        checked += 1
+        if evidence["bodyFontAssets"]:
+            apps.append({"package": package, "layer": "app",
+                         "label": "App 内置正文字体（系统层无法替换）",
+                         "bodyFontAssets": evidence["bodyFontAssets"],
+                         "specialFontAssets": len(evidence["specialFontAssets"])})
+    return {"source": "pm list packages -f -3 (base.apk central directory)", "installed": len(packages),
+            "checked": checked, "truncated": truncated or len(packages) > limit, "apps": apps}
+
+
 def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device: dict[str, str] | None = None,
            proc_root: Path = Path("/proc"), host_root: Path = Path("/"),
            theme_dir: Path = Path("/data/system/theme/fonts"), groups=None,
            weight_probe=static_on_variable_slot, budget_s: float = 60.0, clock=None,
            summary_name: str = "LuoShu-diagnostic-summary.txt", now: str | None = None,
-           coloros_names=None) -> dict[str, Any]:
+           coloros_names=None, package_apks=None, apk_reader=None) -> dict[str, Any]:
     """Write one sanitized LuoShu-coverage-full-<time>.json; return its path/size."""
     import time
     rom = rom if rom in ROMS else detect_rom()
@@ -829,8 +1227,10 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
             errors[name] = _where(exc)
             return default
 
+    apks = package_apks or PackageApks()
     scanned = safe("scan", lambda: scan(module=module, proc_root=proc_root, host_root=host_root, theme_dir=theme_dir, groups=groups,
-                   weight_probe=weight_probe, budget_s=budget_s, clock=clock, rom=rom, coloros_names=coloros_names),
+                   weight_probe=weight_probe, budget_s=budget_s, clock=clock, rom=rom, coloros_names=coloros_names,
+                   package_apks=apks, apk_reader=apk_reader),
                    {"verdict": "error", "items": []})
     theme = safe("theme", lambda: theme_state(theme_dir, module), {"state": "error"}) \
         if rom == "hyperos" else {"state": "n/a"}
@@ -868,6 +1268,10 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
         **({"colorosFlipFont": flip} if flip is not None else {}),
         "webview": safe("webview", lambda: webview_visibility(module, payload, proc_root, host_root), []),
         "fontswitchLog": safe("fontswitchLog", lambda: recent_log(module, sanitize), []),
+        "lastApply": safe("lastApply", lambda: last_apply_log(module, sanitize), {}),
+        "rebuildPending": safe("rebuildPending", lambda: rebuild_pending(module), {}),
+        "installedAppFonts": safe("installedAppFonts",
+                                  lambda: installed_app_fonts(apks, host_root, apk_reader), {}),
         "sanitizedDiagnostic": sanitize(summary_text) if summary_text else "not-generated",
         "privacy": "设备标识、账号、聊天内容、用户路径与来源字体名已省略；系统字体槽位与应用内字体资源名可能保留",
     }

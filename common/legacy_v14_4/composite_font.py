@@ -21,6 +21,7 @@ from typing import Iterable
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.cu2quPen import Cu2QuPen
 from fontTools.pens.qu2cuPen import Qu2CuPen
+from fontTools.pens.reverseContourPen import ReverseContourPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.transformPen import TransformPen
@@ -192,15 +193,23 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
     else:
         private = top.Private
     is_cff2 = tag == "CFF2"
-    pen = T2CharStringPen(None if is_cff2 else width, None, CFF2=is_cff2)
     source_kind = _outline_kind(src)
+    pen = T2CharStringPen(None if is_cff2 else width, None, CFF2=is_cff2)
     output_pen = Qu2CuPen(
         pen,
         max_err=max(0.5, base["head"].unitsPerEm / 2000),
         all_cubic=True,
         reverse_direction=source_kind == "glyf",
     )
-    _draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)
+    try:
+        _draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)
+    except NotImplementedError:
+        # Qu2Cu cannot take TrueType contours without an on-curve point (round
+        # dots, "O"/"0" in many TTFs). Elevate those quadratics to cubics
+        # exactly instead of dropping the glyph or failing a required letter.
+        pen = T2CharStringPen(None if is_cff2 else width, None, CFF2=is_cff2)
+        _draw_decomposed(src_glyph_set, src_name,
+                         ReverseContourPen(pen) if source_kind == "glyf" else pen, scale, y_shift)
     char_string = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
     if selector is not None:
         char_string.fdSelectIndex = selector

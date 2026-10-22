@@ -23,8 +23,9 @@ from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.cu2quPen import Cu2QuPen
-from fontTools.pens.qu2cuPen import Qu2CuPen
+from fontTools.pens.reverseContourPen import ReverseContourPen
 from fontTools.pens.transformPen import TransformPen
+from fontTools.misc.psCharStrings import T2CharString
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.ttLib.tables.TupleVariation import TupleVariation
 from fontTools.varLib.builder import buildVarData, buildVarIdxMap
@@ -199,6 +200,68 @@ OUTLINE_TAGS = ('glyf', 'loca', 'CFF ', 'CFF2', 'hmtx', 'vmtx', 'maxp', 'gvar', 
 DROPPED_TAGS = ('DSIG', 'LTSH', 'hdmx', 'VDMX')
 
 
+def cff_charstring(recording, width, cff2, scale, reverse, private, subrs):
+    """Draw one donor outline as a Type 2 charstring.
+
+    Quadratic TrueType segments are elevated to cubics exactly (the plain
+    pen's own conversion) instead of being re-fitted with Qu2Cu: the shape is
+    identical to the donor, contours without on-curve points need no special
+    case, and the pure-Python curve fitting that dominated the on-device build
+    time (FontTools ships without its compiled extensions there) disappears.
+    The charstrings get somewhat longer; the collection stays index-preserving.
+    """
+    pen = T2CharStringPen(width, None, CFF2=cff2)
+    output = ReverseContourPen(pen) if reverse else pen
+    if scale != 1:
+        output = TransformPen(output, (scale, 0, 0, scale, 0, 0))
+    recording.replay(output)
+    return pen.getCharString(private=private, globalSubrs=subrs)
+
+
+# Converted CFF outline bodies (control box, Type 2 bytes without width, with
+# endchar) keyed by (donor sha256, glyph, scale, donor is TrueType); CFF2 faces
+# take the same bytes minus endchar. Sans and Serif CJK
+# collections compiled one after another in one stage process take the same
+# per-weight donors, so the second collection skips drawing and converting.
+OUTLINE_CACHE = {}
+ENDCHAR = b'\x0e'  # Type 2 endchar; absent in CFF2 charstrings
+
+
+def width_prefix(value):
+    """Type 2 encoding of a leading width operand (same as in a program)."""
+    char = T2CharString(program=[value, 'endchar'])
+    char.compile()
+    return char.bytecode[:-1]
+
+
+def control_box(recording):
+    """Bounds of every recorded point, on- and off-curve (None when empty)."""
+    xs, ys = [], []
+    for _operator, arguments in recording.value:
+        for point in arguments:
+            if point is not None:
+                xs.append(point[0])
+                ys.append(point[1])
+    return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+
+
+def frame_problem(bounds, scale, frame, header, width, bearing, source_name):
+    """Why a donor outline cannot keep the stock face frame (None when it fits).
+
+    Keep the stock line frame: a donor outside it fails before publication;
+    arbitrary per-glyph shrinking would change the requested typeface."""
+    if bounds is not None:
+        x0, y0, x1, y1 = (coordinate * scale for coordinate in bounds)
+        if x0 < frame.xMin - 1 or y0 < frame.yMin - 1 or x1 > frame.xMax + 1 or y1 > frame.yMax + 1:
+            return f'来源字形 {source_name} 超出本机原厂字体面边界'
+    outline_width = 0 if bounds is None else (bounds[2] - bounds[0]) * scale
+    if (width > header.advanceWidthMax or bearing < header.minLeftSideBearing or
+            width - bearing - outline_width < header.minRightSideBearing - 1 or
+            bearing + outline_width > header.xMaxExtent + 1):
+        return f'来源字形 {source_name} 水平度量超出本机原厂字体面边界'
+    return None
+
+
 def ignorable(cp):
     import unicodedata
     return unicodedata.category(chr(cp)) in IGNORABLE_CATEGORIES
@@ -282,10 +345,12 @@ def slot_summary(plan, group):
             'outOfFrameCodepoints': [f'U+{cp:04X}' for cp in frame[:16]]}
 
 
-def replace_face(font, donor, recordings, allow=(), group=None):
+def replace_face(font, donor, recordings, allow=(), group=None, donor_key=None):
     """Replace one face. ``group`` (from resolve_mapping) lets faces that
     share one stock outline table receive the same replacement set; slots
-    that stay stock for frame reasons are added to its ``rejected`` set."""
+    that stay stock for frame reasons are added to its ``rejected`` set.
+    ``donor_key`` (the donor's sha256) lets CFF faces of other collections
+    built in this process reuse already converted outlines."""
     if specialized(font, allow):
         return {'mode': 'retained-specialized', 'replaced': {}, 'uncovered': 0}
     kind = 'glyf' if 'glyf' in font else 'CFF ' if 'CFF ' in font else 'CFF2' if 'CFF2' in font else None
@@ -318,31 +383,39 @@ def replace_face(font, donor, recordings, allow=(), group=None):
     for target_name, source_name in mapping.items():
         # Only conflict checks keep recordings; a converted outline is cached
         # below, so do not hold every drawn donor outline in memory as well.
-        recording = recordings.get(source_name) or draw_record(source_glyphs, source_name)
-        bounds = BoundsPen(None)
-        recording.replay(bounds)
-        # Keep the stock line frame. A donor outside it fails before publication;
-        # arbitrary per-glyph shrinking would change the requested typeface.
-        if bounds.bounds is not None:
-            x0, y0, x1, y1 = (coordinate * scale for coordinate in bounds.bounds)
-            if x0 < frame.xMin - 1 or y0 < frame.yMin - 1 or x1 > frame.xMax + 1 or y1 > frame.yMax + 1:
-                rejected.append((target_name, f'来源字形 {source_name} 超出本机原厂字体面边界'))
-                continue
+        recording = recordings.get(source_name)
+        # CFF and CFF2 encode path operators identically; only the CFF width
+        # prefix and the trailing endchar differ. One cache entry therefore
+        # serves a static CFF collection and a variable CFF2 collection alike
+        # (Android 16 ships NotoSansCJK as CFF2 and NotoSerifCJK as CFF).
+        shared_key = (donor_key, source_name, scale, 'glyf' in donor) if donor_key and kind != 'glyf' else None
+        shared = OUTLINE_CACHE.get(shared_key) if shared_key else None
+        if recording is None and shared is None:
+            recording = draw_record(source_glyphs, source_name)
         width, bearing = donor['hmtx'][source_name]
         width, bearing = round(width * scale), round(bearing * scale)
         if not 0 <= width <= 65535 or not -32768 <= bearing <= 32767:
             rejected.append((target_name, '来源水平度量超出 SFNT 范围'))
             continue
-        header = font['hhea']
-        outline_width = 0 if bounds.bounds is None else (bounds.bounds[2] - bounds.bounds[0]) * scale
-        if (width > header.advanceWidthMax or bearing < header.minLeftSideBearing or
-                width - bearing - outline_width < header.minRightSideBearing - 1 or
-                bearing + outline_width > header.xMaxExtent + 1):
-            rejected.append((target_name, f'来源字形 {source_name} 水平度量超出本机原厂字体面边界'))
+        # The control box (all recorded points) contains the exact outline
+        # bounds, so passing with it proves the exact check passes too. Only a
+        # box that fails pays for the exact curve-extrema computation.
+        box = shared[0] if shared is not None else control_box(recording)
+        problem = frame_problem(box, scale, frame, font['hhea'], width, bearing, source_name)
+        if problem:
+            if recording is None:
+                recording = draw_record(source_glyphs, source_name)
+            exact = BoundsPen(None)
+            recording.replay(exact)
+            problem = frame_problem(exact.bounds, scale, frame, font['hhea'], width, bearing, source_name)
+        if problem:
+            rejected.append((target_name, problem))
             continue
         if kind == 'glyf':
             key = (source_name,)
             if key not in converted:
+                if recording is None:
+                    recording = draw_record(source_glyphs, source_name)
                 pen = TTGlyphPen(None)
                 output = Cu2QuPen(pen, max_err=max(0.5, frame.unitsPerEm / 2000),
                                   reverse_direction='glyf' not in donor)
@@ -392,11 +465,33 @@ def replace_face(font, donor, recordings, allow=(), group=None):
             key = (source_name, selector, width)
             if key not in converted:
                 encoded_width = None if kind == 'CFF2' or width == private.defaultWidthX else width - private.nominalWidthX
-                pen = T2CharStringPen(encoded_width, None, CFF2=kind == 'CFF2')
-                output = Qu2CuPen(pen, max_err=max(0.5, frame.unitsPerEm / 2000),
-                                  all_cubic=True, reverse_direction='glyf' in donor)
-                recording.replay(TransformPen(output, (scale, 0, 0, scale, 0, 0)))
-                char = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
+                if kind == 'CFF ':
+                    # Private dicts only encode the width; the outline body is
+                    # independent of them, so it is shared by every face (and
+                    # collection) that takes this donor glyph at this scale.
+                    if shared is None:
+                        char = cff_charstring(recording, None, False, scale, 'glyf' in donor,
+                                              private, cff.GlobalSubrs)
+                        char.compile()
+                        shared = (box, char.bytecode)
+                        if shared_key:
+                            OUTLINE_CACHE[shared_key] = shared
+                    prefix = b'' if encoded_width is None else width_prefix(encoded_width)
+                    char = T2CharString(bytecode=prefix + shared[1], private=private,
+                                        globalSubrs=cff.GlobalSubrs)
+                else:
+                    if shared is None:
+                        char = cff_charstring(recording, None, False, scale, 'glyf' in donor,
+                                              private, cff.GlobalSubrs)
+                        char.compile()
+                        shared = (box, char.bytecode)
+                        if shared_key:
+                            OUTLINE_CACHE[shared_key] = shared
+                    body = shared[1]
+                    if not body.endswith(ENDCHAR):
+                        raise ValueError('CFF 轮廓缓存缺少 endchar，不能转换为 CFF2')
+                    char = T2CharString(bytecode=body[:-1], private=private,
+                                        globalSubrs=cff.GlobalSubrs)
                 if selector is not None:
                     char.fdSelectIndex = selector
                 converted[key] = char
@@ -504,6 +599,8 @@ def build(source, stock, output, workspace, request, target, progress=None,
     before = ([identity(path) for path in unique], identity(stock))
     source_hashes, stock_hash = [sha(path) for path in unique], sha(stock)
     faces = {path: _pick_face(path, 'cjk', weights[sources.index(path)], None) for path in unique}
+    for stale in [key for key in OUTLINE_CACHE if key[0] not in source_hashes]:
+        del OUTLINE_CACHE[stale]  # only donors of this build stay cached
     report = {'schema': SCHEMA, 'requestId': request, 'target': target,
               'sourceSha256': source_hashes[0], 'stockSha256': stock_hash,
               'sourceFace': faces[unique[0]], 'stockFaces': count, 'faces': []}
@@ -566,7 +663,8 @@ def build(source, stock, output, workspace, request, target, progress=None,
                             details = reuse_face(font, reuse, face_path, merged[index], plans[index])
                     else:
                         original = protected(font)
-                        details = replace_face(font, donor, recordings, allow, merged.get(index))
+                        details = replace_face(font, donor, recordings, allow, merged.get(index),
+                                               donor_key=source_hashes[unique.index(sources[index])])
                         if protected(font) != original:
                             raise ValueError(f'集合面 {index} 的原厂布局契约已变化')
                         if details['mode'] == 'compiled':

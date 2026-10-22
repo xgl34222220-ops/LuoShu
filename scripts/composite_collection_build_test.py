@@ -162,6 +162,99 @@ class CollectionBuildTest(unittest.TestCase):
             self.assertEqual(builder.protected(original), builder.protected(result))
             self.assertNotEqual(outline(original, 'A'), outline(result, 'A'))
 
+    def replace_donor_glyph(self, char, draw):
+        with TTFont(self.source) as font:
+            pen = TTGlyphPen(None); draw(pen)
+            name = font.getBestCmap()[ord(char)]
+            font['glyf'][name] = pen.glyph()
+            font.save(self.source)
+        with TTFont(self.source) as font:
+            from fontTools.pens.boundsPen import BoundsPen
+            bounds = BoundsPen(font.getGlyphSet()); font.getGlyphSet()[name].draw(bounds)
+            return bounds.bounds
+
+    def test_true_type_contour_without_on_curve_points_converts_into_cff_stock(self):
+        # Round strokes in many TrueType fonts have no on-curve point at all;
+        # Qu2Cu refused them and the whole collection stayed stock.
+        def ring(pen):
+            pen.qCurveTo((100, 100), (500, 100), (500, 600), (100, 600), None); pen.closePath()
+        expected = self.replace_donor_glyph('中', ring)
+        self.collection((dict(index=0, cff=True), dict(index=2, cff=True)))
+        report = self.run_build()
+        self.assertTrue(all(face['mode'] == 'compiled' for face in report['faces']))
+        from fontTools.pens.boundsPen import BoundsPen
+        with TTFont(self.output, fontNumber=0) as result:
+            glyphs = result.getGlyphSet(); bounds = BoundsPen(glyphs)
+            glyphs[result.getBestCmap()[ord('中')]].draw(bounds)
+        # Exact elevation: the cubic outline has the donor's own extrema.
+        for got, want in zip(bounds.bounds, expected):
+            self.assertAlmostEqual(got, want, delta=1)
+
+    def test_off_curve_point_outside_frame_with_curve_inside_is_still_replaced(self):
+        # The fast control-box check fails here (off-curve y=800 > frame 700),
+        # the exact curve maximum is 700, so the slot must not stay stock.
+        def arch(pen):
+            pen.moveTo((20, 0)); pen.lineTo((600, 0)); pen.lineTo((600, 600))
+            pen.qCurveTo((310, 800), (20, 600)); pen.closePath()
+        self.replace_donor_glyph('中', arch)
+        self.collection()
+        report = self.run_build()
+        self.assertEqual([0, 0], [face['retainedOutOfFrameSlots'] for face in report['faces']])
+        with TTFont(self.stock, fontNumber=0) as original, TTFont(self.output, fontNumber=0) as result:
+            self.assertNotEqual(outline(original, '中'), outline(result, '中'))
+
+    def test_second_cff_collection_reuses_converted_donor_outlines(self):
+        # Sans then Serif in one stage process: the same donor glyphs are not
+        # drawn or converted again, and the output bytes stay identical.
+        self.collection((dict(index=0, cff=True), dict(index=2, cff=True)))
+        builder.OUTLINE_CACHE.clear()
+        self.run_build()
+        first = self.output.read_bytes()
+        self.assertTrue(builder.OUTLINE_CACHE)
+        with patch.object(builder, 'cff_charstring', side_effect=AssertionError('converted again')), \
+                patch.object(builder, 'draw_record', side_effect=AssertionError('drawn again')):
+            self.run_build()
+        self.assertEqual(first, self.output.read_bytes())
+        builder.OUTLINE_CACHE.clear()
+        self.run_build()
+        self.assertEqual(first, self.output.read_bytes())
+        # A different donor never takes the cached outlines of the first one.
+        fixture(self.source, 3)
+        self.run_build()
+        self.assertTrue(all(key[0] == builder.sha(self.source) for key in builder.OUTLINE_CACHE))
+
+    def test_cff2_and_cff_collections_share_converted_donor_outlines(self):
+        # Android 16: NotoSansCJK is CFF2 and NotoSerifCJK is CFF. Whichever is
+        # compiled first, the other reuses the cached outline bodies and its
+        # output bytes match a cold build of that collection.
+        variable = self.root / 'variable.font'; variable_fixture(variable, cff2=True)
+        variable_stock = self.root / 'variable.ttc'
+        collection = TTCollection(); collection.fonts = [TTFont(variable)]
+        collection.save(variable_stock); collection.close()
+        static_stock = self.stock
+        self.collection((dict(index=0, cff=True), dict(index=2, cff=True)))
+
+        def build(stock):
+            builder.build(self.source, stock, self.output, self.workspace,
+                          'request-collection', '/system/fonts/NotoSansCJK-Regular.ttc')
+            return self.output.read_bytes()
+
+        cold = {}
+        for stock in (variable_stock, static_stock):
+            builder.OUTLINE_CACHE.clear(); cold[stock] = build(stock)
+        for first, second in ((variable_stock, static_stock), (static_stock, variable_stock)):
+            builder.OUTLINE_CACHE.clear()
+            self.assertEqual(cold[first], build(first))
+            with patch.object(builder, 'cff_charstring', side_effect=AssertionError('converted again')), \
+                    patch.object(builder, 'draw_record', side_effect=AssertionError('drawn again')):
+                self.assertEqual(cold[second], build(second))
+        with TTFont(self.output, fontNumber=0) as result:
+            self.assertIn('CFF2', result)
+            from fontTools.pens.recordingPen import RecordingPen
+            pen = RecordingPen(); result.getGlyphSet()[result.getBestCmap()[ord('中')]].draw(pen)
+            self.assertTrue(pen.value)
+        builder.OUTLINE_CACHE.clear()
+
     def test_true_type_stock_accepts_cff_donor(self):
         fixture(self.source, 1, cff=True); self.collection()
         self.run_build()
@@ -468,8 +561,8 @@ class CollectionBuildTest(unittest.TestCase):
 
     def test_source_change_during_build_cannot_publish(self):
         self.collection(); original=builder.replace_face
-        def modify(*args):
-            result=original(*args)
+        def modify(*args, **kwargs):
+            result=original(*args, **kwargs)
             with self.source.open('ab') as stream: stream.write(b'changed')
             return result
         self.output.write_bytes(b'previous generation')
@@ -678,6 +771,25 @@ class SharedTableCollectionTest(unittest.TestCase):
             self.assertNotEqual(outline(original, 'A'), outline(result, 'A'))
         glyf = self.offsets(self.output, 'glyf')
         self.assertEqual(glyf[0], glyf[1])
+
+
+class CollectionCacheKeyTest(unittest.TestCase):
+    def test_key_depends_on_builder_schema_and_inputs_not_batch_driver(self):
+        import hyperos_metrics_batch as batch
+        with tempfile.TemporaryDirectory() as tmp:
+            stock, donor = Path(tmp, 'stock.ttc'), Path(tmp, 'donor.ttf')
+            stock.write_bytes(b'stock'); donor.write_bytes(b'donor')
+            hashed = []
+            real = builder.sha
+            with patch.object(builder, 'sha', side_effect=lambda path: hashed.append(Path(path).resolve()) or real(path)):
+                key = batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',))
+            self.assertNotIn(Path(batch.__file__).resolve(), hashed)
+            self.assertIn(Path(builder.__file__).resolve(), hashed)
+            self.assertEqual(key, batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',)))
+            with patch.object(builder, 'SCHEMA', 'changed'):
+                self.assertNotEqual(key, batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',)))
+            donor.write_bytes(b'other')
+            self.assertNotEqual(key, batch.collection_cache_key(stock, [donor, donor], '/system/fonts/x.ttc', ('serif',)))
 
 
 if __name__ == '__main__':
