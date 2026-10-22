@@ -26,6 +26,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         boolean webFonts = ModuleConfig.DEFAULT_WEB_FONTS;
         boolean blockUnknown = ModuleConfig.DEFAULT_WEB_BLOCK_UNKNOWN;
         boolean verbose = ModuleConfig.DEFAULT_VERBOSE;
+        boolean monoSlot = ModuleConfig.DEFAULT_MONO_SLOT;
         try {
             // One small read per process; new-style XSharedPreferences (xposedminversion 93).
             XSharedPreferences prefs = new XSharedPreferences(ModuleConfig.MODULE_PACKAGE, ModuleConfig.PREFS);
@@ -34,6 +35,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             webFonts = prefs.getBoolean(ModuleConfig.KEY_WEB_FONTS, webFonts);
             blockUnknown = prefs.getBoolean(ModuleConfig.KEY_WEB_BLOCK_UNKNOWN, blockUnknown);
             verbose = prefs.getBoolean(ModuleConfig.KEY_VERBOSE, verbose);
+            monoSlot = prefs.getBoolean(ModuleConfig.KEY_MONO_SLOT, monoSlot);
         } catch (Throwable t) {
             XposedBridge.log(ModuleConfig.TAG + ": prefs unavailable, using defaults: " + t);
         }
@@ -42,7 +44,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         Log.verbose = verbose;
         if (appFonts) {
             try {
-                FontHooks.install(lp);
+                FontHooks.install(lp, monoSlot);
             } catch (Throwable t) {
                 XposedBridge.log(ModuleConfig.TAG + ": font hooks failed in " + lp.packageName + ": " + t);
             }
@@ -54,6 +56,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 XposedBridge.log(ModuleConfig.TAG + ": webview hooks failed in " + lp.packageName + ": " + t);
             }
         }
-        Log.v("installed in " + lp.packageName + " appFonts=" + appFonts + " webFonts=" + webFonts);
+        Log.v("installed in " + lp.packageName + " appFonts=" + appFonts + " webFonts=" + webFonts + " monoSlot=" + monoSlot);
     }
 }

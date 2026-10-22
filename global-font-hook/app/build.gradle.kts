@@ -29,6 +29,12 @@ android {
         targetSdk = 36
         versionCode = moduleVersionCode * 100 + 50
         versionName = moduleVersion.removePrefix("v") + "-globalfont"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Instrumented tests open their test fonts with AssetManager.openFd, which needs them stored.
+    androidResources {
+        noCompress += listOf("ttf")
     }
 
     signingConfigs {
@@ -69,4 +75,8 @@ android {
 dependencies {
     compileOnly("de.robv.android.xposed:api:82")
     testImplementation("junit:junit:4.13.2")
+    // Instrumented coverage checks only (API 28/29/34/35 emulators); nothing here ships in the module APK.
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.core:core:1.13.1")
 }

@@ -8,11 +8,17 @@ public enum FontDecision {
     REPLACE_SERIF,
     /** Icon / symbol / emoji / math / clock / digit / mono / script face: leave untouched. */
     KEEP,
+    /**
+     * Code monospace face: swap for {@code Typeface.create(Typeface.MONOSPACE, weight, italic)}.
+     * Only produced when the user turned on the "monospace to system monospace" switch (off by
+     * default); with the switch off the same face is {@link #KEEP} exactly as before.
+     */
+    REPLACE_MONO,
     /** Name says nothing (hashed, obfuscated, raw buffer): needs one sfnt inspection. */
     UNKNOWN;
 
     public boolean replaces() {
-        return this == REPLACE_SANS || this == REPLACE_SERIF;
+        return this == REPLACE_SANS || this == REPLACE_SERIF || this == REPLACE_MONO;
     }
 
     public static FontDecision parse(String s) {
