@@ -87,10 +87,30 @@ _wcc_pid_running() {
     kill -0 "$_wcc_pid" 2>/dev/null
 }
 
+# Both cheap hints are gone and both supervisors left their cleanup proof.
+# `cleaned` already requires that the recorded owner is no longer that process
+# (task_scope.py cleaned(): not same_process), so the two `alive` identity
+# probes before it are redundant on this path: two fewer Python starts on the
+# critical path after the commit monitor exits. Any doubt (no monitor proof,
+# a failed proof) falls through to the unchanged full check below.
+_wcc_fast_cleaned() {
+    _wcc_pid_running "$2" && return 1
+    _wcc_pid_running "$3" && return 1
+    [ -f "$3.cleanup.json" ] || return 1
+    sh "$(luoshu_scope_runner)" cleaned "$2" "$1" >/dev/null 2>&1 || return 1
+    sh "$(luoshu_scope_runner)" cleaned "$3" "$1.monitor" >/dev/null 2>&1
+}
+
 wait_child_cleanup() {
     _wcc_task="$1"
     _wcc_engine="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix_worker.pid"
     _wcc_monitor="${LUOSHU_TASKS_DIR:-$MODDIR/.luoshu-state/tasks}/mix-monitor-$_wcc_task.pid"
+    # What this phase waits for: the base engine reports success right after
+    # local_commit, but the font is not live yet. The commit monitor
+    # (font_mix_runtime.sh monitor -> mix_router.sh finalize) still runs
+    # finalize_lock, complete_hyperos/complete_coloros, next_commit and
+    # live_mount. wait_child_cleanup therefore overlaps those finalize phases
+    # almost entirely; only its tail after finalize_release is its own cost.
     # The monitor commits the next-boot payload (HyperOS/ColorOS slot metrics,
     # transaction, live mount) before it exits; that is real work and can take
     # far longer than the old 300 x 0.1 s poll budget. Keep the expensive Python
@@ -108,8 +128,13 @@ wait_child_cleanup() {
         if [ $((_wcc_tries % 10)) -ne 0 ] && \
            { _wcc_pid_running "$_wcc_engine" || _wcc_pid_running "$_wcc_monitor"; }; then
             :
-        elif ! luoshu_task_pid_alive "$_wcc_engine" "$_wcc_task" && \
-           ! luoshu_task_pid_alive "$_wcc_monitor" "$_wcc_task.monitor"; then
+        elif _wcc_fast_cleaned "$_wcc_task" "$_wcc_engine" "$_wcc_monitor"; then
+            return 0
+        # Monitor first: it is the one still running during the whole wait
+        # (complete_* + next_commit + live_mount), so the periodic PID-reuse
+        # guard costs one identity probe instead of two.
+        elif ! luoshu_task_pid_alive "$_wcc_monitor" "$_wcc_task.monitor" && \
+           ! luoshu_task_pid_alive "$_wcc_engine" "$_wcc_task"; then
             sh "$(luoshu_scope_runner)" cleaned "$_wcc_engine" "$_wcc_task" || return 125
             if [ -f "$_wcc_monitor.cleanup.json" ] || [ -f "$_wcc_monitor.owner.json" ]; then
                 sh "$(luoshu_scope_runner)" cleaned "$_wcc_monitor" "$_wcc_task.monitor" || return 125
