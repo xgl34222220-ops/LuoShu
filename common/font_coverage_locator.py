@@ -935,6 +935,17 @@ def slot_mounts(module: Path | None, payload: "audit.PayloadIndex", host_root: P
                 limit: int = 400) -> list[dict[str, Any]]:
     """Every payload slot: what the host namespace shows at that path vs the module file."""
     rows = []
+    # ColorOS flip-font slots (SysFont-*.ttf) are symlinks to SysSans-*; when
+    # LuoShu replaced SysSans-* the visible SysFont-* file IS a LuoShu payload
+    # file, just not the one staged under the SysFont-* name. Index every
+    # payload file by identity so such slots count as covered (route=...).
+    owners: dict[tuple[Any, Any], str] = {}
+    for rel in sorted(payload.by_rel):
+        if any(part.startswith(".") for part in rel.split("/")):
+            continue
+        ident = _stat_dict(payload.by_rel[rel]["path"])
+        if ident is not None:
+            owners.setdefault((ident["dev"], ident["ino"]), "/" + rel)
     for rel in sorted(payload.by_rel)[:limit]:
         if not rel.lower().endswith(audit.FONT_SUFFIXES) or any(part.startswith(".") for part in rel.split("/")):
             continue
@@ -943,15 +954,20 @@ def slot_mounts(module: Path | None, payload: "audit.PayloadIndex", host_root: P
         visible = host_root / rel
         shown = _stat_dict(visible)
         mine = _stat_dict(slot["path"])
+        extra: dict[str, Any] = {}
         if shown is None:
             state = "missing"
         elif (shown["dev"], shown["ino"]) == ((mine or {}).get("dev"), (mine or {}).get("ino")):
             state = "luoshu"
+        elif (shown["dev"], shown["ino"]) in owners:
+            state = "luoshu"
+            extra["via"] = owners[(shown["dev"], shown["ino"])]
+            extra["route"] = "symlink" if visible.is_symlink() else "shared-inode"
         elif payload.same_content(logical, visible):
             state = "luoshu-content"
         else:
             state = "stock"
-        rows.append({"slot": logical, "state": state, "visible": shown, "payload": mine})
+        rows.append({"slot": logical, "state": state, "visible": shown, "payload": mine, **extra})
     return rows
 
 
@@ -1092,6 +1108,28 @@ def stage_steps(window: list[str]) -> list[dict[str, Any]]:
     return steps
 
 
+def wake_lock_lines(raw: list[str], start: int, safe_task: str | None, mix_request: str | None,
+                    lookback: int = 60) -> list[str]:
+    """[WAKE-LOCK] lines of the newest apply. The mix worker logs "held for
+    apply task=<outer>" just before its first [MIX-PHASE] record, so it sits
+    above the window start; match it by the apply's task ids (or a safe_switch
+    mention close above the start) and keep any inside the window."""
+    ids = {value for value in (safe_task, mix_request) if value}
+    for line in raw[start:]:
+        record = _timing_record(line)
+        if record and record[0] == "mix" and record[1].get("request") == mix_request:
+            ids.update(v for v in (record[1].get("task"), record[1].get("outer")) if v)
+    picked = []
+    for index, line in enumerate(raw):
+        if "[WAKE-LOCK]" not in line:
+            continue
+        task = dict(_KV.findall(line.split("[WAKE-LOCK]", 1)[1])).get("task")
+        if index >= start or (task and task in ids) or \
+                (start - lookback <= index < start and "safe_switch" in line):
+            picked.append(line)
+    return picked
+
+
 def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_lines: int = 800) -> dict[str, Any]:
     """The newest font apply in fontswitch.log: every line from its first stage
     marker on (no keyword filter, so stage output and errors stay) plus per-phase
@@ -1141,7 +1179,8 @@ def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_line
                            "unit": values.get("unit", ""), "weight": values.get("weight", ""),
                            "status": values.get("result", "unknown"), "elapsedMs": int(values["elapsedMs"])})
     lines = window if len(window) <= max_lines else window[:200] + ["…（中间省略）…"] + window[-(max_lines - 201):]
-    return {"found": True, "lineCount": len(window), "truncated": len(window) > max_lines,
+    wake_lock = wake_lock_lines(raw, start, safe_task, mix_request)
+    return {"found": True, "wakeLock": [sanitize(line)[:400] for line in wake_lock], "lineCount": len(window), "truncated": len(window) > max_lines,
             "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
             "stageSteps": stage_steps(window),
             "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
