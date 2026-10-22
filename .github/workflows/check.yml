@@ -20,6 +20,8 @@ on:
       - uninstall.sh
       - action.sh
       - late-load.sh
+      - emulated-soft-reboot.sh
+      - .luoshu-runtime/**
       - android-app/**
       - magic
       - README.md

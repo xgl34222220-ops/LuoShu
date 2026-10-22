@@ -58,6 +58,7 @@ sh "$ROOT/scripts/uninstall_deferred_restore_test.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 sh "$ROOT/scripts/boot_housekeeping_test.sh"
 sh "$ROOT/scripts/boot_loop_guard_test.sh"
+sh "$ROOT/scripts/ksu_soft_reboot_test.sh"
 sh "$ROOT/scripts/foreign_font_module_test.sh"
 sh "$ROOT/scripts/ksu_metadata_ota_test.sh"
 # 此前未接入任何 workflow 的独立回归（font_name_normalize_test.py 需要真实字体，

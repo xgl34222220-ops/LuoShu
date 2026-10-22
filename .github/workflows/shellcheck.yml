@@ -34,7 +34,8 @@ jobs:
           # (scripts/stable111_frozen_runtime.json) are never edited, so they are
           # never linted here either.
           frozen="$(python3 -c 'import json; print("\n".join(json.load(open("scripts/stable111_frozen_runtime.json"))["sha256"]))')"
-          core='customize.sh uninstall.sh action.sh late-load.sh
+          core='customize.sh uninstall.sh action.sh late-load.sh emulated-soft-reboot.sh
+            .luoshu-runtime/core/emulated-soft-reboot.sh
             common/boot_loop_guard.sh common/system_ota_guard.sh common/util_functions.sh
             common/google_font_provider_service.sh common/boot_housekeeping.sh
             common/module_status.sh common/app_bridge.sh common/font_safety.sh
