@@ -105,6 +105,8 @@ find "$RUNTIME" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete 2>/dev/null
 test -s "$LIB/libpython3.14.so"
 test -s "$LIB/libcrypto_python.so"
 find "$DYN" -maxdepth 1 -type f -name '_hashlib.*.so' -print -quit | grep -q .
+# Static WOFF2 decoder (not a Python extension); WOFF2 import cannot work without it.
+test -s "$RUNTIME/bin/luoshu-woff2-decode"
 test -d "$PYLIB/site-packages/fontTools"
 test -s "$PYLIB/argparse.py"
 test -s "$PYLIB/hashlib.py"

@@ -55,6 +55,17 @@ C
 "$STRIP" "$R/bin/luoshu-python"
 file "$R/bin/luoshu-python" | grep -q 'ARM aarch64'
 
+# WOFF2 import needs Brotli, which the pure-Python FontTools payload cannot provide on-device
+# (every site-packages *.so is removed below). Ship one static ARM64 decoder built from pinned
+# google/woff2 + google/brotli sources instead; see scripts/build_woff2_decoder.sh.
+CXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang++"
+test -x "$CXX"
+CC="$CC" CXX="$CXX" sh "$ROOT/scripts/build_woff2_decoder.sh" "$R/bin/luoshu-woff2-decode" \
+  -static -static-libstdc++
+"$STRIP" "$R/bin/luoshu-woff2-decode"
+file "$R/bin/luoshu-woff2-decode" | grep -q 'ARM aarch64'
+file "$R/bin/luoshu-woff2-decode" | grep -q 'statically linked'
+
 python3 -m venv "$WORK/host-venv"
 "$WORK/host-venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir -q "fonttools==$FONTTOOLS_VERSION"
 FT_DIR=$("$WORK/host-venv/bin/python" - <<'PY'
@@ -83,7 +94,7 @@ find "$R" -type f \( -name '*.a' -o -name '*.la' -o -name '*.pyc' -o -name '*.c'
 find "$R/lib/python3.14/site-packages" -type f -name '*.so' -delete
 
 cp -a "$R"/. "$ROOT/common/python/"
-chmod 0755 "$ROOT/common/python/bin/luoshu-python"
+chmod 0755 "$ROOT/common/python/bin/luoshu-python" "$ROOT/common/python/bin/luoshu-woff2-decode"
 
 # Copy exact upstream license files. Do not use a broad find over the combined
 # runtime tree: after FontTools is installed, that can select the wrong file.

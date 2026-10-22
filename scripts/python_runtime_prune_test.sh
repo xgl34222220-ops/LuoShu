@@ -74,6 +74,7 @@ find "$DYN" -maxdepth 1 -type f -name '_codecs_cn.*.so' -print -quit | grep -q .
 find "$DYN" -maxdepth 1 -type f -name '_codecs_jp.*.so' -print -quit | grep -q .
 find "$DYN" -maxdepth 1 -type f -name '_bz2.*.so' -print -quit | grep -q .
 find "$DYN" -maxdepth 1 -type f -name '_lzma.*.so' -print -quit | grep -q .
+test -s "$STAGE/common/python/bin/luoshu-woff2-decode"
 test -d "$PYLIB/site-packages/fontTools/ttLib"
 test -d "$PYLIB/site-packages/fontTools/cffLib"
 test -d "$PYLIB/site-packages/fontTools/varLib/instancer"

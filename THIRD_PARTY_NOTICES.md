@@ -31,6 +31,22 @@
 
 洛书修改了示例的包名、配色、分层、尺寸和导航状态接入；底层库及原示例的许可证与署名不变。
 
+## Google WOFF2 与 Brotli
+
+- 用途：导入 WOFF2 网页字体时在 Android ARM64 设备上离线解码，得到 SFNT/TTC 后再交给洛书自己的字体校验。设备端 Python 运行时是纯 Python FontTools，没有 Brotli 扩展，因此单独打包一个静态解码器 `common/python/bin/luoshu-woff2-decode`。
+- 来源：[`google/woff2`](https://github.com/google/woff2) 固定提交 `fb9c3379f2605b10f3e8f1d9636664ab5576775c`；[`google/brotli`](https://github.com/google/brotli) 固定提交 `ed738e842d2fbdf2d6459e39267a633c4a9b2f5d`（v1.1.0）。源码包在构建时按 sha256 校验（见 `scripts/build_woff2_decoder.sh`），只编译两者的解码部分，入口为洛书自写的 `tools/woff2/luoshu_woff2_decode.cc`（GPL-3.0-only）。
+- 许可证：两者均为 MIT License。
+- 完整文本：[`licenses/WOFF2-LICENSE.txt`](licenses/WOFF2-LICENSE.txt) 与 [`licenses/Brotli-LICENSE.txt`](licenses/Brotli-LICENSE.txt)（构建脚本会与上游原文逐字节比对）。
+
+## 字域 Ziyu（WOFF/WOFF2 转换与 ZIP 安全解压）
+
+- 来源：字域 Ziyu v1.4.8（作者 酷安@柔性体，仓库 [`shishui611-art/Ziyu`](https://github.com/shishui611-art/Ziyu)），本身是洛书的衍生项目；移植依据为 v1.4.8 发布包，未记录对应的仓库提交号。
+- 许可证：GPL-3.0-only，与洛书一致。
+- 移植文件：
+  - `common/font_web_convert.py`：源自字域 `common/font_web_convert.py`。改动：解码器改为洛书的 `luoshu-woff2-decode`（输入/输出双参数）、WOFF 使用 FontTools 默认惰性加载以加快纯 Python 运行时、去掉字域专用的 `font_structure` 依赖、转换结果默认保留原文件名、解码器缺失或无执行权限时给出明确中文提示。
+  - `common/font_zip_extract.py`：源自字域 `common/font_zip_extract.py`。改动：额外提取 OTC/WOFF/WOFF2，跳过 `__MACOSX/` 与 `._` 资源分叉文件。
+- 洛书侧的接入（`font_check.sh` 先转换后校验、`font_import.sh`/`native_import.sh` 的导入流程与 App 入口）为洛书自写代码。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：

@@ -7,6 +7,8 @@ on:
     paths:
       - common/python/**
       - scripts/prepare_composite_runtime.sh
+      - scripts/build_woff2_decoder.sh
+      - tools/woff2/**
       - scripts/prune_python_runtime.sh
       - scripts/python_runtime_prune_test.sh
       - scripts/build.sh
@@ -26,7 +28,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/build_woff2_decoder.sh', 'tools/woff2/**') }}
       - name: Prepare ARM64 font runtime
         run: |
           if [ ! -x common/python/bin/luoshu-python ]; then
