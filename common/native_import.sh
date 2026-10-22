@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 洛书 v2.0.0：原生 App 文件选择器导入桥。
-# 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 由安全字体包导入器处理。
+# 只接受 App 私有缓存中的 TTF/OTF/TTC/WOFF/WOFF2/ZIP；ZIP 由安全字体包导入器处理，
+# WOFF/WOFF2 先由 font_check.sh 转换为真实 SFNT，再按普通字体文件导入。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -145,6 +146,29 @@ import_emoji_file() {
         "$(json_escape "$_stem")" "$(json_escape "$_target")"
 }
 
+# 网页字体：先在模块私有临时目录转换为 TTF/OTF/TTC 并完整校验，再沿用普通导入流程
+# （去重、TTC 拆分、Emoji 分流、元数据探测）。转换失败时返回 font_check.sh 的原因。
+import_web_font_file() {
+    _iwf_src="$1"
+    _iwf_display="$2"
+    _iwf_tmp="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/native-import-web.$$"
+    rm -rf "$_iwf_tmp" 2>/dev/null || true
+    mkdir -p "$_iwf_tmp" 2>/dev/null || { fail_json "无法创建网页字体转换目录"; return; }
+    FONT_CHECK_CONVERT_DIR="$_iwf_tmp"
+    _iwf_rc=0
+    font_validate "$_iwf_src" text >/dev/null 2>&1 || _iwf_rc=$?
+    FONT_CHECK_CONVERT_DIR=""
+    if [ "$_iwf_rc" -ne 0 ] || [ ! -f "${FONT_CHECK_CONVERTED:-}" ]; then
+        rm -rf "$_iwf_tmp" 2>/dev/null || true
+        fail_json "${FONT_CHECK_ERROR:-网页字体转换失败}"
+        return
+    fi
+    _iwf_converted="$FONT_CHECK_CONVERTED"
+    _iwf_stem="${_iwf_display%.*}"
+    import_font_file "$_iwf_converted" "${_iwf_stem}.${_iwf_converted##*.}"
+    rm -rf "$_iwf_tmp" 2>/dev/null || true
+}
+
 import_font_file() {
     _src="$1"
     _display="$2"
@@ -156,6 +180,7 @@ import_font_file() {
         TTF) _ext=ttf ;;
         OTF) _ext=otf ;;
         TTC) _ext=ttc ;;
+        WOFF|WOFF2) import_web_font_file "$_src" "$_display"; return ;;
         *) fail_json "文件不是受支持的 TTF、OTF 或 TTC 字体"; return ;;
     esac
 
@@ -264,8 +289,8 @@ case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
 [ -n "$display_name" ] || display_name=$(basename "$source_path")
 _ext=$(printf '%s' "${display_name##*.}" | tr '[:upper:]' '[:lower:]')
 case "$_ext" in
-    ttf|otf|ttc|otc) import_font_file "$source_path" "$display_name" ;;
+    ttf|otf|ttc|otc|woff|woff2) import_font_file "$source_path" "$display_name" ;;
     zip) import_zip_file "$source_path" "$display_name" ;;
-    *) fail_json "仅支持 TTF、OTF、TTC/OTC 和字体模块 ZIP" ;;
+    *) fail_json "仅支持 TTF、OTF、TTC/OTC、WOFF/WOFF2 和字体 ZIP 压缩包" ;;
 esac
 exit 0

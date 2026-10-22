@@ -21,7 +21,15 @@ import org.json.JSONObject
 
 private const val IMPORT_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
 private const val MAX_IMPORT_BYTES = 268_435_456L
-private val ALLOWED_IMPORT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "zip")
+// WOFF/WOFF2 are converted to real TTF/OTF/TTC by the module (font_check.sh) before validation.
+internal val ALLOWED_IMPORT_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "woff", "woff2", "zip")
+private val WEB_FONT_IMPORT_EXTENSIONS = setOf("woff", "woff2")
+
+internal fun nativeImportTimeoutMs(extension: String): Long = when (extension) {
+    "zip" -> 180_000L
+    in WEB_FONT_IMPORT_EXTENSIONS -> 120_000L
+    else -> 60_000L
+}
 
 internal enum class NativeImportPhase(val wireName: String) {
     IDLE("idle"),
@@ -398,7 +406,7 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
 
 private suspend fun importOne(context: android.content.Context, uri: Uri, displayName: String): ImportOutcome {
     val extension = displayName.substringAfterLast('.', "").lowercase()
-    require(extension in ALLOWED_IMPORT_EXTENSIONS) { "仅支持 TTF、OTF、TTC/OTC 和 ZIP" }
+    require(extension in ALLOWED_IMPORT_EXTENSIONS) { "仅支持 TTF、OTF、TTC/OTC、WOFF/WOFF2 和 ZIP" }
 
     val cacheDir = File(context.cacheDir, "native_import")
     cacheDir.mkdirs()
@@ -408,7 +416,7 @@ private suspend fun importOne(context: android.content.Context, uri: Uri, displa
         val result = RootShell.exec(
             "sh ${RootShell.quote(IMPORT_BRIDGE)} import_file " +
                 "${RootShell.quote(temp.absolutePath)} ${RootShell.quote(displayName)}",
-            timeoutMs = if (extension == "zip") 180_000L else 60_000L,
+            timeoutMs = nativeImportTimeoutMs(extension),
         )
         if (result.code != 0) error(result.stderr.ifBlank { "Root 导入失败" })
         val root = firstImportJson(result.stdout)

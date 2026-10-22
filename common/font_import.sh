@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书 v2.0.0 - 安全 ZIP 字体包导入
-# 只解压字体文件，不执行压缩包中的任何脚本。
+# 只解压字体文件（含 WOFF/WOFF2，导入前转换为 TTF/OTF/TTC），不执行压缩包中的任何脚本。
 
 IMPORT_MAX_ZIP_BYTES=268435456
 IMPORT_MAX_FILES=128
@@ -44,6 +44,60 @@ import_probe_metadata() {
     case "$_probe_output" in *'|'*'|'*'|'*'|'*) printf '%s
 ' "$_probe_output"; return 0 ;; esac
     return 1
+}
+
+# 安全解压：只取字体条目（TTF/OTF/TTC/OTC/WOFF/WOFF2），拒绝绝对路径、..、符号链接、
+# 控制字符和超出声明/总量的条目，平铺写入空临时目录。移植自字域 Ziyu v1.4.8
+# font_zip_extract.py（GPL-3.0-only）。返回 1 表示压缩包被拒绝；其它非零码表示解压器
+# 无法运行，由调用方回退到 unzip -j。
+IMPORT_ZIP_EXTRACTOR="${IMPORT_ZIP_EXTRACTOR:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_zip_extract.py}"
+import_extract_zip_fonts() {
+    _extract_zip="$1"; _extract_dir="$2"
+    [ -f "$IMPORT_ZIP_EXTRACTOR" ] || return 127
+    if [ -n "${LUOSHU_IMPORT_PYTHON:-}" ]; then
+        "$LUOSHU_IMPORT_PYTHON" "$IMPORT_ZIP_EXTRACTOR" "$_extract_zip" "$_extract_dir" "$IMPORT_MAX_FILES" "$IMPORT_MAX_EXTRACT_BYTES"
+    elif [ -x "$IMPORT_PYBIN" ]; then
+        PYTHONHOME="$IMPORT_PYROOT" \
+            PYTHONPATH="$IMPORT_PYROOT/lib/python3.14:$IMPORT_PYROOT/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$IMPORT_PYROOT/lib:$IMPORT_PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$IMPORT_PYBIN" "$IMPORT_ZIP_EXTRACTOR" "$_extract_zip" "$_extract_dir" "$IMPORT_MAX_FILES" "$IMPORT_MAX_EXTRACT_BYTES"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 "$IMPORT_ZIP_EXTRACTOR" "$_extract_zip" "$_extract_dir" "$IMPORT_MAX_FILES" "$IMPORT_MAX_EXTRACT_BYTES"
+    else
+        return 127
+    fi
+}
+
+# ZIP 中的 WOFF/WOFF2 先转换为真实 SFNT（同名 TTF/OTF 已存在时视为重复副本跳过），
+# 结果留在同一临时目录参与后续的集合拆分与字体族判断。
+IMPORT_WEB_INVALID=0
+IMPORT_WEB_IGNORED=0
+IMPORT_WEB_ERROR=""
+import_convert_web_fonts() {
+    _iwc_dir="$1"
+    IMPORT_WEB_INVALID=0; IMPORT_WEB_IGNORED=0; IMPORT_WEB_ERROR=""
+    for _iwc_f in "$_iwc_dir"/*; do
+        [ -f "$_iwc_f" ] || continue
+        case "$(font_detect_format "$_iwc_f" 2>/dev/null)" in WOFF|WOFF2) ;; *) continue ;; esac
+        _iwc_base=$(basename "$_iwc_f"); _iwc_stem="${_iwc_base%.*}"
+        _iwc_dup=false
+        for _iwc_ext in ttf otf ttc otc TTF OTF TTC OTC; do
+            [ -f "$_iwc_dir/$_iwc_stem.$_iwc_ext" ] && { _iwc_dup=true; break; }
+        done
+        if [ "$_iwc_dup" = true ]; then
+            IMPORT_WEB_IGNORED=$((IMPORT_WEB_IGNORED + 1))
+        else
+            FONT_CHECK_CONVERT_DIR="$_iwc_dir"
+            _iwc_rc=0
+            font_validate "$_iwc_f" text >/dev/null 2>&1 || _iwc_rc=$?
+            FONT_CHECK_CONVERT_DIR=""
+            if [ "$_iwc_rc" -ne 0 ] || [ ! -f "${FONT_CHECK_CONVERTED:-}" ]; then
+                IMPORT_WEB_INVALID=$((IMPORT_WEB_INVALID + 1))
+                IMPORT_WEB_ERROR="${FONT_CHECK_ERROR:-网页字体转换失败}"
+            fi
+        fi
+        rm -f "$_iwc_f" 2>/dev/null || true
+    done
 }
 
 # TTC/OTC 集合按 name 表拆成独立字体面（同族共用前缀、按字重命名），之后与普通
@@ -287,11 +341,11 @@ import_zip_package() {
     [ -n "$_module_name" ] || _module_name="${_zip_name%.*}"
     _display_name="$_module_name"
     _package_label=$(import_package_label "$_display_name")
-    _declared=$(printf '%s\n' "$_listing" | awk 'BEGIN{n=0;s=0} $1 ~ /^[0-9]+$/ && tolower($0) ~ /\.(ttf|otf|ttc|otc)([[:space:]]|$)/ {n++; s+=$1} END{printf "%d %d",n,s}')
+    _declared=$(printf '%s\n' "$_listing" | awk 'BEGIN{n=0;s=0} $1 ~ /^[0-9]+$/ && tolower($0) ~ /\.(ttf|otf|ttc|otc|woff|woff2)([[:space:]]|$)/ {n++; s+=$1} END{printf "%d %d",n,s}')
     set -- $_declared; _declared_count=${1:-0}; _declared_bytes=${2:-0}
     case "$_declared_count" in ''|*[!0-9]*) _declared_count=0 ;; esac
     case "$_declared_bytes" in ''|*[!0-9]*) _declared_bytes=0 ;; esac
-    if [ "$_declared_count" -le 0 ]; then printf '{"status":"error","message":"ZIP 中没有找到 TTF / OTF / TTC / OTC 字体"}\n'; return 0; fi
+    if [ "$_declared_count" -le 0 ]; then printf '{"status":"error","message":"ZIP 中没有找到 TTF / OTF / TTC / OTC / WOFF / WOFF2 字体"}\n'; return 0; fi
     if [ "$_declared_count" -gt "$IMPORT_MAX_FILES" ] || [ "$_declared_bytes" -gt "$IMPORT_MAX_EXTRACT_BYTES" ]; then
         printf '{"status":"error","message":"字体包内容过多（最多 128 个字体、解压后 512 MB）"}\n'; return 0
     fi
@@ -299,10 +353,24 @@ import_zip_package() {
     _tmp="$IMPORT_CACHE_DIR/$(date +%s)-$$"
     rm -rf "$_tmp" 2>/dev/null || true
     mkdir -p "$_tmp" "$USER_FONTS_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建导入临时目录"}\n'; return 0; }
-    for _pat in '*.ttf' '*.otf' '*.ttc' '*.otc' '*.TTF' '*.OTF' '*.TTC' '*.OTC'; do
-        import_unzip -j -o "$_zip" "$_pat" -d "$_tmp" >/dev/null 2>&1 || true
-    done
+    _extract_rc=0
+    _extract_error=$(import_extract_zip_fonts "$_zip" "$_tmp" 2>&1 >/dev/null) || _extract_rc=$?
+    if [ "$_extract_rc" -ne 0 ] && [ "$_extract_rc" -ne 1 ]; then
+        # 安全解压器无法运行（缺少运行时等）：回退到原有的 unzip -j 平铺提取。
+        rm -rf "$_tmp" 2>/dev/null || true
+        mkdir -p "$_tmp" 2>/dev/null || { printf '{"status":"error","message":"无法创建导入临时目录"}\n'; return 0; }
+        for _pat in '*.ttf' '*.otf' '*.ttc' '*.otc' '*.woff' '*.woff2' '*.TTF' '*.OTF' '*.TTC' '*.OTC' '*.WOFF' '*.WOFF2'; do
+            import_unzip -j -o "$_zip" "$_pat" -d "$_tmp" >/dev/null 2>&1 || true
+        done
+    elif [ "$_extract_rc" -ne 0 ]; then
+        rm -rf "$_tmp"
+        _extract_error=$(printf '%s' "$_extract_error" | tr '\n\r' '  ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-180)
+        printf '{"status":"error","message":"字体包解压被拒绝：%s"}\n' "$(json_escape "${_extract_error:-ZIP 字体包读取失败}")"
+        return 0
+    fi
     find "$_tmp" -type l -exec rm -f {} \; 2>/dev/null || true
+
+    import_convert_web_fonts "$_tmp"
 
     # 字体集合不再整份复制到字体库（单字体槽位只能读取第 0 个字体面）：按字体面拆分，
     # 不支持的集合计为无效并保留原因。
@@ -348,11 +416,14 @@ EOF_PROBE
 '             "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" "${_probe_weight:-0}" "$_italic" "$_supports_cjk" >> "$_manifest"
     done
 
-    _invalid=$((_invalid + _collection_invalid))
+    _invalid=$((_invalid + _collection_invalid + IMPORT_WEB_INVALID))
+    _ignored=$((_ignored + IMPORT_WEB_IGNORED))
     if [ "$_valid" -le 0 ]; then
         rm -rf "$_tmp"
         if [ -n "$_collection_error" ]; then
             printf '{"status":"error","message":"TTC/OTC 字体集合无法导入：%s"}\n' "$(json_escape "$_collection_error")"
+        elif [ -n "$IMPORT_WEB_ERROR" ]; then
+            printf '{"status":"error","message":"%s"}\n' "$(json_escape "$IMPORT_WEB_ERROR")"
         else
             printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'
         fi

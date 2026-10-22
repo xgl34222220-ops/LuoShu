@@ -364,7 +364,7 @@ private fun ImportResultDialog(
                 ) {
                     Text(state.summary, color = tokens.textPrimary, fontSize = 14.sp, lineHeight = 22.sp)
                     Text(
-                        "支持 TTF、OTF、TTC 与字体模块 ZIP。ZIP 只提取字体文件，不执行包内脚本。导入记录可在任务中心控制。",
+                        "支持 TTF、OTF、TTC、WOFF/WOFF2 网页字体与字体 ZIP 压缩包。网页字体会先转换为 TTF/OTF 再校验；ZIP 只提取字体文件，不执行包内脚本。导入记录可在任务中心控制。",
                         color = tokens.textSecondary,
                         fontSize = 12.sp,
                         lineHeight = 18.sp,

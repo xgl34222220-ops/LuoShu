@@ -68,9 +68,60 @@ font_detect_format() {
     esac
 }
 
+# 网页字体（WOFF/WOFF2）只是 SFNT 的压缩容器，不能改扩展名后直接给系统使用。
+# 调用方设置 FONT_CHECK_CONVERT_DIR 后，font_validate 会先用 font_web_convert.py
+# 解出真实 TTF/OTF/TTC 到该目录，再对转换结果做完整校验；结果路径写入
+# FONT_CHECK_CONVERTED，原始容器格式写入 FONT_CHECK_SOURCE_FORMAT。
+# 未设置该目录的只读调用保持原来的拒绝文案。
+font_web_convert() {
+    _fwc_src="$1"
+    _fwc_out="$2"
+    FONT_WEB_CONVERT_OUTPUT=""
+    FONT_WEB_CONVERT_ERROR=""
+    _fwc_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _fwc_script="$_fwc_module/common/font_web_convert.py"
+    _fwc_pyroot="$_fwc_module/common/python"
+    if [ ! -f "$_fwc_script" ]; then
+        FONT_WEB_CONVERT_ERROR="网页字体转换组件不可用"
+        return 1
+    fi
+    mkdir -p "$_fwc_out" 2>/dev/null || { FONT_WEB_CONVERT_ERROR="无法创建网页字体转换目录"; return 1; }
+    if [ -n "${LUOSHU_IMPORT_PYTHON:-}" ]; then
+        _fwc_json=$("$LUOSHU_IMPORT_PYTHON" "$_fwc_script" --input "$_fwc_src" --output-dir "$_fwc_out" 2>/dev/null) || true
+    elif [ -x "$_fwc_pyroot/bin/luoshu-python" ]; then
+        _fwc_json=$(PYTHONHOME="$_fwc_pyroot" \
+            PYTHONPATH="$_fwc_pyroot/lib/python3.14:$_fwc_pyroot/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$_fwc_pyroot/lib:$_fwc_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_fwc_pyroot/bin/luoshu-python" "$_fwc_script" --input "$_fwc_src" --output-dir "$_fwc_out" 2>/dev/null) || true
+    elif command -v python3 >/dev/null 2>&1; then
+        _fwc_json=$(python3 "$_fwc_script" --input "$_fwc_src" --output-dir "$_fwc_out" 2>/dev/null) || true
+    else
+        FONT_WEB_CONVERT_ERROR="缺少字体处理运行时，无法转换网页字体"
+        return 1
+    fi
+    _fwc_json=$(printf '%s\n' "$_fwc_json" | sed -n '/^[[:space:]]*{/p' | tail -n1)
+    case "$_fwc_json" in
+        *'"status":"ok"'*)
+            FONT_WEB_CONVERT_OUTPUT=$(printf '%s' "$_fwc_json" | sed -n 's/.*"outputPath":"\([^"]*\)".*/\1/p')
+            if [ -n "$FONT_WEB_CONVERT_OUTPUT" ] && [ -f "$FONT_WEB_CONVERT_OUTPUT" ]; then
+                return 0
+            fi
+            FONT_WEB_CONVERT_ERROR="网页字体转换结果缺失"
+            ;;
+        *)
+            FONT_WEB_CONVERT_ERROR=$(printf '%s' "$_fwc_json" | sed -n 's/.*"message":"\(.*\)"}[[:space:]]*$/\1/p')
+            [ -n "$FONT_WEB_CONVERT_ERROR" ] || FONT_WEB_CONVERT_ERROR="网页字体转换失败"
+            ;;
+    esac
+    FONT_WEB_CONVERT_OUTPUT=""
+    return 1
+}
+
 font_validate() {
     _file="$1"
     _purpose="${2:-text}"
+    FONT_CHECK_SOURCE_FORMAT=""
+    FONT_CHECK_CONVERTED=""
     FONT_CHECK_FORMAT="UNKNOWN"
     FONT_CHECK_SIZE=0
     FONT_CHECK_VARIABLE="false"
@@ -94,8 +145,33 @@ font_validate() {
     case "$FONT_CHECK_FORMAT" in
         TTF|OTF|TTC) ;;
         WOFF|WOFF2)
-            FONT_CHECK_ERROR="检测到网页字体 $FONT_CHECK_FORMAT，不能仅修改扩展名后作为系统字体"
-            return 1
+            _fv_web_format="$FONT_CHECK_FORMAT"
+            _fv_web_error="检测到网页字体 $_fv_web_format，不能仅修改扩展名后作为系统字体"
+            if [ -z "${FONT_CHECK_CONVERT_DIR:-}" ]; then
+                FONT_CHECK_ERROR="$_fv_web_error"
+                return 1
+            fi
+            if ! font_web_convert "$_file" "$FONT_CHECK_CONVERT_DIR"; then
+                FONT_CHECK_ERROR="$_fv_web_error；转换失败：${FONT_WEB_CONVERT_ERROR:-未知原因}"
+                return 1
+            fi
+            _fv_web_output="$FONT_WEB_CONVERT_OUTPUT"
+            # 转换结果必须重新经过完整的真实格式与表校验，不信任转换器自身的判断。
+            _fv_web_dir="$FONT_CHECK_CONVERT_DIR"
+            FONT_CHECK_CONVERT_DIR=""
+            _fv_web_rc=0
+            font_validate "$_fv_web_output" "$_purpose" || _fv_web_rc=$?
+            FONT_CHECK_CONVERT_DIR="$_fv_web_dir"
+            if [ "$_fv_web_rc" -ne 0 ]; then
+                FONT_CHECK_SOURCE_FORMAT="$_fv_web_format"
+                FONT_CHECK_ERROR="$_fv_web_error；转换结果未通过校验：$FONT_CHECK_ERROR"
+                rm -f "$_fv_web_output" 2>/dev/null || true
+                return 1
+            fi
+            FONT_CHECK_SOURCE_FORMAT="$_fv_web_format"
+            FONT_CHECK_CONVERTED="$_fv_web_output"
+            FONT_CHECK_WARNING="已从 $_fv_web_format 转换为 $FONT_CHECK_FORMAT${FONT_CHECK_WARNING:+；$FONT_CHECK_WARNING}"
+            return 0
             ;;
         ZIP)
             FONT_CHECK_ERROR="检测到 ZIP 压缩包，请先解压出 TTF/OTF/TTC 文件"
@@ -181,11 +257,26 @@ font_check_json() {
 }
 
 font_check_cli() {
+    # 命令行检查网页字体时在临时目录中先转换后校验，结束后删除转换结果。
+    _fcc_tmp=""
+    if [ -z "${FONT_CHECK_CONVERT_DIR:-}" ]; then
+        _fcc_tmp=$(mktemp -d "${TMPDIR:-/data/local/tmp}/luoshu-font-check.XXXXXX" 2>/dev/null) || \
+            _fcc_tmp=$(mktemp -d 2>/dev/null) || _fcc_tmp=""
+        FONT_CHECK_CONVERT_DIR="$_fcc_tmp"
+    fi
+    font_check_cli_run "$@"
+    _fcc_rc=$?
+    [ -z "$_fcc_tmp" ] || rm -rf "$_fcc_tmp" 2>/dev/null || true
+    return "$_fcc_rc"
+}
+
+font_check_cli_run() {
     if [ "${1:-}" = "--json" ]; then
         font_check_json "${2:-}" "${3:-text}"
     elif [ -n "${1:-}" ] && [ -f "${1:-}" ]; then
         if font_validate "$1" "${2:-text}"; then
             echo "状态: 通过"
+            [ -z "$FONT_CHECK_SOURCE_FORMAT" ] || echo "原始格式: $FONT_CHECK_SOURCE_FORMAT（已转换后校验）"
             echo "真实格式: $FONT_CHECK_FORMAT"
             echo "文件大小: $FONT_CHECK_SIZE bytes"
             echo "可变字体: $FONT_CHECK_VARIABLE"
@@ -202,5 +293,8 @@ font_check_cli() {
 # 只有直接执行 font_check.sh 时才进入 CLI。被 font_manager/native_import 等脚本
 # source 时，必须只定义函数，不能消费父脚本的位置参数，更不能 exit 父进程。
 case "${0##*/}" in
-    font_check.sh) font_check_cli "$@" ;;
+    font_check.sh)
+        [ -n "${MODULE_DIR:-${MODDIR:-}}" ] || MODULE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
+        font_check_cli "$@"
+        ;;
 esac

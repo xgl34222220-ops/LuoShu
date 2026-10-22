@@ -1,0 +1,64 @@
+name: Web font and ZIP import
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/font_web_convert.py
+      - common/font_zip_extract.py
+      - common/font_check.sh
+      - common/font_import.sh
+      - common/native_import.sh
+      - scripts/build_woff2_decoder.sh
+      - scripts/prepare_composite_runtime.sh
+      - scripts/web_font_import_test.sh
+      - tools/woff2/**
+      - licenses/WOFF2-LICENSE.txt
+      - licenses/Brotli-LICENSE.txt
+      - .github/workflows/web-font-import.yml
+permissions:
+  contents: read
+jobs:
+  web-font-import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file binutils python3-venv python3-brotli \
+            qemu-user-static fonts-dejavu-core build-essential >/dev/null
+
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/build_woff2_decoder.sh', 'tools/woff2/**') }}
+
+      - name: Prepare ARM64 runtime (includes the static WOFF2 decoder)
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+
+      - name: Inspect shipped ARM64 decoder
+        run: |
+          BIN=common/python/bin/luoshu-woff2-decode
+          test -x "$BIN"
+          file "$BIN"
+          file "$BIN" | grep -q 'ARM aarch64'
+          file "$BIN" | grep -q 'statically linked'
+          ! readelf -d "$BIN" 2>/dev/null | grep -q 'NEEDED'
+          printf 'decoder bytes=%s sha256=%s\n' "$(wc -c < "$BIN")" "$(sha256sum "$BIN" | awk '{print $1}')"
+
+      - name: Web font import tests (host build of the pinned decoder)
+        run: LUOSHU_WOFF2_TEST_BUILD=1 sh ./scripts/web_font_import_test.sh
+
+      - name: Web font import tests (shipped ARM64 decoder under qemu)
+        run: |
+          WRAP="$RUNNER_TEMP/luoshu-woff2-decode-qemu"
+          printf '#!/bin/sh\nexec qemu-aarch64-static %s "$@"\n' "$PWD/common/python/bin/luoshu-woff2-decode" > "$WRAP"
+          chmod 0755 "$WRAP"
+          LUOSHU_TEST_WOFF2_DECODER="$WRAP" sh ./scripts/web_font_import_test.sh
