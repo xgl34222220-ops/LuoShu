@@ -265,10 +265,11 @@ class WaitChildCleanup(unittest.TestCase):
             "    _p=$(luoshu_pid_value \"$1\"); [ -n \"$_p\" ] && kill -0 \"$_p\" 2>/dev/null\n"
             "}\n" + extract(["_wcc_pid_running", "wait_child_cleanup"]))
 
-    def run_wait(self, monitor_seconds: float, timeout: str | None = None) -> tuple[int, float]:
+    def run_wait(self, monitor_seconds: float, timeout: str | None = None,
+                 pid_name: str = "mix-monitor-child.pid") -> tuple[int, float]:
         monitor = subprocess.Popen(["sleep", str(monitor_seconds)])
         self.addCleanup(monitor.kill)
-        (self.tasks / "mix-monitor-child.pid").write_text(f"{monitor.pid}\n")
+        (self.tasks / pid_name).write_text(f"{monitor.pid}\n")
         env = dict(os.environ)
         if timeout is not None:
             env["LUOSHU_MIX_CHILD_CLEANUP_TIMEOUT"] = timeout
@@ -290,8 +291,10 @@ class WaitChildCleanup(unittest.TestCase):
         probes = len(self.probes.read_text().splitlines())
         self.assertLessEqual(probes, 12, probes)
 
-    def test_wall_clock_bound_still_reports_unconfirmed_cleanup(self):
-        code, elapsed = self.run_wait(30.0, timeout="2")
+    def test_budget_still_reports_unconfirmed_engine_cleanup(self):
+        # A live commit monitor is never abandoned (its own supervisor bounds
+        # it); a stuck engine with no monitor still ends at the awake budget.
+        code, elapsed = self.run_wait(30.0, timeout="2", pid_name="mix_worker.pid")
         self.assertEqual(code, 124)
         self.assertLess(elapsed, 6.0)
 
