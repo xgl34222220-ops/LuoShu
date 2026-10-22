@@ -175,9 +175,23 @@ if [ "$(value "$LIVE_STATE" bootId)" = "$BOOT" ] && [ "$(value "$LIVE_STATE" sta
     _previous=$(value "$LIVE_STATE" source)
     if safe_source "$_previous"; then OLD_SOURCE="$_previous"; OLD_FONT=$(value "$LIVE_STATE" font); fi
 fi
+# live_mount had no breakdown (28 s on HyperOS, 12-16 s on ColorOS in device
+# exports). Diagnostic only: one [STAGE-STEP] line per part on stderr, which
+# the apply callers append to fontswitch.log; stdout stays the result JSON.
+_live_uptime_ms() { awk '{ printf "%d\n", $1 * 1000 }' /proc/uptime 2>/dev/null || echo 0; }
+_live_step() {
+    printf '[STAGE-STEP] component=live step=%s elapsedMs=%s status=%s\n' \
+        "$1" "$(( $(_live_uptime_ms) - $2 ))" "$3" >&2
+}
 _COPY_TMP="$LUOSHU_TASK_SCOPE_TMPDIR/live-generation-$$"
+_live_step_began=$(_live_uptime_ms)
 SOURCE=$(_live_python "$NEXT" "$LIVE_CACHE" "$BOOT" "$_COPY_TMP")
-safe_source "$SOURCE" || { result false pending-reboot live-copy-failed; exit 1; }
+if safe_source "$SOURCE"; then
+    _live_step generation_prepare "$_live_step_began" ok
+else
+    _live_step generation_prepare "$_live_step_began" failed
+    result false pending-reboot live-copy-failed; exit 1
+fi
 if [ "$OLD_SOURCE" != "$SOURCE" ] || ! live_visible; then
     _journal_tmp="$LUOSHU_TASK_SCOPE_TMPDIR/live-transaction-state"
     [ ! -L "$LIVE_STATE" ] && [ ! -L "$OLD_LIVE_STATE" ] || { result false pending-reboot live-state-unsafe; exit 1; }
@@ -195,13 +209,16 @@ if [ "$OLD_SOURCE" != "$SOURCE" ] || ! live_visible; then
     trap 'signal_exit 129' HUP
     trap 'signal_exit 130' INT
     trap 'signal_exit 143' TERM
+    _live_step_began=$(_live_uptime_ms)
     if ! rm -f "$MANIFEST" || ! luoshu_private_self_mount_ensure; then
+        _live_step self_mount "$_live_step_began" failed
         restore_previous
         _restored=$?
         [ "$_restored" -ne 0 ] || result false pending-reboot live-mount-failed-previous-restored
         [ "$_restored" -eq 0 ] || result false pending-reboot live-mount-and-restore-failed
         exit 1
     fi
+    _live_step self_mount "$_live_step_began" ok
 fi
 _state_tmp="$LUOSHU_TASK_SCOPE_TMPDIR/font-live-state"
 {
