@@ -117,6 +117,8 @@ common/hyperos_theme_takeover.sh
 common/hyperos_boot_routes.sh
 common/hyperos_coverage_bridge.sh
 common/font_coverage_locator.py
+common/umount_visibility.py
+common/umount_visibility.sh
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh
