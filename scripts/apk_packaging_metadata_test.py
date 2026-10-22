@@ -25,7 +25,8 @@ class ApkMetadataTest(unittest.TestCase):
         self.code = int(props['versionCode']) * 100 + 1
         self.zip = self.root / 'dist' / ('LuoShu-' + props['version'] + '.zip')
         for name in ('scripts/check.sh', 'scripts/prune_python_runtime.sh', 'customize.sh',
-                     'common/helper.sh', 'common/python/bin/luoshu-python', 'system/bin/luoshud'):
+                     'common/helper.sh', 'common/python/bin/luoshu-python',
+                     'common/python/bin/luoshu-woff2-decode', 'system/bin/luoshud'):
             path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('#!/bin/sh\nexit 0\n')
         (self.root / 'scripts/module_payload_manifest.txt').write_text('module.prop\ncustomize.sh\ncommon\nsystem\n')
