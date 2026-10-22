@@ -71,7 +71,7 @@ class WakeLock(unittest.TestCase):
         self.assertIn("luoshu_wake_lock_acquire mix_monitor", monitor)
         self.assertIn("trap 'luoshu_wake_lock_release mix_monitor' EXIT", monitor)
         safe = SAFE.read_text(encoding="utf-8")
-        self.assertIn("switch) luoshu_wake_lock_acquire safe_switch 1800", safe)
+        self.assertIn("switch|prewarm) luoshu_wake_lock_acquire safe_switch 1800", safe)
         self.assertIn("luoshu_wake_lock_release safe_switch", function(SAFE, "safe_exit_cleanup"))
 
 

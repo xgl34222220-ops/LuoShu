@@ -1156,13 +1156,14 @@ switch_font() {
 
 case "${1:-}" in
     action)
+        # Keep the CPU awake while the payload is built and mounted
+        # (released by safe_exit_cleanup; expires by itself if killed).
         case "${2:-}" in
-            # Keep the CPU awake while the payload is built and mounted
-            # (released by safe_exit_cleanup; expires by itself if killed).
-            switch) luoshu_wake_lock_acquire safe_switch 1800 || true
-                switch_font "${3:-}"; exit $? ;;
-            prewarm) luoshu_wake_lock_acquire safe_switch 1800 || true
-                prewarm_font "${3:-}"; exit $? ;;
+            switch|prewarm) luoshu_wake_lock_acquire safe_switch 1800 || true ;;
+        esac
+        case "${2:-}" in
+            switch) switch_font "${3:-}"; exit $? ;;
+            prewarm) prewarm_font "${3:-}"; exit $? ;;
             prewarm-start) prewarm_start "${3:-}"; exit $? ;;
             *) safe_error '安全切换核心只接管字体应用/预热动作'; exit 2 ;;
         esac
