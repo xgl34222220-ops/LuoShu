@@ -433,6 +433,55 @@ class LocatorTest(unittest.TestCase):
         self.assertEqual("App 内置正文字体（系统层无法替换）",
                          by_package["com.anthropic.claude"]["layers"]["appBuiltinBodyFonts"]["label"])
 
+    def test_scan_skips_exited_processes_and_counts_unreadable_apart(self):
+        # Device export 2026-10-22 12:44: 26 processes that exited after the
+        # pid listing were counted as systemSlotUncovered=26.
+        self.scan_fixture()
+        for pid, name in (("103", b"com.example.gone\0"), ("104", b"com.example.gone:push\0")):
+            (self.proc / pid).mkdir()
+            (self.proc / pid / "cmdline").write_bytes(name)  # listed, but maps already gone (ENOENT)
+        (self.proc / "105").mkdir()
+        (self.proc / "105" / "cmdline").write_bytes(b"com.example.locked\0")
+        (self.proc / "105" / "maps").mkdir()  # live, same program, maps unreadable (EISDIR)
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, groups=policy.parse_groups(""),
+                              weight_probe=lambda _p: False, rom="hyperos")
+        by_package = {item["package"]: item for item in result["items"]}
+        self.assertNotIn("com.example.gone", by_package)
+        self.assertEqual("unreadable", by_package["com.example.locked"]["verdict"])
+        self.assertIn("EISDIR", by_package["com.example.locked"]["findings"][0]["detail"])
+        self.assertEqual((4, 1, 2, 1), (result["scanned"], result["covered"], result["exited"],
+                                        result["unreadable"]))
+        # aod (group off) + hidden are slot misses; the unreadable one is not.
+        self.assertEqual((0, 2), (result["appBuiltinOnly"], result["systemSlotUncovered"]))
+        gone = locator.locate("com.example.gone", "103", module=self.module, proc_root=self.proc,
+                              host_root=self.host, theme_dir=self.theme, weight_probe=lambda _p: False,
+                              rom="hyperos")
+        self.assertEqual("exited", gone["verdict"])
+
+    def test_webview_probes_cover_cjk_collections_and_rom_slots(self):
+        fonts = self.module / ".luoshu-payload/system/fonts"
+        for name in ("Roboto-Regular.ttf", "NotoSansCJK-Regular.ttc", "NotoSerifCJK-Regular.ttc",
+                     "SysSans-Hans-Regular.ttf", "SysSans-En-Regular.ttf"):
+            (fonts / name).write_bytes(name.encode() * 50)
+        payload = locator.audit.PayloadIndex(self.module)
+        hyperos = locator.webview_probes(payload, "hyperos")
+        self.assertEqual(["/system/fonts/MiSansVF.ttf", "/system/fonts/Roboto-Regular.ttf",
+                          "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSerifCJK-Regular.ttc"], hyperos)
+        coloros = locator.webview_probes(payload, "coloros")
+        self.assertEqual(["/system/fonts/MiSansVF.ttf", "/system/fonts/Roboto-Regular.ttf",
+                          "/system/fonts/SysSans-Hans-Regular.ttf", "/system/fonts/SysSans-En-Regular.ttf",
+                          "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSerifCJK-Regular.ttc"], coloros)
+        # Only slots the payload replaces are probed (no SysSans-Hant here).
+        self.assertNotIn("/system/fonts/SysSans-Hant-Regular.ttf", coloros)
+        # The renderer sees LuoShu's CJK collection through its own root.
+        (self.proc / "300" / "root/system/fonts").mkdir(parents=True)
+        os.link(fonts / "NotoSansCJK-Regular.ttc", self.proc / "300" / "root/system/fonts/NotoSansCJK-Regular.ttc")
+        (self.proc / "300" / "cmdline").write_bytes(b"webview_zygote\0")
+        rows = locator.webview_visibility(self.module, payload, self.proc, self.host, "coloros")
+        self.assertEqual(coloros, rows[0]["probes"])
+        self.assertEqual(["/system/fonts/NotoSansCJK-Regular.ttc"], rows[0]["luoshuVisible"])
+
     def test_scan_cli_emits_json(self):
         self.scan_fixture()
         out = io.StringIO()
@@ -722,6 +771,26 @@ class CoverageExportTest(LocatorTest):
         self.assertTrue(data["metrics"]["available"])
         self.assertEqual(["/system/fonts/MiSansVF.ttf"],
                          sorted(locator.metric_slots({"slots": [{"slot": "/system/fonts/MiSansVF.ttf"}]})))
+
+    def test_export_counts_unreadable_apart_and_drops_exited(self):
+        original = locator.running_app_processes
+        def listed(proc_root=Path("/proc"), limit=96):
+            (self.proc / "105").mkdir(exist_ok=True)
+            (self.proc / "105" / "cmdline").write_bytes(b"com.example.locked\0")
+            (self.proc / "105" / "maps").mkdir(exist_ok=True)
+            # 106 was listed, then exited before its maps were read.
+            return original(proc_root, limit) + [("106", "com.example.gone")]
+        locator.running_app_processes = listed
+        try:
+            data = self._export({"slots": {"/system/fonts/MiSansVF.ttf": {}}})
+        finally:
+            locator.running_app_processes = original
+        self.assertEqual((1, 1), (data["counts"]["unreadable"], data["counts"]["exited"]))
+        self.assertEqual((1, 2, 1), (data["scan"]["unreadable"], data["scan"]["systemSlotUncovered"],
+                                     data["scan"]["exited"]))
+        processes = [p for group in data["issues"] for p in group["processes"]]
+        self.assertIn("com.example.locked", processes)
+        self.assertNotIn("com.example.gone", processes)
 
     def test_export_survives_a_broken_section(self):
         original = locator.webview_visibility
