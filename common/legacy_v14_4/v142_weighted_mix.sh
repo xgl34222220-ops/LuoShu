@@ -99,8 +99,9 @@ wait_child_cleanup() {
     # The budget is awake time (poll count x 0.2 s; sleep does not advance
     # while the phone is suspended), not wall clock: a device slept ~475 s in
     # one apply and the old date-based 600 s limit expired mid live_mount, so
-    # the outer supervisor killed the commit. It also never expires while the
-    # commit monitor still runs: the monitor's own supervisor bounds it.
+    # the outer supervisor killed the commit. The default stays above the
+    # monitor's own budget (LUOSHU_MIX_MONITOR_TIMEOUT + 120), so a healthy
+    # commit is never cut short; an explicit override still bounds the wait.
     _wcc_limit="${LUOSHU_MIX_CHILD_CLEANUP_TIMEOUT:-$(( ${LUOSHU_MIX_MONITOR_TIMEOUT:-1200} + 120 ))}"
     case "$_wcc_limit" in ''|*[!0-9]*) _wcc_limit=1320 ;; esac
     _wcc_tries=0
@@ -116,9 +117,7 @@ wait_child_cleanup() {
             fi
             return 0
         fi
-        if [ $((_wcc_tries / 5)) -ge "$_wcc_limit" ] && ! _wcc_pid_running "$_wcc_monitor"; then
-            return 124
-        fi
+        [ $((_wcc_tries / 5)) -lt "$_wcc_limit" ] || return 124
         sleep .2 2>/dev/null || sleep 1
         _wcc_tries=$((_wcc_tries + 1))
     done
