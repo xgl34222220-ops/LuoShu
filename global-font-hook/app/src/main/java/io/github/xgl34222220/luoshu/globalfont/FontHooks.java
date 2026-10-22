@@ -71,6 +71,7 @@ final class FontHooks {
     // ---------------------------------------------------------------- Android 10+
 
     private static void installQ() {
+        Deopt.constructors(Font.Builder.class);
         XposedBridge.hookAllConstructors(Font.Builder.class, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -78,6 +79,7 @@ final class FontHooks {
                 if (key != null) BUILDER_KEYS.put(param.thisObject, key);
             }
         });
+        Deopt.method(Font.Builder.class, "build");
         XposedHelpers.findAndHookMethod(Font.Builder.class, "build", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -86,12 +88,14 @@ final class FontHooks {
                 if (font != null && key != null) FONT_KEYS.put(font, key);
             }
         });
+        Deopt.constructor(Typeface.CustomFallbackBuilder.class, FontFamily.class);
         XposedHelpers.findAndHookConstructor(Typeface.CustomFallbackBuilder.class, FontFamily.class, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 FALLBACK_FAMILIES.put(param.thisObject, param.args[0]);
             }
         });
+        Deopt.method(Typeface.CustomFallbackBuilder.class, "build");
         XposedHelpers.findAndHookMethod(Typeface.CustomFallbackBuilder.class, "build", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -212,6 +216,7 @@ final class FontHooks {
     // ---------------------------------------------------------------- Android 9
 
     private static void installP() {
+        Deopt.constructors(Typeface.Builder.class);
         XposedBridge.hookAllConstructors(Typeface.Builder.class, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -219,12 +224,14 @@ final class FontHooks {
                 if (key != null) BUILDER_KEYS.put(param.thisObject, key);
             }
         });
+        Deopt.method(Typeface.Builder.class, "build");
         XposedHelpers.findAndHookMethod(Typeface.Builder.class, "build", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 replaceByName(param, BUILDER_KEYS.remove(param.thisObject));
             }
         });
+        Deopt.method(Typeface.class, "createFromAsset", AssetManager.class, String.class);
         XposedHelpers.findAndHookMethod(Typeface.class, "createFromAsset", AssetManager.class, String.class, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -238,6 +245,8 @@ final class FontHooks {
                 if (a != null) replaceByName(param, "file:" + (a instanceof File ? ((File) a).getPath() : a));
             }
         };
+        Deopt.method(Typeface.class, "createFromFile", String.class);
+        Deopt.method(Typeface.class, "createFromFile", File.class);
         XposedHelpers.findAndHookMethod(Typeface.class, "createFromFile", String.class, fromFile);
         XposedHelpers.findAndHookMethod(Typeface.class, "createFromFile", File.class, fromFile);
     }

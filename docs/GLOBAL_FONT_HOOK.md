@@ -33,6 +33,14 @@ AndroidX `ResourcesCompat.getFont` / `TypefaceCompatApi29Impl`（含可下载字
 * **衬线**：名字含 serif（且不含 sans）或常见衬线正文族（Tiempos、Copernicus、Georgia、Noto Serif…）→ 换成系统 `Typeface.SERIF` 对应字重，保持设计意图。
 * **无法判断**：内容哈希名（`3f9c0a1e.woff2`）、R8 缩短名（`a.ttf`、`res/font/b0.ttf`）、无名 buffer → 交给 `SfntInspector` 读字体表：name 表族名再走一遍名单；有 COLR/CBDT/sbix/SVG（彩色/表情）、`post.isFixedPitch`（等宽）、cmap 拉丁字母不足 40/52（无拉丁 cmap，如纯数字/纯图标/纯 CJK）、私用区码位多于拉丁字母（连字图标字体如 Material Icons）→ 保留；否则替换。读不出来的字体一律保留。
 
+### 先 deoptimize 再 Hook
+
+ART 可能把 `Font.Builder.build()` 这类短方法内联进调用方，或保留 AOT 编译副本，导致 Hook 装上了却被绕过（漏拦）。参考 MFGA-Xposed 的做法，每个 Hook 安装前先对目标方法调用一次 deoptimize：
+
+- 范围：仅限已 Hook 的方法——`Font.Builder` 全部构造与 `build()`、`Typeface.CustomFallbackBuilder(FontFamily)` 与 `build()`、Android 9 的 `Typeface.Builder` 构造与 `build()`、`createFromAsset`、`createFromFile(String/File)`，以及 `WebViewClient.shouldInterceptRequest`、`WebView.setWebViewClient` 和 App 自己的 `shouldInterceptRequest` 覆写。
+- 实现：`Deopt` 通过反射调用 LSPosed 旧 API 的 `XposedBridge.deoptimizeMethod(Member)`；框架没有该方法或调用失败时静默跳过，Hook 照常安装，不会崩溃。
+- 开销：每个方法只在模块加载时调用一次，不在绘制/加载热路径上。
+
 ## 为什么不会卡（硬性性能约束）
 
 1. **只挂加载入口**：绝不挂 `onDraw`、`measure`、`TextView.setTypeface`、`Paint`、`Canvas`、`StaticLayout` 等热路径。字体加载在一个 App 生命周期里通常只有几次到几十次。
