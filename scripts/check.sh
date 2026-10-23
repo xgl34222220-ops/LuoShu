@@ -30,6 +30,8 @@ python3 -m py_compile \
   "$ROOT/common/font_extract_faces.py" \
   "$ROOT/common/font_capability.py" \
   "$ROOT/common/font_import_probe.py" \
+  "$ROOT/common/font_web_convert.py" \
+  "$ROOT/common/font_zip_extract.py" \
   "$ROOT/common/font_inventory.py"
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py" "$ROOT/common/font_live_payload.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
@@ -297,6 +299,8 @@ sh "$ROOT/scripts/app_bridge_status_test.sh"
 sh "$ROOT/scripts/font_active_state_test.sh"
 sh "$ROOT/scripts/font_boot_state_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
+# PR-G：WOFF/WOFF2 先转换后校验、ZIP 安全解压（完整 WOFF2/ARM64 解码器用例见 web-font-import.yml）。
+sh "$ROOT/scripts/web_font_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/customize_reenable_test.sh"
