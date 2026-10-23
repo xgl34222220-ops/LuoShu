@@ -16,6 +16,8 @@ on:
       - service.sh
       - uninstall.sh
       - action.sh
+      - emulated-soft-reboot.sh
+      - .luoshu-runtime/**
       - .github/workflows/test-candidate.yml
       - .github/workflows/android-ui-smoke.yml
 permissions:
