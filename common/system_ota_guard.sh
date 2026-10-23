@@ -649,8 +649,22 @@ luoshu_system_ota_resume_early() {
         return 0
     fi
 
-    # pending / rescan-trusted. A newer apply on this ROM ends the hold: the
-    # existing release keeps the newer payload XML over the held copy.
+    # pending / rescan-trusted. After a failed resume confirmed by
+    # module_status the XML is back in the payload: hold it again first, then
+    # tell the same failed XML (keep holding, no retry) from a user re-apply.
+    _lsore_failed=$(luoshu_system_ota_resume_get "$_lsore_module" applyFailedDigest)
+    if [ -n "$_lsore_failed" ] && ! luoshu_system_ota_held_present "$_lsore_module" && \
+       luoshu_system_ota_payload_has_xml "$_lsore_module"; then
+        luoshu_system_ota_hold_xml "$_lsore_module" "$_lsore_boot" "$_lsore_fp" "$_lsore_prev"
+        if [ "$(luoshu_system_ota_held_digest "$_lsore_module")" = "$_lsore_failed" ]; then
+            luoshu_system_ota_resume_log "$_lsore_module" '上次恢复失败的 XML 已重新暂停，不自动重试；重新应用字体即可恢复'
+            return 0
+        fi
+        luoshu_system_ota_resume_mark_applied "$_lsore_module" user-reapply "$_lsore_boot" >/dev/null 2>&1 || true
+        return 1
+    fi
+    # A newer apply on this ROM ends the hold: the existing release keeps the
+    # newer payload XML over the held copy.
     if luoshu_system_ota_held_present "$_lsore_module" && luoshu_system_ota_payload_has_xml "$_lsore_module"; then
         luoshu_system_ota_resume_mark_applied "$_lsore_module" user-reapply "$_lsore_boot" >/dev/null 2>&1 || true
         return 1
