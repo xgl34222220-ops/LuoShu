@@ -94,7 +94,8 @@ def reload(font: TTFont) -> TTFont:
     buffer = io.BytesIO()
     font.save(buffer)
     buffer.seek(0)
-    return TTFont(buffer)
+    # Keep head.modified stable so byte comparisons do not depend on the clock.
+    return TTFont(buffer, recalcTimestamp=False)
 
 
 def to_bytes(font: TTFont) -> bytes:
@@ -308,9 +309,14 @@ def test_cli_and_collection(tmp: Path) -> None:
 
 
 def test_real_font(path: Path, tmp: Path) -> None:
-    font = TTFont(str(path))
+    # Compare fully decompiled copies: fontTools may re-encode a table once it
+    # has been read, which is unrelated to this module.
+    reference = TTFont(str(path), recalcTimestamp=False)
+    reference.ensureDecompiled()
+    before = to_bytes(reference)
+    font = TTFont(str(path), recalcTimestamp=False)
+    font.ensureDecompiled()
     had = {cp: cp in font.getBestCmap() for cp in (0x20, 0x2005)}
-    before = to_bytes(font)
     report = ensure_space_glyphs(font)
     if all(had.values()):
         check(report["status"] == "unchanged" and to_bytes(font) == before, f"real: should be unchanged {report}")
@@ -321,7 +327,7 @@ def test_real_font(path: Path, tmp: Path) -> None:
         check(report["status"] == "patched", f"real: {report}")
         check(all(cp in reload(font).getBestCmap() for cp in (0x20, 0x2005)), "real: not filled")
     # Remove U+2005 from a copy and make sure it is filled back as a blank.
-    font = TTFont(str(path))
+    font = TTFont(str(path), recalcTimestamp=False)
     for table in font["cmap"].tables:
         if table.isUnicode():
             table.cmap.pop(0x2005, None)
