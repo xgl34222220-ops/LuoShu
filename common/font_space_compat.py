@@ -43,6 +43,8 @@ TARGETS = (SPACE, FOUR_PER_EM_SPACE)
 # recompiles safely after adding an entry.
 WRITABLE_CMAP_FORMATS = (4, 12)
 MAX_CID = 65535
+# maxp.numGlyphs is uint16, so glyph ids 0..65534 at most.
+MAX_GLYPHS = 65535
 
 
 class _Skip(Exception):
@@ -102,6 +104,8 @@ def _unique_name(font: TTFont, preferred: list[str]) -> str:
 
 def _append_glyph(font: TTFont, kind: str, codepoint: int, width: int) -> str:
     order = list(font.getGlyphOrder())
+    if len(order) >= MAX_GLYPHS:
+        raise _Skip("glyph_limit")
     if kind == "cid":
         top = font["CFF "].cff.topDictIndex[0]
         used = []

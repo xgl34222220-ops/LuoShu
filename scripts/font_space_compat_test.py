@@ -258,6 +258,22 @@ def test_variable_reuse_only() -> None:
     check(reload(font).getBestCmap()[0x2005] == "uni00A0", "var nbsp: 2005 should reuse quarter-em nbsp")
 
 
+def test_glyph_limit() -> None:
+    builder = FontBuilder(1000, isTTF=True)
+    order = [".notdef", *[f"g{i}" for i in range(1, 65535)]]
+    builder.setupGlyphOrder(order)
+    builder.setupCharacterMap({ord("A"): "g1"})
+    empty = empty_tt()
+    builder.setupGlyf({name: empty for name in order})
+    builder.setupHorizontalMetrics({name: (500, 0) for name in order})
+    builder.setupHorizontalHeader(ascent=880, descent=-120)
+    font = builder.font
+    report = ensure_space_glyphs(font)
+    check(report["status"] == "skipped" and report["unresolved"].get("U+0020") == "glyph_limit", f"limit: {report}")
+    check(len(font.getGlyphOrder()) == 65535 and 0x20 not in font.getBestCmap(), "limit: font modified")
+    to_bytes(font)
+
+
 def test_fixed_pitch() -> None:
     font = make_font(mono=True)
     report = ensure_space_glyphs(font)
@@ -327,6 +343,7 @@ def main() -> int:
     test_cid()
     test_cid_without_fdarray()
     test_variable_reuse_only()
+    test_glyph_limit()
     test_fixed_pitch()
     test_no_unicode_cmap()
     with tempfile.TemporaryDirectory() as tmp_name:
