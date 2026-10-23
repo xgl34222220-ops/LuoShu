@@ -31,6 +31,7 @@ python3 -m py_compile \
   "$ROOT/common/font_capability.py" \
   "$ROOT/common/font_import_probe.py" \
   "$ROOT/common/font_inventory.py"
+python3 -m py_compile "$ROOT/common/font_verity.py"
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py" "$ROOT/common/font_live_payload.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
 python3 "$ROOT/scripts/stable111_rework_gate_test.py"

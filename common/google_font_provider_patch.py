@@ -105,6 +105,51 @@ def normalize_weight(font: TTFont, weight: int) -> None:
         font["head"].macStyle = style
 
 
+def postscript_name(font: TTFont) -> str | None:
+    if "name" not in font:
+        return None
+    for record in font["name"].names:
+        if record.nameID == 6:
+            try:
+                value = record.toUnicode().strip()
+            except Exception:
+                continue
+            if value:
+                return value
+    return None
+
+
+def apply_protected_identity(source: TTFont, target: TTFont) -> dict[str, Any]:
+    """Keep the identity Android checks for updatable fonts in /data/fonts.
+
+    UpdatableFontDir only accepts a file there whose PostScript name matches the
+    preinstalled font it overrides and whose head.fontRevision is not lower than
+    that font's. The clone therefore carries the replaced file's exact revision
+    and PostScript name (name ID 6 and, for CFF outlines, the CFF font name).
+    """
+    if "head" not in source or "head" not in target:
+        raise ProviderPatchError("protected-head-table-missing")
+    expected = postscript_name(target)
+    if not expected:
+        raise ProviderPatchError("protected-postscript-name-missing")
+    source["head"].fontRevision = target["head"].fontRevision
+    if postscript_name(source) != expected:
+        raise ProviderPatchError("protected-postscript-name-not-copied")
+    if "CFF " in source:
+        cff = source["CFF "].cff
+        if len(cff.fontNames) == 1:
+            cff.fontNames = [expected]
+    return {"fontRevision": float(target["head"].fontRevision), "postScriptName": expected}
+
+
+def verify_protected_output(output: Path, expected: dict[str, Any]) -> None:
+    with open_font(output, lazy=True) as font:
+        if "head" not in font or float(font["head"].fontRevision) != expected["fontRevision"]:
+            raise ProviderPatchError("protected-font-revision-mismatch")
+        if postscript_name(font) != expected["postScriptName"]:
+            raise ProviderPatchError("protected-postscript-name-mismatch")
+
+
 def instantiate_for_target(source: TTFont, target: TTFont, weight: int) -> TTFont:
     target_variable = "fvar" in target
     source_variable = "fvar" in source
@@ -137,7 +182,8 @@ def atomic_save(font: TTFont, output: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) -> dict[str, Any]:
+def patch(source_path: Path, target_path: Path, output_path: Path, weight: int,
+          protected: bool = False) -> dict[str, Any]:
     source = open_font(source_path)
     target = open_font(target_path)
     try:
@@ -164,8 +210,15 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
         source = instantiate_for_target(source, target, weight)
         copy_target_names(source, target)
         normalize_weight(source, weight)
+        identity = apply_protected_identity(source, target) if protected else None
         atomic_save(source, output_path)
-        return {
+        if identity is not None:
+            try:
+                verify_protected_output(output_path, identity)
+            except Exception:
+                output_path.unlink(missing_ok=True)
+                raise
+        result = {
             "status": "ok",
             "source": str(source_path),
             "target": str(target_path),
@@ -176,6 +229,9 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
             "variationMode": "native" if "fvar" in source else "static-instance",
             "outputBytes": output_path.stat().st_size,
         }
+        if identity is not None:
+            result["protected"] = identity
+        return result
     finally:
         try:
             source.close()
@@ -191,6 +247,8 @@ def main() -> int:
     parser.add_argument("--target", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--weight", type=int)
+    parser.add_argument("--protected", action="store_true",
+                        help="target is an updatable font under /data/fonts: keep fontRevision and PostScript name")
     args = parser.parse_args()
     if args.inspect_targets is not None:
         seen: set[str] = set()
@@ -214,7 +272,7 @@ def main() -> int:
     if any(value is None for value in (args.source, args.target, args.output, args.weight)):
         parser.error("--source, --target, --output and --weight are required for patching")
     try:
-        result = patch(args.source, args.target, args.output, args.weight)
+        result = patch(args.source, args.target, args.output, args.weight, protected=args.protected)
     except Exception as exc:
         print(json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False, separators=(",", ":")))
         return 1

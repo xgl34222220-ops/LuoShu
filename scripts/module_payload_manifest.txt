@@ -92,6 +92,8 @@ common/google_font_fallback.py
 common/google_font_fallback.sh
 common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
+common/font_verity.py
+common/font_verity.sh
 common/google_font_provider_service.sh
 common/google_font_watch_wait.py
 common/google_font_diagnostic.py
