@@ -12,7 +12,7 @@
     "common/mount_self_backend.sh": "41713ca6a9e2681b8f3693d9132e793f78ba2ff4f922277a66b91087a649c522",
     "common/mount_self_fallback.sh": "132ff016087ca03f49d6ca16fb2717cc0c4751b96e26315a526d81e8fa036d1b",
     "common/mount_compat.sh": "48745d0810398a77ddb34c93e7a935599934dedbf5f86e948f6124d1e855d76a",
-    "common/mount_compat_base.sh": "31b98b1bb8c4a4edf65ad40a41dcbdf3e8a84fa5817faf7c06bec65c256c935a",
+    "common/mount_compat_base.sh": "6317d004dcaf6dfd6677ca58785e8380413a41753b612ee6b61e761216456037",
     "common/mount_compat_policy.sh": "c293f88de5922ab05b53e861c952e08825666a93a1c916fe0f53396507a95eb5",
     "common/mount_fast_sync.sh": "2cb5d24d03a8d406988868ee99c9e58d333da3f124b7d5237da10dd1f9a2eae4",
     "common/font_runtime_mount.sh": "be56fbb4e361442564e49c6bf6f967820b2c06f0de8b3c9064df0981e431b2b8",
