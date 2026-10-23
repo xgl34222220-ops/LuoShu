@@ -1,0 +1,5 @@
+# Hook registry. Every hook the module installs must be listed here, one per line:
+#   <kind> <target>
+# kind: jni (RegisterNatives replacement) | plt (import of a named caller library)
+# tests/hook_registry_test.py fails when an entry is outside the allow list or names a drawing,
+# paint, layout or canvas symbol. N1 installs nothing, so the registry is empty.

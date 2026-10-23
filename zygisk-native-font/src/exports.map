@@ -1,0 +1,6 @@
+{
+  global:
+    zygisk_module_entry;
+  local:
+    *;
+};
