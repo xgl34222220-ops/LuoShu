@@ -74,7 +74,8 @@ jobs:
           sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           ndk="$sdk/ndk/$NDK_VERSION"
           if [[ ! -d "$ndk" ]]; then
-            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
+            # `yes` dies of SIGPIPE once sdkmanager exits; keep that out of pipefail.
+            (yes || true) | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" | tail -n 5
           fi
           test -f "$ndk/build/cmake/android.toolchain.cmake"
           echo "LSNF_NDK=$ndk" >> "$GITHUB_ENV"
