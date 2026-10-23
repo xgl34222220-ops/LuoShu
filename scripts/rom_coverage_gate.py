@@ -8,7 +8,9 @@
   （其中的名单由 common/hyperos_physical_policy.py 生成，分组开关取默认值）加
   ``_lhcc_collection_names_for_root``（暂存时按本机字体面编译的 CJK 集合）；
 * coloros：common/coloros_global.sh 的 ``get_all_coloros_files``（只计夹具中存在的文件）加
-  ``coloros_collection_names_for_root``（暂存时由 coloros_metrics_batch 按本机字体面编译的 CJK 集合）。
+  ``coloros_collection_names_for_root``（暂存时由 coloros_metrics_batch 按本机字体面编译的 CJK 集合）；
+* originos / flyme：common/origin_flyme_global.sh 的 ``luoshu_oem_slot_names_for_root``
+  （ROM 专有精确槽位 + 名称规则，时钟/等宽/图标/Emoji 等保护规则同实机映射）。
 
 规则（--check，CI 与 scripts/check.sh 使用）：
 
@@ -43,6 +45,10 @@ MAPPERS = {
                 '. "$1"; get_all_coloros_files; '
                 '! type coloros_collection_names_for_root >/dev/null 2>&1 || '
                 'coloros_collection_names_for_root "$2"'),
+    'originos': ('common/origin_flyme_global.sh',
+                 '. "$1"; luoshu_oem_slot_names_for_root originos "$2"'),
+    'flyme': ('common/origin_flyme_global.sh',
+              '. "$1"; luoshu_oem_slot_names_for_root flyme "$2"'),
 }
 
 
