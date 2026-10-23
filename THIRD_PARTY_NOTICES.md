@@ -31,6 +31,13 @@
 
 洛书修改了示例的包名、配色、分层、尺寸和导航状态接入；底层库及原示例的许可证与署名不变。
 
+## zygisk.hpp（Zygisk 模块公开 API 头文件）
+
+- 用途：可选的 Native 字体伴随模块（`zygisk-native-font/`，独立 ZIP，不进入主模块）编译时使用的 Zygisk 公开接口声明。
+- 来源：[`topjohnwu/zygisk-module-sample`](https://github.com/topjohnwu/zygisk-module-sample) `module/jni/zygisk.hpp`，原样保留、未修改。
+- 许可证：文件头所附的 ISC 风格许可（Copyright 2022-2023 John "topjohnwu" Wu）。
+- 完整文本：[`zygisk-native-font/third_party/zygisk/LICENSE`](zygisk-native-font/third_party/zygisk/LICENSE)。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：

@@ -1,0 +1,129 @@
+name: Zygisk native font companion
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - zygisk-native-font/**
+      - common/font_import.sh
+      - common/font_inventory.py
+      - THIRD_PARTY_NOTICES.md
+      - .github/workflows/zygisk-native-font.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  NDK_VERSION: '28.2.13676358'
+  LSNF_VERSION: 'v0.1.0-n1'
+  LSNF_VERSION_CODE: '100'
+jobs:
+  host-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Keep-word table in sync with repo font name rules
+        run: python3 zygisk-native-font/tools/gen_keep_words.py --check
+
+      - name: Hook registry allow list
+        run: python3 zygisk-native-font/tests/hook_registry_test.py
+
+      - name: Generate test font corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'fonttools==4.61.1'
+          sudo apt-get install -y -qq --no-install-recommends fonts-dejavu-core >/dev/null || true
+          python3 zygisk-native-font/tools/make_test_fonts.py "$RUNNER_TEMP/corpus"
+
+      - name: Unit tests (ASan/UBSan)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S zygisk-native-font -B "$RUNNER_TEMP/san" -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
+            -DLSNF_HOST_TESTS=ON -DLSNF_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug -DLSNF_CORPUS="$RUNNER_TEMP/corpus"
+          cmake --build "$RUNNER_TEMP/san"
+          ctest --test-dir "$RUNNER_TEMP/san" --output-on-failure -V -E verdict_bench
+
+      - name: Micro benchmark (Release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S zygisk-native-font -B "$RUNNER_TEMP/rel" -G Ninja -DCMAKE_CXX_COMPILER=clang++ \
+            -DLSNF_HOST_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DLSNF_CORPUS="$RUNNER_TEMP/corpus"
+          cmake --build "$RUNNER_TEMP/rel"
+          "$RUNNER_TEMP/rel/verdict_bench" "$RUNNER_TEMP/corpus" | tee "$RUNNER_TEMP/verdict-bench.txt"
+          {
+            echo '### 洛书 Native 字体：判定微基准'
+            echo '```'
+            cat "$RUNNER_TEMP/verdict-bench.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  module:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: host-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install NDK r28c
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ndk="$sdk/ndk/$NDK_VERSION"
+          if [[ ! -d "$ndk" ]]; then
+            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" >/dev/null
+          fi
+          test -f "$ndk/build/cmake/android.toolchain.cmake"
+          echo "LSNF_NDK=$ndk" >> "$GITHUB_ENV"
+
+      - name: Build four ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            cmake -S zygisk-native-font -B "$RUNNER_TEMP/build/$abi" -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE="$LSNF_NDK/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$abi" -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static \
+              -DCMAKE_BUILD_TYPE=Release
+            cmake --build "$RUNNER_TEMP/build/$abi"
+          done
+          ls -l "$RUNNER_TEMP"/build/*/libluoshu_native_font.so "$RUNNER_TEMP"/build/*/lsnf-config
+
+      - name: Static gate (exports, NEEDED, no inline hook library)
+        shell: bash
+        run: |
+          set -euo pipefail
+          readelf="$(find "$LSNF_NDK/toolchains/llvm/prebuilt" -name llvm-readelf -type f -print -quit)"
+          sh zygisk-native-font/tools/static_gate.sh "$readelf" "$RUNNER_TEMP/build"
+
+      - name: Package module ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh zygisk-native-font/tools/package.sh "$RUNNER_TEMP/build" "$RUNNER_TEMP/out" "$LSNF_VERSION" "$LSNF_VERSION_CODE"
+          zip="$RUNNER_TEMP/out/LuoShuNativeFont-$LSNF_VERSION.zip"
+          for f in module.prop customize.sh post-fs-data.sh uninstall.sh skip_mount \
+                   META-INF/com/google/android/update-binary META-INF/com/google/android/updater-script \
+                   zygisk/arm64-v8a.so zygisk/armeabi-v7a.so zygisk/x86_64.so zygisk/x86.so \
+                   bin/arm64-v8a/lsnf-config defaults/exclude.list licenses/zygisk.hpp.txt; do
+            unzip -l "$zip" "$f" >/dev/null || { echo "::error::ZIP is missing $f"; exit 1; }
+          done
+          unzip -p "$zip" module.prop | grep -qx 'id=LuoShuNativeFont'
+          ls -l "$RUNNER_TEMP/out"
+          echo "### 洛书 Native 字体伴随模块 ZIP：$(stat -c %s "$zip") 字节" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Main module ZIP stays untouched
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -n 'zygisk-native-font\|LuoShuNativeFont' scripts/module_payload_manifest.txt scripts/build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-NativeFont-Module
+          path: ${{ runner.temp }}/out/*
+          if-no-files-found: error
+          retention-days: 14
