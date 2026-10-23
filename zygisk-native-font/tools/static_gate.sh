@@ -9,6 +9,7 @@ readelf="$1"
 build_root="$2"
 allowed_needed=' libc.so libdl.so liblog.so libm.so libandroid.so '
 status=0
+[ -x "$readelf" ] || { echo "::error::readelf not executable: $readelf" >&2; exit 1; }
 for so in "$build_root"/*/libluoshu_native_font.so; do
   echo "== $so ($(stat -c %s "$so") bytes)"
   exports="$("$readelf" -W --dyn-syms "$so" | awk '$5=="GLOBAL"||$5=="WEAK" {if ($7!="UND") print $8}' | sed 's/@.*//' | sort -u)"

@@ -97,7 +97,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          readelf="$(find "$LSNF_NDK/toolchains/llvm/prebuilt" -name llvm-readelf -type f -print -quit)"
+          readelf="$LSNF_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          test -x "$readelf"
           sh zygisk-native-font/tools/static_gate.sh "$readelf" "$RUNNER_TEMP/build"
 
       - name: Package module ZIP
