@@ -45,6 +45,7 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import device_font_process_audit as audit  # noqa: E402
+import umount_visibility  # noqa: E402
 
 try:
     import hyperos_physical_policy as policy  # noqa: E402
@@ -1203,7 +1204,8 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
            theme_dir: Path = Path("/data/system/theme/fonts"), groups=None,
            weight_probe=static_on_variable_slot, budget_s: float = 60.0, clock=None,
            summary_name: str = "LuoShu-diagnostic-summary.txt", now: str | None = None,
-           coloros_names=None, package_apks=None, apk_reader=None) -> dict[str, Any]:
+           coloros_names=None, package_apks=None, apk_reader=None,
+           umount_facts: str | None = None) -> dict[str, Any]:
     """Write one sanitized LuoShu-coverage-full-<time>.json; return its path/size."""
     import time
     rom = rom if rom in ROMS else detect_rom()
@@ -1267,6 +1269,9 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
         "theme": theme,
         **({"colorosFlipFont": flip} if flip is not None else {}),
         "webview": safe("webview", lambda: webview_visibility(module, payload, proc_root, host_root), []),
+        "umountVisibility": safe("umountVisibility", lambda: umount_visibility.build(
+            module=module, proc_root=proc_root, facts_text=umount_facts,
+            probe=umount_visibility.payload_probe(payload, proc_root, host_root, default_probes(payload))), {}),
         "fontswitchLog": safe("fontswitchLog", lambda: recent_log(module, sanitize), []),
         "lastApply": safe("lastApply", lambda: last_apply_log(module, sanitize), {}),
         "rebuildPending": safe("rebuildPending", lambda: rebuild_pending(module), {}),
@@ -1286,8 +1291,11 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
     temporary.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     os.chmod(temporary, 0o644)
     os.replace(temporary, target)
+    umount = (report.get("umountVisibility") or {}).get("conclusion") or {}
     return {"path": str(target), "bytes": target.stat().st_size, "issues": report["counts"]["issues"],
-            "processesWithIssues": report["counts"]["processesWithIssues"], "rom": rom}
+            "processesWithIssues": report["counts"]["processesWithIssues"], "rom": rom,
+            **({"umount": {key: umount[key] for key in ("summary", "app", "webview") if key in umount}}
+               if umount else {})}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

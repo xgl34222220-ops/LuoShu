@@ -18,6 +18,9 @@ on:
       - scripts/hyperos_source_xml_test.py
       - scripts/hyperos_theme_takeover_test.py
       - scripts/font_coverage_locator_test.py
+      - common/umount_visibility.py
+      - common/umount_visibility.sh
+      - scripts/umount_visibility_test.py
       - common/font_inventory_scan.py
       - scripts/hyperos_latin_policy_regression_test.py
       - common/hyperos_webview_route.sh
@@ -48,7 +51,8 @@ jobs:
           sh -n common/hyperos_theme_takeover.sh
           sh -n common/hyperos_boot_routes.sh
           sh -n common/hyperos_coverage_bridge.sh
-          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py common/hyperos_source_xml.py common/font_coverage_locator.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py scripts/hyperos_source_xml_test.py
+          sh -n common/umount_visibility.sh
+          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py common/hyperos_source_xml.py common/font_coverage_locator.py common/umount_visibility.py scripts/umount_visibility_test.py scripts/hyperos_latin_policy_regression_test.py scripts/hyperos_webview_route_test.py scripts/hyperos_source_xml_test.py
           # Shell copies of the filename policy are generated; fail on drift.
           python3 common/hyperos_physical_policy.py --check
           python3 scripts/hyperos_latin_policy_regression_test.py
@@ -56,3 +60,4 @@ jobs:
           python3 scripts/hyperos_source_xml_test.py
           python3 scripts/hyperos_theme_takeover_test.py
           python3 scripts/font_coverage_locator_test.py
+          python3 scripts/umount_visibility_test.py
