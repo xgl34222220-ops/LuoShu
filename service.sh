@@ -17,17 +17,6 @@ if [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
     ) </dev/null >/dev/null 2>&1 &
 fi
 
-# ColorOS slot compatibility (opt-in): only started when the switch is on or a
-# previous run left OPlus slots to restore; otherwise nothing runs on any ROM.
-if [ -f "$MODDIR/common/coloros_slot_compat.sh" ] && \
-   { grep -qx 'enabled=1' "$MODDIR/config/coloros_slot_compat.conf" 2>/dev/null || \
-     [ -f "${LUOSHU_COLOROS_SLOT_COMPAT_STORE:-/data/adb/luoshu/coloros-slot-compat}/manifest.v1" ]; }; then
-    (
-        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-            sh "$MODDIR/common/coloros_slot_compat.sh" boot
-    ) </dev/null >/dev/null 2>&1 &
-fi
-
 if [ ! -f "$LEGACY_MODE" ]; then
     [ -f "$V4_SERVICE" ] && exec sh "$V4_SERVICE"
     exit 0

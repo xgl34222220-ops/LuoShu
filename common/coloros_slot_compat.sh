@@ -25,7 +25,6 @@
 #   coloros_slot_compat.sh sync     apply or restore according to config/state
 #   coloros_slot_compat.sh restore  put every recorded entry back
 #   coloros_slot_compat.sh status   key=value lines for the App
-#   coloros_slot_compat.sh boot     wait for boot completion, then sync
 set +e
 
 _lcsc_init() {
@@ -294,7 +293,8 @@ luoshu_coloros_slot_compat_apply() {
 
 luoshu_coloros_slot_compat_sync() {
     _lcsc_init
-    if luoshu_coloros_slot_compat_enabled && _lcsc_is_coloros && [ "$(_lcsc_active_font)" != default ]; then
+    if [ "${LUOSHU_COLOROS_SLOT_COMPAT_SUSPEND:-0}" != 1 ] && luoshu_coloros_slot_compat_enabled && \
+       _lcsc_is_coloros && [ "$(_lcsc_active_font)" != default ]; then
         luoshu_coloros_slot_compat_apply
         return $?
     fi
@@ -319,14 +319,6 @@ if [ "${0##*/}" = coloros_slot_compat.sh ]; then
         sync) luoshu_coloros_slot_compat_sync ;;
         restore) _lcsc_init; luoshu_coloros_slot_compat_restore ;;
         status) luoshu_coloros_slot_compat_status ;;
-        boot)
-            _lcsc_wait=0
-            while [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ] && [ "$_lcsc_wait" -lt 150 ]; do
-                sleep 2
-                _lcsc_wait=$((_lcsc_wait + 1))
-            done
-            luoshu_coloros_slot_compat_sync
-            ;;
-        *) echo 'usage: coloros_slot_compat.sh sync|restore|status|boot' >&2; exit 2 ;;
+        *) echo 'usage: coloros_slot_compat.sh sync|restore|status' >&2; exit 2 ;;
     esac
 fi

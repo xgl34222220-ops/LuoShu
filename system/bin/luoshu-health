@@ -270,6 +270,9 @@ restore_default() {
     [ -f "$MOD/common/font_manager.sh" ] || { printf 'status=error\nmessage=font_manager_missing\n'; return 2; }
     _rd_out="$(MODDIR="$MOD" MODULE_DIR="$MOD" sh "$MOD/common/font_manager.sh" action switch default 2>&1)"
     printf '%s\n' "$_rd_out"
+    # ColorOS slot compatibility: on the default font, put recorded OPlus slots back now.
+    [ ! -f "$MOD/common/coloros_slot_compat.sh" ] || \
+        MODDIR="$MOD" MODULE_DIR="$MOD" sh "$MOD/common/coloros_slot_compat.sh" sync >/dev/null 2>&1 || true
 }
 
 # ColorOS slot compatibility switch (default off). set writes the config, then

@@ -69,4 +69,19 @@ class SystemCenterViewModelTest {
         assertFalse(state.loading)
         assertEquals(HealthLevel.HEALTHY, state.level)
     }
+
+    @Test
+    fun parsesSlotCompatStatusDefaultOffAndFallback() {
+        val off = parseSlotCompatStatus("status=ok\nenabled=false\ncoloros=true\nwrittenSlots=0\n")
+        assertTrue(off.loaded)
+        assertFalse(off.enabled)
+        assertTrue(off.coloros)
+        assertEquals("", off.error)
+        val fallback = parseSlotCompatStatus("status=fallback\nenabled=true\ncoloros=true\nwrittenSlots=0\n")
+        assertTrue(fallback.enabled)
+        assertTrue(fallback.message.contains("回退"))
+        val on = parseSlotCompatStatus("status=ok\nenabled=true\ncoloros=true\nwrittenSlots=4\n")
+        assertEquals(4, on.writtenSlots)
+        assertFalse(parseSlotCompatStatus("").loaded)
+    }
 }

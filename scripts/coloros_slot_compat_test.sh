@@ -111,6 +111,13 @@ font "$TMP/w/module/system/fonts/.luoshu-font-store/bold.font" 'ttcf' C
 if run sync; then fail 'collection source should fail'; fi
 [ "$(snapshot)" = "$before" ] || fail 'collection source changed slots'
 
+# 8a. Boot-loop safe mode suspends the mode and restores.
+setup; before=$(snapshot)
+printf 'enabled=1\n' > "$TMP/w/module/config/coloros_slot_compat.conf"
+run sync
+LUOSHU_COLOROS_SLOT_COMPAT_SUSPEND=1 run sync
+[ "$(snapshot)" = "$before" ] || fail 'suspend did not restore'
+
 # 8. Uninstall-style restore.
 setup; before=$(snapshot)
 printf 'enabled=1\n' > "$TMP/w/module/config/coloros_slot_compat.conf"
@@ -135,9 +142,9 @@ if missing:
     print('missing tokens:', sorted(missing)); sys.exit(1)
 PY
 
-# 10. Wiring: service starts it only when switched on or restore is pending;
+# 10. Wiring: module_status (boot + after switch) starts it only when switched on or restore is pending;
 #     uninstall restores; App switch goes through luoshu-health.
-grep -q "grep -qx 'enabled=1' \"\$MODDIR/config/coloros_slot_compat.conf\"" "$ROOT/service.sh" || fail 'service guard'
+grep -q "grep -qx 'enabled=1' \"\$MODDIR/config/coloros_slot_compat.conf\"" "$ROOT/common/module_status.sh" || fail 'boot/switch status guard'
 grep -q 'coloros_slot_compat.sh" restore' "$ROOT/uninstall.sh" || fail 'uninstall restore'
 grep -q 'slot-compat) slot_compat' "$ROOT/system/bin/luoshu-health" || fail 'health action'
 grep -qx 'common/coloros_slot_compat.sh' "$ROOT/scripts/module_payload_manifest.txt" || fail 'payload manifest'
