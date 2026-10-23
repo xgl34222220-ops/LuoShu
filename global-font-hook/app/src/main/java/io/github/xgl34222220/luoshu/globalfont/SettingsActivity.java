@@ -34,6 +34,11 @@ public final class SettingsActivity extends Activity {
 
         root.addView(toggle(R.string.toggle_enabled, ModuleConfig.KEY_ENABLED, ModuleConfig.DEFAULT_ENABLED));
         root.addView(toggle(R.string.toggle_app_fonts, ModuleConfig.KEY_APP_FONTS, ModuleConfig.DEFAULT_APP_FONTS));
+        Switch monoSwitch = toggle(R.string.toggle_mono_slot, ModuleConfig.KEY_MONO_SLOT, ModuleConfig.DEFAULT_MONO_SLOT);
+        root.addView(monoSwitch);
+        boolean monoOk = MonoProbe.systemMonospaceIsFixedPitch();
+        monoSwitch.setEnabled(monoOk); // a proportional "monospace" slot would break alignment
+        root.addView(text(getString(monoOk ? R.string.mono_slot_hint : R.string.mono_slot_unavailable), 13));
         root.addView(toggle(R.string.toggle_web_fonts, ModuleConfig.KEY_WEB_FONTS, ModuleConfig.DEFAULT_WEB_FONTS));
         root.addView(toggle(R.string.toggle_web_unknown, ModuleConfig.KEY_WEB_BLOCK_UNKNOWN, ModuleConfig.DEFAULT_WEB_BLOCK_UNKNOWN));
         root.addView(toggle(R.string.toggle_verbose, ModuleConfig.KEY_VERBOSE, ModuleConfig.DEFAULT_VERBOSE));
