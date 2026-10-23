@@ -317,6 +317,179 @@ luoshu_mountify_module_selected() {
     return 1
 }
 
+# ---------------------------------------------------------------------------
+# Read-only provider route probes (diagnostics only).
+# Never write, create or rewrite another module's configuration; production
+# mounting does not consult these results.
+# Output: reason|mode|config-path
+_luoshu_route_root() {
+    printf '%s\n' "${LUOSHU_META_DETECT_ROOT:-/data/adb}"
+}
+
+# Hybrid Mount: decides whether LuoShu would be routed by pure VFS only.
+# Inline tables, dotted rule keys or unknown modes are reported as unverified
+# instead of being guessed, so a hidden Magic/Overlay override never reads as
+# safe. reason is one of: hybrid-config-missing, hybrid-config-unreadable,
+# hybrid-config-unverified, hybrid-module-excluded, hybrid-route-not-pure-vfs,
+# hybrid-pure-vfs.
+luoshu_hybrid_route_probe() {
+    _lhrp_root=$(_luoshu_route_root)
+    _lhrp_id="${1:-$(luoshu_module_id 2>/dev/null)}"
+    [ -n "$_lhrp_id" ] || _lhrp_id=LuoShu
+    _lhrp_file=''
+    for _lhrp_candidate in \
+        "$_lhrp_root/hybrid-mount/config.toml" \
+        "$_lhrp_root/metamodule/config.toml" \
+        "$_lhrp_root/modules/hybrid_mount/config.toml" \
+        "$_lhrp_root/modules/meta-hybrid_mount/config.toml" \
+        "$_lhrp_root/modules/hybrid-mount/config.toml"; do
+        [ -f "$_lhrp_candidate" ] && { _lhrp_file="$_lhrp_candidate"; break; }
+    done
+    [ -n "$_lhrp_file" ] || { printf 'hybrid-config-missing||\n'; return 0; }
+    [ -r "$_lhrp_file" ] || { printf 'hybrid-config-unreadable||%s\n' "$_lhrp_file"; return 0; }
+    _lhrp_route=$(awk -v wanted="$_lhrp_id" '
+        function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+        function uncomment(s,   i, q, c, out, escaped) {
+            for (i=1; i<=length(s); i++) {
+                c=substr(s,i,1)
+                if (!q && c=="#") break
+                out=out c
+                if (escaped) { escaped=0; continue }
+                if (q=="\"" && c=="\\") { escaped=1; continue }
+                if (q && c==q) q=""
+                else if (!q && (c=="\"" || c=="\047")) q=c
+            }
+            return trim(out)
+        }
+        function mode(s) {
+            if (s !~ /^"(overlay|magic|vfs|ignore)"$/ && s !~ /^\047(overlay|magic|vfs|ignore)\047$/) { invalid=1; return "" }
+            return substr(s,2,length(s)-2)
+        }
+        BEGIN { global="overlay"; section="" }
+        {
+            line=uncomment($0)
+            if (line=="") next
+            if (line ~ /^\[/) {
+                section=line; gsub(/["\047[:space:]]/, "", section)
+                if (section !~ /^\[[^][]+\]$/) invalid=1
+                in_module=(section=="[rules." wanted "]")
+                in_paths=(section=="[rules." wanted ".paths]")
+                next
+            }
+            if (line !~ /=/) { if (in_module || in_paths) invalid=1; next }
+            key=line; sub(/=.*/, "", key); key=trim(key)
+            value=line; sub(/^[^=]*=/, "", value); value=trim(value)
+            if (key=="default_mode" && (section=="" || in_module)) {
+                value=mode(value)
+                if (in_module) { if (module_seen++) invalid=1; module=value }
+                else { if (global_seen++) invalid=1; global=value; if (global=="ignore") invalid=1 }
+            } else if (in_paths) {
+                value=mode(value)
+                if (value!="vfs" && value!="ignore") unsafe_path=1
+            } else if (in_module || section=="[rules]" || (section=="" && key ~ /^rules[.[:space:]]/)) {
+                invalid=1
+            }
+        }
+        END {
+            value=(module!="" ? module : global)
+            if (invalid) reason="hybrid-config-unverified"
+            else if (value=="ignore") reason="hybrid-module-excluded"
+            else if (value!="vfs" || unsafe_path) reason="hybrid-route-not-pure-vfs"
+            else reason="hybrid-pure-vfs"
+            print reason "|" (invalid ? "" : value)
+        }
+    ' "$_lhrp_file" 2>/dev/null) || _lhrp_route='hybrid-config-unverified|'
+    case "$_lhrp_route" in hybrid-*'|'*) ;; *) _lhrp_route='hybrid-config-unverified|' ;; esac
+    if [ "${_lhrp_route%%|*}" = hybrid-pure-vfs ]; then
+        # Persistent and bundled blacklists are merged by Hybrid Mount; an
+        # unreadable or unrecognised blacklist never reads as "allowed".
+        for _lhrp_blacklist in \
+            "$_lhrp_root/hybrid-mount/module_blacklist.toml" \
+            "${_lhrp_file%/*}/module_blacklist.toml"; do
+            [ -e "$_lhrp_blacklist" ] || continue
+            [ -r "$_lhrp_blacklist" ] || { _lhrp_route='hybrid-config-unreadable|'; break; }
+            _lhrp_bl=$(awk -v wanted="$_lhrp_id" '
+                { sub(/#.*/, ""); text=text " " $0 }
+                END {
+                    if (text ~ /^[[:space:]]*$/) { print "ok"; exit }
+                    if (text !~ /^[[:space:]]*blacklist[[:space:]]*=[[:space:]]*\[/) { print "unverified"; exit }
+                    sub(/^[^[]*\[/, "", text)
+                    if (text !~ /\][[:space:]]*$/) { print "unverified"; exit }
+                    sub(/\][[:space:]]*$/, "", text)
+                    while (match(text, /"[A-Za-z][A-Za-z0-9._-]*"|\047[A-Za-z][A-Za-z0-9._-]*\047/)) {
+                        id=substr(text,RSTART+1,RLENGTH-2)
+                        if (id==wanted) excluded=1
+                        text=substr(text,1,RSTART-1) substr(text,RSTART+RLENGTH)
+                    }
+                    if (text !~ /^[[:space:],]*$/) print "unverified"
+                    else print (excluded ? "excluded" : "ok")
+                }
+            ' "$_lhrp_blacklist" 2>/dev/null) || _lhrp_bl=unverified
+            case "$_lhrp_bl" in
+                ok) ;;
+                excluded) _lhrp_route="hybrid-module-excluded|${_lhrp_route#*|}"; break ;;
+                *) _lhrp_route='hybrid-config-unverified|'; break ;;
+            esac
+        done
+    fi
+    printf '%s|%s\n' "$_lhrp_route" "$_lhrp_file"
+}
+
+# Mountify: reports which mountify_mounts mode is selected and whether LuoShu
+# is in its scope. reason is one of: mountify-config-missing,
+# mountify-config-unverified, mountify-mounts-disabled (0),
+# mountify-whitelist-selected / mountify-whitelist-excluded (1),
+# mountify-all-modules (2), mountify-module-skipped (LuoShu skip markers).
+luoshu_mountify_route_probe() {
+    _lmrp_root=$(_luoshu_route_root)
+    _lmrp_id="${1:-$(luoshu_module_id 2>/dev/null)}"
+    [ -n "$_lmrp_id" ] || _lmrp_id=LuoShu
+    _lmrp_config=''
+    _lmrp_list=''
+    for _lmrp_candidate in \
+        "$_lmrp_root/mountify/config.sh" \
+        "$_lmrp_root/modules/mountify/config.sh" \
+        "$_lmrp_root/modules/Mountify/config.sh"; do
+        [ -f "$_lmrp_candidate" ] && { _lmrp_config="$_lmrp_candidate"; break; }
+    done
+    for _lmrp_candidate in \
+        "$_lmrp_root/mountify/modules.txt" \
+        "$_lmrp_root/modules/mountify/modules.txt" \
+        "$_lmrp_root/modules/Mountify/modules.txt"; do
+        [ -f "$_lmrp_candidate" ] && { _lmrp_list="$_lmrp_candidate"; break; }
+    done
+    [ -n "$_lmrp_config" ] || { printf 'mountify-config-missing||\n'; return 0; }
+    _lmrp_raw=$(sed -n 's/^[[:space:]]*mountify_mounts[[:space:]]*=[[:space:]]*//p' "$_lmrp_config" 2>/dev/null | tail -n1)
+    _lmrp_mode=$(printf '%s' "$_lmrp_raw" | sed -n 's/^["\047]\{0,1\}\([0-9][0-9]*\)["\047]\{0,1\}[[:space:]]*\(#.*\)\{0,1\}$/\1/p')
+    if [ -z "$_lmrp_raw" ]; then
+        _lmrp_mode=2
+    elif [ -z "$_lmrp_mode" ]; then
+        printf 'mountify-config-unverified||%s\n' "$_lmrp_config"
+        return 0
+    fi
+    case "$_lmrp_mode" in
+        0) _lmrp_reason=mountify-mounts-disabled ;;
+        1)
+            if [ -n "$_lmrp_list" ] && grep -Fxq "$_lmrp_id" "$_lmrp_list" 2>/dev/null; then
+                _lmrp_reason=mountify-whitelist-selected
+            else
+                _lmrp_reason=mountify-whitelist-excluded
+            fi
+            ;;
+        2) _lmrp_reason=mountify-all-modules ;;
+        *) _lmrp_reason=mountify-config-unverified ;;
+    esac
+    case "$_lmrp_reason" in
+        mountify-whitelist-selected|mountify-all-modules)
+            _lmrp_module="${LUOSHU_MOUNT_MODDIR:-${MODULE_DIR:-${MODDIR:-}}}"
+            if [ -n "$_lmrp_module" ] && { [ -e "$_lmrp_module/skip_mountify" ] || [ -e "$_lmrp_module/skip_mount" ]; }; then
+                _lmrp_reason=mountify-module-skipped
+            fi
+            ;;
+    esac
+    printf '%s|%s|%s\n' "$_lmrp_reason" "$_lmrp_mode" "$_lmrp_config"
+}
+
 luoshu_recover_explicit_disable() {
     [ -e "$LUOSHU_MOUNT_MODDIR/disable" ] || return 0
     rm -f "$LUOSHU_MOUNT_MODDIR/disable" 2>/dev/null || {
@@ -937,7 +1110,7 @@ luoshu_mount_status_json() {
     _lmsj_duration=$(_lmsj_get durationSeconds)
     _lmsj_time=$(_lmsj_get time)
 
-    printf '{"manager":"%s","engine":"%s","backend":"%s","state":"%s","detail":"%s","warning":"%s","contentRoot":"%s","partitions":"%s","verifiedPartitions":"%s","failedPartitions":"%s","unsupportedPartitions":"%s","synced":%s,"failed":%s,"durationSeconds":%s,"time":%s}' \
+    printf '{"manager":"%s","engine":"%s","backend":"%s","state":"%s","detail":"%s","warning":"%s","contentRoot":"%s","partitions":"%s","verifiedPartitions":"%s","failedPartitions":"%s","unsupportedPartitions":"%s","synced":%s,"failed":%s,"durationSeconds":%s,"time":%s,"hybridRoute":"%s","mountifyRoute":"%s"}' \
         "$(_luoshu_json_escape "$(luoshu_detect_root_manager)")" \
         "$(_luoshu_json_escape "$(luoshu_detect_mount_engine)")" \
         "$(_luoshu_json_escape "${_lmsj_backend:-$(luoshu_mount_backend)}")" \
@@ -950,7 +1123,9 @@ luoshu_mount_status_json() {
         "$(_luoshu_json_escape "$_lmsj_failed_partitions")" \
         "$(_luoshu_json_escape "$_lmsj_unsupported")" \
         "${_lmsj_synced:-0}" "${_lmsj_failed:-0}" \
-        "${_lmsj_duration:-0}" "${_lmsj_time:-0}"
+        "${_lmsj_duration:-0}" "${_lmsj_time:-0}" \
+        "$(_luoshu_json_escape "$(luoshu_hybrid_route_probe 2>/dev/null | cut -d'|' -f1)")" \
+        "$(_luoshu_json_escape "$(luoshu_mountify_route_probe 2>/dev/null | cut -d'|' -f1)")"
 }
 
 _luoshu_hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
