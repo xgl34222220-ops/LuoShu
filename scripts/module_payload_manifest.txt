@@ -80,6 +80,7 @@ common/font_manager_v4.sh
 common/font_settings_policy.sh
 common/font_metadata.py
 common/font_metrics_normalize.py
+common/font_space_compat.py
 common/font_mix.sh
 common/font_mix_controller.sh
 common/font_name_normalize.py

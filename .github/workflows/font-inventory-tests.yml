@@ -9,6 +9,10 @@ on:
       - common/stock_inventory_scan.py
       - common/font_manager.sh
       - common/font_metrics_normalize.py
+      - common/font_space_compat.py
+      - common/composite_font.py
+      - common/font_instance.py
+      - common/device_font_slot_build_base.py
       - common/rom_adapters.sh
       - common/device_font_payload_policy.sh
       - customize.sh
@@ -18,6 +22,7 @@ on:
       - scripts/stock_inventory_scan_wrapper_test.py
       - scripts/rom_adapter_inventory_test.sh
       - scripts/font_metrics_normalization_test.py
+      - scripts/font_space_compat_test.py
       - scripts/module_payload_manifest.txt
       - .github/workflows/font-inventory-tests.yml
 permissions:
@@ -35,7 +40,7 @@ jobs:
       - name: Validate inventory scanners and runtime mapper
         run: |
           set -eu
-          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/font_metrics_normalize.py
+          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/font_metrics_normalize.py common/font_space_compat.py
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_test.py --font "$FONT"
@@ -43,6 +48,7 @@ jobs:
           python3 scripts/stock_inventory_scan_wrapper_test.py
           sh scripts/rom_adapter_inventory_test.sh "$FONT"
           python3 scripts/font_metrics_normalization_test.py
+          python3 scripts/font_space_compat_test.py --font "$FONT"
       - name: Validate install-stage and fallback contracts
         run: |
           set -eu
