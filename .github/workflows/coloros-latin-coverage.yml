@@ -5,6 +5,8 @@ on:
     paths:
       - common/coloros_latin_policy.py
       - common/coloros_flipfont.sh
+      - common/coloros_slot_compat.sh
+      - scripts/coloros_slot_compat_test.sh
       - common/coloros_global.sh
       - common/coloros_metrics_batch.py
       - common/legacy_v14_4/rom_adapters.sh
@@ -31,6 +33,7 @@ jobs:
       - name: Compile source and run focused ColorOS regressions
         run: |
           sh -n common/coloros_flipfont.sh
+          sh -n common/coloros_slot_compat.sh
           sh -n common/coloros_global.sh
           sh -n common/legacy_v14_4/rom_adapters.sh
           sh -n common/legacy_v14_4/font_switch_safe.sh
@@ -41,3 +44,4 @@ jobs:
           sh scripts/coloros_consistency_mapping_test.sh
           sh scripts/coloros_partition_mapping_test.sh
           python3 scripts/coloros_metrics_batch_test.py
+          sh scripts/coloros_slot_compat_test.sh

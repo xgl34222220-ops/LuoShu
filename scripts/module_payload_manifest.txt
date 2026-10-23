@@ -15,6 +15,7 @@ common/coloros_flipfont.sh
 common/coloros_global.sh
 common/coloros_latin_policy.py
 common/coloros_metrics_batch.py
+common/coloros_slot_compat.sh
 common/coloros_stage_complete.sh
 common/composite_font.py
 common/composite_collection_build.py

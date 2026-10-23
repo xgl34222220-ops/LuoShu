@@ -62,7 +62,8 @@ def _clean_env(temp: Path, fonts: Path) -> dict[str, str]:
 
 
 def replaced_names(rom: str, fixture: list[str], mapper_root: Path = ROOT,
-                   script_path: Path | None = None) -> list[str]:
+                   script_path: Path | None = None,
+                   extra_env: dict[str, str] | None = None) -> list[str]:
     """Run the ROM's real shell mapper over placeholder files named ``fixture``."""
     relative, script = MAPPERS[rom]
     shell = script_path or (mapper_root / relative)
@@ -73,11 +74,51 @@ def replaced_names(rom: str, fixture: list[str], mapper_root: Path = ROOT,
         (temp / 'module').mkdir()
         for name in fixture:
             (fonts / name).write_bytes(b'rom coverage fixture; not a font\n')
+        env = _clean_env(temp, fonts)
+        env.update(extra_env or {})
         proc = subprocess.run(['sh', '-c', script, 'sh', str(shell), str(fonts)],
-                              cwd=temp, env=_clean_env(temp, fonts), check=True,
+                              cwd=temp, env=env, check=True,
                               text=True, capture_output=True, timeout=120)
     wanted = set(fixture)
     return sorted({line.strip() for line in proc.stdout.split() if line.strip() in wanted})
+
+
+SLOT_COMPAT = 'common/coloros_slot_compat.sh'
+# Slots the ColorOS slot compatibility mode must never write, whatever the switch says.
+SLOT_COMPAT_PROTECTED = ('clock', 'mono', 'icon', 'emoji', 'symbol', 'serif', 'italic', 'myanmar')
+
+
+def slot_compat_admitted(names: list[str], mapper_root: Path = ROOT) -> list[str]:
+    """Names the slot compatibility mode would accept as OPlus slots."""
+    if not names:
+        return []
+    script = '. "$1"; shift; for n in "$@"; do luoshu_coloros_slot_compat_slot_ok "$n" && printf "%s\\n" "$n"; done; :'
+    with tempfile.TemporaryDirectory() as raw:
+        env = {key: value for key, value in os.environ.items() if not key.startswith('LUOSHU_')}
+        env['LUOSHU_REAL_MODDIR'] = str(Path(raw) / 'module')
+        proc = subprocess.run(['sh', '-c', script, 'sh', str(mapper_root / SLOT_COMPAT), *names],
+                              cwd=raw, env=env, check=True, text=True, capture_output=True, timeout=120)
+    return sorted({line.strip() for line in proc.stdout.splitlines() if line.strip()})
+
+
+def slot_compat_errors(fixture: list[str], mapper_root: Path = ROOT) -> list[str]:
+    """The opt-in mode must not change overlay coverage nor admit protected slots."""
+    errors: list[str] = []
+    off = replaced_names('coloros', fixture, mapper_root)
+    with tempfile.TemporaryDirectory() as raw:
+        conf = Path(raw) / 'coloros_slot_compat.conf'
+        conf.write_text('enabled=1\n', encoding='utf-8')
+        on = replaced_names('coloros', fixture, mapper_root,
+                            extra_env={'LUOSHU_COLOROS_SLOT_COMPAT_CONF': str(conf)})
+    if on != off:
+        errors.append('[coloros] 槽位兼容模式开启后改变了 /system 覆盖名单：'
+                      f'新增 {sorted(set(on) - set(off))} 缺少 {sorted(set(off) - set(on))}')
+    probes = list(fixture) + ['OplusOSUI-Mono-Regular.ttf', 'ColorOSUI-Clock-Regular.ttf',
+                              'OplusOSUI-Icon.ttf', 'SysFont-Myanmar-Regular.ttf', 'OplusOSUI-Italic.ttf']
+    for name in slot_compat_admitted(probes, mapper_root):
+        if any(token in name.lower() for token in SLOT_COMPAT_PROTECTED):
+            errors.append(f'[coloros] 槽位兼容模式会写入受保护槽位 {name}（时钟/等宽/图标等必须保持原厂）')
+    return errors
 
 
 def _reason_ok(reason: object) -> bool:
@@ -134,6 +175,8 @@ def check(path: Path = BASELINE) -> int:
         for note in notes:
             print(note)
         print(f'[{rom}] 替换 {len(replaced)} / 夹具 {len(entry["fixture"])}')
+        if rom == 'coloros':
+            failed.extend(slot_compat_errors(list(entry['fixture'])))
     for line in failed:
         print('ERROR ' + line, file=sys.stderr)
     if failed:
