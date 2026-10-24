@@ -1,7 +1,20 @@
-# 洛书全局字体（可选 LSPosed 伴随模块）
+# 洛书全局字体（内置于洛书 App 的可选 LSPosed 模块）
 
-> 目录：`global-font-hook/`。独立 Gradle 工程，独立产出 APK（CI 产物 `LuoShu-GlobalFont-Companion`）。
-> 主模块 ZIP 不包含本模块任何文件（CI 有检查）。主模块自身的 Hook 只有内置的“全局字体增强（Zygisk）”：仅在开关开启时由 Zygisk 库安装，默认关闭，见 `zygisk-native-font/README.md`。
+> 目录：`android-app/global-font-hook/`。作为独立 Gradle 库模块被洛书 App（`:app`）依赖，代码与 App 隔离；**洛书 App 本身就是 LSPosed 模块**（`io.github.xgl34222220.luoshu`，测试包 `.debug`），不再单独构建或发布伴随 APK。
+> CI：`.github/workflows/global-font-hook.yml` 跑模块单测/基准，并检查 App APK 内的 `assets/xposed_init`、Xposed 元数据和 Hook 类。主模块 ZIP 的 shell 负载不含本模块文件，只随内置的 App APK 一起分发。主模块另有“全局字体增强（Zygisk）”，见 `zygisk-native-font/README.md`。
+
+## 启用步骤
+
+1. 安装/更新洛书（App 随模块 ZIP 一起安装，或单独安装 App APK）。
+2. 打开 LSPosed → 模块 → 启用 **洛书**，在作用域里勾选需要生效的 App（推荐列表见下文；勾选洛书自身只用于让 App 显示“已激活”）。
+3. 强制停止并重新打开这些 App。
+4. 洛书 App → 设置 → 安全与维护 → **全局字体（LSPosed）**：显示 LSPosed 是否已激活本模块，“全局字体开关”进入原伴随 App 的全部开关（也可从 LSPosed 的模块设置进入）。
+
+Hook 只在 LSPosed 注入的作用域进程里运行。若洛书自身也在作用域里，模块在洛书进程只替换 `ModuleStatus.isModuleActive()`（用于显示“已激活”），不读配置、不装任何字体 Hook，洛书启动不受影响。App 判断“已激活”= 该自 Hook 生效，或 LSPosed 的 `xposedsharedprefs` 允许创建全局可读配置（LSPosed 只对已启用的模块这样做）。
+
+## 旧版独立伴随 App
+
+旧版“洛书全局字体”（`io.github.xgl34222220.luoshu.globalfont`）已由内置模块取代，可在 LSPosed 中停用后卸载；洛书设置页和模块设置页检测到它仍安装时会提示。两者同时启用时：两份代码都设置同一个进程标记 `luoshu.gfh.active`，内置模块在作用域进程里先检查该标记，已被旧模块替换就跳过，不重复安装 Hook。旧模块不检查标记，若内置模块先加载，旧模块仍会再挂一次（两份都换成系统字体，结果预期一致，但多一份开销，且这种组合未在真机验证），因此建议卸载旧伴随 App。旧伴随 App 的开关存于它自己的包内，不会自动迁移，需在洛书里重新设置一次。
 
 ## 解决什么问题
 
@@ -39,7 +52,7 @@ AndroidX `ResourcesCompat.getFont` / `TypefaceCompatApi29Impl`（含可下载字
 * **衬线**：名字含 serif（且不含 sans）或常见衬线正文族（Tiempos、Copernicus、Georgia、Noto Serif…）→ 换成系统 `Typeface.SERIF` 对应字重，保持设计意图。
 * **多字体 family**：遍历 family 全部成员（Android 10+ `FontFamily` 的每个 `Font`，Android 9 隐藏 `FontFamily` 里登记的每个字体），**只要有一个成员需要保留（图标、表情、符号，或主线程上尚未判定）就整个 family 保持原样**，否则按第一个成员的判定替换。这样图标和正文混装在一个 family 里时不会把图标换掉（`rules/FamilyVerdict.java`）。
 * **等宽字体换为系统等宽（开关，默认关）**：关闭时等宽/代码字体与以前一样保持原样。打开后，名字确实是代码等宽族（`RobotoMono`、`JetBrains Mono`、`Source Code Pro`、`Consolas`、`Menlo`、`FiraCode`…；`Monoton` 这类只是以 mono 开头的展示字体不算）或 sfnt `post.isFixedPitch` 为真且是拉丁正文字体时，判定为 `REPLACE_MONO`，换成 `Typeface.create(Typeface.MONOSPACE, 原字重, 原斜体)`，即洛书的 mono 槽。图标、数字、时钟、表情、非拉丁的等宽字体仍保持。开关打开期间的判定缓存使用独立键（后缀 `~m`），切换开关不会沿用旧结论。
-  * 洛书 mono 槽不一定严格等宽：设置页用 `Paint` 实测系统 `Typeface.MONOSPACE` 的 `i W 0 m .` 字宽，不一致就**灰掉开关**并说明原因；Hook 侧每个进程也做一次同样的实测，不成立则不做等宽替换。（主模块的 `font_capability` 结果属于 root 侧状态，伴随 App 读不到，所以这里用运行时实测代替，主模块零改动。）
+  * 洛书 mono 槽不一定严格等宽：设置页用 `Paint` 实测系统 `Typeface.MONOSPACE` 的 `i W 0 m .` 字宽，不一致就**灰掉开关**并说明原因；Hook 侧每个进程也做一次同样的实测，不成立则不做等宽替换。（主模块的 `font_capability` 结果属于 root 侧状态，Hook 进程读不到，所以这里用运行时实测代替。）
 * **无法判断**：内容哈希名（`3f9c0a1e.woff2`）、R8 缩短名（`a.ttf`、`res/font/b0.ttf`）、无名 buffer → 交给 `SfntInspector` 读字体表：name 表族名再走一遍名单；有 COLR/CBDT/sbix/SVG（彩色/表情）、`post.isFixedPitch`（等宽）、cmap 拉丁字母不足 40/52（无拉丁 cmap，如纯数字/纯图标/纯 CJK）、私用区码位多于拉丁字母（连字图标字体如 Material Icons）→ 保留；否则替换。读不出来的字体一律保留。
 
 ### 先 deoptimize 再 Hook
@@ -50,9 +63,9 @@ ART 可能把 `Font.Builder.build()` 这类短方法内联进调用方，或保�
 - 实现：`Deopt` 通过反射调用 LSPosed 旧 API 的 `XposedBridge.deoptimizeMethod(Member)`；框架没有该方法或调用失败时静默跳过，Hook 照常安装，不会崩溃。
 - 开销：每个方法只在模块加载时调用一次，不在绘制/加载热路径上。
 
-### 进程标记（与原生伴随模块共存）
+### 进程标记（与 Zygisk 全局字体增强、旧伴随模块共存）
 
-App 字体 Hook 装好后，本模块在该进程执行 `System.setProperty("luoshu.gfh.active", "1")`（常量 `ModuleConfig.PROCESS_MARKER`）。只是进程内的 Java 系统属性，不写 `persist.*`/`setprop`，不影响其他进程。将来的原生伴随模块读到它时，可把 Java 层字体交给本模块、自己只处理其余路径。
+App 字体 Hook 装好后，本模块在该进程执行 `System.setProperty("luoshu.gfh.active", "1")`（常量 `ModuleConfig.PROCESS_MARKER`）。只是进程内的 Java 系统属性，不写 `persist.*`/`setprop`，不影响其他进程。主模块内置的“全局字体增强（Zygisk）”读到它时把 Java 层字体交给本模块、自己让出（#314）；内置模块启动前也读它，避免与仍启用的旧伴随模块重复替换。洛书 App 自身进程从不设置该标记。
 
 ## 为什么不会卡（硬性性能约束）
 
@@ -64,7 +77,7 @@ App 字体 Hook 装好后，本模块在该进程执行 `System.setProperty("luo
 
 ### 可量化开销（`DecisionCacheBenchmarkTest`，JVM，ns/op）
 
-CI 每次运行都会把实测值写进 `app/build/reports/global-font-benchmark.txt`、Job Summary 和产物。开发机（aarch64，JDK 17）一次实测：
+CI 每次运行都会把实测值写进 `android-app/global-font-hook/build/reports/global-font-benchmark.txt`、Job Summary 和产物。开发机（aarch64，JDK 17）一次实测：
 
 | 操作 | 耗时 |
 | --- | --- |
@@ -101,17 +114,17 @@ CI 每次运行都会把实测值写进 `app/build/reports/global-font-benchmark
 * **Chrome Custom Tabs**：见上文 X 结论，在浏览器进程渲染，本模块不处理。
 * **首次加载**：名字无法判断（哈希/混淆名）的字体若在主线程加载，第一次保持原样，后台判定完成后从下一次加载（通常是下次启动）开始替换。
 * **Android 9**：`Typeface.Builder`/`createFromAsset`/`createFromFile` 只按名字判定；经隐藏 `FontFamily.addFontFromBuffer` 加载的字体（描述符、AndroidX、可下载字体）有 buffer，名字无法判断时走 sfnt（主线程首次保持原样）。
-* **Android 8.x**：伴随模块 `minSdk 28`，不支持安装；Android 8 的 `ResourcesImpl.loadFont` 与 Android 9 走同一组隐藏 API，本次补的是 Android 9 上的这条路径。
+* **Android 8.x**：洛书 App `minSdk 28`，不支持安装；Android 8 的 `ResourcesImpl.loadFont` 与 Android 9 走同一组隐藏 API，本次补的是 Android 9 上的这条路径。
 * **AndroidX 被 R8 改名**：`FontsContractCompat`/`TypefaceCompat` 等类名被混淆时找不到，只是少了可下载字体的**命名**；字体本身仍经 `Font.Builder`/`FontFamily` 加载，照常走 sfnt 判定。
 * **网页**：哈希名 Web 字体默认放行（宁可不换也不让图标变方块），可在设置中开启激进模式；`data:` 内联字体无法拦截。
-* **签名**：PR 构建的 APK 用 CI 临时 debug key 签名，不同次构建之间不能覆盖安装，需要先卸载旧包。
+* **签名**：与洛书 App 相同；PR 构建的测试 App 用 CI 临时 debug key 签名，不同次构建之间不能覆盖安装，需要先卸载旧包。
 
 ## 测试
 
-* JVM 单测（`:app:testDebugUnitTest`）：名单、sfnt、等宽开关（`MonoSlotRulesTest`）、family 判定（`FamilyVerdictTest`）、可下载字体 query 与描述符命名（`SourceNamesTest`）、deoptimize、开销基准。
-* 仪器测试（`app/src/androidTest`，CI 任务 `Instrumented coverage API 28/29/34/35`，模拟器上没有 LSPosed，所以**不触发 Hook 本身**）：逐个 API 级别断言 Hook 目标方法存在（含 Android 9 隐藏 `FontFamily`）；`Resources.getFont`、`ResourcesCompat.getFont`（Compose `Font(R.font.x)` 经 `AndroidFontLoader` 走这里）、XML 多字体 family、assets、`Typeface.Builder(AssetManager)`、文件、PFD/FileDescriptor 都能加载；真实对象上的来源命名（`res:`/`asset:`/`file:`/`fd:`/`dl:`）、APK 内 asset 描述符不命名、真实字体文件的 sfnt 与 family 判定、系统等宽字体通过等宽实测。测试字体由 `global-font-hook/tools/gen_test_fonts.py` 用 fontTools 生成（方块字形，无第三方字形）。
+* JVM 单测（在 `android-app/` 下运行 `:global-font-hook:testDebugUnitTest`）：名单、sfnt、等宽开关（`MonoSlotRulesTest`）、family 判定（`FamilyVerdictTest`）、可下载字体 query 与描述符命名（`SourceNamesTest`）、deoptimize、开销基准。
+* 仪器测试（`android-app/global-font-hook/src/androidTest`，CI 任务 `Instrumented coverage API 28/29/34/35`，模拟器上没有 LSPosed，所以**不触发 Hook 本身**）：逐个 API 级别断言 Hook 目标方法存在（含 Android 9 隐藏 `FontFamily`）；`Resources.getFont`、`ResourcesCompat.getFont`（Compose `Font(R.font.x)` 经 `AndroidFontLoader` 走这里）、XML 多字体 family、assets、`Typeface.Builder(AssetManager)`、文件、PFD/FileDescriptor 都能加载；真实对象上的来源命名（`res:`/`asset:`/`file:`/`fd:`/`dl:`）、APK 内 asset 描述符不命名、真实字体文件的 sfnt 与 family 判定、系统等宽字体通过等宽实测。测试字体由 `android-app/global-font-hook/tools/gen_test_fonts.py` 用 fontTools 生成（方块字形，无第三方字形）。
 * Hook 实际生效需要在装了 LSPosed 的真机上验证（见 PR 描述的真机清单）。
 
 ## 开关
 
-伴随 App（桌面图标“洛书全局字体”，也可从 LSPosed 模块设置进入）：总开关、App 内置字体、等宽字体换为系统等宽（默认关；系统等宽实测不等宽时灰掉）、WebView 网页字体、激进模式（默认关）、调试日志（默认关）。真正生效的前提是：在 LSPosed 启用本模块并勾选目标 App。洛书主 App 未做改动。
+洛书 App → 设置 → 安全与维护 → 全局字体（LSPosed）→ 全局字体开关（也可从 LSPosed 模块设置进入；没有单独的桌面图标）：总开关、App 内置字体、等宽字体换为系统等宽（默认关；系统等宽实测不等宽时灰掉）、WebView 网页字体、激进模式（默认关）、调试日志（默认关）。真正生效的前提是：在 LSPosed 中启用洛书并勾选作用域（目标 App）。

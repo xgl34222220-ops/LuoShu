@@ -215,6 +215,7 @@ if [ -d "$MODPATH/zygisk" ]; then
     [ ! -f "$MODPATH/common/native_font.sh" ] || chmod 0755 "$MODPATH/common/native_font.sh" 2>/dev/null || true
     ui_print '• 全局字体增强（Zygisk）已内置，默认关闭，可在洛书设置中开启'
 fi
+ui_print '• 可选：在 LSPosed 中启用洛书并勾选作用域，App 内置字体与网页字体跟随系统（旧「洛书全局字体」伴随 App 可卸载）'
 ui_print '✓ 私有字体负载已部署'
 ui_print '✓ 洛书将独立完成字体挂载'
 return 0 2>/dev/null || exit 0

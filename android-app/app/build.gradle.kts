@@ -108,6 +108,9 @@ android {
 }
 
 dependencies {
+    // LSPosed global-font module (hook code kept in its own Gradle module; runs only where LSPosed injects it).
+    implementation(project(":global-font-hook"))
+
     val composeBom = platform("androidx.compose:compose-bom:2026.03.00")
     implementation(composeBom)
 
