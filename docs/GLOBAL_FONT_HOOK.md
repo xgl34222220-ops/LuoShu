@@ -16,8 +16,14 @@
 | | `Font.Builder.build()` | 记录 Font → 来源 |
 | | `Typeface.CustomFallbackBuilder(FontFamily)` 构造器 | 记录 builder → family |
 | | `Typeface.CustomFallbackBuilder.build()` | 判定 family 第一个字体；正文字体返回 `Typeface.create(Typeface.DEFAULT/SERIF, 原字重, 原斜体)` |
-| Android 9 | `Typeface.Builder` 构造器 + `build()`、`Typeface.createFromAsset`、`Typeface.createFromFile(String/File)` | 仅按名字判定 |
+| | `Typeface.CustomFallbackBuilder.build()` 遍历 family 全部字体 | 任一成员需保留（图标/表情/尚未判定）→ 整个 family 保持；否则按第一个字体替换 |
+| Android 9 | `Typeface.Builder` 构造器 + `build()`、`Typeface.createFromAsset`、`Typeface.createFromFile(String/File)` | 按名字判定 |
+| Android 9 res/font、AndroidX、可下载字体 | 隐藏类 `android.graphics.FontFamily` 的 `addFontFromAssetManager`（记录 res/font 路径）、`addFontFromBuffer`（记录 buffer）+ `Typeface.createFromFamiliesWithDefault`（全部重载） | 覆盖 `ResourcesImpl.loadFont → Typeface.createFromResources`（`Resources.getFont`，含 XML 多字体 family）、AndroidX `TypefaceCompatApi26Impl/28Impl`（`ResourcesCompat.getFont`、Compose `Font(R.font.x)`）和 `FontsContract.buildTypeface`；按整个 family 判定，有 buffer 的成员可走 sfnt |
+| 可下载字体命名（全部版本） | `FontsContract.fetchFonts` / `buildTypeface`；AndroidX `FontsContractCompat.fetchFonts` / `buildTypeface`、`FontProvider.getFontFamilyResult`、`TypefaceCompat.createFromFontInfo`（App 类存在且未被 R8 改名时） | 把 `FontRequest` 的 query（如 `name=Roboto&weight=700`）记到返回的 `FontInfo` 上；构建 Typeface 期间在当前线程公布族名，`Font.Builder`/`addFontFromBuffer` 的无名 buffer 记为 `dl:Roboto`，名字能判定时**首次加载就生效** |
+| 描述符来源后备名 | `Font.Builder(ParcelFileDescriptor/FileDescriptor)`、Android 9 `Typeface.Builder(FileDescriptor)` | 读 `/proc/self/fd/N` 链接；**只在目标是 .ttf/.otf/.ttc/.otc/.woff/.woff2 文件时**记为 `fd:路径`（APK 内的 asset 描述符、memfd、ashmem 不命名，仍交给 sfnt） |
 | WebView 网页字体 | `WebViewClient.shouldInterceptRequest(WebView, WebResourceRequest)`（基类）+ `WebView.setWebViewClient` 时对 App 自己的 client 子类的同名覆写方法挂一次 | 正文 Web 字体回 404 空响应，页面回落到系统字体 |
+
+每个新增 Hook 都单独 try，找不到方法（ROM 删改、App 被 R8 改名）只记一行调试日志，其他 Hook 照常安装；每个 Hook 安装前同样先 deoptimize（见下文）。
 
 为什么 Android 10+ 只挂 `Font.Builder` + `CustomFallbackBuilder` 就够：AOSP 中
 `Typeface.createFromAsset/createFromFile` → `Typeface.Builder.build()` → `Font.Builder` + `CustomFallbackBuilder`；
@@ -31,7 +37,22 @@ AndroidX `ResourcesCompat.getFont` / `TypefaceCompatApi29Impl`（含可下载字
 
 * **保留**（不替换）：名字含 icon / symbol / material / awesome / glyph / dingbat / weather / fontello / emptyfont（同 `common/font_import.sh import_is_icon_name`）、emoji / twemoji / noto-color（同 `import_is_color_font_name`）、`common/font_inventory.py GENERIC_DENY_FILE_TOKENS` 全部词（emoji icon symbol math music mono monospace clock dingbat barcode qrcode materialicons notocoloremoji 及阿拉伯/希伯来/泰文/天城文等脚本专用字体），另加 iconfont、fontawesome/`fa-*`、Material Symbols、remixicon、codicon、KaTeX/MathJax/STIX/latex、digit/number/`num`、LCD/七段、等宽与代码字体（mono、SF Mono、JetBrains、Source Code 等）。单测 `coversModuleScannerTokens` 直接读取上述两个仓库文件，主模块名单新增词而这里漏掉时测试失败。
 * **衬线**：名字含 serif（且不含 sans）或常见衬线正文族（Tiempos、Copernicus、Georgia、Noto Serif…）→ 换成系统 `Typeface.SERIF` 对应字重，保持设计意图。
+* **多字体 family**：遍历 family 全部成员（Android 10+ `FontFamily` 的每个 `Font`，Android 9 隐藏 `FontFamily` 里登记的每个字体），**只要有一个成员需要保留（图标、表情、符号，或主线程上尚未判定）就整个 family 保持原样**，否则按第一个成员的判定替换。这样图标和正文混装在一个 family 里时不会把图标换掉（`rules/FamilyVerdict.java`）。
+* **等宽字体换为系统等宽（开关，默认关）**：关闭时等宽/代码字体与以前一样保持原样。打开后，名字确实是代码等宽族（`RobotoMono`、`JetBrains Mono`、`Source Code Pro`、`Consolas`、`Menlo`、`FiraCode`…；`Monoton` 这类只是以 mono 开头的展示字体不算）或 sfnt `post.isFixedPitch` 为真且是拉丁正文字体时，判定为 `REPLACE_MONO`，换成 `Typeface.create(Typeface.MONOSPACE, 原字重, 原斜体)`，即洛书的 mono 槽。图标、数字、时钟、表情、非拉丁的等宽字体仍保持。开关打开期间的判定缓存使用独立键（后缀 `~m`），切换开关不会沿用旧结论。
+  * 洛书 mono 槽不一定严格等宽：设置页用 `Paint` 实测系统 `Typeface.MONOSPACE` 的 `i W 0 m .` 字宽，不一致就**灰掉开关**并说明原因；Hook 侧每个进程也做一次同样的实测，不成立则不做等宽替换。（主模块的 `font_capability` 结果属于 root 侧状态，伴随 App 读不到，所以这里用运行时实测代替，主模块零改动。）
 * **无法判断**：内容哈希名（`3f9c0a1e.woff2`）、R8 缩短名（`a.ttf`、`res/font/b0.ttf`）、无名 buffer → 交给 `SfntInspector` 读字体表：name 表族名再走一遍名单；有 COLR/CBDT/sbix/SVG（彩色/表情）、`post.isFixedPitch`（等宽）、cmap 拉丁字母不足 40/52（无拉丁 cmap，如纯数字/纯图标/纯 CJK）、私用区码位多于拉丁字母（连字图标字体如 Material Icons）→ 保留；否则替换。读不出来的字体一律保留。
+
+### 先 deoptimize 再 Hook
+
+ART 可能把 `Font.Builder.build()` 这类短方法内联进调用方，或保留 AOT 编译副本，导致 Hook 装上了却被绕过（漏拦）。参考 MFGA-Xposed 的做法，每个 Hook 安装前先对目标方法调用一次 deoptimize：
+
+- 范围：仅限已 Hook 的方法——`Font.Builder` 全部构造与 `build()`、`Typeface.CustomFallbackBuilder(FontFamily)` 与 `build()`、Android 9 的 `Typeface.Builder` 构造与 `build()`、`createFromAsset`、`createFromFile(String/File)`、隐藏 `FontFamily.addFontFromAssetManager/addFontFromBuffer` 与 `Typeface.createFromFamiliesWithDefault` 的全部重载、`FontsContract`/AndroidX 可下载字体入口的全部重载，以及 `WebViewClient.shouldInterceptRequest`、`WebView.setWebViewClient` 和 App 自己的 `shouldInterceptRequest` 覆写。
+- 实现：`Deopt` 通过反射调用 LSPosed 旧 API 的 `XposedBridge.deoptimizeMethod(Member)`；框架没有该方法或调用失败时静默跳过，Hook 照常安装，不会崩溃。
+- 开销：每个方法只在模块加载时调用一次，不在绘制/加载热路径上。
+
+### 进程标记（与原生伴随模块共存）
+
+App 字体 Hook 装好后，本模块在该进程执行 `System.setProperty("luoshu.gfh.active", "1")`（常量 `ModuleConfig.PROCESS_MARKER`）。只是进程内的 Java 系统属性，不写 `persist.*`/`setprop`，不影响其他进程。将来的原生伴随模块读到它时，可把 Java 层字体交给本模块、自己只处理其余路径。
 
 ## 为什么不会卡（硬性性能约束）
 
@@ -79,10 +100,18 @@ CI 每次运行都会把实测值写进 `app/build/reports/global-font-benchmark
 * **微信/QQ**：大部分原生界面可以生效；内置网页使用腾讯 X5/XWeb 内核（不是 `android.webkit.WebView`），网页字体拦截对其无效；小程序/部分页面为自绘或 X5 渲染。
 * **Chrome Custom Tabs**：见上文 X 结论，在浏览器进程渲染，本模块不处理。
 * **首次加载**：名字无法判断（哈希/混淆名）的字体若在主线程加载，第一次保持原样，后台判定完成后从下一次加载（通常是下次启动）开始替换。
-* **Android 9**：只按名字判定，名字无法判断的字体保持原样。
+* **Android 9**：`Typeface.Builder`/`createFromAsset`/`createFromFile` 只按名字判定；经隐藏 `FontFamily.addFontFromBuffer` 加载的字体（描述符、AndroidX、可下载字体）有 buffer，名字无法判断时走 sfnt（主线程首次保持原样）。
+* **Android 8.x**：伴随模块 `minSdk 28`，不支持安装；Android 8 的 `ResourcesImpl.loadFont` 与 Android 9 走同一组隐藏 API，本次补的是 Android 9 上的这条路径。
+* **AndroidX 被 R8 改名**：`FontsContractCompat`/`TypefaceCompat` 等类名被混淆时找不到，只是少了可下载字体的**命名**；字体本身仍经 `Font.Builder`/`FontFamily` 加载，照常走 sfnt 判定。
 * **网页**：哈希名 Web 字体默认放行（宁可不换也不让图标变方块），可在设置中开启激进模式；`data:` 内联字体无法拦截。
 * **签名**：PR 构建的 APK 用 CI 临时 debug key 签名，不同次构建之间不能覆盖安装，需要先卸载旧包。
 
+## 测试
+
+* JVM 单测（`:app:testDebugUnitTest`）：名单、sfnt、等宽开关（`MonoSlotRulesTest`）、family 判定（`FamilyVerdictTest`）、可下载字体 query 与描述符命名（`SourceNamesTest`）、deoptimize、开销基准。
+* 仪器测试（`app/src/androidTest`，CI 任务 `Instrumented coverage API 28/29/34/35`，模拟器上没有 LSPosed，所以**不触发 Hook 本身**）：逐个 API 级别断言 Hook 目标方法存在（含 Android 9 隐藏 `FontFamily`）；`Resources.getFont`、`ResourcesCompat.getFont`（Compose `Font(R.font.x)` 经 `AndroidFontLoader` 走这里）、XML 多字体 family、assets、`Typeface.Builder(AssetManager)`、文件、PFD/FileDescriptor 都能加载；真实对象上的来源命名（`res:`/`asset:`/`file:`/`fd:`/`dl:`）、APK 内 asset 描述符不命名、真实字体文件的 sfnt 与 family 判定、系统等宽字体通过等宽实测。测试字体由 `global-font-hook/tools/gen_test_fonts.py` 用 fontTools 生成（方块字形，无第三方字形）。
+* Hook 实际生效需要在装了 LSPosed 的真机上验证（见 PR 描述的真机清单）。
+
 ## 开关
 
-伴随 App（桌面图标“洛书全局字体”，也可从 LSPosed 模块设置进入）：总开关、App 内置字体、WebView 网页字体、激进模式（默认关）、调试日志（默认关）。真正生效的前提是：在 LSPosed 启用本模块并勾选目标 App。洛书主 App 未做改动。
+伴随 App（桌面图标“洛书全局字体”，也可从 LSPosed 模块设置进入）：总开关、App 内置字体、等宽字体换为系统等宽（默认关；系统等宽实测不等宽时灰掉）、WebView 网页字体、激进模式（默认关）、调试日志（默认关）。真正生效的前提是：在 LSPosed 启用本模块并勾选目标 App。洛书主 App 未做改动。

@@ -26,18 +26,28 @@ public final class SfntInspector {
         public boolean parsed;
 
         public FontDecision decide() {
+            return decide(false);
+        }
+
+        /** With {@code monoSlot}, a Latin text face that is fixed pitch or named as code mono maps to REPLACE_MONO. */
+        public FontDecision decide(boolean monoSlot) {
             if (!parsed) return FontDecision.KEEP; // unreadable: never risk replacing
-            FontDecision byName = FontNameRules.classifyAll(family, fullName, postscriptName);
-            if (byName == FontDecision.KEEP) return FontDecision.KEEP;
-            if (colour || fixedPitch) return FontDecision.KEEP;
+            FontDecision byName = FontNameRules.classifyAll(monoSlot, family, fullName, postscriptName);
+            if (byName == FontDecision.KEEP || colour) return FontDecision.KEEP;
             if (basicLatinLetters < 40) return FontDecision.KEEP; // no Latin text cmap
             if (privateUse > basicLatinLetters) return FontDecision.KEEP; // ligature/PUA icon font
+            boolean mono = fixedPitch || byName == FontDecision.REPLACE_MONO;
+            if (mono) return monoSlot ? FontDecision.REPLACE_MONO : FontDecision.KEEP;
             return byName == FontDecision.REPLACE_SERIF ? FontDecision.REPLACE_SERIF : FontDecision.REPLACE_SANS;
         }
     }
 
     public static FontDecision decide(ByteBuffer font) {
         return inspect(font).decide();
+    }
+
+    public static FontDecision decide(ByteBuffer font, boolean monoSlot) {
+        return inspect(font).decide(monoSlot);
     }
 
     public static Report inspect(ByteBuffer source) {
