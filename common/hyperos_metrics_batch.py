@@ -635,7 +635,13 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
 def write_metrics(source: Path, output: Path, contract: tuple,
                   cjk_fallback_codepoints: frozenset[int] | None = None,
                   stock_cjk_punctuation: frozenset[int] = frozenset(), *,
-                  align_bitmap_bottom: bool = False) -> dict:
+                  align_bitmap_bottom: bool = False, tabular_digits: bool = False) -> dict:
+    """Write one slot alias with the stock line metrics.
+
+    tabular_digits asks for the clock-slot equal-width digits in the same pass
+    (see apply_tabular_digits). The result is then carried in the report
+    ('tabularDigits'); without that key the caller must still run
+    apply_tabular_digits on the output, which is the unchanged legacy path."""
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
@@ -697,13 +703,34 @@ def write_metrics(source: Path, output: Path, contract: tuple,
             del font['MVAR']
         removed = (remove_cjk_mappings(font, cjk_fallback_codepoints, stock_cjk_punctuation)
                    if cjk_fallback_codepoints else 0)
+        # Clock slots: equal-width digits in this same pass. The old second
+        # pass re-opened the finished 20 MB alias and re-saved every table
+        # (~1.2 s per clock slot on a phone, eight slots on HyperOS). Planning
+        # touches only cmap/hmtx; any failure leaves the font untouched and
+        # the caller falls back to the separate apply_tabular_digits pass.
+        tabular_report, tabular_updates = None, None
+        if tabular_digits:
+            try:
+                tabular_report, tabular_updates = _plan_tabular_digits(font)
+            except Exception:  # identical fallback: the legacy pass reports the error
+                tabular_report, tabular_updates = None, None
+        patched_tables = PATCHED_METRIC_TABLES
+        full_save = False
+        if tabular_updates:
+            font['hmtx'].metrics.update(tabular_updates)
+            for tag in TABULAR_STALE_TABLES:  # cached per-size advances would disagree
+                if tag in font:
+                    del font[tag]
+                    full_save = True
+            # hmtx first: its compile sets hhea.numberOfHMetrics.
+            patched_tables = ('hmtx', *PATCHED_METRIC_TABLES)
         # cmap glyph-name resolution can lazily load CFF to learn the glyph
         # order. Discard only those unmodified decoded tables so save copies
         # their original reader bytes instead of reserializing the outlines.
         for tag in ('glyf', 'CFF ', 'CFF2', 'gvar'):
             font.tables.pop(tag, None)
-        if (face >= 0 or had_mvar or removed or
-                not _patch_metric_tables(source, output, font, stream.fileno())):
+        if (face >= 0 or had_mvar or removed or full_save or
+                not _patch_metric_tables(source, output, font, stream.fileno(), patched_tables)):
             font.save(output, reorderTables=False)
         report = {'sourceUpem': upem, 'sourceHead': list(source_frame),
                   'outputHead': [int(head.yMin), int(head.yMax)],
@@ -713,12 +740,43 @@ def write_metrics(source: Path, output: Path, contract: tuple,
                   'bitmapBaselineReason': bottom_reason,
                   'layoutBoundsDifferFromSource': source_frame != (head.yMin, head.yMax),
                   'removedCjkMappings': removed}
+        if tabular_report is not None:
+            report.update(tabular_report)
     os.chmod(output, 0o644)
     return report
 
 
 PATCHED_METRIC_TABLES = ('head', 'hhea', 'OS/2')
 DIGIT_CODEPOINTS = tuple(range(0x30, 0x3A))
+
+
+TABULAR_STALE_TABLES = ('hdmx', 'LTSH')
+
+
+def _plan_tabular_digits(font: TTFont) -> tuple[dict, dict | None]:
+    """Equal-width digit advances for an open font, without changing it.
+
+    Returns the report and the hmtx entries to write (None: nothing changes).
+    Shared by the fused write_metrics pass and apply_tabular_digits so both
+    produce the same advances and side bearings."""
+    if 'fvar' in font or 'hmtx' not in font:
+        return {'tabularDigits': 'skipped-variable' if 'fvar' in font else 'no-hmtx'}, None
+    cmap = font.getBestCmap() or {}
+    names = [cmap.get(code) for code in DIGIT_CODEPOINTS]
+    metrics = font['hmtx'].metrics
+    if any(name is None or name not in metrics for name in names):
+        return {'tabularDigits': 'missing-digits'}, None
+    advance = max(metrics[name][0] for name in names)
+    if all(metrics[name][0] == advance for name in names):
+        return {'tabularDigits': 'already-tabular', 'tabularAdvance': advance}, None
+    truetype = 'glyf' in font
+    updates = {}
+    for name in dict.fromkeys(names):
+        width, lsb = metrics[name]
+        shift = (advance - width) // 2 if truetype else 0
+        updates[name] = (advance, lsb + shift)
+    return {'tabularDigits': 'applied', 'tabularAdvance': advance,
+            'tabularCentered': truetype}, updates
 
 
 def apply_tabular_digits(path: Path) -> dict:
@@ -729,42 +787,34 @@ def apply_tabular_digits(path: Path) -> dict:
     glyf outlines relative to it); CFF digits keep their position. Variable
     fonts are left unchanged (HVAR/gvar would override hmtx at other weights),
     so the user font is used as is. Outlines are never decoded or rewritten.
+
+    Fallback pass only: write_metrics(tabular_digits=True) normally does the
+    same change while it writes the alias.
     """
     face = _pick_face(path)
     options = {'fontNumber': face} if face >= 0 else {}
     try:
         with path.open('rb') as stream, TTFont(stream, lazy=True, recalcBBoxes=False,
                                                recalcTimestamp=False, **options) as font:
-            if 'fvar' in font or 'hmtx' not in font:
-                return {'tabularDigits': 'skipped-variable' if 'fvar' in font else 'no-hmtx'}
-            cmap = font.getBestCmap() or {}
-            names = [cmap.get(code) for code in DIGIT_CODEPOINTS]
-            metrics = font['hmtx'].metrics
-            if any(name is None or name not in metrics for name in names):
-                return {'tabularDigits': 'missing-digits'}
-            advance = max(metrics[name][0] for name in names)
-            if all(metrics[name][0] == advance for name in names):
-                return {'tabularDigits': 'already-tabular', 'tabularAdvance': advance}
-            truetype = 'glyf' in font
-            for name in dict.fromkeys(names):
-                width, lsb = metrics[name]
-                shift = (advance - width) // 2 if truetype else 0
-                metrics[name] = (advance, lsb + shift)
-            for tag in ('hdmx', 'LTSH'):  # cached per-size advances would disagree
+            report, updates = _plan_tabular_digits(font)
+            if not updates:
+                return report
+            font['hmtx'].metrics.update(updates)
+            for tag in TABULAR_STALE_TABLES:  # cached per-size advances would disagree
                 if tag in font:
                     del font[tag]
             temporary = path.with_name(path.name + '.tnum')
             font.save(temporary, reorderTables=False)
         os.replace(temporary, path)
         os.chmod(path, 0o644)
-        return {'tabularDigits': 'applied', 'tabularAdvance': advance,
-                'tabularCentered': truetype}
+        return report
     except Exception as error:  # never block staging; the slot keeps the user font as is
         path.with_name(path.name + '.tnum').unlink(missing_ok=True)
         return {'tabularDigits': f'error:{error.__class__.__name__}'}
 
 
-def _patch_metric_tables(source: Path, output: Path, font: TTFont, descriptor: int) -> bool:
+def _patch_metric_tables(source: Path, output: Path, font: TTFont, descriptor: int,
+                         tables: tuple = PATCHED_METRIC_TABLES) -> bool:
     """Write a metrics-only alias as a kernel copy plus three table patches.
 
     Re-saving with fontTools rereads and re-checksums every table, ~1.8 s for a
@@ -791,7 +841,7 @@ def _patch_metric_tables(source: Path, output: Path, font: TTFont, descriptor: i
             tag, checksum, offset, length = struct.unpack_from('>4sIII', directory, 16 * index)
             entries[tag.decode('latin-1')] = (index, checksum, offset, length)
         compiled = {}
-        for tag in PATCHED_METRIC_TABLES:
+        for tag in tables:
             if tag not in entries:
                 return False
             data = font[tag].compile(font)
@@ -1376,10 +1426,13 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                     metric_source, compact_removed = compact_sources[source_key]
                 with STEPS.step('slot_metrics', slot=logical) as info:
                     output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
-                                                        align_bitmap_bottom=align_bottom)
+                                                        align_bitmap_bottom=align_bottom,
+                                                        tabular_digits=tabular)
                     info['bytes'] = output.stat().st_size
+                    if tabular and 'tabularDigits' in output_reports[key]:
+                        info['tabular'] = 'fused'
                 output_reports[key]['removedCjkMappings'] += compact_removed
-                if tabular:
+                if tabular and 'tabularDigits' not in output_reports[key]:
                     with STEPS.step('tabular_digits', slot=logical):
                         output_reports[key].update(apply_tabular_digits(output))
                 cache[key] = output

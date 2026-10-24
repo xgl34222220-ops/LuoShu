@@ -1215,11 +1215,81 @@ def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_line
                            "status": values.get("result", "unknown"), "elapsedMs": int(values["elapsedMs"])})
     lines = window if len(window) <= max_lines else window[:200] + ["…（中间省略）…"] + window[-(max_lines - 201):]
     wake_lock = wake_lock_lines(raw, start, safe_task, mix_request)
-    return {"found": True, "wakeLock": [sanitize(line)[:400] for line in wake_lock], "lineCount": len(window), "truncated": len(window) > max_lines,
-            "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
-            "stageSteps": stage_steps(window),
-            "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
-            or sum(row["elapsedMs"] for row in phases)}
+    result = {"found": True, "wakeLock": [sanitize(line)[:400] for line in wake_lock], "lineCount": len(window), "truncated": len(window) > max_lines,
+              "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
+              "stageSteps": stage_steps(window),
+              "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
+              or sum(row["elapsedMs"] for row in phases)}
+    result.update(mix_wall_clock(window, mix_request))
+    return result
+
+
+def _mix_interval_uptime(value: str) -> int | None:
+    if re.fullmatch(r"[0-9]{1,10}(?:\.[0-9]{1,3})?", value) is None:
+        return None
+    seconds, _, fraction = value.partition(".")
+    return int(seconds) * 1000 + int((fraction + "000")[:3])
+
+
+def mix_wall_clock(window: list[str], request: str | None) -> dict[str, Any]:
+    """Real elapsed time of one composite apply, from [MIX-PHASE] uptimes.
+
+    The phases do not run one after another: worker/wait_child_cleanup is the
+    outer worker waiting while the commit monitor runs finalize_lock,
+    complete_hyperos/complete_coloros, next_commit and live_mount. Summing
+    every phase (totalPhaseMs) counts that finalize work twice, e.g. 114 s
+    reported for a 71 s apply. wallMs is first begin to last end;
+    waitChildCleanup splits the wait into the finalize work it overlaps and
+    its own tail (the monitor's exit and process-cleanup proof)."""
+    if not request:
+        return {}
+    begins: dict[tuple, int] = {}
+    intervals: list[tuple[str, int, int]] = []
+    for line in window:
+        record = _timing_record(line)
+        if not record or record[0] != "mix" or record[1].get("request") != request:
+            continue
+        values = record[1]
+        at = _mix_interval_uptime(values.get("uptimeSeconds", ""))
+        if at is None:
+            continue
+        key = (values.get("task"), values.get("component"), values.get("phase"), values.get("unit"))
+        if values["event"] == "begin":
+            begins[key] = at
+        elif key in begins:
+            intervals.append((f"{values.get('component', '?')}/{values.get('phase', '?')}", begins.pop(key), at))
+    if not intervals:
+        return {}
+    wall = max(end for _, _, end in intervals) - min(begin for _, begin, _ in intervals)
+    out: dict[str, Any] = {"wallMs": wall,
+                           "wallNote": "wallMs 为本次复合应用首个阶段开始到最后阶段结束的真实耗时；"
+                                       "totalPhaseMs 把与 finalize 并行的 wait_child_cleanup 重复计入"}
+    commits = [end for name, _, end in intervals if name == "fixed-apply/local_commit"]
+    locks = [begin for name, begin, _ in intervals if name == "finalize/finalize_lock"]
+    if commits and locks and locks[-1] >= commits[-1]:
+        # Engine exit + its cleanup proof + the monitor noticing it.
+        out["commitHandoffMs"] = locks[-1] - commits[-1]
+    waits = [(begin, end) for name, begin, end in intervals if name == "worker/wait_child_cleanup"]
+    if waits:
+        begin, end = waits[-1]
+        covered = sorted((max(begin, b), min(end, e)) for name, b, e in intervals
+                         if name.startswith("finalize/") and min(end, e) > max(begin, b))
+        overlap, cursor = 0, begin
+        for b, e in covered:  # union of the overlapped finalize work
+            b = max(b, cursor)
+            if e > b:
+                overlap += e - b
+                cursor = e
+        last_finalize = max((e for name, _, e in intervals if name.startswith("finalize/") and begin <= e <= end),
+                            default=None)
+        out["waitChildCleanup"] = {
+            "elapsedMs": end - begin,
+            "overlapFinalizeMs": overlap,
+            "ownMs": end - begin - overlap,
+            # From the monitor's finalize_release end to the worker noticing it.
+            "tailAfterFinalizeMs": end - last_finalize if last_finalize is not None else None,
+        }
+    return out
 
 
 def read_module_prop(module: Path | None) -> dict[str, str]:
