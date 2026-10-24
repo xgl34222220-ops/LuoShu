@@ -1,9 +1,9 @@
 id=LuoShu
 name=洛书
-version=v3.0.0
-versionCode=80000
+version=v3.3.3
+versionCode=80303
 versionSeries=refactor
 author=惜故里丶
-description=Android 全局字体引擎：保留 1.1.1 挂载核心，组合字体英数与中文对齐并支持英数微调
+description=Android 全局字体引擎：保留 1.1.1 挂载核心，新增可选全局字体增强与 OTA 自动恢复，补齐多 ROM 字体槽覆盖
 updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json
 actionIcon=branding/luoshu-app-icon.webp
