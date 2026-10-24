@@ -6,6 +6,9 @@ on:
       - common/google_font_*.py
       - common/google_font_*.sh
       - scripts/google_font_*test.py
+      - common/font_verity.py
+      - common/font_verity.sh
+      - scripts/font_verity_protected_test.py
       - .github/workflows/google-font-guard-regression.yml
 permissions:
   contents: read
@@ -25,3 +28,9 @@ jobs:
           python3 -m py_compile common/google_font_watch_wait.py
           python3 scripts/google_font_guard_resume_test.py
           python3 scripts/google_font_watch_test.py
+      - name: Protected /data/fonts verity regression
+        run: |
+          sh -n common/font_verity.sh
+          python3 -m pip install --disable-pip-version-check --quiet 'fonttools>=4.50,<5'
+          [ -f /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf ] || { sudo apt-get update -qq; sudo apt-get install -y -qq --no-install-recommends fonts-dejavu-core; }
+          python3 scripts/font_verity_protected_test.py
