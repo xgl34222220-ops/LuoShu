@@ -52,10 +52,15 @@ jobs:
           esac
           tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
           [[ -n "$tag_sha" ]] || { echo "Missing release tag: $tag" >&2; exit 2; }
-          [[ "$tag_sha" == "$RELEASE_SHA" ]] || {
-            echo "Release tag does not match validated workflow SHA: $tag_sha != $RELEASE_SHA" >&2
-            exit 2
-          }
+          if [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+            # "Publish signed release" also succeeds when its gate skips a main
+            # push whose version is already published (release_skip_gate.sh).
+            # Nothing was released from this SHA, so leave the channels alone.
+            echo "::notice title=Metadata sync skipped::$tag points to $tag_sha, not $RELEASE_SHA; no release was published from this run."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
           notes_file="RELEASE_NOTES_${tag}.md"
           git cat-file -e "$tag:$notes_file" 2>/dev/null || {
@@ -89,6 +94,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate and push metadata
+        if: ${{ steps.release.outputs.skip == 'false' }}
         shell: bash
         env:
           TAG: ${{ steps.release.outputs.tag }}
@@ -131,7 +137,7 @@ jobs:
           exit 4
 
       - name: Archive and retire approved v4.2.0 branches
-        if: ${{ steps.release.outputs.tag == 'v4.2.0' && steps.release.outputs.output == 'update.json' }}
+        if: ${{ steps.release.outputs.skip == 'false' && steps.release.outputs.tag == 'v4.2.0' && steps.release.outputs.output == 'update.json' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
