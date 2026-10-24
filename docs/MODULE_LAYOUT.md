@@ -15,6 +15,7 @@ LuoShu/
 ├── service.sh
 ├── boot-completed.sh
 ├── late-load.sh        # KernelSU late-load 入口（仅 KSU_LATE_LOAD=1 时运行）
+├── emulated-soft-reboot.sh  # KernelSU 软重启阶段入口（仅 KSU=true 时运行）
 ├── action.sh
 ├── uninstall.sh
 ├── common/
@@ -35,7 +36,8 @@ Version-suffixed implementation files must not return to the root. The root scri
 ├── core/
 │   ├── post-fs-data.sh
 │   ├── post-mount.sh
-│   └── service.sh
+│   ├── service.sh
+│   └── emulated-soft-reboot.sh
 └── compat/
     └── v227/
         ├── customize.sh
@@ -44,6 +46,18 @@ Version-suffixed implementation files must not return to the root. The root scri
 ```
 
 `core/` is the current internal boot/service implementation. `compat/` exists only for migration/cleanup contracts that still have installed-device compatibility value.
+
+### KernelSU 软重启（emulated-soft-reboot 阶段）
+
+KernelSU 的 `ksud soft-reboot` 不重启内核：它切到 PID 1 的挂载命名空间，把 `sys.boot_completed` 置 0，在限定时间内运行各模块的 `emulated-soft-reboot.sh`，然后 `stop` 框架，再依次重放 post-fs-data（含 post-mount）、`start`、service 与 boot-completed。由于 `/proc/sys/kernel/random/boot_id` 保持不变，洛书按 boot_id 记录的自挂载日志会被误认为“本次启动已挂载”，因此需要在这一阶段主动收尾。
+
+- 根目录 `emulated-soft-reboot.sh` 只做路由：`KSU` 不是 `true` 时直接退出（Magisk、APatch 等不会调用此阶段，行为不变），否则执行 `.luoshu-runtime/core/emulated-soft-reboot.sh`。
+- 只处理本次启动的日志：`self-mount/boot-id` 与当前 boot_id 不一致时不做任何卸载，旧日志绝不重放。
+- 卸载范围仅限洛书自己登记的挂载：先 `self-mount/mounts.list`，再 `private-payload/module-view.mounts`（只接受模块目录内的目标），各自按登记的逆序（最新优先）卸载；普通卸载失败时退回 `umount -l`；已不存在的挂载点视为已释放。
+- 卸载前检查 mountinfo 中该路径最上层的挂载：位于洛书状态目录内，或其 root / 来源 / 选项指向洛书状态目录或本模块目录，才视为洛书所有；叠在上面的其他模块挂载一律不动。
+- 全部释放后重置本次启动决策：清空 `mounts.list` 与 `lower/`、`work/`，删除 `self-mount/boot-id` 和 `config/self-mount-required.conf`，`config/self-mount.conf` 写为 `state=idle`、`reason=ksu-soft-reboot`，重放的 post-mount 因此执行一次全新的自挂载事务。
+- 有任何目标未释放时保守处理：日志里只保留未释放的条目，boot-id 与挂载状态不动，交由 post-mount 现有的同 boot 回滚路径。
+- 结果写入 `config/ksu-soft-reboot.conf`（`state=ready|failed`、`reason`、`released`、`remaining`、`bootId`），过程日志在 `logs/soft-reboot.log`。回归测试为 `scripts/ksu_soft_reboot_test.sh`（已接入 `scripts/check.sh`）。
 
 ## Runtime configuration
 

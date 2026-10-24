@@ -15,6 +15,7 @@ common/coloros_flipfont.sh
 common/coloros_global.sh
 common/coloros_latin_policy.py
 common/coloros_metrics_batch.py
+common/coloros_slot_compat.sh
 common/coloros_stage_complete.sh
 common/composite_font.py
 common/composite_collection_build.py
@@ -66,6 +67,8 @@ common/font_finalize_hotfix.sh
 common/font_import.sh
 common/font_import_compat.sh
 common/font_import_probe.py
+common/font_web_convert.py
+common/font_zip_extract.py
 common/font_instance.py
 common/font_inventory.py
 common/font_inventory_scan.py
@@ -80,6 +83,7 @@ common/font_manager_v4.sh
 common/font_settings_policy.sh
 common/font_metadata.py
 common/font_metrics_normalize.py
+common/font_space_compat.py
 common/font_mix.sh
 common/font_mix_controller.sh
 common/font_name_normalize.py
@@ -92,6 +96,8 @@ common/google_font_fallback.py
 common/google_font_fallback.sh
 common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
+common/font_verity.py
+common/font_verity.sh
 common/google_font_provider_service.sh
 common/google_font_watch_wait.py
 common/google_font_diagnostic.py
@@ -115,7 +121,10 @@ common/hyperos_source_xml.py
 common/hyperos_theme_takeover.sh
 common/hyperos_boot_routes.sh
 common/hyperos_coverage_bridge.sh
+common/native_font.sh
 common/font_coverage_locator.py
+common/umount_visibility.py
+common/umount_visibility.sh
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh
@@ -134,6 +143,7 @@ common/mount_compat.sh
 common/mount_compat_base.sh
 common/mount_compat_policy.sh
 common/mount_fast_sync.sh
+common/mount_overlay_layer.sh
 common/mount_self_atomic.sh
 common/mount_self_backend.sh
 common/mount_self_fallback.sh
@@ -166,6 +176,7 @@ uninstall.sh
 action.sh
 boot-completed.sh
 late-load.sh
+emulated-soft-reboot.sh
 magic
 common/font_next_transaction.sh
 common/font_live_switch.sh

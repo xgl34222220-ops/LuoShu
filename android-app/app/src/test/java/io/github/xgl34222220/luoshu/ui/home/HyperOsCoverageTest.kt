@@ -199,6 +199,20 @@ class HyperOsCoverageTest {
     }
 
     @Test
+    fun exportShowsUmountVisibilityConclusionWhenTheModuleReturnsIt() {
+        val old = parseCoverageExport(
+            """{"status":"ok","data":{"path":"/sdcard/LuoShu/reports/LuoShu-coverage-full-1.json","bytes":10,"issues":0,"processesWithIssues":0}}""",
+        )
+        assertEquals("", old.umountSummary)
+        assertFalse(coverageExportSummary(old).contains("挂载可见性"))
+        val withUmount = parseCoverageExport(
+            """{"status":"ok","data":{"path":"/sdcard/LuoShu/reports/LuoShu-coverage-full-2.json","bytes":10,"issues":0,"processesWithIssues":0,"umount":{"summary":"App 侧：抽查 5 个进程都能看到洛书挂载；WebView：被 webview_zygote_umount 卸载（可在 KernelSU 管理器关闭）。","app":"visible","webview":"unmounted"}}}""",
+        )
+        assertTrue(coverageExportSummary(withUmount).contains("挂载可见性：App 侧"))
+        assertTrue(coverageExportSummary(withUmount).contains("webview_zygote_umount"))
+    }
+
+    @Test
     fun parsesExportResultAndRejectsUnexpectedPaths() {
         assertEquals("sh '/data/adb/modules/LuoShu/common/app_bridge.sh' coverage_export", coverageExportCommand())
         val result = parseCoverageExport(

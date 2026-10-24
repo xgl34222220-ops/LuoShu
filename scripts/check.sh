@@ -23,6 +23,7 @@ python3 -m py_compile \
   "$ROOT/common/composite_font.py" \
   "$ROOT/common/font_instance.py" \
   "$ROOT/common/font_metrics_normalize.py" \
+  "$ROOT/common/font_space_compat.py" \
   "$ROOT/common/font_coverage.py" \
   "$ROOT/common/font_axis_info.py" \
   "$ROOT/common/font_role_check.py" \
@@ -30,7 +31,10 @@ python3 -m py_compile \
   "$ROOT/common/font_extract_faces.py" \
   "$ROOT/common/font_capability.py" \
   "$ROOT/common/font_import_probe.py" \
+  "$ROOT/common/font_web_convert.py" \
+  "$ROOT/common/font_zip_extract.py" \
   "$ROOT/common/font_inventory.py"
+python3 -m py_compile "$ROOT/common/font_verity.py"
 python3 -m py_compile "$ROOT/common/task_scope.py" "$ROOT/common/runtime_paths_lock.py" "$ROOT/common/font_live_payload.py"
 python3 "$ROOT/scripts/stable111_rework_gate.py"
 python3 "$ROOT/scripts/stable111_rework_gate_test.py"
@@ -58,6 +62,7 @@ sh "$ROOT/scripts/uninstall_deferred_restore_test.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 sh "$ROOT/scripts/boot_housekeeping_test.sh"
 sh "$ROOT/scripts/boot_loop_guard_test.sh"
+sh "$ROOT/scripts/ksu_soft_reboot_test.sh"
 sh "$ROOT/scripts/foreign_font_module_test.sh"
 sh "$ROOT/scripts/ksu_metadata_ota_test.sh"
 # 此前未接入任何 workflow 的独立回归（font_name_normalize_test.py 需要真实字体，
@@ -77,6 +82,7 @@ sh "$ROOT/scripts/v4_rom_regression_test.sh"
 # 稳定性加固：Magisk 卡开机保护、OTA 早检测、未完成开机统一语义、卸载、发布跳过。
 sh "$ROOT/scripts/boot_unfinished_semantics_test.sh"
 sh "$ROOT/scripts/system_ota_early_test.sh"
+sh "$ROOT/scripts/system_ota_resume_test.sh"
 sh "$ROOT/scripts/uninstall_resilience_test.sh"
 sh "$ROOT/scripts/app_bridge_boot_guard_test.sh"
 sh "$ROOT/scripts/app_bridge_reboot_test.sh"
@@ -95,10 +101,10 @@ for file in \
   common/app_bridge.sh common/font_manager.sh common/font_active_state.sh common/font_boot_state.sh common/font_library_cache.sh common/app_installer.sh \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
-  scripts/assert.sh scripts/module_layout_test.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
+  scripts/assert.sh scripts/module_layout_test.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/overlay_loop_layer_test.sh common/mount_overlay_layer.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
   scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
-  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
+  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/originos_flyme_slot_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_space_compat_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   common/legacy_v14_4/composite_cache_proof.sh scripts/legacy_mix_fixed_cache_identity_test.py \
   common/legacy_v14_4/mix_phase_timing.sh scripts/legacy_mix_phase_timing_test.py \
@@ -297,6 +303,8 @@ sh "$ROOT/scripts/app_bridge_status_test.sh"
 sh "$ROOT/scripts/font_active_state_test.sh"
 sh "$ROOT/scripts/font_boot_state_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
+# PR-G：WOFF/WOFF2 先转换后校验、ZIP 安全解压（完整 WOFF2/ARM64 解码器用例见 web-font-import.yml）。
+sh "$ROOT/scripts/web_font_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/customize_reenable_test.sh"
@@ -304,14 +312,20 @@ python3 "$ROOT/scripts/device_validation_gate_test.py"
 python3 "$ROOT/scripts/sync_update_metadata_test.py"
 python3 "$ROOT/scripts/release_branch_cleanup_test.py"
 sh "$ROOT/scripts/mount_compat_test.sh"
+sh "$ROOT/scripts/overlay_loop_layer_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
+sh "$ROOT/scripts/originos_flyme_slot_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
 sh "$ROOT/scripts/module_layout_test.sh"
+# 全局字体增强（Zygisk）：默认关闭、配置路径、让出与失败保守。
+sh "$ROOT/scripts/native_font_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
 python3 "$ROOT/scripts/font_coverage_speed_test.py"
 sh "$ROOT/scripts/coloros_legacy_coverage_test.sh"
 # ColorOS 15/16 拉丁/数字覆盖：OSans 数字族、SysFont flip 链接槽位、生僻字/占位回退保留、flip 字体诊断。
 python3 "$ROOT/scripts/coloros_latin_coverage_test.py"
+# ColorOS 槽位兼容模式（默认关闭）：默认/其他 ROM 不改动、受保护槽位不写、关闭恢复、失败回退。
+sh "$ROOT/scripts/coloros_slot_compat_test.sh"
 # ROM 覆盖回归门禁：夹具中文件从"替换"退化为"保留原厂"且未在基线登记理由即失败。
 python3 "$ROOT/scripts/rom_coverage_gate.py" --check
 python3 "$ROOT/scripts/rom_coverage_gate_test.py"
@@ -376,6 +390,7 @@ sh "$ROOT/scripts/device_font_payload_runtime_test.sh"
 sh "$ROOT/scripts/device_font_transaction_guard_test.sh"
 sh "$ROOT/scripts/font_config_variable_weight_test.sh"
 python3 "$ROOT/scripts/font_metrics_normalization_test.py"
+python3 "$ROOT/scripts/font_space_compat_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/legacy_composite_layout_test.py"
 python3 "$ROOT/scripts/composite_latin_cjk_alignment_test.py"
 python3 "$ROOT/scripts/hyperos_layout_freetype_test.py"
@@ -387,6 +402,8 @@ sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 python3 "$ROOT/scripts/legacy_mix_fixed_prepare_reuse_test.py"
 python3 "$ROOT/scripts/legacy_mix_prepared_instance_cache_test.py"
 python3 "$ROOT/scripts/apply_wake_lock_test.py"
+python3 "$ROOT/scripts/wait_child_critical_path_test.py"
+python3 "$ROOT/scripts/hyperos_tabular_fusion_test.py"
 python3 "$ROOT/scripts/legacy_mix_fixed_cache_identity_test.py"
 python3 "$ROOT/scripts/composite_manual_tune_test.py"
 python3 "$ROOT/scripts/legacy_mix_phase_timing_test.py"

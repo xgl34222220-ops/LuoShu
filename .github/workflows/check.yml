@@ -20,7 +20,10 @@ on:
       - uninstall.sh
       - action.sh
       - late-load.sh
+      - emulated-soft-reboot.sh
+      - .luoshu-runtime/**
       - android-app/**
+      - zygisk-native-font/**
       - magic
       - README.md
       - LICENSE
@@ -65,7 +68,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/build_woff2_decoder.sh', 'tools/woff2/**') }}
 
       - name: Prepare ARM64 composite runtime
         run: |
@@ -117,6 +120,19 @@ jobs:
       - name: Lint, test and build native App
         working-directory: android-app
         run: gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Install NDK for the Zygisk library
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ndk="$sdk/ndk/28.2.13676358"
+          if [[ ! -f "$ndk/build/cmake/android.toolchain.cmake" ]]; then
+            # `yes` dies of SIGPIPE once sdkmanager exits; keep that out of pipefail.
+            (yes || true) | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358" | tail -n 5
+          fi
+          test -f "$ndk/build/cmake/android.toolchain.cmake"
+          echo "LUOSHU_NDK=$ndk" >> "$GITHUB_ENV"
 
       - name: Build App and single module candidate
         shell: bash

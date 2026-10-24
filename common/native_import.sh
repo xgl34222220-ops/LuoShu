@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 洛书 v2.0.0：原生 App 文件选择器导入桥。
-# 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 由安全字体包导入器处理。
+# 只接受 App 私有缓存中的 TTF/OTF/TTC/WOFF/WOFF2/ZIP；ZIP 由安全字体包导入器处理，
+# WOFF/WOFF2 由 font_prepare_import 解包为 SFNT 并完整校验后按普通字体导入。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -145,6 +146,23 @@ import_emoji_file() {
         "$(json_escape "$_stem")" "$(json_escape "$_target")"
 }
 
+# 网页字体：解包到模块私有临时目录 → 以解包结果走普通字体导入（去重、Emoji 分流、TTC 拆分）。
+import_web_font() {
+    _nwf_src="$1"; _nwf_display="$2"
+    type font_prepare_import >/dev/null 2>&1 || { fail_json "检测到网页字体，不能仅修改扩展名后作为系统字体"; return; }
+    _nwf_work="${LUOSHU_TMP_DIR:-$MODDIR/.luoshu-state/tmp}/web-import-$$"
+    rm -rf "$_nwf_work" 2>/dev/null || true
+    mkdir -p "$_nwf_work" 2>/dev/null || { fail_json "无法创建网页字体转换目录"; return; }
+    if ! font_prepare_import "$_nwf_src" "$_nwf_work" text >/dev/null 2>&1; then
+        rm -rf "$_nwf_work" 2>/dev/null || true
+        fail_json "${FONT_CHECK_ERROR:-字体文件校验失败}"
+        return
+    fi
+    _nwf_path="$FONT_PREPARED_PATH"
+    import_font_file "$_nwf_path" "${_nwf_display%.*}.${_nwf_path##*.}"
+    rm -rf "$_nwf_work" 2>/dev/null || true
+}
+
 import_font_file() {
     _src="$1"
     _display="$2"
@@ -265,7 +283,8 @@ case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
 _ext=$(printf '%s' "${display_name##*.}" | tr '[:upper:]' '[:lower:]')
 case "$_ext" in
     ttf|otf|ttc|otc) import_font_file "$source_path" "$display_name" ;;
+    woff|woff2) import_web_font "$source_path" "$display_name" ;;
     zip) import_zip_file "$source_path" "$display_name" ;;
-    *) fail_json "仅支持 TTF、OTF、TTC/OTC 和字体模块 ZIP" ;;
+    *) fail_json "仅支持 TTF、OTF、TTC/OTC、WOFF/WOFF2 和字体 ZIP" ;;
 esac
 exit 0

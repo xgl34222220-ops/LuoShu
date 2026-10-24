@@ -224,7 +224,7 @@ internal fun settingChangeMessage(setting: HyperOsSetting): String = when (setti
 }
 
 internal val COVERAGE_SCOPE_NOTE =
-    "微信、QQ、支付宝等应用内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内；洛书主模块不做 Hook。"
+    "微信、QQ、支付宝等应用内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内；主模块默认不做 Hook（App 自带正文字体可在设置中开启“全局字体增强（Zygisk）”）。"
 
 // --- 选择应用定位 / 一键扫描 ----------------------------------------------------------------------
 
@@ -297,6 +297,8 @@ internal data class CoverageExportResult(
     val bytes: Long,
     val issues: Int,
     val processesWithIssues: Int,
+    /** 一句话 umount 可见性结论（App 侧 / WebView）；旧模块不返回时为空，按旧样式展示。 */
+    val umountSummary: String = "",
 )
 
 internal fun parseCoverageExport(raw: String): CoverageExportResult {
@@ -310,6 +312,7 @@ internal fun parseCoverageExport(raw: String): CoverageExportResult {
         bytes = data.optLong("bytes", 0L),
         issues = data.optInt("issues", 0),
         processesWithIssues = data.optInt("processesWithIssues", 0),
+        umountSummary = data.optJSONObject("umount")?.optString("summary").orEmpty().trim(),
     )
 }
 
@@ -317,7 +320,8 @@ internal fun coverageExportSummary(result: CoverageExportResult): String {
     val size = if (result.bytes >= 1024) "${result.bytes / 1024} KB" else "${result.bytes} B"
     val issues = if (result.issues == 0) "未发现未覆盖的进程。"
     else "共 ${result.issues} 类问题，涉及 ${result.processesWithIssues} 个进程（相同文件集合已合并）。"
-    return "$issues 文件 $size，已按现有规则脱敏，可直接分享给开发者。"
+    val umount = if (result.umountSummary.isNotBlank()) "\n挂载可见性：${result.umountSummary}" else ""
+    return "$issues 文件 $size，已按现有规则脱敏，可直接分享给开发者。$umount"
 }
 
 internal fun hyperOsSettingForKey(key: String): HyperOsSetting? = HyperOsSetting.entries.firstOrNull { it.key == key }

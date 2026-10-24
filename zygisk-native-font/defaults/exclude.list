@@ -1,0 +1,28 @@
+# 洛书 Native 字体：内置排除名单（一行一个包名，# 后为注释）。
+# 用户自己的名单在 /data/adb/modules/LuoShu/config/native-font-exclude.list，两者合并生效。
+# 系统界面与桌面
+com.android.systemui
+com.android.launcher3
+com.miui.home
+com.oppo.launcher
+com.coloros.launcher
+com.huawei.android.launcher
+com.bbk.launcher2
+com.sec.android.app.launcher
+com.google.android.apps.nexuslauncher
+# 支付与银行（度量变化可能引发风控或裁字，默认排除）
+com.eg.android.AlipayGphone
+com.unionpay
+com.icbc
+com.chinamworld.main
+com.ccb.android
+com.android.bankabc
+cmb.pb
+com.bankcomm.Bankcomm
+# 带强反作弊的游戏
+com.tencent.tmgp.sgame
+com.tencent.tmgp.pubgmhd
+com.tencent.lolm
+com.miHoYo.Yuanshen
+com.miHoYo.hkrpg
+com.netease.hyxd

@@ -189,8 +189,52 @@ class CliFixtureTest(unittest.TestCase):
     def test_unreadable_maps_and_no_payload(self):
         shutil.rmtree(self.module / ".luoshu-payload")
         report = self.run_cli("systemui=999")
-        self.assertEqual("maps-unreadable", report["systemui.state"])
+        self.assertEqual("exited", report["systemui.state"])  # /proc/999 does not exist
         self.assertEqual("inactive:no-payload", report["fontAudit"])
+
+    def _report(self, *targets: str) -> dict[str, str]:
+        args = SimpleNamespace(target=list(targets), proc_root=str(self.proc), module=self.module,
+                               visible_root=str(self.visible))
+        return audit.build_report(args)
+
+    def test_exited_process_is_not_unreadable(self):
+        # Gone from /proc (ENOENT), pid reused by another program, zombie with empty maps.
+        (self.proc / "501").mkdir(parents=True)
+        (self.proc / "501" / "cmdline").write_bytes(b"com.other.app\0")
+        (self.proc / "501" / "maps").mkdir()  # EISDIR: not an exit errno, but cmdline changed
+        (self.proc / "502").mkdir(parents=True)
+        (self.proc / "502" / "cmdline").write_bytes(b"")
+        (self.proc / "502" / "maps").write_text("")
+        report = self._report("a=999@com.example.a", "b=501@com.example.b", "c=502@com.example.c")
+        self.assertEqual(["exited"] * 3, [report["a.state"], report["b.state"], report["c.state"]])
+        self.assertNotIn("a.mapsError", report)
+        self.assertEqual("unknown:no-process-readable", report["fontAudit"])
+
+    def test_esrch_means_exited_and_eacces_stays_unreadable(self):
+        import errno
+        from unittest import mock
+        (self.proc / "601").mkdir(parents=True)
+        (self.proc / "601" / "cmdline").write_bytes(b"com.example.d:remote\0")
+        (self.proc / "601" / "maps").write_text("")
+        real = Path.read_text
+
+        def denied(code):
+            def read_text(path, *a, **k):
+                if path.name == "maps":
+                    raise OSError(code, os.strerror(code), str(path))
+                return real(path, *a, **k)
+            return read_text
+        with mock.patch.object(Path, "read_text", denied(errno.EACCES)):
+            report = self._report("d=601@com.example.d:remote")
+        self.assertEqual(("maps-unreadable", "EACCES"), (report["d.state"], report["d.mapsError"]))
+        with mock.patch.object(Path, "read_text", denied(errno.ESRCH)):
+            report = self._report("d=601@com.example.d:remote")
+        self.assertEqual("exited", report["d.state"])
+        # Live process, same program, maps is a directory: genuinely unreadable.
+        (self.proc / "601" / "maps").unlink()
+        (self.proc / "601" / "maps").mkdir()
+        report = self._report("d=601@com.example.d")
+        self.assertEqual(("maps-unreadable", "EISDIR"), (report["d.state"], report["d.mapsError"]))
 
     def test_cli_is_read_only(self):
         self.write_maps("100", maps_line("/system/fonts/MiSansVF.ttf", self.ident(self.stock_old)))
@@ -293,7 +337,7 @@ class ShellEntryTest(unittest.TestCase):
             self.assertIn("fontAudit=gap:systemui=1/1", result.stdout)
             conf = (module / "config/device-font-process-audit.conf").read_text()
             self.assertIn("launcher.package=com.example.home", conf)
-            self.assertIn("launcher.state=maps-unreadable", conf)  # pid 77 has no fixture maps
+            self.assertIn("launcher.state=exited", conf)  # pid 77 has no /proc entry: exited
             self.assertIn("systemServer.state=not-running", conf)
             self.assertNotIn("webview.", conf)
 

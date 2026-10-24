@@ -433,6 +433,55 @@ class LocatorTest(unittest.TestCase):
         self.assertEqual("App 内置正文字体（系统层无法替换）",
                          by_package["com.anthropic.claude"]["layers"]["appBuiltinBodyFonts"]["label"])
 
+    def test_scan_skips_exited_processes_and_counts_unreadable_apart(self):
+        # Device export 2026-10-22 12:44: 26 processes that exited after the
+        # pid listing were counted as systemSlotUncovered=26.
+        self.scan_fixture()
+        for pid, name in (("103", b"com.example.gone\0"), ("104", b"com.example.gone:push\0")):
+            (self.proc / pid).mkdir()
+            (self.proc / pid / "cmdline").write_bytes(name)  # listed, but maps already gone (ENOENT)
+        (self.proc / "105").mkdir()
+        (self.proc / "105" / "cmdline").write_bytes(b"com.example.locked\0")
+        (self.proc / "105" / "maps").mkdir()  # live, same program, maps unreadable (EISDIR)
+        result = locator.scan(module=self.module, proc_root=self.proc, host_root=self.host,
+                              theme_dir=self.theme, groups=policy.parse_groups(""),
+                              weight_probe=lambda _p: False, rom="hyperos")
+        by_package = {item["package"]: item for item in result["items"]}
+        self.assertNotIn("com.example.gone", by_package)
+        self.assertEqual("unreadable", by_package["com.example.locked"]["verdict"])
+        self.assertIn("EISDIR", by_package["com.example.locked"]["findings"][0]["detail"])
+        self.assertEqual((4, 1, 2, 1), (result["scanned"], result["covered"], result["exited"],
+                                        result["unreadable"]))
+        # aod (group off) + hidden are slot misses; the unreadable one is not.
+        self.assertEqual((0, 2), (result["appBuiltinOnly"], result["systemSlotUncovered"]))
+        gone = locator.locate("com.example.gone", "103", module=self.module, proc_root=self.proc,
+                              host_root=self.host, theme_dir=self.theme, weight_probe=lambda _p: False,
+                              rom="hyperos")
+        self.assertEqual("exited", gone["verdict"])
+
+    def test_webview_probes_cover_cjk_collections_and_rom_slots(self):
+        fonts = self.module / ".luoshu-payload/system/fonts"
+        for name in ("Roboto-Regular.ttf", "NotoSansCJK-Regular.ttc", "NotoSerifCJK-Regular.ttc",
+                     "SysSans-Hans-Regular.ttf", "SysSans-En-Regular.ttf"):
+            (fonts / name).write_bytes(name.encode() * 50)
+        payload = locator.audit.PayloadIndex(self.module)
+        hyperos = locator.webview_probes(payload, "hyperos")
+        self.assertEqual(["/system/fonts/MiSansVF.ttf", "/system/fonts/Roboto-Regular.ttf",
+                          "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSerifCJK-Regular.ttc"], hyperos)
+        coloros = locator.webview_probes(payload, "coloros")
+        self.assertEqual(["/system/fonts/MiSansVF.ttf", "/system/fonts/Roboto-Regular.ttf",
+                          "/system/fonts/SysSans-Hans-Regular.ttf", "/system/fonts/SysSans-En-Regular.ttf",
+                          "/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSerifCJK-Regular.ttc"], coloros)
+        # Only slots the payload replaces are probed (no SysSans-Hant here).
+        self.assertNotIn("/system/fonts/SysSans-Hant-Regular.ttf", coloros)
+        # The renderer sees LuoShu's CJK collection through its own root.
+        (self.proc / "300" / "root/system/fonts").mkdir(parents=True)
+        os.link(fonts / "NotoSansCJK-Regular.ttc", self.proc / "300" / "root/system/fonts/NotoSansCJK-Regular.ttc")
+        (self.proc / "300" / "cmdline").write_bytes(b"webview_zygote\0")
+        rows = locator.webview_visibility(self.module, payload, self.proc, self.host, "coloros")
+        self.assertEqual(coloros, rows[0]["probes"])
+        self.assertEqual(["/system/fonts/NotoSansCJK-Regular.ttc"], rows[0]["luoshuVisible"])
+
     def test_scan_cli_emits_json(self):
         self.scan_fixture()
         out = io.StringIO()
@@ -723,6 +772,26 @@ class CoverageExportTest(LocatorTest):
         self.assertEqual(["/system/fonts/MiSansVF.ttf"],
                          sorted(locator.metric_slots({"slots": [{"slot": "/system/fonts/MiSansVF.ttf"}]})))
 
+    def test_export_counts_unreadable_apart_and_drops_exited(self):
+        original = locator.running_app_processes
+        def listed(proc_root=Path("/proc"), limit=96):
+            (self.proc / "105").mkdir(exist_ok=True)
+            (self.proc / "105" / "cmdline").write_bytes(b"com.example.locked\0")
+            (self.proc / "105" / "maps").mkdir(exist_ok=True)
+            # 106 was listed, then exited before its maps were read.
+            return original(proc_root, limit) + [("106", "com.example.gone")]
+        locator.running_app_processes = listed
+        try:
+            data = self._export({"slots": {"/system/fonts/MiSansVF.ttf": {}}})
+        finally:
+            locator.running_app_processes = original
+        self.assertEqual((1, 1), (data["counts"]["unreadable"], data["counts"]["exited"]))
+        self.assertEqual((1, 2, 1), (data["scan"]["unreadable"], data["scan"]["systemSlotUncovered"],
+                                     data["scan"]["exited"]))
+        processes = [p for group in data["issues"] for p in group["processes"]]
+        self.assertIn("com.example.locked", processes)
+        self.assertNotIn("com.example.gone", processes)
+
     def test_export_survives_a_broken_section(self):
         original = locator.webview_visibility
         locator.webview_visibility = lambda *a, **k: (_ for _ in ()).throw(TypeError("boom /sdcard/x"))
@@ -805,6 +874,68 @@ class CoverageExportTest(LocatorTest):
         self.assertEqual(435000, steps[2]["suspendedMs"])
         self.assertEqual("/system/fonts/NotoSansCJK-Regular.ttc", steps[2]["slot"])
         self.assertNotIn("slot", steps[3])  # only system slot paths are exported
+
+    def test_coloros_flipfont_symlink_slots_count_as_luoshu(self):
+        # Device export 2026-10-22 (ColorOS): /system/fonts/SysFont-*.ttf are flip
+        # font symlinks to SysSans-*; visible dev:ino equals the SysSans-En/Hans
+        # LuoShu payload, yet the slot was "stock" because the SysFont-* payload
+        # file itself has another inode, inflating slotsNotLuoShu.
+        base = Path(self.tmp.name) / "coloros"
+        module = base / "module"
+        fonts = module / ".luoshu-payload/system/fonts"
+        fonts.mkdir(parents=True)
+        host_fonts = base / "host/system/fonts"
+        host_fonts.mkdir(parents=True)
+        (fonts / "SysSans-En-Regular.ttf").write_bytes(b"latin" * 100)
+        (fonts / "SysSans-Hans-Regular.ttf").write_bytes(b"cjk" * 300)
+        (fonts / "SysFont-Regular.ttf").write_bytes(b"cjk" * 300)       # own inode
+        (fonts / "SysFont-Hans-Regular.ttf").write_bytes(b"cjk" * 300)
+        (fonts / "Stock-Only.ttf").write_bytes(b"mine" * 10)
+        for name in ("SysSans-En-Regular.ttf", "SysSans-Hans-Regular.ttf"):
+            os.link(fonts / name, host_fonts / name)                    # bind-mounted payload
+        os.symlink("SysSans-En-Regular.ttf", host_fonts / "SysFont-Regular.ttf")
+        os.symlink("SysSans-Hans-Regular.ttf", host_fonts / "SysFont-Hans-Regular.ttf")
+        (host_fonts / "Stock-Only.ttf").write_bytes(b"stock" * 10)
+        payload = locator.audit.PayloadIndex(module)
+        rows = {row["slot"]: row for row in locator.slot_mounts(module, payload, base / "host")}
+        en = rows["/system/fonts/SysFont-Regular.ttf"]
+        self.assertEqual("luoshu", en["state"])
+        self.assertEqual("/system/fonts/SysSans-En-Regular.ttf", en["via"])
+        self.assertEqual("symlink", en["route"])
+        self.assertNotEqual(en["visible"]["ino"], en["payload"]["ino"])
+        hans = rows["/system/fonts/SysFont-Hans-Regular.ttf"]
+        self.assertEqual(("luoshu", "/system/fonts/SysSans-Hans-Regular.ttf"), (hans["state"], hans["via"]))
+        self.assertEqual("luoshu", rows["/system/fonts/SysSans-En-Regular.ttf"]["state"])
+        self.assertNotIn("via", rows["/system/fonts/SysSans-En-Regular.ttf"])
+        self.assertEqual("stock", rows["/system/fonts/Stock-Only.ttf"]["state"])  # real stock still reported
+        self.assertEqual(1, sum(row["state"] in ("stock", "missing") for row in rows.values()))
+
+    def test_last_apply_carries_the_wake_lock_line_of_that_apply(self):
+        # fontswitch.log: v142_weighted_mix.sh writes "[WAKE-LOCK] held for apply
+        # task=<outer>" before the first [MIX-PHASE]; the export dropped it.
+        (self.module / "logs").mkdir(exist_ok=True)
+        (self.module / "logs/fontswitch.log").write_text("\n".join([
+            "[2026-10-22 11:00:00] [WAKE-LOCK] held for apply task=axes-old limit=1800s",
+            "[MIX-PHASE] schema=1 request=r-old outer=axes-old task=axes-old component=prepare phase=prepare "
+            "unit=cjk weight=fixed event=begin uptimeSeconds=1.0",
+            "[2026-10-22 11:40:00] [WAKE-LOCK] held for apply task=axes-new limit=1800s",
+            "[2026-10-22 11:40:00] unrelated line",
+            "[MIX-PHASE] schema=1 request=r-new outer=axes-new task=axes-new component=prepare phase=prepare "
+            "unit=cjk weight=fixed event=begin uptimeSeconds=10.0",
+            "[MIX-PHASE] schema=1 request=r-new outer=axes-new task=axes-new component=prepare phase=prepare "
+            "unit=cjk weight=fixed event=end uptimeSeconds=11.0 elapsedMs=1000 result=ok",
+            "[2026-10-22 11:41:00] [WAKE-LOCK] safe_switch held for apply task=safe-1 limit=1800s",
+        ]) + "\n")
+        last = locator.last_apply_log(self.module, str)
+        self.assertTrue(last["found"])
+        self.assertEqual(2, len(last["wakeLock"]))
+        self.assertIn("task=axes-new", last["wakeLock"][0])
+        self.assertIn("safe_switch", last["wakeLock"][1])
+        self.assertFalse(any("axes-old" in line for line in last["wakeLock"]))
+        (self.module / "logs/fontswitch.log").write_text(
+            "[MIX-PHASE] schema=1 request=r1 component=prepare phase=prepare unit=cjk weight=fixed "
+            "event=begin uptimeSeconds=1.0\n")
+        self.assertEqual([], locator.last_apply_log(self.module, str)["wakeLock"])
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

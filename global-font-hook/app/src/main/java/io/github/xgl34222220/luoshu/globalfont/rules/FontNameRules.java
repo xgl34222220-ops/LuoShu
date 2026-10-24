@@ -67,6 +67,20 @@ public final class FontNameRules {
             "baskerville", "times", "caslon", "charter", "bodoni", "didot", "crimson", "literata",
             "newsreader", "minion", "palatino", "cambria", "sabon", "songti", "mingti", "fangsong"};
 
+    /**
+     * Preserve tokens whose only meaning is "fixed-pitch / programming face". They are skipped when
+     * the mono switch is on and the name is a code monospace family; every other token still keeps.
+     */
+    private static final Set<String> CODE_ONLY_TOKENS = Collections.unmodifiableSet(new LinkedHashSet<>(
+            java.util.Arrays.asList("mono", "monospace", "consol", "courier", "menlo", "firacode",
+                    "sourcecode", "jetbrains", "cascadia", "inconsolata", "hack-", "ibmplexmono", "sfmono",
+                    "code")));
+
+    /** Programming families recognised without a "mono" word (separators removed before matching). */
+    private static final String[] CODE_FAMILIES = {
+            "consolas", "courier", "menlo", "firacode", "sourcecode", "jetbrainsmono", "cascadia",
+            "inconsolata", "ibmplexmono", "sfmono", "dejavusansmono"};
+
     private static boolean containsAny(String lower, String[] tokens) {
         for (String t : tokens) if (lower.contains(t)) return true;
         return false;
@@ -77,17 +91,23 @@ public final class FontNameRules {
 
     /** Classify one name: a path, an asset name, a resource entry name, or a family name. */
     public static FontDecision classify(String rawName) {
+        return classify(rawName, false);
+    }
+
+    /**
+     * Classify with the "monospace to system monospace" switch. Off: identical to
+     * {@link #classify(String)}. On: a programming monospace name with no other preserve reason is
+     * {@link FontDecision#REPLACE_MONO}; all other verdicts are unchanged.
+     */
+    public static FontDecision classify(String rawName, boolean monoSlot) {
         if (rawName == null) return FontDecision.UNKNOWN;
         String base = baseName(rawName);
         if (base.isEmpty()) return FontDecision.UNKNOWN;
         String lower = base.toLowerCase(Locale.ROOT);
-        for (int i = 0, n = PRESERVE_SUBSTRINGS.size(); i < n; i++) {
-            if (lower.contains(PRESERVE_SUBSTRINGS.get(i))) return FontDecision.KEEP;
-        }
         List<String> words = words(base);
-        for (int i = 0, n = words.size(); i < n; i++) {
-            if (PRESERVE_WORDS.contains(words.get(i))) return FontDecision.KEEP;
-        }
+        boolean code = monoSlot && codeMonospace(words);
+        if (hasPreserveToken(lower, words, code)) return FontDecision.KEEP;
+        if (code) return FontDecision.REPLACE_MONO;
         if (looksObfuscated(lower)) return FontDecision.UNKNOWN;
         if (lower.contains("serif") ? !lower.contains("sans") : containsAny(lower, SERIF_FAMILIES)) {
             return FontDecision.REPLACE_SERIF;
@@ -95,20 +115,57 @@ public final class FontNameRules {
         return FontDecision.REPLACE_SANS;
     }
 
+    private static boolean hasPreserveToken(String lower, List<String> words, boolean skipCodeTokens) {
+        for (int i = 0, n = PRESERVE_SUBSTRINGS.size(); i < n; i++) {
+            String t = PRESERVE_SUBSTRINGS.get(i);
+            if (lower.contains(t) && !(skipCodeTokens && CODE_ONLY_TOKENS.contains(t))) return true;
+        }
+        for (int i = 0, n = words.size(); i < n; i++) {
+            String w = words.get(i);
+            if (PRESERVE_WORDS.contains(w) && !(skipCodeTokens && CODE_ONLY_TOKENS.contains(w))) return true;
+        }
+        return false;
+    }
+
     /**
      * Combine several names that describe the same face (file name + family name). Any KEEP wins,
      * then any concrete replacement, otherwise UNKNOWN.
      */
     public static FontDecision classifyAll(String... names) {
+        return classifyAll(false, names);
+    }
+
+    /** As {@link #classifyAll(String...)}; precedence KEEP, REPLACE_MONO, REPLACE_SERIF, REPLACE_SANS. */
+    public static FontDecision classifyAll(boolean monoSlot, String... names) {
+        int bestRank = 0;
         FontDecision best = FontDecision.UNKNOWN;
         for (String name : names) {
-            FontDecision d = classify(name);
+            FontDecision d = classify(name, monoSlot);
             if (d == FontDecision.KEEP) return d;
-            if (d == FontDecision.REPLACE_SERIF || (d == FontDecision.REPLACE_SANS && best == FontDecision.UNKNOWN)) {
+            int rank = d == FontDecision.REPLACE_MONO ? 3 : d == FontDecision.REPLACE_SERIF ? 2
+                    : d == FontDecision.REPLACE_SANS ? 1 : 0;
+            if (rank > bestRank) {
+                bestRank = rank;
                 best = d;
             }
         }
         return best;
+    }
+
+    /** True for programming monospace family names ("Roboto Mono", "Consolas"), false for "Monoton". */
+    public static boolean isCodeMonospace(String rawName) {
+        if (rawName == null) return false;
+        String base = baseName(rawName);
+        return !base.isEmpty() && codeMonospace(words(base));
+    }
+
+    private static boolean codeMonospace(List<String> words) {
+        StringBuilder joined = new StringBuilder();
+        for (String w : words) {
+            if (w.endsWith("mono") || w.equals("monospace") || w.equals("monospaced") || w.equals("hack")) return true;
+            joined.append(w);
+        }
+        return containsAny(joined.toString(), CODE_FAMILIES);
     }
 
     /** Strip directories, query strings and font extensions. */

@@ -25,10 +25,19 @@ class ApkMetadataTest(unittest.TestCase):
         self.code = int(props['versionCode']) * 100 + 1
         self.zip = self.root / 'dist' / ('LuoShu-' + props['version'] + '.zip')
         for name in ('scripts/check.sh', 'scripts/prune_python_runtime.sh', 'customize.sh',
-                     'common/helper.sh', 'common/python/bin/luoshu-python', 'system/bin/luoshud'):
+                     'common/helper.sh', 'common/python/bin/luoshu-python',
+                     'common/python/bin/luoshu-woff2-decode', 'system/bin/luoshud'):
             path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('#!/bin/sh\nexit 0\n')
         (self.root / 'scripts/module_payload_manifest.txt').write_text('module.prop\ncustomize.sh\ncommon\nsystem\n')
+        # Prebuilt Zygisk library tree (the real one is built with the NDK by build_zygisk.sh).
+        self.zygisk = Path(self.temp.name) / 'zygisk-prebuilt'
+        for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'):
+            (self.zygisk / abi).mkdir(parents=True)
+            (self.zygisk / abi / 'libluoshu_native_font.so').write_bytes(b'so-' + abi.encode())
+            (self.zygisk / abi / 'lsnf-config').write_bytes(b'tool-' + abi.encode())
+        for name in ('zygisk-native-font/defaults/exclude.list', 'zygisk-native-font/third_party/zygisk/LICENSE'):
+            path = self.root / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text('x\n')
         for name in ('sh', 'dirname', 'basename', 'sed', 'head', 'python3', 'rm', 'mkdir', 'cp',
                      'sha256sum', 'awk', 'chmod', 'find', 'grep', 'zip', 'unzip', 'wc', 'tr'):
             command = shutil.which(name); self.assertIsNotNone(command)
@@ -51,7 +60,8 @@ esac
     def build(self, *, package='', code='', fail=''):
         env = {key: value for key, value in os.environ.items() if not key.startswith('LUOSHU_')}
         env.update(PATH=str(self.bin), LUOSHU_APP_APK=str(self.apk), LUOSHU_APP_PACKAGE=package,
-                   LUOSHU_APP_VERSION_CODE=str(code), MOCK_FAIL=fail, MOCK_CALLS=str(self.calls))
+                   LUOSHU_APP_VERSION_CODE=str(code), MOCK_FAIL=fail, MOCK_CALLS=str(self.calls),
+                   LUOSHU_ZYGISK_DIR=str(self.zygisk))
         return subprocess.run([str(self.bin / 'sh'), str(self.root / 'scripts/build.sh')], cwd=self.root,
                               env=env, capture_output=True, text=True, timeout=15)
 
@@ -94,6 +104,15 @@ esac
             self.assertEqual(archive.read('bundled/LuoShu-App.apk'), self.apk.read_bytes())
             props = archive.read('bundled/app.prop').decode()
             self.assertIn(f'package={PACKAGE}\n', props); self.assertIn(f'versionCode={self.code}\n', props)
+            for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'):
+                self.assertEqual(archive.read(f'zygisk/{abi}.so'), b'so-' + abi.encode())
+                self.assertEqual(archive.read(f'zygisk/bin/{abi}/lsnf-config'), b'tool-' + abi.encode())
+            self.assertIn('zygisk/defaults/exclude.list', archive.namelist())
+            self.assertIn('licenses/zygisk.hpp.txt', archive.namelist())
+
+    def test_missing_zygisk_library_is_rejected(self):
+        (self.zygisk / 'x86' / 'libluoshu_native_font.so').unlink()
+        self.reject(self.build(package=PACKAGE, code=self.code), 71)
 
     def test_no_analyzer_supports_explicit_metadata(self):
         self.analyzer.unlink()

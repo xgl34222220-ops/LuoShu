@@ -67,6 +67,22 @@ class MapperTest(unittest.TestCase):
         self.assertEqual(sorted(set(hyperos['legacyReplaced']) - set(hyperos['replaced'])),
                          ['MiSansL3.otf'])
 
+    def test_oem_private_slots_replaced_and_protected_kept(self):
+        data = gate.load()
+        origin = data['roms']['originos']
+        for name in ('VivoFont.ttf', 'DroidSansFallbackBBK.ttf', 'vivoSansVF.ttf'):
+            self.assertIn(name, origin['replaced'])
+        flyme = data['roms']['flyme']
+        self.assertIn('FlymeSans-Regular.ttf', flyme['replaced'])
+        for rom in ('originos', 'flyme'):
+            entry = data['roms'][rom]
+            for name in ('DroidSansMono.ttf', 'NotoColorEmoji.ttf'):
+                self.assertNotIn(name, entry['replaced'], (rom, name))
+            # Live mapper agrees with the baseline.
+            self.assertEqual(gate.replaced_names(rom, entry['fixture']), entry['replaced'])
+        # Unverified Flyme SysSans names are diagnostic-only.
+        self.assertNotIn('SysSans-Hans-Regular.ttf', flyme['replaced'])
+
     def test_reintroduced_mono_regression_is_caught(self):
         # Re-create the #290 behaviour (every *mono* kept stock) in a copy of the mapper.
         shell = ROOT / 'common/legacy_v14_4/hyperos_full_coverage.sh'
@@ -84,6 +100,29 @@ class MapperTest(unittest.TestCase):
         for name in ('DroidSansMono.ttf', 'RobotoMono-Regular.ttf', 'NotoSansMono-Regular.ttf'):
             self.assertIn(name, joined)
 
+
+    def test_slot_compat_keeps_overlay_and_protected_slots(self):
+        fixture = gate.load()['roms']['coloros']['fixture']
+        self.assertEqual(gate.slot_compat_errors(fixture), [])
+        admitted = gate.slot_compat_admitted(['OplusOSUI-Regular.ttf', 'SysFont-Bold.ttf',
+                                              'OplusOSUI-Mono-Regular.ttf', 'ColorOSUI-Clock-Regular.ttf',
+                                              'OplusOSUI-Icon.ttf', 'Roboto-Regular.ttf'])
+        self.assertEqual(admitted, ['OplusOSUI-Regular.ttf', 'SysFont-Bold.ttf'])
+
+    def test_slot_compat_protected_regression_is_caught(self):
+        shell = ROOT / gate.SLOT_COMPAT
+        text = shell.read_text(encoding='utf-8')
+        marker = "    _lcsso_lower=$(printf '%s' \"$1\" | tr '[:upper:]' '[:lower:]')\n"
+        self.assertIn(marker, text)
+        patched = text.replace(marker, marker + '    return 0\n', 1)
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / 'common').mkdir()
+            (root / gate.SLOT_COMPAT).write_text(patched, encoding='utf-8')
+            for rel in ('common/coloros_global.sh', 'common/coloros_flipfont.sh'):
+                (root / rel).write_text((ROOT / rel).read_text(encoding='utf-8'), encoding='utf-8')
+            errors = gate.slot_compat_errors(['SysFont-Regular.ttf'], mapper_root=root)
+        self.assertTrue(any('ColorOSUI-Clock-Regular.ttf' in line for line in errors), errors)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -31,6 +31,20 @@
 
 洛书修改了示例的包名、配色、分层、尺寸和导航状态接入；底层库及原示例的许可证与署名不变。
 
+## Google WOFF2 与 Brotli
+
+- 用途：导入 WOFF2 网页字体时在 Android ARM64 设备上离线解码为 SFNT/TTC，再交给洛书自己的字体校验。设备端 Python 运行时只带纯 Python FontTools、没有 Brotli 扩展，因此单独打包静态解码器 `common/python/bin/luoshu-woff2-decode`。WOFF 1.0 由洛书自写的 `common/font_web_convert.py` 按 W3C WOFF 1.0 规范用 zlib 解包，不使用本节代码。
+- 来源：[`google/woff2`](https://github.com/google/woff2) 固定提交 `fb9c3379f2605b10f3e8f1d9636664ab5576775c`；[`google/brotli`](https://github.com/google/brotli) 固定提交 `ed738e842d2fbdf2d6459e39267a633c4a9b2f5d`（v1.1.0）。源码包构建时按 sha256 校验（`scripts/build_woff2_decoder.sh`），只编译两者的解码部分；入口 `tools/woff2/luoshu_woff2_decode.cc` 为洛书自写（GPL-3.0-only）。
+- 许可证：两者均为 MIT License。
+- 完整文本：[`licenses/WOFF2-LICENSE.txt`](licenses/WOFF2-LICENSE.txt) 与 [`licenses/Brotli-LICENSE.txt`](licenses/Brotli-LICENSE.txt)（构建脚本会与上游原文逐字节比对）。
+
+## zygisk.hpp（Zygisk 模块公开 API 头文件）
+
+- 用途：主模块内置“全局字体增强（Zygisk）”库（源码 `zygisk-native-font/`，产物 `zygisk/<abi>.so`，默认关闭）编译时使用的 Zygisk 公开接口声明；许可全文随模块 ZIP 附于 `licenses/zygisk.hpp.txt`。
+- 来源：[`topjohnwu/zygisk-module-sample`](https://github.com/topjohnwu/zygisk-module-sample) `module/jni/zygisk.hpp`，原样保留、未修改。
+- 许可证：文件头所附的 ISC 风格许可（Copyright 2022-2023 John "topjohnwu" Wu）。
+- 完整文本：[`zygisk-native-font/third_party/zygisk/LICENSE`](zygisk-native-font/third_party/zygisk/LICENSE)。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：

@@ -76,6 +76,15 @@ mark_interrupted_task() {
     } >"$_mit_tmp" 2>/dev/null && mv -f "$_mit_tmp" "$TASK_FILE" 2>/dev/null
 }
 
+# Cheap liveness hint only (kill -0 on the recorded pid). A positive answer
+# may be PID reuse, so it never proves the engine is still running; a negative
+# one is always confirmed by the full supervisor identity probe.
+_monitor_pid_hint() {
+    _mph_pid=$(luoshu_pid_value "$1" 2>/dev/null)
+    case "$_mph_pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_mph_pid" 2>/dev/null
+}
+
 monitor_task() {
     _wanted="$1"
     _monitor_limit="${LUOSHU_MIX_MONITOR_TIMEOUT:-1200}"
@@ -85,15 +94,36 @@ monitor_task() {
     if luoshu_wake_lock_acquire mix_monitor "$((_monitor_limit + 15))"; then
         trap 'luoshu_wake_lock_release mix_monitor' EXIT
     fi
-    _loops=0
-    while [ "$_loops" -lt "$_monitor_limit" ]; do
+    # 0.2 s ticks; the budget stays _monitor_limit seconds of awake polling.
+    # The engine's end is noticed through the cheap kill -0 hint within one
+    # tick (the old 1 s poll added ~0.5 s before every commit). While the
+    # hint shows the engine running, the full identity probe (one Python
+    # start) runs every 5 s only as a PID-reuse guard instead of every second,
+    # so it no longer competes with the composite build it is waiting for.
+    _ticks=0
+    _hint_trusted=true
+    while [ $((_ticks / 5)) -lt "$_monitor_limit" ]; do
+        _hint_gone=false
+        if [ "$_hint_trusted" = true ] && ! _monitor_pid_hint "$WORKER_PID"; then
+            _hint_gone=true
+        fi
+        if [ "$_hint_gone" = false ] && [ $((_ticks % 5)) -ne 0 ]; then
+            sleep .2 2>/dev/null || sleep 1
+            _ticks=$((_ticks + 1))
+            continue
+        fi
         _task="$(read_task_value task)"
         _state="$(read_task_value state)"
         # The shared task record has moved on. Keeping this monitor alive for
         # another twelve minutes only polls the next task and can never commit
         # the superseded one.
         [ -z "$_task" ] || [ "$_task" = "$_wanted" ] || exit 0
-        if [ "$_task" = "$_wanted" ] && ! luoshu_task_pid_alive "$WORKER_PID" "$_wanted"; then
+        _probe=false
+        if [ "$_hint_gone" = true ] || [ "$_hint_trusted" = false ] || [ $((_ticks % 25)) -eq 0 ]; then
+            _probe=true
+        fi
+        if [ "$_task" = "$_wanted" ] && [ "$_probe" = true ] && \
+           ! luoshu_task_pid_alive "$WORKER_PID" "$_wanted"; then
             # A terminal config alone is not cleanup evidence. Wait for the
             # matching supervisor proof, including adopted grandchildren.
             if ! sh "$(luoshu_scope_runner)" cleaned "$WORKER_PID" "$_wanted" >/dev/null 2>&1; then
@@ -128,8 +158,11 @@ monitor_task() {
                     exit 1 ;;
             esac
         fi
-        sleep 1
-        _loops=$((_loops + 1))
+        # A gone hint contradicted by the full probe (unreadable or legacy pid
+        # record): fall back to the old full probe every second, never 5 Hz.
+        [ "$_hint_gone" = false ] || _hint_trusted=false
+        sleep .2 2>/dev/null || sleep 1
+        _ticks=$((_ticks + 1))
     done
     luoshu_stop_task_pid "$WORKER_PID" "$_wanted" >/dev/null 2>&1 || {
         write_finalize_state failed '字体组合超时，进程回收尚未确认'

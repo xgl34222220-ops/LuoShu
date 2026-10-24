@@ -10,7 +10,7 @@ fail() {
 }
 
 # Root-manager entrypoints are the only runtime shell entrypoints allowed at module root.
-for path in customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh action.sh boot-completed.sh late-load.sh; do
+for path in customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh action.sh boot-completed.sh late-load.sh emulated-soft-reboot.sh; do
   [ -f "$ROOT/$path" ] || fail "missing root hook: $path"
 done
 for obsolete in post-fs-data-v4.sh post-mount-v4.sh service_v4.sh; do
@@ -22,6 +22,7 @@ for path in \
   .luoshu-runtime/core/post-fs-data.sh \
   .luoshu-runtime/core/post-mount.sh \
   .luoshu-runtime/core/service.sh \
+  .luoshu-runtime/core/emulated-soft-reboot.sh \
   .luoshu-runtime/compat/v227/customize.sh \
   .luoshu-runtime/compat/v227/post-fs-data.sh \
   .luoshu-runtime/compat/v227/uninstall.sh; do
@@ -60,14 +61,25 @@ done
 
 # All moved shell cores must remain syntactically valid.
 for path in \
-  customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh late-load.sh \
+  customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh late-load.sh emulated-soft-reboot.sh \
   .luoshu-runtime/core/post-fs-data.sh \
   .luoshu-runtime/core/post-mount.sh \
   .luoshu-runtime/core/service.sh \
+  .luoshu-runtime/core/emulated-soft-reboot.sh \
   .luoshu-runtime/compat/v227/customize.sh \
   .luoshu-runtime/compat/v227/post-fs-data.sh \
   .luoshu-runtime/compat/v227/uninstall.sh; do
   sh -n "$ROOT/$path" || fail "shell syntax: $path"
 done
+
+# 全局字体增强：主模块只有一个 Zygisk 入口（zygisk/<abi>.so，四个 ABI），由 build.sh 从同一份
+# 源码构建；不再有独立伴随模块。Hook 只在开关开启时由 Zygisk 库安装，默认关闭。
+grep -qx 'common/native_font.sh' "$MANIFEST" || fail "native font config layer not shipped"
+! grep -q '^zygisk' "$MANIFEST" || fail "zygisk payload must be built, never copied from the repository"
+grep -q 'build_zygisk.sh' "$ROOT/scripts/build.sh" || fail "build.sh does not build the Zygisk library"
+grep -q "ZYGISK_ABIS='arm64-v8a armeabi-v7a x86_64 x86'" "$ROOT/scripts/build.sh" || fail "Zygisk ABI list changed"
+[ ! -e "$ROOT/zygisk-native-font/module" ] || fail "standalone Zygisk module packaging returned"
+[ "$(grep -rl 'REGISTER_ZYGISK_MODULE(' "$ROOT/zygisk-native-font/src" | wc -l | tr -d ' ')" = 1 ] || fail "exactly one Zygisk entry expected"
+sh -n "$ROOT/common/native_font.sh" || fail "shell syntax: common/native_font.sh"
 
 printf 'Module layout cleanup checks passed.\n'

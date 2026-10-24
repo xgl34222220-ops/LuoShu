@@ -96,6 +96,33 @@ internal data class MaintenanceState(
     val error: String = "",
 )
 
+/** ColorOS 字体槽兼容模式（默认关闭）的开关状态，来自 luoshu-health slot-compat。 */
+internal data class SlotCompatState(
+    val loaded: Boolean = false,
+    val enabled: Boolean = false,
+    val coloros: Boolean = false,
+    val writtenSlots: Int = 0,
+    val busy: Boolean = false,
+    val message: String = "",
+    val error: String = "",
+)
+
+internal fun parseSlotCompatStatus(raw: String): SlotCompatState {
+    val values = raw.lineSequence()
+        .map { it.trim() }
+        .filter { '=' in it }
+        .associate { it.substringBefore('=') to it.substringAfter('=') }
+    val status = values["status"].orEmpty()
+    return SlotCompatState(
+        loaded = values.containsKey("enabled"),
+        enabled = values.bool("enabled"),
+        coloros = values.bool("coloros"),
+        writtenSlots = values.int("writtenSlots"),
+        message = if (status == "fallback") "写入专有槽失败，已自动回退为原厂槽位；常规替换不受影响" else "",
+        error = if (status == "error") values["message"].orEmpty().ifBlank { "设置失败" } else "",
+    )
+}
+
 internal data class OnlineUpdateInfo(
     val loading: Boolean = false,
     val error: String = "",
@@ -125,6 +152,9 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
         private set
 
     var updateChannel by mutableStateOf(UpdateChannel.STABLE)
+        private set
+
+    var slotCompat by mutableStateOf(SlotCompatState())
         private set
 
     var updateInfo by mutableStateOf(OnlineUpdateInfo())
@@ -164,6 +194,27 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
                     error = result.stderr.ifBlank { "无法运行洛书系统体检" },
                 )
             }
+        }
+    }
+
+    fun refreshSlotCompat() {
+        if (slotCompat.busy) return
+        viewModelScope.launch {
+            val result = RootShell.exec("sh ${RootShell.quote(healthScript)} slot-compat", timeoutMs = 15_000L)
+            if (result.code == 0) slotCompat = parseSlotCompatStatus(result.stdout)
+        }
+    }
+
+    fun setSlotCompat(enabled: Boolean) {
+        if (slotCompat.busy) return
+        slotCompat = slotCompat.copy(busy = true, message = "", error = "")
+        viewModelScope.launch {
+            val result = RootShell.exec(
+                "sh ${RootShell.quote(healthScript)} slot-compat ${if (enabled) 1 else 0}",
+                timeoutMs = 60_000L,
+            )
+            slotCompat = if (result.code == 0) parseSlotCompatStatus(result.stdout)
+            else slotCompat.copy(busy = false, error = result.stderr.ifBlank { result.stdout.ifBlank { "设置失败" } })
         }
     }
 

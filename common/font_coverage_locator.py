@@ -45,6 +45,7 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import device_font_process_audit as audit  # noqa: E402
+import umount_visibility  # noqa: E402
 
 try:
     import hyperos_physical_policy as policy  # noqa: E402
@@ -92,10 +93,10 @@ GUIDE = {
         "KernelSU：在管理器 App Profile 里关闭该应用的“卸载模块”，并检查“默认卸载模块”；Magisk：把该应用移出 DenyList。然后强行停止该应用再打开。"),
     "app-embedded": (
         "该应用使用自带字体或独立网页内核",
-        "微信、QQ、支付宝等内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内，洛书无法替换（主模块不做 Hook）。"),
+        "微信、QQ、支付宝等内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内，系统层无法替换（主模块默认不做 Hook；可在设置中开启“全局字体增强（Zygisk）”尝试替换 App 自带正文字体）。"),
     "app-body-font": (
         "App 内置正文字体（系统层无法替换）",
-        "这是应用自己打包的英文/数字正文字体，不是系统字体槽未覆盖；洛书主模块不做 Hook，无法替换。中文等其余文字仍使用洛书字体。"),
+        "这是应用自己打包的英文/数字正文字体，不是系统字体槽未覆盖；系统层无法替换；主模块默认不做 Hook，可在设置中开启“全局字体增强（Zygisk）”后重启再看。中文等其余文字仍使用洛书字体。"),
     "link-switched": (
         "进程在洛书挂载前加载了字体，或开机后系统切换了字体链接",
         "强行停止该应用（系统界面可重启）后再看；若每次开机都出现，请导出诊断反馈。"),
@@ -114,6 +115,9 @@ GUIDE = {
     "unreadable": (
         "无法读取该进程的字体映射",
         "请确认已授予洛书 Root 权限后重试。"),
+    "exited": (
+        "该进程在检测时已退出",
+        "重新打开该应用并保持在后台，再回到洛书重新检测。"),
     "collection-kept": (
         "本机 CJK 字体集合本次未能替换，已保留原厂",
         "原因见详情；重新应用字体会再次尝试。若反复出现，请导出完整诊断反馈。"),
@@ -266,6 +270,26 @@ def default_probes(payload: audit.PayloadIndex) -> list[str]:
         return picks
     return ["/" + rel for rel in sorted(payload.by_rel)
             if rel.count("/") == 2 and "/fonts/" in "/" + rel][:4]
+
+
+# WebView renderers draw CJK from the system collections and, on ColorOS, from
+# SysSans; Roboto alone does not show whether the CJK text is LuoShu's.
+WEBVIEW_EXTRA_PROBES = ("/system/fonts/NotoSansCJK-Regular.ttc", "/system/fonts/NotoSerifCJK-Regular.ttc")
+WEBVIEW_ROM_PROBES = {
+    "coloros": ("/system/fonts/SysSans-Hans-Regular.ttf", "/system/fonts/SysSans-Hant-Regular.ttf",
+                "/system/fonts/SysSans-En-Regular.ttf"),
+}
+WEBVIEW_PROBES_MAX = 10
+
+
+def webview_probes(payload: audit.PayloadIndex, rom: str | None = None) -> list[str]:
+    """default_probes plus the CJK collections and the ROM's body slots, each
+    only when the payload actually replaces it."""
+    picks = list(default_probes(payload))
+    for path in (*WEBVIEW_ROM_PROBES.get(rom or "", ()), *WEBVIEW_EXTRA_PROBES):
+        if path not in picks and payload.slot_for(path) is not None:
+            picks.append(path)
+    return picks[:WEBVIEW_PROBES_MAX]
 
 
 def static_on_variable_slot(payload_fonts: Path) -> bool:
@@ -716,8 +740,14 @@ def locate(package: str, pid: str, *, module: Path | None, proc_root: Path = Pat
         findings.insert(0, finding("no-payload", rom=rom))
         result["verdict"] = "no-payload"
         return result
+    if state == "exited":
+        # Exited between listing and reading: not a coverage problem.
+        findings.insert(0, finding("exited", rom=rom))
+        result["verdict"] = "exited"
+        return result
     if state != "ok":
-        findings.insert(0, finding("unreadable", [], state, rom))
+        error = report.get("app.mapsError", "")
+        findings.insert(0, finding("unreadable", [], f"{state}:{error}" if error else state, rom))
         result["verdict"] = "unreadable"
         return result
 
@@ -852,7 +882,7 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
     weight = weight_probe((module / ".luoshu-payload/system/fonts") if module else Path("/nonexistent"))
     judge = StockPolicy(rom, module, audit.PayloadIndex(module), groups, coloros_names=coloros_names)
     items, covered, truncated = [], 0, False
-    app_only = 0
+    app_only = unreadable = exited = 0
     # APK central directories are cheap, but cap their share of the scan.
     apk_deadline = time.monotonic() + max(1.0, min(12.0, budget_s / 4))
     apks = package_apks or PackageApks()
@@ -870,6 +900,10 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
         if result["verdict"] == "no-payload":
             return {"schema": SCAN_SCHEMA, "verdict": "no-payload", "rom": rom, "scanned": 0, "covered": 0,
                     "items": [], "fixes": []}
+        if result["verdict"] == "exited":
+            exited += 1  # gone before its maps were read: neither scanned nor an issue
+            continue
+        unreadable += result["verdict"] == "unreadable"
         # weight-loss is payload-wide (reported once), not a miss in this process.
         found = [f for f in result["findings"] if f["category"] not in ("weight-loss", "covered")]
         if not found:
@@ -890,8 +924,10 @@ def scan(*, module, proc_root=Path("/proc"), host_root=Path("/"), theme_dir=Path
     return {"schema": SCAN_SCHEMA, "verdict": "ok", "rom": rom, "romLabel": ROM_LABELS[rom],
             "scanned": covered + len(items), "covered": covered,
             # Of the processes not covered: only app-shipped body fonts (no
-            # system slot can reach them) vs. a system font slot problem.
-            "appBuiltinOnly": app_only, "systemSlotUncovered": len(items) - app_only,
+            # system slot can reach them), maps truly unreadable (EACCES...:
+            # unknown, not a slot miss) vs. a system font slot problem.
+            "appBuiltinOnly": app_only, "unreadable": unreadable,
+            "systemSlotUncovered": len(items) - app_only - unreadable, "exited": exited,
             "items": items, "fixes": list(dict.fromkeys(k for i in items for k in i["fixes"])),
             "truncated": truncated, "weightLoss": bool(weight)}
 
@@ -935,6 +971,17 @@ def slot_mounts(module: Path | None, payload: "audit.PayloadIndex", host_root: P
                 limit: int = 400) -> list[dict[str, Any]]:
     """Every payload slot: what the host namespace shows at that path vs the module file."""
     rows = []
+    # ColorOS flip-font slots (SysFont-*.ttf) are symlinks to SysSans-*; when
+    # LuoShu replaced SysSans-* the visible SysFont-* file IS a LuoShu payload
+    # file, just not the one staged under the SysFont-* name. Index every
+    # payload file by identity so such slots count as covered (route=...).
+    owners: dict[tuple[Any, Any], str] = {}
+    for rel in sorted(payload.by_rel):
+        if any(part.startswith(".") for part in rel.split("/")):
+            continue
+        ident = _stat_dict(payload.by_rel[rel]["path"])
+        if ident is not None:
+            owners.setdefault((ident["dev"], ident["ino"]), "/" + rel)
     for rel in sorted(payload.by_rel)[:limit]:
         if not rel.lower().endswith(audit.FONT_SUFFIXES) or any(part.startswith(".") for part in rel.split("/")):
             continue
@@ -943,15 +990,20 @@ def slot_mounts(module: Path | None, payload: "audit.PayloadIndex", host_root: P
         visible = host_root / rel
         shown = _stat_dict(visible)
         mine = _stat_dict(slot["path"])
+        extra: dict[str, Any] = {}
         if shown is None:
             state = "missing"
         elif (shown["dev"], shown["ino"]) == ((mine or {}).get("dev"), (mine or {}).get("ino")):
             state = "luoshu"
+        elif (shown["dev"], shown["ino"]) in owners:
+            state = "luoshu"
+            extra["via"] = owners[(shown["dev"], shown["ino"])]
+            extra["route"] = "symlink" if visible.is_symlink() else "shared-inode"
         elif payload.same_content(logical, visible):
             state = "luoshu-content"
         else:
             state = "stock"
-        rows.append({"slot": logical, "state": state, "visible": shown, "payload": mine})
+        rows.append({"slot": logical, "state": state, "visible": shown, "payload": mine, **extra})
     return rows
 
 
@@ -1007,10 +1059,10 @@ def weight_loss_slots(module: Path | None, metrics: dict[str, Any]) -> list[str]
 
 
 def webview_visibility(module: Path | None, payload: "audit.PayloadIndex", proc_root: Path,
-                       host_root: Path) -> list[dict[str, Any]]:
+                       host_root: Path, rom: str | None = None) -> list[dict[str, Any]]:
     """Is the module visible in webview_zygote / WebView sandboxed renderers?"""
     rows = []
-    probes = default_probes(payload)
+    probes = webview_probes(payload, rom)
     try:
         pids = sorted((e.name for e in proc_root.iterdir() if e.name.isdigit()), key=int)
     except OSError:
@@ -1092,6 +1144,28 @@ def stage_steps(window: list[str]) -> list[dict[str, Any]]:
     return steps
 
 
+def wake_lock_lines(raw: list[str], start: int, safe_task: str | None, mix_request: str | None,
+                    lookback: int = 60) -> list[str]:
+    """[WAKE-LOCK] lines of the newest apply. The mix worker logs "held for
+    apply task=<outer>" just before its first [MIX-PHASE] record, so it sits
+    above the window start; match it by the apply's task ids (or a safe_switch
+    mention close above the start) and keep any inside the window."""
+    ids = {value for value in (safe_task, mix_request) if value}
+    for line in raw[start:]:
+        record = _timing_record(line)
+        if record and record[0] == "mix" and record[1].get("request") == mix_request:
+            ids.update(v for v in (record[1].get("task"), record[1].get("outer")) if v)
+    picked = []
+    for index, line in enumerate(raw):
+        if "[WAKE-LOCK]" not in line:
+            continue
+        task = dict(_KV.findall(line.split("[WAKE-LOCK]", 1)[1])).get("task")
+        if index >= start or (task and task in ids) or \
+                (start - lookback <= index < start and "safe_switch" in line):
+            picked.append(line)
+    return picked
+
+
 def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_lines: int = 800) -> dict[str, Any]:
     """The newest font apply in fontswitch.log: every line from its first stage
     marker on (no keyword filter, so stage output and errors stay) plus per-phase
@@ -1141,11 +1215,82 @@ def last_apply_log(module: Path | None, sanitize: Callable[[str], str], max_line
                            "unit": values.get("unit", ""), "weight": values.get("weight", ""),
                            "status": values.get("result", "unknown"), "elapsedMs": int(values["elapsedMs"])})
     lines = window if len(window) <= max_lines else window[:200] + ["…（中间省略）…"] + window[-(max_lines - 201):]
-    return {"found": True, "lineCount": len(window), "truncated": len(window) > max_lines,
-            "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
-            "stageSteps": stage_steps(window),
-            "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
-            or sum(row["elapsedMs"] for row in phases)}
+    wake_lock = wake_lock_lines(raw, start, safe_task, mix_request)
+    result = {"found": True, "wakeLock": [sanitize(line)[:400] for line in wake_lock], "lineCount": len(window), "truncated": len(window) > max_lines,
+              "lines": [sanitize(line)[:400] for line in lines], "phases": phases,
+              "stageSteps": stage_steps(window),
+              "totalPhaseMs": sum(row["elapsedMs"] for row in phases if row["source"] == "safe-switch")
+              or sum(row["elapsedMs"] for row in phases)}
+    result.update(mix_wall_clock(window, mix_request))
+    return result
+
+
+def _mix_interval_uptime(value: str) -> int | None:
+    if re.fullmatch(r"[0-9]{1,10}(?:\.[0-9]{1,3})?", value) is None:
+        return None
+    seconds, _, fraction = value.partition(".")
+    return int(seconds) * 1000 + int((fraction + "000")[:3])
+
+
+def mix_wall_clock(window: list[str], request: str | None) -> dict[str, Any]:
+    """Real elapsed time of one composite apply, from [MIX-PHASE] uptimes.
+
+    The phases do not run one after another: worker/wait_child_cleanup is the
+    outer worker waiting while the commit monitor runs finalize_lock,
+    complete_hyperos/complete_coloros, next_commit and live_mount. Summing
+    every phase (totalPhaseMs) counts that finalize work twice, e.g. 114 s
+    reported for a 71 s apply. wallMs is first begin to last end;
+    waitChildCleanup splits the wait into the finalize work it overlaps and
+    its own tail (the monitor's exit and process-cleanup proof)."""
+    if not request:
+        return {}
+    begins: dict[tuple, int] = {}
+    intervals: list[tuple[str, int, int]] = []
+    for line in window:
+        record = _timing_record(line)
+        if not record or record[0] != "mix" or record[1].get("request") != request:
+            continue
+        values = record[1]
+        at = _mix_interval_uptime(values.get("uptimeSeconds", ""))
+        if at is None:
+            continue
+        key = (values.get("task"), values.get("component"), values.get("phase"), values.get("unit"))
+        if values["event"] == "begin":
+            begins[key] = at
+        elif key in begins:
+            intervals.append((f"{values.get('component', '?')}/{values.get('phase', '?')}", begins.pop(key), at))
+    if not intervals:
+        return {}
+    wall = max(end for _, _, end in intervals) - min(begin for _, begin, _ in intervals)
+    out: dict[str, Any] = {"wallMs": wall,
+                           "wallNote": "wallMs 为本次复合应用首个阶段开始到最后阶段结束的真实耗时；"
+                                       "totalPhaseMs 把与 finalize 并行的 wait_child_cleanup 重复计入"}
+    commits = [end for name, _, end in intervals if name == "fixed-apply/local_commit"]
+    locks = [begin for name, begin, _ in intervals if name == "finalize/finalize_lock"]
+    if commits and locks and locks[-1] >= commits[-1]:
+        # Engine exit + its cleanup proof + the monitor noticing it.
+        out["commitHandoffMs"] = locks[-1] - commits[-1]
+    waits = [(begin, end) for name, begin, end in intervals if name == "worker/wait_child_cleanup"]
+    if waits:
+        begin, end = waits[-1]
+        covered = sorted((max(begin, b), min(end, e)) for name, b, e in intervals
+                         if name.startswith("finalize/") and min(end, e) > max(begin, b))
+        overlap, cursor = 0, begin
+        for b, e in covered:  # union of the overlapped finalize work
+            b = max(b, cursor)
+            if e > b:
+                overlap += e - b
+                cursor = e
+        last_finalize = max((e for name, _, e in intervals if name.startswith("finalize/") and begin <= e <= end),
+                            default=None)
+        out["waitChildCleanup"] = {
+            "elapsedMs": end - begin,
+            "overlapFinalizeMs": overlap,
+            "ownMs": end - begin - overlap,
+            # From the monitor's finalize_release end to the worker noticing it.
+            "tailAfterFinalizeMs": end - last_finalize if last_finalize is not None else None,
+        }
+    return out
 
 
 def read_module_prop(module: Path | None) -> dict[str, str]:
@@ -1203,7 +1348,8 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
            theme_dir: Path = Path("/data/system/theme/fonts"), groups=None,
            weight_probe=static_on_variable_slot, budget_s: float = 60.0, clock=None,
            summary_name: str = "LuoShu-diagnostic-summary.txt", now: str | None = None,
-           coloros_names=None, package_apks=None, apk_reader=None) -> dict[str, Any]:
+           coloros_names=None, package_apks=None, apk_reader=None,
+           umount_facts: str | None = None) -> dict[str, Any]:
     """Write one sanitized LuoShu-coverage-full-<time>.json; return its path/size."""
     import time
     rom = rom if rom in ROMS else detect_rom()
@@ -1266,7 +1412,10 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
         "mountinfo": safe("mountinfo", lambda: [sanitize(line) for line in mountinfo_fonts(proc_root)], []),
         "theme": theme,
         **({"colorosFlipFont": flip} if flip is not None else {}),
-        "webview": safe("webview", lambda: webview_visibility(module, payload, proc_root, host_root), []),
+        "webview": safe("webview", lambda: webview_visibility(module, payload, proc_root, host_root, rom), []),
+        "umountVisibility": safe("umountVisibility", lambda: umount_visibility.build(
+            module=module, proc_root=proc_root, facts_text=umount_facts,
+            probe=umount_visibility.payload_probe(payload, proc_root, host_root, default_probes(payload))), {}),
         "fontswitchLog": safe("fontswitchLog", lambda: recent_log(module, sanitize), []),
         "lastApply": safe("lastApply", lambda: last_apply_log(module, sanitize), {}),
         "rebuildPending": safe("rebuildPending", lambda: rebuild_pending(module), {}),
@@ -1278,6 +1427,8 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
     report["sectionErrors"] = errors
     report["counts"] = {"issues": len(report["issues"]),
                         "processesWithIssues": sum(len(group["processes"]) for group in report["issues"]),
+                        "unreadable": int(scanned.get("unreadable", 0) or 0),
+                        "exited": int(scanned.get("exited", 0) or 0),
                         "slots": len(report["slots"]),
                         "slotsNotLuoShu": sum(row["state"] in ("stock", "missing") for row in report["slots"])}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1286,8 +1437,11 @@ def export(*, module: Path | None, out_dir: Path, rom: str | None = None, device
     temporary.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     os.chmod(temporary, 0o644)
     os.replace(temporary, target)
+    umount = (report.get("umountVisibility") or {}).get("conclusion") or {}
     return {"path": str(target), "bytes": target.stat().st_size, "issues": report["counts"]["issues"],
-            "processesWithIssues": report["counts"]["processesWithIssues"], "rom": rom}
+            "processesWithIssues": report["counts"]["processesWithIssues"], "rom": rom,
+            **({"umount": {key: umount[key] for key in ("summary", "app", "webview") if key in umount}}
+               if umount else {})}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

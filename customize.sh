@@ -200,6 +200,21 @@ if [ -f "$_lc_paths" ] && ! luoshu_runtime_paths_init "$MODPATH"; then
     abort '洛书运行目录迁移未完成，已有文件已保留'
     return 1 2>/dev/null || exit 1
 fi
+# 全局字体增强（Zygisk）：只在 Zygisk 环境下由 zygisk/<abi>.so 读取，默认关闭；
+# 没有 Zygisk 时这些文件不会被加载。安装时只修正权限，不改动用户已有的开关。
+if [ -d "$MODPATH/zygisk" ]; then
+    chmod 0755 "$MODPATH/zygisk" "$MODPATH/zygisk/bin" "$MODPATH/zygisk/defaults" 2>/dev/null || true
+    for _lc_zso in "$MODPATH"/zygisk/*.so; do
+        [ -f "$_lc_zso" ] && chmod 0644 "$_lc_zso" 2>/dev/null
+    done
+    for _lc_ztool in "$MODPATH"/zygisk/bin/*/lsnf-config; do
+        [ -f "$_lc_ztool" ] || continue
+        chmod 0755 "${_lc_ztool%/*}" "$_lc_ztool" 2>/dev/null || true
+    done
+    rm -rf "$MODPATH/zygisk/runtime" 2>/dev/null || true
+    [ ! -f "$MODPATH/common/native_font.sh" ] || chmod 0755 "$MODPATH/common/native_font.sh" 2>/dev/null || true
+    ui_print '• 全局字体增强（Zygisk）已内置，默认关闭，可在洛书设置中开启'
+fi
 ui_print '✓ 私有字体负载已部署'
 ui_print '✓ 洛书将独立完成字体挂载'
 return 0 2>/dev/null || exit 0

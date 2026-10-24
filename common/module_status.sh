@@ -75,6 +75,18 @@ if [ -f "$MODDIR/common/system_ota_guard.sh" ]; then
         "$(sed -n 's/^state=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)" || true
 fi
 
+# ColorOS slot compatibility (opt-in, default off): runs only when the switch is
+# on or OPlus slots are recorded for restore; after boot and after every switch
+# it follows the active font. Boot-loop safe mode always restores.
+if [ -f "$MODDIR/common/coloros_slot_compat.sh" ] && \
+   { grep -qx 'enabled=1' "$MODDIR/config/coloros_slot_compat.conf" 2>/dev/null || \
+     [ -f "${LUOSHU_COLOROS_SLOT_COMPAT_STORE:-/data/adb/luoshu/coloros-slot-compat}/manifest.v1" ]; }; then
+    _lms_slot_suspend=0
+    [ "$SAFE_MODE" = true ] && _lms_slot_suspend=1
+    LUOSHU_COLOROS_SLOT_COMPAT_SUSPEND="$_lms_slot_suspend" MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+        sh "$MODDIR/common/coloros_slot_compat.sh" sync >/dev/null 2>&1 || true
+fi
+
 DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
 if [ "$SAFE_MODE" = true ]; then
     DESCRIPTION="⚠ 卡开机保护：连续启动未完成，已跳过洛书挂载（点“操作”重新启用）；当前选择：$DISPLAY"

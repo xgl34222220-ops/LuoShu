@@ -290,6 +290,85 @@
         "SysSans-Hans-Regular.ttf",
         "SysSans-Hant-Regular.ttf"
       ]
+    },
+    "originos": {
+      "fixture": [
+        "DroidSansFallback.ttf",
+        "DroidSansFallbackBBK.ttf",
+        "DroidSansMono.ttf",
+        "NotoColorEmoji.ttf",
+        "NotoSansCJK-Regular.ttc",
+        "NotoSansSymbols-Regular-Subsetted.ttf",
+        "NotoSerif-Regular.ttf",
+        "Roboto-Bold.ttf",
+        "Roboto-Regular.ttf",
+        "RobotoMono-Regular.ttf",
+        "VivoFont.ttf",
+        "VivoSans-Medium.ttf",
+        "vivoSansThai.ttf",
+        "vivoSansVF.ttf"
+      ],
+      "replaced": [
+        "DroidSansFallbackBBK.ttf",
+        "Roboto-Bold.ttf",
+        "Roboto-Regular.ttf",
+        "VivoFont.ttf",
+        "VivoSans-Medium.ttf",
+        "vivoSansVF.ttf"
+      ],
+      "keptStock": {
+        "DroidSansFallback.ttf": "AOSP 通用回退链，交给 XML 层处理，不做文件直写",
+        "DroidSansMono.ttf": "等宽槽保留原厂（代码/终端对齐）",
+        "NotoColorEmoji.ttf": "Emoji 只允许由可选 Emoji 槽写入",
+        "NotoSansCJK-Regular.ttc": "AOSP CJK 集合，交给 XML 层处理，不做文件直写",
+        "NotoSansSymbols-Regular-Subsetted.ttf": "符号/图标字体保留原厂",
+        "NotoSerif-Regular.ttf": "衬线族保留原厂",
+        "RobotoMono-Regular.ttf": "等宽槽保留原厂（代码/终端对齐）",
+        "vivoSansThai.ttf": "泰文专用字体，保留原厂避免泰文变方块"
+      },
+      "legacyRef": "460f0e5e",
+      "legacyReplaced": [
+        "Roboto-Bold.ttf",
+        "Roboto-Regular.ttf",
+        "VivoSans-Medium.ttf",
+        "vivoSansVF.ttf"
+      ]
+    },
+    "flyme": {
+      "fixture": [
+        "DroidSansFallback.ttf",
+        "DroidSansMono.ttf",
+        "FlymeSans-Bold.ttf",
+        "FlymeSans-Medium.ttf",
+        "FlymeSans-Regular.ttf",
+        "MeizuSans-Bold.ttf",
+        "NotoColorEmoji.ttf",
+        "NotoSerif-Regular.ttf",
+        "Roboto-Regular.ttf",
+        "SysSans-Hans-Regular.ttf"
+      ],
+      "replaced": [
+        "FlymeSans-Bold.ttf",
+        "FlymeSans-Medium.ttf",
+        "FlymeSans-Regular.ttf",
+        "MeizuSans-Bold.ttf",
+        "Roboto-Regular.ttf"
+      ],
+      "keptStock": {
+        "DroidSansFallback.ttf": "AOSP 通用回退链，交给 XML 层处理，不做文件直写",
+        "DroidSansMono.ttf": "等宽槽保留原厂（代码/终端对齐）",
+        "NotoColorEmoji.ttf": "Emoji 只允许由可选 Emoji 槽写入",
+        "NotoSerif-Regular.ttf": "衬线族保留原厂",
+        "SysSans-Hans-Regular.ttf": "Flyme 上该槽位用途未经公开资料核实，仅写诊断不替换"
+      },
+      "legacyRef": "460f0e5e",
+      "legacyReplaced": [
+        "FlymeSans-Bold.ttf",
+        "FlymeSans-Medium.ttf",
+        "FlymeSans-Regular.ttf",
+        "MeizuSans-Bold.ttf",
+        "Roboto-Regular.ttf"
+      ]
     }
   }
 }

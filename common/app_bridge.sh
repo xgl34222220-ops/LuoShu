@@ -484,6 +484,17 @@ case "${1:-status}" in
             coverage_export) MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_coverage_bridge.sh" export ;;
         esac
         ;;
+    native_font_status|native_font_set)
+        # 全局字体增强（Zygisk）：只读写主模块 config/native-font.conf，重启后生效。
+        if [ ! -f "$MODDIR/common/native_font.sh" ]; then
+            printf '{"status":"error","message":"全局字体增强组件不可用，请先安装匹配版本的模块"}\n'
+            exit 0
+        fi
+        case "$1" in
+            native_font_status) MODDIR="$MODDIR" sh "$MODDIR/common/native_font.sh" status ;;
+            native_font_set) MODDIR="$MODDIR" sh "$MODDIR/common/native_font.sh" set "${2:-}" "${3:-}" ;;
+        esac
+        ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac

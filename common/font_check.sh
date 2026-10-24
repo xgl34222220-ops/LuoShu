@@ -140,6 +140,93 @@ font_validate() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# 网页字体导入（WOFF/WOFF2）
+# font_validate 对网页字体始终按原文案拒绝；导入流程改调 font_prepare_import：
+# 网页字体先解包为真实 SFNT，再把解包结果交给 font_validate 做同样的完整检查。
+#   font_prepare_import SRC WORKDIR [purpose]
+#   成功：FONT_PREPARED_PATH=可直接导入的文件（普通字体即 SRC 本身），
+#         FONT_PREPARED_FROM=WOFF/WOFF2（普通字体为空）
+#   失败：FONT_CHECK_ERROR 与 font_validate 的原文案一致，FONT_WEB_REASON=转换失败原因
+# ---------------------------------------------------------------------------
+font_check_run_python() {
+    _fcrp_mod="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _fcrp_root="$_fcrp_mod/common/python"
+    if [ -n "${LUOSHU_IMPORT_PYTHON:-}" ]; then
+        "$LUOSHU_IMPORT_PYTHON" "$@"
+    elif [ -x "$_fcrp_root/bin/luoshu-python" ]; then
+        PYTHONHOME="$_fcrp_root" \
+            PYTHONPATH="$_fcrp_root/lib/python3.14:$_fcrp_root/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$_fcrp_root/lib:$_fcrp_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_fcrp_root/bin/luoshu-python" "$@"
+    else
+        return 127
+    fi
+}
+
+font_json_field() {
+    printf '%s' "$1" | sed -n "s/.*\"$2\":\"\([^\"]*\)\".*/\1/p"
+}
+
+font_unwrap_web() {
+    _fuw_src="$1"; _fuw_dir="$2"; _fuw_stem="${3:-}"
+    FONT_WEB_OUTPUT=""; FONT_WEB_REASON=""
+    _fuw_tool="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_web_convert.py"
+    if [ ! -f "$_fuw_tool" ]; then FONT_WEB_REASON="网页字体转换组件缺失"; return 1; fi
+    mkdir -p "$_fuw_dir" 2>/dev/null || { FONT_WEB_REASON="无法创建转换目录"; return 1; }
+    if [ -n "$_fuw_stem" ]; then
+        _fuw_out=$(font_check_run_python "$_fuw_tool" "$_fuw_src" "$_fuw_dir" --name "$_fuw_stem" 2>/dev/null)
+    else
+        _fuw_out=$(font_check_run_python "$_fuw_tool" "$_fuw_src" "$_fuw_dir" 2>/dev/null)
+    fi
+    _fuw_rc=$?
+    if [ "$_fuw_rc" -eq 127 ] && [ -z "$_fuw_out" ]; then FONT_WEB_REASON="缺少字体处理运行时"; return 1; fi
+    _fuw_out=$(printf '%s\n' "$_fuw_out" | grep '^{' | tail -n 1)
+    case "$_fuw_out" in
+        '{"ok":true'*)
+            FONT_WEB_OUTPUT=$(font_json_field "$_fuw_out" output)
+            [ -n "$FONT_WEB_OUTPUT" ] && [ -f "$FONT_WEB_OUTPUT" ] && return 0
+            FONT_WEB_OUTPUT=""; FONT_WEB_REASON="转换结果缺失"; return 1 ;;
+    esac
+    FONT_WEB_REASON=$(font_json_field "$_fuw_out" error)
+    [ -n "$FONT_WEB_REASON" ] || FONT_WEB_REASON="转换失败"
+    return 1
+}
+
+font_prepare_import() {
+    _fpi_src="$1"; _fpi_dir="$2"; _fpi_purpose="${3:-text}"
+    FONT_PREPARED_PATH=""; FONT_PREPARED_FROM=""; FONT_WEB_REASON=""
+    _fpi_fmt=$(font_detect_format "$_fpi_src" 2>/dev/null)
+    case "$_fpi_fmt" in
+        WOFF|WOFF2) ;;
+        *)
+            font_validate "$_fpi_src" "$_fpi_purpose" || return 1
+            FONT_PREPARED_PATH="$_fpi_src"
+            return 0 ;;
+    esac
+    # 先跑一次 font_validate 拿到原始拒绝文案与大小门槛（过小的文件不尝试转换）。
+    font_validate "$_fpi_src" "$_fpi_purpose" && { FONT_PREPARED_PATH="$_fpi_src"; return 0; }
+    _fpi_reject="$FONT_CHECK_ERROR"
+    case "$FONT_CHECK_FORMAT" in WOFF|WOFF2) ;; *) return 1 ;; esac
+    _fpi_name=$(basename "$_fpi_src"); _fpi_name="${_fpi_name%.*}"
+    if ! font_unwrap_web "$_fpi_src" "$_fpi_dir" "$_fpi_name"; then
+        FONT_CHECK_FORMAT="$_fpi_fmt"
+        FONT_CHECK_ERROR="$_fpi_reject"
+        return 1
+    fi
+    if ! font_validate "$FONT_WEB_OUTPUT" "$_fpi_purpose"; then
+        FONT_WEB_REASON="转换结果未通过校验：$FONT_CHECK_ERROR"
+        rm -f "$FONT_WEB_OUTPUT" 2>/dev/null || true
+        FONT_CHECK_FORMAT="$_fpi_fmt"
+        FONT_CHECK_ERROR="$_fpi_reject"
+        return 1
+    fi
+    FONT_PREPARED_PATH="$FONT_WEB_OUTPUT"
+    FONT_PREPARED_FROM="$_fpi_fmt"
+    FONT_CHECK_WARNING="由 $_fpi_fmt 网页字体解包为 $FONT_CHECK_FORMAT${FONT_CHECK_WARNING:+；$FONT_CHECK_WARNING}"
+    return 0
+}
+
 # 用作“全局字体”前额外检查常用中文、英文、数字和标点。这个门禁只读取
 # cmap，不修改字体；复合字体的中文/英文/数字分槽校验仍由复合引擎负责。
 font_validate_global() {
@@ -181,6 +268,52 @@ font_check_json() {
 }
 
 font_check_cli() {
+    # 网页字体在临时目录解包后检查，结束即删除；普通字体走原逻辑。
+    _fcc_target="${1:-}"; [ "$_fcc_target" = "--json" ] && _fcc_target="${2:-}"
+    _fcc_work=""
+    if [ -n "$_fcc_target" ] && [ -f "$_fcc_target" ]; then
+        case "$(font_detect_format "$_fcc_target")" in
+            WOFF|WOFF2)
+                _fcc_work=$(mktemp -d "${TMPDIR:-/data/local/tmp}/luoshu-webfont.XXXXXX" 2>/dev/null || mktemp -d 2>/dev/null) || _fcc_work=""
+                ;;
+        esac
+    fi
+    if [ -n "$_fcc_work" ]; then
+        font_check_cli_web "$@"; _fcc_rc=$?
+        rm -rf "$_fcc_work" 2>/dev/null || true
+        return "$_fcc_rc"
+    fi
+    font_check_cli_plain "$@"
+}
+
+font_check_cli_web() {
+    if [ "${1:-}" = "--json" ]; then
+        if font_prepare_import "${2:-}" "$_fcc_work" "${3:-text}"; then
+            printf '{"valid":true,"format":"%s","source":"%s","bytes":%s,"variable":%s,"color":%s,"warning":"%s"}\n' \
+                "$FONT_CHECK_FORMAT" "$FONT_PREPARED_FROM" "$FONT_CHECK_SIZE" "$FONT_CHECK_VARIABLE" "$FONT_CHECK_COLOR" "$FONT_CHECK_WARNING"
+            return 0
+        fi
+        printf '{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"error":"%s","reason":"%s"}\n' \
+            "$FONT_CHECK_FORMAT" "$FONT_CHECK_SIZE" "$FONT_CHECK_VARIABLE" "$FONT_CHECK_COLOR" "$FONT_CHECK_ERROR" "$FONT_WEB_REASON"
+        return 1
+    fi
+    if font_prepare_import "$1" "$_fcc_work" "${2:-text}"; then
+        echo "状态: 通过"
+        echo "原始格式: $FONT_PREPARED_FROM"
+        echo "真实格式: $FONT_CHECK_FORMAT"
+        echo "文件大小: $FONT_CHECK_SIZE bytes"
+        echo "可变字体: $FONT_CHECK_VARIABLE"
+        echo "彩色字体表: $FONT_CHECK_COLOR"
+        [ -n "$FONT_CHECK_WARNING" ] && echo "提示: $FONT_CHECK_WARNING"
+        return 0
+    fi
+    echo "状态: 失败"
+    echo "原因: $FONT_CHECK_ERROR"
+    [ -n "$FONT_WEB_REASON" ] && echo "转换: $FONT_WEB_REASON"
+    return 1
+}
+
+font_check_cli_plain() {
     if [ "${1:-}" = "--json" ]; then
         font_check_json "${2:-}" "${3:-text}"
     elif [ -n "${1:-}" ] && [ -f "${1:-}" ]; then
@@ -202,5 +335,10 @@ font_check_cli() {
 # 只有直接执行 font_check.sh 时才进入 CLI。被 font_manager/native_import 等脚本
 # source 时，必须只定义函数，不能消费父脚本的位置参数，更不能 exit 父进程。
 case "${0##*/}" in
-    font_check.sh) font_check_cli "$@" ;;
+    font_check.sh)
+        if [ -z "${MODULE_DIR:-${MODDIR:-}}" ]; then
+            MODULE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
+        fi
+        font_check_cli "$@"
+        ;;
 esac

@@ -137,7 +137,8 @@ Google 字体兼容会影响当前用户所有依赖 GMS 下载字体的应用�
 - 图标、Emoji、符号、无关语言和高风险字体槽默认不参与普通替换；
 - 新负载生成后会先进行格式、覆盖和契约检查；
 - 切换失败时保留上一套有效字体；
-- 卸载只处理洛书自己的挂载和记录。
+- 卸载只处理洛书自己的挂载和记录；
+- 字体替换不依赖 Hook。Hook 仅在用户开启“全局字体增强（Zygisk）”时由 Zygisk 库安装，默认关闭；没有 Zygisk 时完全无影响。
 
 ## 功能边界
 
@@ -151,6 +152,15 @@ Google 字体兼容会影响当前用户所有依赖 GMS 下载字体的应用�
 - 与洛书同时覆盖同一字体路径的其他模块。
 
 Google 字体兼容也不能替换 App 自己打包的字体或网页指定字体。
+
+### 全局字体增强（Zygisk，可选）
+
+模块内置 `zygisk/<abi>.so`（arm64-v8a、armeabi-v7a、x86、x86_64），在 **App 设置 → 安全与维护 → 全局字体增强（Zygisk）** 开启后重启生效，把 App 自带的正文字体换成洛书正文字体（Android 12–17 / API 31–37）。
+
+- 需要 Root 管理器已启用 Zygisk（Magisk 内置 Zygisk、ZygiskNext、ReZygisk）；没有 Zygisk 时这个库不会被加载，对系统没有任何影响；
+- 默认关闭；配置保存在 `/data/adb/modules/LuoShu/config/native-font.conf`（旧路径 `/data/adb/luoshu_native_font/` 仍可读取），排除名单为同目录 `native-font-exclude.list`；
+- 图标、等宽、彩色字体放行；内置排除名单（系统界面、桌面等）与用户名单合并；洛书字体未确认生效或已有其它全局字体方案（`luoshu.gfh.active`）时自动让出；
+- 遇到显示异常或闪退，关闭开关并重启即可恢复。
 
 ## ROM 兼容
 
