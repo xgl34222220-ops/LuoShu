@@ -12,7 +12,7 @@ import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
 
-/**
+/*
  * Settings of the built-in LSPosed module (opened from 设置 → 安全与维护 or LSPosed's module
  * settings): switches + explanation. Plain framework views, no AndroidX; runs only when opened.
  */
@@ -70,7 +70,7 @@ public final class SettingsActivity extends Activity {
         return p != null ? p : getSharedPreferences(ModuleConfig.PREFS, Context.MODE_PRIVATE);
     }
 
-    /**
+    /*
      * LSPosed (xposedsharedprefs) makes the module preferences readable by hooked apps. Returns null
      * when the module is not active (the framework then rejects MODE_WORLD_READABLE).
      */

@@ -5,7 +5,7 @@ import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 
-/**
+/*
  * Asks the framework to deoptimize a method before it is hooked, so ART cannot keep an inlined or
  * AOT-compiled copy of it inside a caller and silently bypass the hook (same idea as MFGA-Xposed's
  * {@code deoptimize(method)} before each hook). Uses LSPosed's legacy
@@ -18,7 +18,7 @@ final class Deopt {
     static final String BRIDGE = "de.robv.android.xposed.XposedBridge";
     private static final Method DEOPTIMIZE = resolve(BRIDGE);
 
-    /** Returns the static {@code deoptimizeMethod(Member)} of {@code className}, or null. */
+    /* Returns the static {@code deoptimizeMethod(Member)} of {@code className}, or null. */
     static Method resolve(String className) {
         try {
             Method m = Class.forName(className, false, Deopt.class.getClassLoader())
@@ -35,7 +35,7 @@ final class Deopt {
         return DEOPTIMIZE != null;
     }
 
-    /** Deoptimizes one method or constructor; never throws. */
+    /* Deoptimizes one method or constructor; never throws. */
     static boolean member(Member member) {
         return invoke(DEOPTIMIZE, member);
     }
@@ -51,7 +51,7 @@ final class Deopt {
         }
     }
 
-    /** Every declared constructor, matching {@code XposedBridge.hookAllConstructors}. */
+    /* Every declared constructor, matching {@code XposedBridge.hookAllConstructors}. */
     static void constructors(Class<?> type) {
         try {
             for (Constructor<?> c : type.getDeclaredConstructors()) member(c);

@@ -8,7 +8,7 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
-/**
+/*
  * LSPosed entry. LSPosed only injects this class into apps the user ticked in the module scope, so
  * apps outside the scope pay nothing at all. Inside a scoped app the hooks are installed once per
  * process and only on font-loading entry points (never on draw / measure / setTypeface / Paint).
@@ -78,7 +78,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         Log.v("installed in " + lp.packageName + " appFonts=" + appFonts + " webFonts=" + webFonts + " monoSlot=" + monoSlot);
     }
 
-    /** The App's own process: report "active" to the App and nothing else. */
+    /* The App's own process: report "active" to the App and nothing else. */
     private static void markSelfActive(XC_LoadPackage.LoadPackageParam lp) {
         try {
             XposedHelpers.findAndHookMethod(ModuleStatus.class.getName(), lp.classLoader, "isModuleActive",

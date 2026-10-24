@@ -71,7 +71,7 @@ public class FontNameRulesTest {
         assertEquals(FontDecision.UNKNOWN, FontNameRules.classifyAll("a.ttf", "b1"));
     }
 
-    /** Every token the LuoShu module scanners treat as non-body must be preserved here too. */
+    /* Every token the LuoShu module scanners treat as non-body must be preserved here too. */
     @Test
     public void coversModuleScannerTokens() throws Exception {
         File root = new File(System.getProperty("user.dir"));

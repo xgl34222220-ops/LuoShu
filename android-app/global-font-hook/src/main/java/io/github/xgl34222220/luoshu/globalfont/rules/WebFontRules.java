@@ -2,7 +2,7 @@ package io.github.xgl34222220.luoshu.globalfont.rules;
 
 import java.util.Locale;
 
-/**
+/*
  * WebView web-font interception policy. Looks only at the request URL, the request Accept header
  * and (when the app itself already produced a response) its MIME type. It never reads a body.
  */
@@ -10,11 +10,11 @@ public final class WebFontRules {
     private WebFontRules() {}
 
     public enum Verdict {
-        /** Not a font request: leave it alone. */
+        /* Not a font request: leave it alone. */
         NOT_FONT,
-        /** Font request for an icon / symbol / math / unknown face: let it load. */
+        /* Font request for an icon / symbol / math / unknown face: let it load. */
         ALLOW,
-        /** Body-text web font: answer 404 so the page falls back to the system (LuoShu) font. */
+        /* Body-text web font: answer 404 so the page falls back to the system (LuoShu) font. */
         BLOCK
     }
 

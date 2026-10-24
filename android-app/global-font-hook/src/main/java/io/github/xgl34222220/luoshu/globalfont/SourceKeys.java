@@ -10,7 +10,7 @@ import java.io.File;
 import java.io.FileDescriptor;
 import java.util.Map;
 
-/**
+/*
  * Turns font-loading arguments into a cache key {@code scheme:name}. Only framework classes are
  * used here so instrumented tests can call it without Xposed.
  *
@@ -21,12 +21,12 @@ import java.util.Map;
 final class SourceKeys {
     private SourceKeys() {}
 
-    /** Downloadable-font family currently being turned into a Typeface on this thread. */
+    /* Downloadable-font family currently being turned into a Typeface on this thread. */
     static final ThreadLocal<String> DOWNLOAD_FAMILY = new ThreadLocal<>();
 
     private static final String MONO_SUFFIX = "~m";
 
-    /** Key for constructor arguments that carry a name; null for buffers and descriptors. */
+    /* Key for constructor arguments that carry a name; null for buffers and descriptors. */
     static String named(Object[] args, Map<Object, String> fontKeys) {
         Object first = args != null && args.length > 0 ? args[0] : null;
         Object second = args != null && args.length > 1 ? args[1] : null;
@@ -49,7 +49,7 @@ final class SourceKeys {
         return null;
     }
 
-    /**
+    /*
      * Second-chance key for unnamed sources: the downloadable family set for this thread, else the
      * font file a descriptor points to. Null when neither applies.
      */
@@ -60,19 +60,19 @@ final class SourceKeys {
         return path == null ? null : "fd:" + path;
     }
 
-    /** The name inside a key: no scheme prefix and no mono-switch suffix. */
+    /* The name inside a key: no scheme prefix and no mono-switch suffix. */
     static String nameOf(String key) {
         String k = key.endsWith(MONO_SUFFIX) ? key.substring(0, key.length() - MONO_SUFFIX.length()) : key;
         int colon = k.indexOf(':');
         return colon >= 0 && colon <= 6 ? k.substring(colon + 1) : k;
     }
 
-    /** Separate cache slot for verdicts made with the mono switch on. */
+    /* Separate cache slot for verdicts made with the mono switch on. */
     static String withMono(String key, boolean monoSlot) {
         return monoSlot ? key + MONO_SUFFIX : key;
     }
 
-    /** Font file path behind a {@link ParcelFileDescriptor} or {@link FileDescriptor}, else null. */
+    /* Font file path behind a {@link ParcelFileDescriptor} or {@link FileDescriptor}, else null. */
     static String descriptorFontPath(Object source) {
         try {
             if (source instanceof ParcelFileDescriptor) {

@@ -8,7 +8,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import org.junit.Test;
 
-/** "Monospace to system monospace" switch: off keeps every verdict as before, on maps only code mono faces. */
+/* "Monospace to system monospace" switch: off keeps every verdict as before, on maps only code mono faces. */
 public class MonoSlotRulesTest {
     static final String[] CODE_MONO = {
             "SFMono-Regular.otf", "JetBrainsMono-Regular.ttf", "RobotoMono-Bold.ttf", "SourceCodePro-Regular.otf",

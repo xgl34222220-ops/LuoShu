@@ -10,7 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import org.junit.Test;
 
-/** Builds tiny synthetic sfnt files in memory so the test needs no binary fixtures. */
+/* Builds tiny synthetic sfnt files in memory so the test needs no binary fixtures. */
 public class SfntInspectorTest {
     static byte[] font(String family, int[][] ranges, boolean fixedPitch, boolean colour) throws IOException {
         byte[] name = nameTable(family);

@@ -33,7 +33,7 @@ import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-/**
+/*
  * Runs on API 28/29/34/35 emulators without LSPosed. It cannot fire the hooks themselves; it proves
  * the things the hooks rely on, on each API level, with real framework objects:
  * <ul>

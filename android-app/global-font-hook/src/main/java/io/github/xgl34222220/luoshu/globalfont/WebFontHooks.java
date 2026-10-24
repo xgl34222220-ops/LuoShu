@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
+/*
  * Makes android.webkit.WebView pages fall back to the system font by answering body-text web-font
  * requests with an empty 404. Only {@code shouldInterceptRequest} is hooked (it already runs on
  * Chromium's IO threads, never on the UI thread) plus {@code WebView.setWebViewClient}, which is

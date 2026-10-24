@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/**
+/*
  * Pure-JVM font classification by file name / family name only.
  *
  * <p>This is the fast path: it does no IO, allocates a few short strings and never touches the
@@ -30,7 +30,7 @@ import java.util.Set;
 public final class FontNameRules {
     private FontNameRules() {}
 
-    /** Substring tokens: a lower-cased name containing any of these is never replaced. */
+    /* Substring tokens: a lower-cased name containing any of these is never replaced. */
     public static final List<String> PRESERVE_SUBSTRINGS = Collections.unmodifiableList(java.util.Arrays.asList(
             // icon fonts (LuoShu import_is_icon_name + common web/app icon sets)
             "icon", "symbol", "material", "awesome", "glyph", "dingbat", "weather", "fontello",
@@ -56,18 +56,18 @@ public final class FontNameRules {
             "sinhala", "ethiopic", "georgian", "armenian", "japanese", "korean", "hangul",
             "hiragana", "katakana", "odia", "oriya", "cjkjp", "cjkkr"));
 
-    /** Whole-word tokens: too short to match as substrings ("num" would hit "Numans"). */
+    /* Whole-word tokens: too short to match as substrings ("num" would hit "Numans"). */
     public static final Set<String> PRESERVE_WORDS = Collections.unmodifiableSet(new LinkedHashSet<>(
             java.util.Arrays.asList("num", "nums", "fa", "fab", "fas", "far", "fal", "mdi", "ico",
                     "icons", "sym", "seg", "led", "code", "tnum")));
 
-    /** Well-known serif text families; mapped to the system serif instead of sans. */
+    /* Well-known serif text families; mapped to the system serif instead of sans. */
     public static final String[] SERIF_FAMILIES = {
             "tiempos", "copernicus", "georgia", "lora", "merriweather", "playfair", "garamond",
             "baskerville", "times", "caslon", "charter", "bodoni", "didot", "crimson", "literata",
             "newsreader", "minion", "palatino", "cambria", "sabon", "songti", "mingti", "fangsong"};
 
-    /**
+    /*
      * Preserve tokens whose only meaning is "fixed-pitch / programming face". They are skipped when
      * the mono switch is on and the name is a code monospace family; every other token still keeps.
      */
@@ -76,7 +76,7 @@ public final class FontNameRules {
                     "sourcecode", "jetbrains", "cascadia", "inconsolata", "hack-", "ibmplexmono", "sfmono",
                     "code")));
 
-    /** Programming families recognised without a "mono" word (separators removed before matching). */
+    /* Programming families recognised without a "mono" word (separators removed before matching). */
     private static final String[] CODE_FAMILIES = {
             "consolas", "courier", "menlo", "firacode", "sourcecode", "jetbrainsmono", "cascadia",
             "inconsolata", "ibmplexmono", "sfmono", "dejavusansmono"};
@@ -89,12 +89,12 @@ public final class FontNameRules {
     private static final String[] FONT_EXTENSIONS = {
             ".woff2", ".woff", ".ttf", ".otf", ".ttc", ".otc", ".eot", ".fnt", ".xml"};
 
-    /** Classify one name: a path, an asset name, a resource entry name, or a family name. */
+    /* Classify one name: a path, an asset name, a resource entry name, or a family name. */
     public static FontDecision classify(String rawName) {
         return classify(rawName, false);
     }
 
-    /**
+    /*
      * Classify with the "monospace to system monospace" switch. Off: identical to
      * {@link #classify(String)}. On: a programming monospace name with no other preserve reason is
      * {@link FontDecision#REPLACE_MONO}; all other verdicts are unchanged.
@@ -127,7 +127,7 @@ public final class FontNameRules {
         return false;
     }
 
-    /**
+    /*
      * Combine several names that describe the same face (file name + family name). Any KEEP wins,
      * then any concrete replacement, otherwise UNKNOWN.
      */
@@ -135,7 +135,7 @@ public final class FontNameRules {
         return classifyAll(false, names);
     }
 
-    /** As {@link #classifyAll(String...)}; precedence KEEP, REPLACE_MONO, REPLACE_SERIF, REPLACE_SANS. */
+    /* As {@link #classifyAll(String...)}; precedence KEEP, REPLACE_MONO, REPLACE_SERIF, REPLACE_SANS. */
     public static FontDecision classifyAll(boolean monoSlot, String... names) {
         int bestRank = 0;
         FontDecision best = FontDecision.UNKNOWN;
@@ -152,7 +152,7 @@ public final class FontNameRules {
         return best;
     }
 
-    /** True for programming monospace family names ("Roboto Mono", "Consolas"), false for "Monoton". */
+    /* True for programming monospace family names ("Roboto Mono", "Consolas"), false for "Monoton". */
     public static boolean isCodeMonospace(String rawName) {
         if (rawName == null) return false;
         String base = baseName(rawName);
@@ -168,7 +168,7 @@ public final class FontNameRules {
         return containsAny(joined.toString(), CODE_FAMILIES);
     }
 
-    /** Strip directories, query strings and font extensions. */
+    /* Strip directories, query strings and font extensions. */
     public static String baseName(String raw) {
         String s = raw;
         int q = s.indexOf('?');
@@ -187,7 +187,7 @@ public final class FontNameRules {
         return s.trim();
     }
 
-    /**
+    /*
      * Content-hashed or R8-shortened names ("a.ttf", "3f9c0a1e", "font_b1") carry no meaning, so they
      * must not be replaced on name alone.
      */
@@ -210,7 +210,7 @@ public final class FontNameRules {
         return len >= 12 && digits * 3 >= len && letters > 0;
     }
 
-    /** Split "RobotoSlab-BoldItalic_v2" into lower-case words: roboto, slab, bold, italic, v, 2. */
+    /* Split "RobotoSlab-BoldItalic_v2" into lower-case words: roboto, slab, bold, italic, v, 2. */
     static List<String> words(String base) {
         ArrayList<String> out = new ArrayList<>(6);
         StringBuilder cur = new StringBuilder();

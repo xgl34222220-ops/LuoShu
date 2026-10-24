@@ -89,6 +89,9 @@ jobs:
         run: |
           set -euo pipefail
           test ! -e global-font-hook
+          # :app:lintDebug also analyzes this Java library; lint's Java doc-comment parser needs JDK 21
+          # APIs (List.removeLast) and crashes on JDK 17, so the module uses plain /* */ comments only.
+          ! grep -rn '/\*\*' android-app/global-font-hook/src --include='*.java'
           ! grep -n 'global-font-hook' scripts/module_payload_manifest.txt scripts/build.sh
           ! grep -rn 'LuoShu-GlobalFont' .github/workflows --include='*.yml' | grep -v 'global-font-hook.yml'
 

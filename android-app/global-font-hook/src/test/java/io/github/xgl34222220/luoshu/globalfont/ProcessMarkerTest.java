@@ -6,14 +6,14 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
-/** The native companion looks this exact property up; renaming it silently breaks coexistence. */
+/* The native companion looks this exact property up; renaming it silently breaks coexistence. */
 public class ProcessMarkerTest {
     @Test
     public void markerNameIsStable() {
         assertEquals("luoshu.gfh.active", ModuleConfig.PROCESS_MARKER);
     }
 
-    /** Module preferences live in the LuoShu App that carries the module (debug test builds: .debug). */
+    /* Module preferences live in the LuoShu App that carries the module (debug test builds: .debug). */
     @Test
     public void moduleIsTheLuoShuApp() {
         assertEquals("io.github.xgl34222220.luoshu.debug", ModuleConfig.MODULE_PACKAGE);
@@ -23,7 +23,7 @@ public class ProcessMarkerTest {
         assertFalse(ModuleConfig.isLuoShuApp("com.tencent.mm"));
     }
 
-    /** Old companion still enabled and already hooked this process: the built-in copy skips. */
+    /* Old companion still enabled and already hooked this process: the built-in copy skips. */
     @Test
     public void markerSetByAnotherCopyMeansSkip() {
         String before = System.getProperty(ModuleConfig.PROCESS_MARKER);
@@ -38,7 +38,7 @@ public class ProcessMarkerTest {
         }
     }
 
-    /** Without LSPosed the App's own status query reports inactive (the self hook flips it). */
+    /* Without LSPosed the App's own status query reports inactive (the self hook flips it). */
     @Test
     public void selfStatusDefaultsToInactive() {
         assertFalse(ModuleStatus.isModuleActive());

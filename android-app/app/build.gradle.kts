@@ -98,12 +98,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    lint {
-        // App lint stays on the App's own sources. The Java LSPosed module library is verified by
-        // global-font-hook.yml (unit tests + APK checks); lint's Java doc-comment parser crashes on it.
-        checkDependencies = false
-    }
-
     packaging {
         resources.excludes += setOf(
             "/META-INF/{AL2.0,LGPL2.1}",

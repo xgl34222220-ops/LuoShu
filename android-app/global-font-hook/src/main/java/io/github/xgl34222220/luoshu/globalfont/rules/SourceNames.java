@@ -2,13 +2,13 @@ package io.github.xgl34222220.luoshu.globalfont.rules;
 
 import java.util.Locale;
 
-/** String helpers that give a name to fonts loaded from buffers, descriptors or font providers. */
+/* String helpers that give a name to fonts loaded from buffers, descriptors or font providers. */
 public final class SourceNames {
     private SourceNames() {}
 
     private static final int MAX_NAME = 128;
 
-    /**
+    /*
      * Family name in a {@code android.provider.FontRequest} query. Accepts key/value queries
      * ({@code name=Noto Sans&weight=700}, key {@code name} or {@code family}) and a plain family
      * string; a {@code :axis} suffix is dropped. Null when there is no usable name.
@@ -33,7 +33,7 @@ public final class SourceNames {
         return v.isEmpty() || v.length() > MAX_NAME ? null : v;
     }
 
-    /**
+    /*
      * The target of a {@code /proc/self/fd/N} link when it is an absolute path to a font file
      * (ttf/otf/ttc/otc/woff/woff2). Null for memfd, ashmem, /dev nodes, deleted files, APKs and
      * anything else, so those fonts are decided from their bytes instead.

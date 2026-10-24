@@ -4,7 +4,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 
-/**
+/*
  * Minimal read-only sfnt (TTF/OTF/TTC first face) inspector used only when the name rules return
  * {@link FontDecision#UNKNOWN}. It reads the table directory plus the name, cmap, post and colour
  * table tags. The hook only calls it off the main thread and caches the result per font source, so
@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets;
 public final class SfntInspector {
     private SfntInspector() {}
 
-    /** Result of an inspection; exposed for tests. */
+    /* Result of an inspection; exposed for tests. */
     public static final class Report {
         public String family = "";
         public String fullName = "";
@@ -29,7 +29,7 @@ public final class SfntInspector {
             return decide(false);
         }
 
-        /** With {@code monoSlot}, a Latin text face that is fixed pitch or named as code mono maps to REPLACE_MONO. */
+        /* With {@code monoSlot}, a Latin text face that is fixed pitch or named as code mono maps to REPLACE_MONO. */
         public FontDecision decide(boolean monoSlot) {
             if (!parsed) return FontDecision.KEEP; // unreadable: never risk replacing
             FontDecision byName = FontNameRules.classifyAll(monoSlot, family, fullName, postscriptName);

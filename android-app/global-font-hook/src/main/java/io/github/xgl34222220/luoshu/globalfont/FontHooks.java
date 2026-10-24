@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.zip.CRC32;
 
-/**
+/*
  * Redirects app-bundled body-text fonts to the system default family (which LuoShu replaced).
  *
  * <p>Only font <b>loading</b> entry points are hooked. On Android 10+ every app font path
@@ -51,22 +51,22 @@ final class FontHooks {
     private FontHooks() {}
 
     static final DecisionCache CACHE = new DecisionCache();
-    /** (source, weight, italic) -> replacement typeface. */
+    /* (source, weight, italic) -> replacement typeface. */
     private static final ConcurrentHashMap<String, Typeface> STYLED = new ConcurrentHashMap<>();
-    /** (kind, weight, italic) -> one shared system typeface instance. */
+    /* (kind, weight, italic) -> one shared system typeface instance. */
     private static final ConcurrentHashMap<String, Typeface> FACES = new ConcurrentHashMap<>();
     private static final Map<Object, String> BUILDER_KEYS = Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Object, String> FONT_KEYS = Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<Object, Object> FALLBACK_FAMILIES = Collections.synchronizedMap(new WeakHashMap<>());
-    /** Android 9: hidden FontFamily instance -> fonts this process added to it. */
+    /* Android 9: hidden FontFamily instance -> fonts this process added to it. */
     private static final Map<Object, List<Member>> P_MEMBERS = Collections.synchronizedMap(new WeakHashMap<>());
-    /** Provider FontInfo (framework or AndroidX) -> family named in its FontRequest. */
+    /* Provider FontInfo (framework or AndroidX) -> family named in its FontRequest. */
     private static final Map<Object, String> PROVIDER_FAMILIES = Collections.synchronizedMap(new WeakHashMap<>());
     private static final Set<String> PENDING = ConcurrentHashMap.newKeySet();
     private static final AtomicBoolean SAVE_SCHEDULED = new AtomicBoolean();
     private static volatile ScheduledExecutorService worker;
     private static volatile File store;
-    /** "Monospace to system monospace" switch, read once per process (default off). */
+    /* "Monospace to system monospace" switch, read once per process (default off). */
     static volatile boolean monoSlot;
 
     static void install(XC_LoadPackage.LoadPackageParam lp, boolean monoToSystemMono) {
@@ -83,7 +83,7 @@ final class FontHooks {
         installProviderNaming(lp.classLoader);
     }
 
-    /** A font of a family: where it came from (may be null) and its bytes (null on Android 9 assets). */
+    /* A font of a family: where it came from (may be null) and its bytes (null on Android 9 assets). */
     static final class Member {
         final String name;
         final ByteBuffer bytes;
@@ -93,7 +93,7 @@ final class FontHooks {
             this.bytes = bytes;
         }
 
-        /** Cache key: buffers are keyed by name (or header CRC) plus size, names by themselves. */
+        /* Cache key: buffers are keyed by name (or header CRC) plus size, names by themselves. */
         String key() {
             if (bytes != null) {
                 String id = name != null ? name : "buf:" + headerHash(bytes);
@@ -103,7 +103,7 @@ final class FontHooks {
         }
     }
 
-    /**
+    /*
      * Replacement for a whole family, or null to leave it. Every member is decided (so the cache is
      * warm next time); the first member's key and the combined verdict pick the system face.
      */
@@ -122,14 +122,14 @@ final class FontHooks {
         return styled(leadKey, d, built.getWeight(), built.isItalic());
     }
 
-    /** REPLACE_MONO is only applied when the system monospace face measures as fixed pitch. */
+    /* REPLACE_MONO is only applied when the system monospace face measures as fixed pitch. */
     private static boolean monoUsable(FontDecision d, String key) {
         if (d != FontDecision.REPLACE_MONO || MonoProbe.systemMonospaceIsFixedPitch()) return true;
         Log.v("system monospace not fixed pitch, kept " + key);
         return false;
     }
 
-    /** hookAllMethods after deoptimizing every overload; a missing class or method is only logged. */
+    /* hookAllMethods after deoptimizing every overload; a missing class or method is only logged. */
     private static void hookEvery(Class<?> type, String method, XC_MethodHook hook) {
         if (type == null) return;
         try {
@@ -193,12 +193,12 @@ final class FontHooks {
         });
     }
 
-    /** Key that names where a Font.Builder reads from. Null when the source has no name. */
+    /* Key that names where a Font.Builder reads from. Null when the source has no name. */
     static String sourceKey(Object[] args) {
         return SourceKeys.named(args, FONT_KEYS);
     }
 
-    /** Name rules first; the sfnt check runs once, never on the main thread. */
+    /* Name rules first; the sfnt check runs once, never on the main thread. */
     static FontDecision decide(String key, String name, ByteBuffer buffer) {
         FontDecision d = CACHE.get(key);
         if (d != null) return d;
@@ -259,7 +259,7 @@ final class FontHooks {
         return face;
     }
 
-    /** Identity for an unnamed font: CRC of its table directory (includes per-table checksums). */
+    /* Identity for an unnamed font: CRC of its table directory (includes per-table checksums). */
     static String headerHash(ByteBuffer b) {
         try {
             int len = Math.min(b.capacity(), 12 + 16 * 32);
@@ -315,7 +315,7 @@ final class FontHooks {
         installHiddenFontFamily();
     }
 
-    /**
+    /*
      * Android 9 (and 8) res/font, AndroidX TypefaceCompatApi26/28Impl and FontsContract build
      * typefaces by adding fonts to the hidden {@code android.graphics.FontFamily} and calling
      * {@code Typeface.createFromFamiliesWithDefault(FontFamily[], ...)}, bypassing the public
@@ -378,7 +378,7 @@ final class FontHooks {
         list.add(m);
     }
 
-    /** Android 9 has no Font object to inspect: name rules only, unknown names are kept. */
+    /* Android 9 has no Font object to inspect: name rules only, unknown names are kept. */
     private static void replaceByName(XC_MethodHook.MethodHookParam param, String key) {
         Typeface result = (Typeface) param.getResult();
         if (key == null || result == null || result == Typeface.DEFAULT) return;
@@ -390,7 +390,7 @@ final class FontHooks {
 
     // ---------------------------------------------------------------- provider (downloadable) fonts
 
-    /**
+    /*
      * Names provider fonts after the family in their FontRequest so name rules can decide them.
      * {@code fetchFonts}/{@code getFontFamilyResult} return a result whose {@code getFonts()} lists
      * FontInfo objects; each is mapped to the request family. While {@code buildTypeface} /

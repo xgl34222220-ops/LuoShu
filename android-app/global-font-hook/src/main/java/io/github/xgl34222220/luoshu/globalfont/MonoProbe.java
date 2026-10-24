@@ -4,14 +4,14 @@ import android.graphics.Paint;
 import android.graphics.Typeface;
 import io.github.xgl34222220.luoshu.globalfont.rules.MonoMetrics;
 
-/**
+/*
  * Measures {@code Typeface.MONOSPACE} once per process. The mono switch only maps code fonts onto
  * it when narrow and wide glyphs really have the same advance.
  */
 final class MonoProbe {
     private MonoProbe() {}
 
-    /** Narrow, wide, digit and punctuation glyphs. */
+    /* Narrow, wide, digit and punctuation glyphs. */
     private static final char[] PROBE = {'i', 'W', '0', 'm', '.'};
     private static volatile Boolean fixedPitch;
 

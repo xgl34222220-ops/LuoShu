@@ -10,7 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import org.junit.Test;
 
-/**
+/*
  * Quantifies the per-load overhead the hook adds. The thresholds are deliberately loose (CI
  * machines vary); the measured numbers are printed and written to
  * build/reports/global-font-benchmark.txt so the PR can quote them.

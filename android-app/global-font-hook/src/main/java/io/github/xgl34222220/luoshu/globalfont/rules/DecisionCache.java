@@ -3,7 +3,7 @@ package io.github.xgl34222220.luoshu.globalfont.rules;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
+/*
  * Per-process verdict cache keyed by font source ("asset:fonts/x.ttf", "res:inter_bold",
  * "file:/data/.../x.ttf#123456"). Lookups are a single ConcurrentHashMap read, so a font that was
  * decided once costs nothing on later loads. The map can be serialised to a tiny properties-like
@@ -32,12 +32,12 @@ public final class DecisionCache {
         return d;
     }
 
-    /** Resolve by name first; fall back to the cached deep-inspection verdict. */
+    /* Resolve by name first; fall back to the cached deep-inspection verdict. */
     public FontDecision resolveByName(String key, String... names) {
         return resolveByName(key, false, names);
     }
 
-    /** Same, with the mono switch; callers give mono-on verdicts their own key. */
+    /* Same, with the mono switch; callers give mono-on verdicts their own key. */
     public FontDecision resolveByName(String key, boolean monoSlot, String... names) {
         FontDecision cached = get(key);
         if (cached != null) return cached;
@@ -66,7 +66,7 @@ public final class DecisionCache {
         }
     }
 
-    /** Key for the (source, weight, italic) -> replacement Typeface cache. */
+    /* Key for the (source, weight, italic) -> replacement Typeface cache. */
     public static String styleKey(String source, int weight, boolean italic) {
         return source + '|' + weight + (italic ? "|i" : "|n");
     }
