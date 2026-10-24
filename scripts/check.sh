@@ -78,6 +78,7 @@ sh "$ROOT/scripts/v4_rom_regression_test.sh"
 # 稳定性加固：Magisk 卡开机保护、OTA 早检测、未完成开机统一语义、卸载、发布跳过。
 sh "$ROOT/scripts/boot_unfinished_semantics_test.sh"
 sh "$ROOT/scripts/system_ota_early_test.sh"
+sh "$ROOT/scripts/system_ota_resume_test.sh"
 sh "$ROOT/scripts/uninstall_resilience_test.sh"
 sh "$ROOT/scripts/app_bridge_boot_guard_test.sh"
 sh "$ROOT/scripts/app_bridge_reboot_test.sh"

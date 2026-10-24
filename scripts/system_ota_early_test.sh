@@ -1,8 +1,8 @@
 #!/bin/sh
 # Early (pre-mount) system OTA detection: on a ro.build.fingerprint mismatch the
 # first boot skips the generated XML overlay and the /data/fonts dynamic view,
-# keeps the physical slots, requests the existing rescan, and the next boot
-# puts the held XML back before anything validates the payload.
+# keeps the physical slots, requests the existing rescan; later boots keep the
+# hold until the rescanned stock inventory is trusted, then put the XML back.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/luoshu-ota-early.XXXXXX")
@@ -107,19 +107,35 @@ for impl in device_font_dynamic_guard.sh device_font_payload_runtime.sh; do
 done
 rm -f "$MODDIR/config/device-font-dynamic-mount.conf"
 
-# 8. Next boot: the post-boot check recorded the new build; held XML returns.
-printf 'fingerprint=fp-new\nincremental=2\npreviousFingerprint=fp-old\n' > "$MODDIR/config/system-build.conf"
-if early boot-c fp-new; then fail 'held again on the new, recorded build'; fi
-[ -f "$PAYLOAD/system/etc/fonts.xml" ] || fail 'system XML not restored on the next boot'
-[ -f "$PAYLOAD/product/etc/fonts_customization.xml" ] || fail 'product XML not restored on the next boot'
-[ ! -e "$MODDIR/.luoshu-ota-held-xml" ] || fail 'held directory left behind'
+# Step 6 left a payload manifest behind; it did not exist when the hold began,
+# so drop it again (a changed manifest identity means "the user re-applied").
+rm -f "$MODDIR/config/font-payload-manifest.conf"
 
-# 9. A newer apply during the held boot wins over the held copy.
-printf 'fingerprint=fp-new\n' > "$MODDIR/config/system-build.conf"
-early boot-d fp-newer || fail 'second OTA not detected'
-printf '<familyset><font>LuoShu-700.ttf</font></familyset>\n' > "$PAYLOAD/system/etc/fonts.xml"
-printf 'fingerprint=fp-newer\n' > "$MODDIR/config/system-build.conf"
-early boot-e fp-newer || true
-grep -q 'LuoShu-700' "$PAYLOAD/system/etc/fonts.xml" || fail 'held XML overwrote a newer apply'
+# 8. Next boot: the post-boot check recorded the new build, but the stock
+#    inventory is not trusted yet (rescan still pending, no inventory for this
+#    build): the hold continues and the XML stays out of the payload.
+printf 'fingerprint=fp-new\nincremental=2\npreviousFingerprint=fp-old\n' > "$MODDIR/config/system-build.conf"
+grep -qx 'state=pending' "$MODDIR/config/system-ota-resume.conf" || fail 'resume record not pending after the hold'
+early boot-c fp-new || fail 'XML released before the stock inventory was trusted'
+[ ! -e "$PAYLOAD/system/etc/fonts.xml" ] || fail 'system XML back while the inventory is untrusted'
+[ -f "$MODDIR/.luoshu-ota-held-xml/system/etc/fonts.xml" ] || fail 'held XML lost while untrusted'
+grep -qx 'bootId=boot-c' "$MODDIR/config/system-ota-boot-hold.conf" || fail 'hold not re-recorded for the untrusted boot'
+grep -qx 'state=pending' "$MODDIR/config/system-ota-resume.conf" || fail 'untrusted inventory advanced the resume state'
+grep -q '\[SYSTEM-OTA-RESUME\].*继续暂停' "$MODDIR/logs/fontswitch.log" || fail 'continued hold not logged'
+
+# 9. A trusted inventory for this build (rescan marker consumed, inventory
+#    fingerprint == ro.build.fingerprint) and every referenced font present:
+#    the next boot puts the held XML back.
+rm -f "$MODDIR/config/stock_inventory_scan_pending"
+printf '{"buildFingerprint": "fp-new", "fonts": []}\n' > "$MODDIR/config/device_font_inventory.json"
+mkdir -p "$PAYLOAD/product/fonts"
+dd if=/dev/zero of="$PAYLOAD/product/fonts/LuoShuSlot-1.ttf" bs=2048 count=1 2>/dev/null
+if early boot-d fp-new; then fail 'held again with a trusted inventory'; fi
+[ -f "$PAYLOAD/system/etc/fonts.xml" ] || fail 'system XML not restored with a trusted inventory'
+[ -f "$PAYLOAD/product/etc/fonts_customization.xml" ] || fail 'product XML not restored with a trusted inventory'
+[ ! -e "$MODDIR/.luoshu-ota-held-xml" ] || fail 'held directory left behind'
+grep -qx 'state=apply-ready' "$MODDIR/config/system-ota-resume.conf" || fail 'resume record not apply-ready'
+grep -qx 'applyBootId=boot-d' "$MODDIR/config/system-ota-resume.conf" || fail 'resume boot not recorded'
+if LUOSHU_BOOTLOOP_BOOT_ID=boot-d luoshu_system_ota_boot_hold_active "$MODDIR"; then fail 'hold active in the resume boot'; fi
 
 printf 'System OTA early detection checks passed.\n'
