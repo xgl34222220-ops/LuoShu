@@ -79,6 +79,18 @@ case "$APP_PACKAGE" in
     ;;
 esac
 
+# Zygisk library: zygisk/<abi>.so is loaded only by a Zygisk implementation; nothing is installed
+# unless the user turns on 全局字体增强 (config/native-font.conf) and reboots.
+if [ -z "$ZYGISK_DIR" ]; then
+  ZYGISK_DIR=$(mktemp -d)
+  ZYGISK_TMP="$ZYGISK_DIR"
+  sh "$ROOT/scripts/build_zygisk.sh" "$ZYGISK_DIR"
+fi
+for abi in $ZYGISK_ABIS; do
+  [ -s "$ZYGISK_DIR/$abi/libluoshu_native_font.so" ] || { echo "Missing Zygisk library: $abi" >&2; exit 71; }
+  [ -s "$ZYGISK_DIR/$abi/lsnf-config" ] || { echo "Missing Zygisk config tool: $abi" >&2; exit 71; }
+done
+
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
 PAYLOAD_MANIFEST="$ROOT/scripts/module_payload_manifest.txt"
@@ -91,17 +103,8 @@ while IFS= read -r path || [ -n "$path" ]; do
 done < "$PAYLOAD_MANIFEST"
 [ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
-# Zygisk library: zygisk/<abi>.so is loaded only by a Zygisk implementation; nothing is installed
-# unless the user turns on 全局字体增强 (config/native-font.conf) and reboots.
-if [ -z "$ZYGISK_DIR" ]; then
-  ZYGISK_DIR=$(mktemp -d)
-  ZYGISK_TMP="$ZYGISK_DIR"
-  sh "$ROOT/scripts/build_zygisk.sh" "$ZYGISK_DIR"
-fi
 mkdir -p "$STAGE/zygisk/defaults" "$STAGE/licenses"
 for abi in $ZYGISK_ABIS; do
-  [ -s "$ZYGISK_DIR/$abi/libluoshu_native_font.so" ] || { echo "Missing Zygisk library: $abi" >&2; exit 71; }
-  [ -s "$ZYGISK_DIR/$abi/lsnf-config" ] || { echo "Missing Zygisk config tool: $abi" >&2; exit 71; }
   cp -f "$ZYGISK_DIR/$abi/libluoshu_native_font.so" "$STAGE/zygisk/$abi.so"
   mkdir -p "$STAGE/zygisk/bin/$abi"
   cp -f "$ZYGISK_DIR/$abi/lsnf-config" "$STAGE/zygisk/bin/$abi/lsnf-config"
