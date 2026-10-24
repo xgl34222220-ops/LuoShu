@@ -27,6 +27,9 @@ fi
 for _bridge in google_font_provider_bridge.sh hyperos_theme_font_bridge.sh hyperos_webview_route.sh hyperos_theme_takeover.sh; do
     [ ! -f "$MODDIR/common/$_bridge" ] || MODDIR="$MODDIR" sh "$MODDIR/common/$_bridge" restore >/dev/null 2>&1 || true
 done
+# ColorOS slot compatibility: put recorded OPlus flip/SysFont slots back.
+[ ! -f "$MODDIR/common/coloros_slot_compat.sh" ] || \
+    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/coloros_slot_compat.sh" restore >/dev/null 2>&1 || true
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 type luoshu_private_unmount_module_view >/dev/null 2>&1 && \
     ( luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 ) || true

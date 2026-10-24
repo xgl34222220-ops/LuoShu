@@ -101,5 +101,28 @@ class MapperTest(unittest.TestCase):
             self.assertIn(name, joined)
 
 
+    def test_slot_compat_keeps_overlay_and_protected_slots(self):
+        fixture = gate.load()['roms']['coloros']['fixture']
+        self.assertEqual(gate.slot_compat_errors(fixture), [])
+        admitted = gate.slot_compat_admitted(['OplusOSUI-Regular.ttf', 'SysFont-Bold.ttf',
+                                              'OplusOSUI-Mono-Regular.ttf', 'ColorOSUI-Clock-Regular.ttf',
+                                              'OplusOSUI-Icon.ttf', 'Roboto-Regular.ttf'])
+        self.assertEqual(admitted, ['OplusOSUI-Regular.ttf', 'SysFont-Bold.ttf'])
+
+    def test_slot_compat_protected_regression_is_caught(self):
+        shell = ROOT / gate.SLOT_COMPAT
+        text = shell.read_text(encoding='utf-8')
+        marker = "    _lcsso_lower=$(printf '%s' \"$1\" | tr '[:upper:]' '[:lower:]')\n"
+        self.assertIn(marker, text)
+        patched = text.replace(marker, marker + '    return 0\n', 1)
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            (root / 'common').mkdir()
+            (root / gate.SLOT_COMPAT).write_text(patched, encoding='utf-8')
+            for rel in ('common/coloros_global.sh', 'common/coloros_flipfont.sh'):
+                (root / rel).write_text((ROOT / rel).read_text(encoding='utf-8'), encoding='utf-8')
+            errors = gate.slot_compat_errors(['SysFont-Regular.ttf'], mapper_root=root)
+        self.assertTrue(any('ColorOSUI-Clock-Regular.ttf' in line for line in errors), errors)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

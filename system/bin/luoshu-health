@@ -270,10 +270,41 @@ restore_default() {
     [ -f "$MOD/common/font_manager.sh" ] || { printf 'status=error\nmessage=font_manager_missing\n'; return 2; }
     _rd_out="$(MODDIR="$MOD" MODULE_DIR="$MOD" sh "$MOD/common/font_manager.sh" action switch default 2>&1)"
     printf '%s\n' "$_rd_out"
+    # ColorOS slot compatibility: on the default font, put recorded OPlus slots back now.
+    [ ! -f "$MOD/common/coloros_slot_compat.sh" ] || \
+        MODDIR="$MOD" MODULE_DIR="$MOD" sh "$MOD/common/coloros_slot_compat.sh" sync >/dev/null 2>&1 || true
+}
+
+# ColorOS slot compatibility switch (default off). set writes the config, then
+# syncs at once: off restores recorded OPlus slots, on writes them for the active font.
+slot_compat() {
+    _scp_script="$MOD/common/coloros_slot_compat.sh"
+    [ -f "$_scp_script" ] || { printf 'status=error\nmessage=slot_compat_missing\n'; return 2; }
+    case "${1:-}" in
+        0|1)
+            mkdir -p "$MOD/config" 2>/dev/null
+            printf 'enabled=%s\n' "$1" > "$MOD/config/coloros_slot_compat.conf.tmp.$$" 2>/dev/null && \
+                mv -f "$MOD/config/coloros_slot_compat.conf.tmp.$$" "$MOD/config/coloros_slot_compat.conf" 2>/dev/null || {
+                rm -f "$MOD/config/coloros_slot_compat.conf.tmp.$$" 2>/dev/null
+                printf 'status=error\nmessage=config_write_failed\n'
+                return 1
+            }
+            chmod 0644 "$MOD/config/coloros_slot_compat.conf" 2>/dev/null || true
+            if MODDIR="$MOD" MODULE_DIR="$MOD" sh "$_scp_script" sync >/dev/null 2>&1; then
+                printf 'status=ok\n'
+            else
+                printf 'status=fallback\n'
+            fi
+            ;;
+        '') printf 'status=ok\n' ;;
+        *) printf 'status=error\nmessage=bad_value\n'; return 2 ;;
+    esac
+    MODDIR="$MOD" MODULE_DIR="$MOD" sh "$_scp_script" status
 }
 
 case "$ACTION" in
     report) report ;;
+    slot-compat) slot_compat "${2:-}" ;;
     repair-stale) repair_stale ;;
     restore-default) restore_default ;;
     *) printf 'status=error\nmessage=unsupported_action\n'; exit 2 ;;

@@ -620,6 +620,7 @@ private fun SafetyPage(model: SystemCenterViewModel) {
                 }
             }
         }
+        item { SlotCompatCard(model) }
         item {
             SettingCard("恢复与保护") {
                 Text("将当前字体恢复为系统默认，完成后需要重启手机。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
@@ -695,6 +696,25 @@ private fun <T> ChoiceRow(entries: List<T>, selected: T, label: (T) -> String, o
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SlotCompatCard(model: SystemCenterViewModel) {
+    val state = model.slotCompat
+    LaunchedEffect(Unit) { model.refreshSlotCompat() }
+    SettingCard("ColorOS 字体槽兼容") {
+        ToggleLine(
+            title = "写入 OPLUS 专有字体槽",
+            description = if (state.loaded && !state.coloros) "仅 ColorOS / OxygenOS 生效，当前系统不会有任何改动。"
+            else "默认关闭。开启后，除常规替换外，还会把当前字体写入系统字体设置/主题字体接管的 flip 字体槽（SysFont/OplusOSUI），解决“中文已换、英文数字仍是原字体”。时钟、等宽、图标槽保持原厂；原文件先备份，关闭开关、恢复默认字体或卸载模块时自动还原，写入失败会自动回退。",
+            checked = state.enabled,
+            onChange = model::setSlotCompat,
+            enabled = state.loaded && !state.busy && (state.coloros || state.enabled),
+        )
+        if (state.enabled && state.writtenSlots > 0) Text("已接管 ${state.writtenSlots} 个专有槽位", color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+        if (state.message.isNotBlank() || state.error.isNotBlank()) Text(state.error.ifBlank { state.message }, color = if (state.error.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary, fontSize = 13.sp)
+        NoticeLine("停用（而非卸载）模块前请先关闭此开关；改变后建议重启手机。")
     }
 }
 
