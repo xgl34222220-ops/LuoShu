@@ -60,6 +60,24 @@ with tempfile.TemporaryDirectory() as tmp:
     }
     assert allowed(fixture(tmp, meta=v222))
 
+    # Accept: release preparation (module.prop bumped to v9.0.0) while the
+    # channel still carries the published policy currentStable (v8.0.0).
+    v800 = {
+        "version": "v8.0.0", "versionCode": 130000,
+        "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v8.0.0/LuoShu-v8.0.0.zip",
+        "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/refactor-v8.0.0/RELEASE_NOTES_refactor-v8.0.0.md",
+    }
+    root = fixture(tmp, meta=v800)
+    assert not allowed(root), "must reject previous stable without policy"
+    (root / "config/stable_version_policy.json").write_text(json.dumps({"series": "refactor", "currentStable": "v8.0.0"}))
+    assert not allowed(root), "must reject previous stable without its notes"
+    (root / "RELEASE_NOTES_refactor-v8.0.0.md").write_text("notes\n")
+    assert allowed(root)
+    root = fixture(tmp, meta={**v800, "versionCode": 130001})
+    (root / "config/stable_version_policy.json").write_text(json.dumps({"series": "refactor", "currentStable": "v8.0.0"}))
+    (root / "RELEASE_NOTES_refactor-v8.0.0.md").write_text("notes\n")
+    assert not allowed(root), "must reject edited previous stable"
+
     rejects = {
         "foreign zipUrl": dict(meta={**OFFICIAL, "zipUrl": "https://evil.example/LuoShu-v9.0.0.zip"}),
         "wrong tag in zipUrl": dict(meta={**OFFICIAL, "zipUrl": OFFICIAL["zipUrl"].replace("refactor-v9.0.0/", "refactor-v8.8.8/")}),

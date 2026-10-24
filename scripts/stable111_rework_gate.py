@@ -66,6 +66,36 @@ def official_release_metadata(root, name):
     return (json.dumps(meta, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def current_stable_metadata(root, name):
+    """Return the exact bytes sync-update-metadata published for the policy's
+    currentStable release, or None when the policy or its notes are missing."""
+    if name not in UPDATE_CHANNELS:
+        return None
+    policy_path = root / "config/stable_version_policy.json"
+    if not policy_path.is_file():
+        return None
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    version = str(policy.get("currentStable", ""))
+    if policy.get("series") != "refactor":
+        return None
+    parts = version[1:].split(".") if version.startswith("v") else []
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    major, minor, patch = (int(part) for part in parts)
+    code = 50000 + major * 10000 + minor * 100 + patch
+    tag = f"refactor-{version}"
+    notes = f"RELEASE_NOTES_{tag}.md"
+    if not (root / notes).is_file():
+        return None
+    spec = importlib.util.spec_from_file_location(
+        "_luoshu_sync_update_metadata", ROOT / "scripts/sync_update_metadata.py")
+    sync = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sync)
+    meta = sync.build_metadata(repository=REPOSITORY, version=version,
+                               version_code=code, tag=tag, notes_file=notes)
+    return (json.dumps(meta, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
 def published_channel_allowed(root, name, pinned):
     data = (root / name).read_bytes()
     # The owner authorized only the 2.2.2 channel promotion. Pin its exact
@@ -76,7 +106,12 @@ def published_channel_allowed(root, name, pinned):
     actual = hashlib.sha256(data).hexdigest()
     if actual in (pinned["publishedMetadataSha256"][name], authorized.get(name)):
         return True
-    return data == official_release_metadata(root, name)
+    if data == official_release_metadata(root, name):
+        return True
+    # A release-preparation commit bumps module.prop before the tag exists, so
+    # the channel still carries the bytes sync-update-metadata published for
+    # the current stable named in config/stable_version_policy.json.
+    return data == current_stable_metadata(root, name)
 
 
 def main():
