@@ -131,7 +131,11 @@ void testCli(const std::string &tool, const std::string &dir) {
     CHECK(runCapture(tool + " lookup " + cfg + " com.example.force") == "2\n");
     CHECK(runCapture(tool + " lookup " + cfg + " com.other") == "0\n");
     std::string dump = runCapture(tool + " dump " + cfg);
-    CHECK(dump.find("enabled=1 verbose=0 count=3") != std::string::npos);
+    CHECK(dump.find("enabled=1 verbose=0 java_font=0 count=3") != std::string::npos);
+    // Feature switches are separate bits; the default build leaves them off.
+    std::string jf = tool + " build --out " + cfg + ".jf --enabled 1 --java-font 1 --allow-newer-api 0 --boot-id-file " + boot;
+    CHECK(std::system(jf.c_str()) == 0);
+    CHECK(runCapture(tool + " dump " + cfg + ".jf").find("enabled=1 verbose=0 java_font=1 count=0") != std::string::npos);
     std::vector<unsigned char> blob;
     CHECK(readBytes(cfg, &blob));
     ConfigView v;

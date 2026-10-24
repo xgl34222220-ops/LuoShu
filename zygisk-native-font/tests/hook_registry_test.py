@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The hook registry (src/hooks.def) may only name allow-listed creation-time hooks.
 
-Drawing / paint / layout / canvas paths must never be hooked. N1 ships an empty registry; later
-stages add entries here and to ALLOWED in the same change.
+Drawing / paint / layout / canvas paths must never be hooked. Every JNI method the sources hand to
+a hook registrar (kFontBuilderClass / kNBuildName style constants) must be declared in the registry.
 """
 import pathlib
 import re
@@ -44,6 +44,19 @@ def main() -> int:
     src = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "src").glob("*.cpp"))
     if not entries and re.search(r"hookJniNativeMethods|pltHookRegister|pltHookCommit", src):
         errors.append("sources install hooks but hooks.def is empty")
+    headers = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "src").glob("*.h"))
+    consts = dict(re.findall(r'constexpr const char \*(k\w+) = "([^"]+)";', headers))
+    declared = {t for k, t in entries if k == "jni"}
+    cls, name = consts.get("kFontBuilderClass"), consts.get("kNBuildName")
+    if cls and name and f"{cls}.{name}" not in declared:
+        errors.append(f"sources hook {cls}.{name} but hooks.def does not declare it")
+    for sym in re.findall(r"JNINativeMethod\s+\w+\[\]\s*=\s*\{\{\s*\"?(\w+)", src):
+        if not any(t.endswith("." + sym) for t in declared) and sym not in consts:
+            errors.append(f"JNI method {sym} registered by the sources is not declared in hooks.def")
+    # Drawing paths stay untouched in the sources too, not only in the registry.
+    for m in re.finditer(r"hookJniNativeMethods\([^;]*", src):
+        if FORBIDDEN.search(m.group(0)):
+            errors.append(f"drawing/layout path hooked in sources: {m.group(0)[:80]}")
     for e in errors:
         print(f"::error::{e}", file=sys.stderr)
     print(f"hook registry: {len(entries)} entries, {len(errors)} errors")

@@ -3,8 +3,13 @@
 //
 //   lsnf-config build --out FILE [--enabled 0|1] [--verbose 0|1] [--boot-id-file FILE]
 //                     [--exclude LIST]... [--force LIST]...
+//                     [--java-font 0|1] [--allow-newer-api 0|1]
+//   lsnf-config faces --out FILE [--boot-id-file FILE] FONT...
+//                                        writes runtime/faces.bin from the LuoShu body faces given
+//                                        (LuoShu-NNN[i|Italic].ttf; others are ignored, max 8)
 //   lsnf-config lookup FILE PACKAGE      prints the bits (decimal)
 //   lsnf-config dump FILE                prints flags and every entry
+//   lsnf-config dump-faces FILE          prints every face of a faces.bin
 //
 // LIST: one package per line; '#' starts a comment; blank lines ignored; invalid names rejected.
 #include <cstdio>
@@ -12,6 +17,7 @@
 #include <cstring>
 
 #include "config.h"
+#include "face_table.h"
 
 namespace {
 
@@ -29,8 +35,11 @@ int usage() {
     fprintf(stderr,
             "usage: lsnf-config build --out FILE [--enabled 0|1] [--verbose 0|1] [--boot-id-file FILE]\n"
             "                         [--exclude LIST]... [--force LIST]...\n"
+            "                         [--java-font 0|1] [--allow-newer-api 0|1]\n"
+            "       lsnf-config faces --out FILE [--boot-id-file FILE] FONT...\n"
             "       lsnf-config lookup FILE PACKAGE\n"
-            "       lsnf-config dump FILE\n");
+            "       lsnf-config dump FILE\n"
+            "       lsnf-config dump-faces FILE\n");
     return 64;
 }
 
@@ -106,6 +115,9 @@ int build(int argc, char **argv) {
         if (!strcmp(a, "--out")) out = v;
         else if (!strcmp(a, "--enabled")) flags = !strcmp(v, "1") ? (flags | lsnf::kFlagEnabled) : flags;
         else if (!strcmp(a, "--verbose")) flags = !strcmp(v, "1") ? (flags | lsnf::kFlagVerbose) : flags;
+        else if (!strcmp(a, "--java-font")) flags = !strcmp(v, "1") ? (flags | lsnf::kFlagJavaFont) : flags;
+        else if (!strcmp(a, "--allow-newer-api"))
+            flags = !strcmp(v, "1") ? (flags | lsnf::kFlagAllowNewerApi) : flags;
         else if (!strcmp(a, "--boot-id-file")) bootFile = v;
         else if (!strcmp(a, "--exclude")) { if (!addList(pool, v, lsnf::kPkgExclude)) return 65; }
         else if (!strcmp(a, "--force")) { if (!addList(pool, v, lsnf::kPkgForce)) return 65; }
@@ -162,14 +174,116 @@ int dump(const char *path) {
         fprintf(stderr, "lsnf-config: invalid config %s\n", path);
         return 65;
     }
-    printf("flags=%u enabled=%d verbose=%d count=%u boot_hash=%016llx\n", view.flags,
-           (view.flags & lsnf::kFlagEnabled) ? 1 : 0, (view.flags & lsnf::kFlagVerbose) ? 1 : 0, view.count,
+    printf("flags=%u enabled=%d verbose=%d java_font=%d count=%u boot_hash=%016llx\n", view.flags,
+           (view.flags & lsnf::kFlagEnabled) ? 1 : 0, (view.flags & lsnf::kFlagVerbose) ? 1 : 0, (view.flags & lsnf::kFlagJavaFont) ? 1 : 0, view.count,
            (unsigned long long)view.bootHash);
     for (uint32_t i = 0; i < view.count; ++i) {
         const uint8_t *e = view.entries + size_t(i) * lsnf::kConfigEntrySize;
         uint32_t off = uint32_t(e[0]) | (uint32_t(e[1]) << 8) | (uint32_t(e[2]) << 16) | (uint32_t(e[3]) << 24);
         unsigned len = unsigned(e[4] | (e[5] << 8)), bits = unsigned(e[6] | (e[7] << 8));
         printf("%.*s\t%u\n", int(len), reinterpret_cast<const char *>(view.strings + off), bits);
+    }
+    free(buf);
+    return 0;
+}
+
+const char *baseName(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
+
+// Size and fingerprint without reading the whole (possibly 20+ MB) font: head and tail spans only.
+bool fingerprintFile(const char *path, uint64_t *size, uint64_t *fp) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+    bool ok = fseek(f, 0, SEEK_END) == 0;
+    long n = ok ? ftell(f) : -1;
+    ok = ok && n >= 12;
+    static uint8_t buf[2 * lsnf::kFingerprintSpan];
+    if (ok) {
+        size_t len = size_t(n);
+        if (len <= sizeof(buf)) {
+            ok = fseek(f, 0, SEEK_SET) == 0 && fread(buf, 1, len, f) == len;
+        } else {
+            // Rebuild the exact byte sequence faceFingerprint() hashes: [head span][tail span].
+            ok = fseek(f, 0, SEEK_SET) == 0 && fread(buf, 1, lsnf::kFingerprintSpan, f) == lsnf::kFingerprintSpan &&
+                 fseek(f, long(len - lsnf::kFingerprintSpan), SEEK_SET) == 0 &&
+                 fread(buf + lsnf::kFingerprintSpan, 1, lsnf::kFingerprintSpan, f) == lsnf::kFingerprintSpan;
+        }
+        if (ok) {
+            *size = uint64_t(len);
+            *fp = len <= sizeof(buf) ? lsnf::faceFingerprint(buf, len) : lsnf::faceFingerprintSpans(buf, len);
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+int faces(int argc, char **argv) {
+    const char *out = nullptr;
+    const char *bootFile = "/proc/sys/kernel/random/boot_id";
+    static lsnf::FaceSpec specs[lsnf::kMaxFaces];
+    size_t count = 0;
+    for (int i = 0; i < argc; ++i) {
+        const char *a = argv[i];
+        if (!strcmp(a, "--out") && i + 1 < argc) { out = argv[++i]; continue; }
+        if (!strcmp(a, "--boot-id-file") && i + 1 < argc) { bootFile = argv[++i]; continue; }
+        if (a[0] == '-') return usage();
+        const char *name = baseName(a);
+        lsnf::FaceSpec spec;
+        if (!lsnf::parseFaceName(name, &spec.weight, &spec.italic)) {
+            fprintf(stderr, "lsnf-config: not a LuoShu body face, ignored: %s\n", a);
+            continue;
+        }
+        if (strlen(name) >= lsnf::kFaceNameMax) continue;
+        if (count >= lsnf::kMaxFaces) {
+            fprintf(stderr, "lsnf-config: more than %zu faces, ignored: %s\n", lsnf::kMaxFaces, a);
+            continue;
+        }
+        if (!fingerprintFile(a, &spec.size, &spec.fingerprint)) {
+            fprintf(stderr, "lsnf-config: cannot read %s\n", a);
+            return 66;
+        }
+        memcpy(spec.name, name, strlen(name) + 1);
+        specs[count++] = spec;
+    }
+    if (!out) return usage();
+    if (count == 0) {
+        fprintf(stderr, "lsnf-config: no LuoShu body face\n");
+        return 65;
+    }
+    size_t bootLen = 0;
+    char *boot = readFile(bootFile, 256, &bootLen);
+    if (!boot) {
+        fprintf(stderr, "lsnf-config: cannot read boot id %s\n", bootFile);
+        return 66;
+    }
+    uint64_t hash = lsnf::bootHash(boot, bootLen);
+    free(boot);
+    uint8_t blob[lsnf::kFaceHeaderSize + lsnf::kMaxFaces * lsnf::kFaceEntrySize];
+    size_t len = lsnf::buildFaceTable(specs, count, hash, blob, sizeof(blob));
+    if (len == 0 || !writeAtomic(out, blob, len)) {
+        fprintf(stderr, "lsnf-config: cannot write %s\n", out);
+        return 73;
+    }
+    printf("lsnf-config: wrote %s (%zu faces)\n", out, count);
+    return 0;
+}
+
+int dumpFaces(const char *path) {
+    size_t len = 0;
+    char *buf = readFile(path, 4096, &len);
+    lsnf::FaceTable t;
+    if (!buf || !lsnf::parseFaceTable(reinterpret_cast<const uint8_t *>(buf), len, &t)) {
+        free(buf);
+        fprintf(stderr, "lsnf-config: invalid face table %s\n", path);
+        return 65;
+    }
+    printf("faces=%u boot_hash=%016llx\n", t.count, (unsigned long long)t.bootHash);
+    for (uint32_t i = 0; i < t.count; ++i) {
+        const lsnf::FaceSpec &f = t.faces[i];
+        printf("%s\tweight=%u\titalic=%d\tttc=%u\tsize=%llu\tfp=%016llx\n", f.name, unsigned(f.weight),
+               f.italic ? 1 : 0, f.ttcIndex, (unsigned long long)f.size, (unsigned long long)f.fingerprint);
     }
     free(buf);
     return 0;
@@ -182,5 +296,7 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[1], "build")) return build(argc - 2, argv + 2);
     if (!strcmp(argv[1], "lookup") && argc == 4) return lookup(argv[2], argv[3]);
     if (!strcmp(argv[1], "dump") && argc == 3) return dump(argv[2]);
+    if (!strcmp(argv[1], "faces")) return faces(argc - 2, argv + 2);
+    if (!strcmp(argv[1], "dump-faces") && argc == 3) return dumpFaces(argv[2]);
     return usage();
 }

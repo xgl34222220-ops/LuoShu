@@ -13,8 +13,8 @@ permissions:
   contents: read
 env:
   NDK_VERSION: '28.2.13676358'
-  LSNF_VERSION: 'v0.1.0-n1'
-  LSNF_VERSION_CODE: '100'
+  LSNF_VERSION: 'v0.2.0-n3'
+  LSNF_VERSION_CODE: '200'
 jobs:
   host-tests:
     runs-on: ubuntu-24.04
@@ -129,3 +129,84 @@ jobs:
           path: ${{ runner.temp }}/out/*
           if-no-files-found: error
           retention-days: 14
+
+  emulator-integration:
+    # Feature 1 on real ART: the same hook code, installed via RegisterNatives inside app_process
+    # (no Zygisk on the emulator). Checks the Android 12+ nBuild signature registers, body fonts are
+    # built from the LuoShu face, icon / monospace / color fonts are kept and the marker yields.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: host-tests
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [31, 33, 34, 35, 36]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install NDK r28c
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          ndk="$sdk/ndk/$NDK_VERSION"
+          if [[ ! -d "$ndk" ]]; then
+            (yes || true) | "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" | tail -n 5
+          fi
+          echo "LSNF_NDK=$ndk" >> "$GITHUB_ENV"
+
+      - name: Build harness (x86_64) and dex
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          out="$RUNNER_TEMP/harness"
+          mkdir -p "$out" "$RUNNER_TEMP/classes"
+          cmake -S zygisk-native-font -B "$RUNNER_TEMP/hb" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$LSNF_NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release -DLSNF_ANDROID_HARNESS=ON
+          cmake --build "$RUNNER_TEMP/hb" --target luoshu_nf_harness
+          cp "$RUNNER_TEMP/hb/libluoshu_nf_harness.so" "$out/"
+          platform="$(ls -d "$sdk"/platforms/android-* | sort -V | tail -n 1)"
+          tools="$(ls -d "$sdk"/build-tools/* | sort -V | tail -n 1)"
+          javac -source 8 -target 8 -nowarn -bootclasspath "$platform/android.jar" -d "$RUNNER_TEMP/classes" \
+            zygisk-native-font/tests/android/java/LsnfHarness.java
+          "$tools/d8" --min-api 26 --output "$RUNNER_TEMP/classes" "$RUNNER_TEMP"/classes/*.class
+          cp "$RUNNER_TEMP/classes/classes.dex" "$out/harness.dex"
+          python3 -m pip install --quiet 'fonttools==4.61.1'
+          python3 zygisk-native-font/tools/make_test_fonts.py "$RUNNER_TEMP/corpus" >/dev/null
+          for f in latin_body.ttf cjk_body.ttf pua_only.ttf mono_post.ttf color_colr.ttf; do
+            cp "$RUNNER_TEMP/corpus/$f" "$out/"
+          done
+          # Stand-ins for the LuoShu body faces: two distinct files so the weight match is visible.
+          cp "$RUNNER_TEMP/corpus/cjk_body.ttf" "$out/LuoShu-400.ttf"
+          cp "$RUNNER_TEMP/corpus/cjk_ext_f12.ttf" "$out/LuoShu-700.ttf"
+          ls -l "$out"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=15
+          test -r /dev/kvm && test -w /dev/kvm
+
+      - name: Run harness on API ${{ matrix.api }}
+        timeout-minutes: 15
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: true
+          cores: 2
+          ram-size: 3072M
+          emulator-boot-timeout: 600
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: sh zygisk-native-font/tests/android/run_emulator_test.sh "$RUNNER_TEMP/harness"

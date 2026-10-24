@@ -23,6 +23,8 @@ constexpr size_t kPackageMaxLen = 255;
 enum ConfigFlag : uint32_t {
     kFlagEnabled = 1u << 0,  // user switch; off by default
     kFlagVerbose = 1u << 1,  // log one line per decided process
+    kFlagJavaFont = 1u << 2,       // Feature 1: Font$Builder.nBuild replacement (needs kFlagEnabled)
+    kFlagAllowNewerApi = 1u << 3,  // let Feature 1 try releases newer than Android 16
 };
 
 // Per-package bits.
@@ -69,7 +71,7 @@ struct ProcessInfo {
 };
 
 enum class Skip : uint8_t {
-    None = 0,        // eligible (N1: nothing is hooked yet, the module only logs)
+    None = 0,        // eligible; features still have their own gates (java_font_policy.h)
     SystemUid,       // app id < 10000
     Isolated,        // app id 90000..99999 (isolated / app zygote children)
     ChildZygote,
