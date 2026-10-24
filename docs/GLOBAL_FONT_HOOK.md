@@ -1,7 +1,7 @@
 # 洛书全局字体（可选 LSPosed 伴随模块）
 
 > 目录：`global-font-hook/`。独立 Gradle 工程，独立产出 APK（CI 产物 `LuoShu-GlobalFont-Companion`）。
-> 洛书主模块保持**无 Hook**，主模块 ZIP 不包含本模块任何文件（`scripts/module_payload_manifest.txt` 未改动，CI 有检查）。
+> 主模块 ZIP 不包含本模块任何文件（CI 有检查）。主模块自身的 Hook 只有内置的“全局字体增强（Zygisk）”：仅在开关开启时由 Zygisk 库安装，默认关闭，见 `zygisk-native-font/README.md`。
 
 ## 解决什么问题
 

@@ -1,34 +1,37 @@
-# 洛书 Native 字体伴随模块（实验）
+# 洛书全局字体增强（Zygisk，主模块内置）
 
-可选的 Zygisk 伴随模块，独立 ZIP（模块 ID `LuoShuNativeFont`），不进入主模块 ZIP，主模块保持零 Hook。
+本目录是主模块内置 Zygisk 库的源码。`scripts/build.sh` 通过 `scripts/build_zygisk.sh` 为 arm64-v8a、armeabi-v7a、x86、x86_64 构建，并打包进主模块 ZIP：
 
-## 当前阶段（N3：Java 层 Font$Builder.nBuild 替换）
+| 主模块 ZIP 内路径 | 内容 |
+| --- | --- |
+| `zygisk/<abi>.so` | Zygisk 库（唯一入口；同时提供 root companion） |
+| `zygisk/bin/<abi>/lsnf-config` | 配置编译工具 |
+| `zygisk/defaults/exclude.list` | 内置排除名单 |
+| `common/native_font.sh` | 配置层：`prepare` / `status` / `set` |
+| `licenses/zygisk.hpp.txt` | zygisk.hpp 许可 |
 
-- **N3 已包含 Feature 1：Java 层替换。** 在 Android 12–17（API 31–37）上通过 `RegisterNatives` 替换 `android.graphics.fonts.Font$Builder.nBuild`：App 自带的正文字体改用洛书当前已验证生效的正文字体构建；图标 / 等宽 / 彩色 / 判定失败的字体一律保留原样。API 低于 31 或高于 37（未开 `allow_newer_api`）、签名不匹配、`faces.bin` 缺失时不安装，进程保持原状。
-- **默认关闭。** 开启：`touch /data/adb/luoshu_native_font/enabled` 后重启；总开关开启后 Java 层替换随之开启，`touch /data/adb/luoshu_native_font/java_font.off` 可单独关闭。
-- **让出：** 洛书主模块不存在 / 被禁用 / 字体未验证生效（`device-font-load-verification` 非 verified、待重启、payload 待重建）时不写 `faces.bin`，Feature 1 不安装。
-- **日志：** `touch /data/adb/luoshu_native_font/verbose` 后重启，`logcat -s LuoShuNativeFont` 查看每个进程的判定与替换。
+不再有独立伴随模块 ZIP。字体替换本身不依赖 Hook；**Hook 仅在开关开启时由 Zygisk 库安装，默认关闭**。没有 Zygisk 时该库不会被加载，对系统完全没有影响。
 
-N1/N2 基础行为： 每个 App 进程在 `preAppSpecialize` 里只做：快速跳过（系统 uid、隔离进程、子 zygote、DenyList）→ 通过模块目录 fd 读 `runtime/config.bin` → 开关 / boot_id / 排除名单判定 → （开启详细日志时）写一行 logcat → 请求 Zygisk 卸载本库。进程状态与不装本模块时一致。
-- `system_server` 不注入（`preServerSpecialize` 直接卸载）。
-- 图标字体判定库 `src/sfnt_verdict.*` 由 N3 的 `Font$Builder.nBuild` 替换调用。
+## 行为
+
+- **Java 层替换（Feature 1）：** Android 12–17（API 31–37）上通过 Zygisk `hookJniNativeMethods` 替换 `android.graphics.fonts.Font$Builder.nBuild`：App 自带的正文字体改用洛书当前已验证生效的正文字体构建；图标 / 等宽 / 彩色 / 判定失败的字体一律放行。API 低于 31 或高于 37（未开 `allow_newer_api`）、签名不匹配、`faces.bin` 缺失时不安装，进程保持原状。
+- **每次开机准备：** `system_server` 或第一个 App 进程发现本次开机还没有配置时，向 root companion 请求一次 `common/native_font.sh prepare`（不等待，进程启动不被拖慢；准备完成前启动的进程直接跳过）。prepare 把开关、名单和已验证的洛书正文字体编译成 `zygisk/runtime/config.bin`、`faces.bin`，写入本次 `boot_id`；配置缺失、损坏或 boot_id 不符时一律跳过。
+- **让出：** 洛书模块被禁用 / 待删除时整体关闭；洛书字体未验证生效（`device-font-load-verification` 非 verified、待重启、payload 待重建）时不写 `faces.bin`，替换不安装；进程里已有其它全局字体方案（`System.getProperty("luoshu.gfh.active")`）时让出。
+- **跳过：** 系统 uid、隔离进程、子 zygote、DenyList、内置与用户排除名单；`system_server` 不注入。未安装 Hook 的进程会请求 Zygisk 卸载本库。
 
 ## 开关与名单
 
-设置目录：`/data/adb/luoshu_native_font/`（模块更新不丢，卸载模块时清除）
+App：**设置 → 安全与维护 → 全局字体增强（Zygisk）**，修改后重启生效。配置在主模块 config 目录（模块更新保留）：
 
 | 文件 | 作用 |
 | --- | --- |
-| `enabled` | 存在即开启（默认不存在 = 关闭） |
-| `verbose` | 存在即在 logcat 输出每个进程的判定（tag `LuoShuNativeFont`） |
-| `java_font.off` | 存在即单独关闭 N3 Java 层 `Font$Builder.nBuild` 替换（默认随总开关开启） |
-| `allow_newer_api` | 存在即允许在高于 API 37 的系统上尝试安装（默认不允许） |
-| `exclude.list` | 用户排除名单，一行一个包名，`#` 后为注释；与内置 `defaults/exclude.list` 合并 |
-| `force.list` | 预留给后续「强制生效」名单，当前只解析不生效 |
+| `/data/adb/modules/LuoShu/config/native-font.conf` | `enabled`（默认 0）、`verbose`、`java_font`（默认 1）、`allow_newer_api`（默认 0） |
+| `/data/adb/modules/LuoShu/config/native-font-exclude.list` | 用户排除名单，一行一个包名，`#` 后为注释；与内置名单合并 |
+| `/data/adb/modules/LuoShu/config/native-font-force.list` | 预留，当前只解析不生效 |
 
-修改后重启生效：`post-fs-data.sh` 在 zygote 启动前用 `bin/<abi>/lsnf-config` 把开关与名单编译成 `runtime/config.bin`，写入本次 `boot_id`；主模块 `LuoShu` 不存在、被禁用或待删除时强制关闭。配置缺失、损坏或 boot_id 不符时模块一律跳过。
+兼容：`native-font.conf` 不存在时只读旧路径 `/data/adb/luoshu_native_font/`（`enabled`、`verbose`、`java_font.off`、`allow_newer_api`、`exclude.list`、`force.list`）；App 第一次保存时迁入新配置。
 
-查看判定：`logcat -s LuoShuNativeFont`；查看配置：`/data/adb/modules/LuoShuNativeFont/bin/arm64-v8a/lsnf-config dump /data/adb/modules/LuoShuNativeFont/runtime/config.bin`。
+查看判定：`verbose=1` 后重启，`logcat -s LuoShuNativeFont`；本次开机状态：`zygisk/runtime/state.conf`；查看配置：`zygisk/bin/arm64-v8a/lsnf-config dump zygisk/runtime/config.bin`。
 
 ## 图标字体判定（N2）
 
@@ -54,7 +57,7 @@ cmake -S . -B out/arm64-v8a -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/andr
       -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static -DCMAKE_BUILD_TYPE=Release
 ```
 
-CI：`.github/workflows/zygisk-native-font.yml`（主机单测 + 4 ABI 构建 + 静态门禁 + 打包 ZIP）。
+CI：`.github/workflows/zygisk-native-font.yml`（主机单测 + 4 ABI 构建 + 静态门禁 + 配置层测试 `scripts/native_font_test.sh`）；主模块 ZIP 由 `scripts/build.sh` 打包并校验四个 ABI。
 
 ## 第三方
 

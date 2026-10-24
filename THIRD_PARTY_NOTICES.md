@@ -33,7 +33,7 @@
 
 ## zygisk.hpp（Zygisk 模块公开 API 头文件）
 
-- 用途：可选的 Native 字体伴随模块（`zygisk-native-font/`，独立 ZIP，不进入主模块）编译时使用的 Zygisk 公开接口声明。
+- 用途：主模块内置“全局字体增强（Zygisk）”库（源码 `zygisk-native-font/`，产物 `zygisk/<abi>.so`，默认关闭）编译时使用的 Zygisk 公开接口声明；许可全文随模块 ZIP 附于 `licenses/zygisk.hpp.txt`。
 - 来源：[`topjohnwu/zygisk-module-sample`](https://github.com/topjohnwu/zygisk-module-sample) `module/jni/zygisk.hpp`，原样保留、未修改。
 - 许可证：文件头所附的 ISC 风格许可（Copyright 2022-2023 John "topjohnwu" Wu）。
 - 完整文本：[`zygisk-native-font/third_party/zygisk/LICENSE`](zygisk-native-font/third_party/zygisk/LICENSE)。

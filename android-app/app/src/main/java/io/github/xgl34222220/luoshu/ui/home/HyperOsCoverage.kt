@@ -224,7 +224,7 @@ internal fun settingChangeMessage(setting: HyperOsSetting): String = when (setti
 }
 
 internal val COVERAGE_SCOPE_NOTE =
-    "微信、QQ、支付宝等应用内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内；洛书主模块不做 Hook。"
+    "微信、QQ、支付宝等应用内嵌字体与 Chrome 网页字体不在系统字体覆盖范围内；主模块默认不做 Hook（App 自带正文字体可在设置中开启“全局字体增强（Zygisk）”）。"
 
 // --- 选择应用定位 / 一键扫描 ----------------------------------------------------------------------
 
