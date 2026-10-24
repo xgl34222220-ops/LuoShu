@@ -141,6 +141,97 @@ if grep -q '^faces' "$TOOL.calls"; then fail 'faces built while a reboot is pend
 grep -qx 'reason=reboot-required' "$MOD/zygisk/runtime/state.conf" || fail 'reboot-required reason missing'
 rm -f "$MOD/config/text_reboot_required.conf"
 
+# 4h. ROM 槽位布局（模块里没有 LuoShu-NNN，正文直接写成 ROM 槽位文件）。
+# mkfont FILE WEIGHT TAG：最小 sfnt，只有一张 OS/2 表（usWeightClass=WEIGHT），TAG 让内容各不相同。
+mkfont() {
+  _hi=$(( $2 / 256 )); _lo=$(( $2 % 256 ))
+  # shellcheck disable=SC2059
+  { printf '\000\001\000\000\000\001\000\000\000\000\000\000OS/2\000\000\000\000\000\000\000\034\000\000\000\010'
+    printf "\000\004\001\364\\$(printf '%o' "$_hi")\\$(printf '%o' "$_lo")\000\005"
+    printf '%s' "$3"; } > "$1"
+}
+rm -f "$MOD/system/fonts/LuoShu-400.ttf" "$SYS/system/fonts/LuoShu-400.ttf"
+rm -rf "$MOD/system/fonts" "$MOD/my_product" "$MOD/.luoshu-payload" "$SYS"
+mkdir -p "$SYS/system/fonts" "$SYS/my_product/fonts"
+# 4h-1. 什么都没有：no-luoshu-faces，并写明找过的目录。
+: > "$TOOL.calls"
+runs prepare
+grep -qx 'reason=no-luoshu-faces' "$MOD/zygisk/runtime/state.conf" || fail 'no-luoshu-faces reason missing'
+grep -q '^reason_detail=.*system/fonts' "$MOD/zygisk/runtime/state.conf" || fail 'searched dirs not reported'
+runs status | grep -q '"facesDetail":".*fonts' || fail 'facesDetail not in status JSON'
+# 4h-2. ColorOS（PLK110 布局）：/system/fonts 与 /my_product/fonts 下的 SysSans/SysFont 槽位。
+mkdir -p "$MOD/system/fonts/.luoshu-font-store" "$MOD/my_product/fonts"
+mkfont "$MOD/system/fonts/.luoshu-font-store/regular.font" 400 luoshu-regular
+ln "$MOD/system/fonts/.luoshu-font-store/regular.font" "$MOD/system/fonts/SysSans-Hans-Regular.ttf"
+ln "$MOD/system/fonts/.luoshu-font-store/regular.font" "$MOD/system/fonts/SysFont-Hans-Regular.ttf"
+ln "$MOD/system/fonts/.luoshu-font-store/regular.font" "$MOD/system/fonts/SysSans-En-Regular.ttf"
+ln "$MOD/system/fonts/.luoshu-font-store/regular.font" "$MOD/system/fonts/DroidSansMono.ttf"
+ln "$MOD/system/fonts/.luoshu-font-store/regular.font" "$MOD/system/fonts/AndroidClock.ttf"
+mkfont "$MOD/system/fonts/SysSans-Hans-Bold.ttf" 700 luoshu-bold
+mkfont "$MOD/system/fonts/SysFont-Hans-Bold.ttf" 700 luoshu-bold-copy
+printf 'no-os2-medium' > "$MOD/my_product/fonts/SysFont-Hans-Medium.ttf"
+mkfont "$MOD/system/fonts/SysSans-Hans-Light-Italic.ttf" 300 italic
+# OS/2 usWeightClass 优先于文件名（Heavy 名字但 OS/2=850）。
+mkfont "$MOD/system/fonts/SysSans-Hans-Heavy.ttf" 850 luoshu-heavy
+# 未挂载：让出。
+: > "$TOOL.calls"
+runs prepare
+grep -qx 'reason=font-not-mounted' "$MOD/zygisk/runtime/state.conf" || fail 'coloros slots taken as mounted'
+cp "$MOD/my_product/fonts/SysFont-Hans-Medium.ttf" "$SYS/my_product/fonts/SysFont-Hans-Medium.ttf"
+: > "$TOOL.calls"
+runs prepare
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail "coloros slot layout faces=0: $(cat "$MOD/zygisk/runtime/state.conf")"
+call=$(grep '^faces' "$TOOL.calls")
+for w in 400 500 700 850; do
+  printf '%s' "$call" | grep -q "$MOD/zygisk/runtime/faces/LuoShu-$w.ttf" || fail "coloros weight $w missing: $call"
+done
+[ "$(printf '%s' "$call" | tr ' ' '\n' | grep -c 'LuoShu-')" = 4 ] || fail "coloros faces not deduped by weight: $call"
+[ "$(stat -c %i "$MOD/zygisk/runtime/faces/LuoShu-400.ttf")" = "$(stat -c %i "$MOD/system/fonts/SysSans-Hans-Regular.ttf")" ] || fail 'regular face not linked to the slot file'
+cmp -s "$MOD/zygisk/runtime/faces/LuoShu-700.ttf" "$MOD/system/fonts/SysSans-Hans-Bold.ttf" || fail 'SysSans bold not preferred over SysFont'
+cmp -s "$MOD/zygisk/runtime/faces/LuoShu-500.ttf" "$MOD/my_product/fonts/SysFont-Hans-Medium.ttf" || fail 'my_product slot not used'
+grep -qx 'reason=' "$MOD/zygisk/runtime/state.conf" || fail 'stale reason after coloros faces'
+# 槽位大小与系统真实路径不一致视为未挂载。
+printf 'stock' > "$SYS/my_product/fonts/SysFont-Hans-Medium.ttf"
+runs prepare
+grep -qx 'reason=font-not-mounted' "$MOD/zygisk/runtime/state.conf" || fail 'stock my_product slot taken as mounted'
+[ ! -f "$MOD/zygisk/runtime/faces.bin" ] || fail 'stale faces.bin kept (coloros)'
+cp "$MOD/system/fonts/SysFont-Hans-Bold.ttf" "$SYS/system/fonts/SysFont-Hans-Bold.ttf"
+runs prepare
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail 'system slot visibility not accepted'
+rm -rf "$MOD/system/fonts" "$MOD/my_product" "$SYS" "$MOD/zygisk/runtime/faces"
+mkdir -p "$SYS/system/fonts"
+# 4h-3. HyperOS（私有负载，seed 同名换内容）：MiSansVF + 数字字重槽；Roboto/拉丁/Overlay 不取。
+P="$MOD/.luoshu-payload/system/fonts"
+mkdir -p "$P" "$MOD/.luoshu-payload/mi_ext/fonts"
+mkfont "$P/MiSansVF.ttf" 400 luoshu-vf
+ln "$P/MiSansVF.ttf" "$P/400.ttf"
+mkfont "$P/700.ttf" 700 luoshu-700
+mkfont "$P/MiSansLatinVF.ttf" 400 latin
+mkfont "$P/MiSansVF_Overlay.ttf" 400 overlay
+mkfont "$P/Roboto-Medium.ttf" 500 roboto
+mkfont "$P/RobotoMono-Regular.ttf" 400 mono
+mkfont "$MOD/.luoshu-payload/mi_ext/fonts/MiSansVF.ttf" 400 luoshu-vf-mi-ext
+: > "$TOOL.calls"
+runs prepare
+grep -qx 'reason=font-not-mounted' "$MOD/zygisk/runtime/state.conf" || fail 'hyperos seed slots taken as mounted'
+printf 'stock-vf' > "$SYS/system/fonts/MiSansVF.ttf"
+cp "$P/700.ttf" "$SYS/system/fonts/700.ttf"
+: > "$TOOL.calls"
+runs prepare
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail "hyperos slot layout faces=0: $(cat "$MOD/zygisk/runtime/state.conf")"
+call=$(grep '^faces' "$TOOL.calls")
+printf '%s' "$call" | grep -q "$MOD/zygisk/runtime/faces/LuoShu-400.ttf" || fail "hyperos 400 missing: $call"
+printf '%s' "$call" | grep -q "$MOD/zygisk/runtime/faces/LuoShu-700.ttf" || fail "hyperos 700 missing: $call"
+[ "$(printf '%s' "$call" | tr ' ' '\n' | grep -c 'LuoShu-')" = 2 ] || fail "hyperos picked extra slots: $call"
+cmp -s "$MOD/zygisk/runtime/faces/LuoShu-400.ttf" "$P/MiSansVF.ttf" || fail 'hyperos regular face is not MiSansVF'
+rm -rf "$MOD/.luoshu-payload" "$MOD/zygisk/runtime/faces" "$SYS"
+mkdir -p "$MOD/system/fonts" "$SYS/system/fonts"
+printf 'luoshu-regular' > "$MOD/system/fonts/LuoShu-400.ttf"
+printf 'luoshu-regular' > "$SYS/system/fonts/LuoShu-400.ttf"
+runs prepare
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail 'LuoShu-NNN path regressed'
+[ ! -e "$MOD/zygisk/runtime/faces" ] || fail 'slot aliases kept for LuoShu-NNN layout'
+
 # 5. App 写开关：迁到主模块 config，带走旧名单；之后只读新配置。
 out=$(run set enabled 0)
 printf '%s' "$out" | grep -q '"enabled":false' || fail "set enabled 0 failed: $out"
