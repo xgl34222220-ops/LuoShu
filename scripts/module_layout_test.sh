@@ -70,4 +70,14 @@ for path in \
   sh -n "$ROOT/$path" || fail "shell syntax: $path"
 done
 
+# 全局字体增强：主模块只有一个 Zygisk 入口（zygisk/<abi>.so，四个 ABI），由 build.sh 从同一份
+# 源码构建；不再有独立伴随模块。Hook 只在开关开启时由 Zygisk 库安装，默认关闭。
+grep -qx 'common/native_font.sh' "$MANIFEST" || fail "native font config layer not shipped"
+! grep -q '^zygisk' "$MANIFEST" || fail "zygisk payload must be built, never copied from the repository"
+grep -q 'build_zygisk.sh' "$ROOT/scripts/build.sh" || fail "build.sh does not build the Zygisk library"
+grep -q "ZYGISK_ABIS='arm64-v8a armeabi-v7a x86_64 x86'" "$ROOT/scripts/build.sh" || fail "Zygisk ABI list changed"
+[ ! -e "$ROOT/zygisk-native-font/module" ] || fail "standalone Zygisk module packaging returned"
+[ "$(grep -rl 'REGISTER_ZYGISK_MODULE(' "$ROOT/zygisk-native-font/src" | wc -l | tr -d ' ')" = 1 ] || fail "exactly one Zygisk entry expected"
+sh -n "$ROOT/common/native_font.sh" || fail "shell syntax: common/native_font.sh"
+
 printf 'Module layout cleanup checks passed.\n'

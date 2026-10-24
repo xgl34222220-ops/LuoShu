@@ -1,7 +1,7 @@
 #!/bin/sh
 # Static gate for the built module libraries.
 #   static_gate.sh READELF BUILD_ROOT
-# * the .so exports exactly one defined dynamic symbol: zygisk_module_entry
+# * the .so exports exactly the two Zygisk entries: zygisk_companion_entry, zygisk_module_entry
 # * DT_NEEDED is a subset of {libc, libdl, liblog, libm, libandroid}
 # * no inline-hook library is linked or embedded
 set -eu
@@ -14,8 +14,8 @@ for so in "$build_root"/*/libluoshu_native_font.so; do
   echo "== $so ($(stat -c %s "$so") bytes)"
   exports="$("$readelf" -W --dyn-syms "$so" | awk '$5=="GLOBAL"||$5=="WEAK" {if ($7!="UND") print $8}' | sed 's/@.*//' | sort -u)"
   echo "exports: $(echo "$exports" | tr '\n' ' ')"
-  if [ "$exports" != "zygisk_module_entry" ]; then
-    echo "::error::$so must export only zygisk_module_entry" >&2
+  if [ "$exports" != "$(printf 'zygisk_companion_entry\nzygisk_module_entry')" ]; then
+    echo "::error::$so must export only zygisk_companion_entry and zygisk_module_entry" >&2
     status=1
   fi
   needed="$("$readelf" -W -d "$so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')"

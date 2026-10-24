@@ -13,8 +13,12 @@ SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
-# 10.5 MiB + 128 KiB: HyperOS coverage (PR #290) + real-device feedback/ColorOS coverage (PR #293/#294).
-MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11141120}"
+# 16 MiB: owner-authorized budget once the Zygisk library (four ABIs) ships inside the main module.
+MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-16777216}"
+# Zygisk library (全局字体增强, default off). LUOSHU_ZYGISK_DIR may point at a prebuilt
+# <abi>/{libluoshu_native_font.so,lsnf-config} tree; otherwise it is built here with the NDK.
+ZYGISK_DIR="${LUOSHU_ZYGISK_DIR:-}"
+ZYGISK_ABIS='arm64-v8a armeabi-v7a x86_64 x86'
 
 sh "$ROOT/scripts/check.sh"
 [ -n "$APP_APK" ] || {
@@ -87,6 +91,26 @@ while IFS= read -r path || [ -n "$path" ]; do
 done < "$PAYLOAD_MANIFEST"
 [ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
+# Zygisk library: zygisk/<abi>.so is loaded only by a Zygisk implementation; nothing is installed
+# unless the user turns on 全局字体增强 (config/native-font.conf) and reboots.
+if [ -z "$ZYGISK_DIR" ]; then
+  ZYGISK_DIR=$(mktemp -d)
+  ZYGISK_TMP="$ZYGISK_DIR"
+  sh "$ROOT/scripts/build_zygisk.sh" "$ZYGISK_DIR"
+fi
+mkdir -p "$STAGE/zygisk/defaults" "$STAGE/licenses"
+for abi in $ZYGISK_ABIS; do
+  [ -s "$ZYGISK_DIR/$abi/libluoshu_native_font.so" ] || { echo "Missing Zygisk library: $abi" >&2; exit 71; }
+  [ -s "$ZYGISK_DIR/$abi/lsnf-config" ] || { echo "Missing Zygisk config tool: $abi" >&2; exit 71; }
+  cp -f "$ZYGISK_DIR/$abi/libluoshu_native_font.so" "$STAGE/zygisk/$abi.so"
+  mkdir -p "$STAGE/zygisk/bin/$abi"
+  cp -f "$ZYGISK_DIR/$abi/lsnf-config" "$STAGE/zygisk/bin/$abi/lsnf-config"
+  chmod 0644 "$STAGE/zygisk/$abi.so"
+  chmod 0755 "$STAGE/zygisk/bin/$abi/lsnf-config"
+done
+cp -f "$ROOT/zygisk-native-font/defaults/exclude.list" "$STAGE/zygisk/defaults/exclude.list"
+cp -f "$ROOT/zygisk-native-font/third_party/zygisk/LICENSE" "$STAGE/licenses/zygisk.hpp.txt"
+
 mkdir -p "$STAGE/bundled"
 cp -f "$APP_APK" "$STAGE/bundled/LuoShu-App.apk"
 APP_SHA256=$(sha256sum "$STAGE/bundled/LuoShu-App.apk" | awk '{print $1}')
@@ -148,6 +172,11 @@ unzip -Z1 "$ZIP" | grep -Eq '(^|/)webroot(/|$)|(^|/)(__pycache__|emoji)(/|$)|\.p
   exit 89
 } || true
 unzip -Z1 "$ZIP" | grep -qx 'bundled/LuoShu-App.apk'
+for abi in $ZYGISK_ABIS; do
+  unzip -Z1 "$ZIP" | grep -qx "zygisk/$abi.so" || { echo "Zygisk library missing from ZIP: $abi" >&2; exit 89; }
+  unzip -Z1 "$ZIP" | grep -qx "zygisk/bin/$abi/lsnf-config" || { echo "Zygisk tool missing from ZIP: $abi" >&2; exit 89; }
+done
+! unzip -Z1 "$ZIP" | grep -q '^zygisk/runtime/' || { echo 'Zygisk runtime state packaged' >&2; exit 89; }
 
 python3 - "$ZIP" > "$SIZE_REPORT" <<'PY'
 import collections
@@ -183,3 +212,4 @@ printf 'Built: %s\n' "$ZIP"
 printf 'Bundled App: %s (%s)\n' "$STAGE/bundled/LuoShu-App.apk" "$APP_PACKAGE"
 printf 'Size report: %s (%s / %s bytes budget)\n' "$SIZE_REPORT" "$ZIP_BYTES" "$MAX_ZIP_BYTES"
 rm -rf "$STAGE"
+[ -z "${ZYGISK_TMP:-}" ] || rm -rf "$ZYGISK_TMP"

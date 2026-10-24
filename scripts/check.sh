@@ -307,6 +307,8 @@ sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
 sh "$ROOT/scripts/module_layout_test.sh"
+# 全局字体增强（Zygisk）：默认关闭、配置路径、让出与失败保守。
+sh "$ROOT/scripts/native_font_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
 python3 "$ROOT/scripts/font_coverage_speed_test.py"
 sh "$ROOT/scripts/coloros_legacy_coverage_test.sh"

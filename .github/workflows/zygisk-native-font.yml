@@ -1,9 +1,12 @@
-name: Zygisk native font companion
+name: Zygisk native font (main module)
 on:
   pull_request:
     branches: [main]
     paths:
       - zygisk-native-font/**
+      - common/native_font.sh
+      - scripts/build_zygisk.sh
+      - scripts/native_font_test.sh
       - common/font_import.sh
       - common/font_inventory.py
       - THIRD_PARTY_NOTICES.md
@@ -13,8 +16,6 @@ permissions:
   contents: read
 env:
   NDK_VERSION: '28.2.13676358'
-  LSNF_VERSION: 'v0.2.0-n3'
-  LSNF_VERSION_CODE: '200'
 jobs:
   host-tests:
     runs-on: ubuntu-24.04
@@ -93,7 +94,7 @@ jobs:
           done
           ls -l "$RUNNER_TEMP"/build/*/libluoshu_native_font.so "$RUNNER_TEMP"/build/*/lsnf-config
 
-      - name: Static gate (exports, NEEDED, no inline hook library)
+      - name: Static gate (Zygisk exports, NEEDED, no inline hook library)
         shell: bash
         run: |
           set -euo pipefail
@@ -101,34 +102,21 @@ jobs:
           test -x "$readelf"
           sh zygisk-native-font/tools/static_gate.sh "$readelf" "$RUNNER_TEMP/build"
 
-      - name: Package module ZIP
+      - name: Main module packages the Zygisk library
         shell: bash
         run: |
           set -euo pipefail
-          sh zygisk-native-font/tools/package.sh "$RUNNER_TEMP/build" "$RUNNER_TEMP/out" "$LSNF_VERSION" "$LSNF_VERSION_CODE"
-          zip="$RUNNER_TEMP/out/LuoShuNativeFont-$LSNF_VERSION.zip"
-          for f in module.prop customize.sh post-fs-data.sh uninstall.sh skip_mount \
-                   META-INF/com/google/android/update-binary META-INF/com/google/android/updater-script \
-                   zygisk/arm64-v8a.so zygisk/armeabi-v7a.so zygisk/x86_64.so zygisk/x86.so \
-                   bin/arm64-v8a/lsnf-config defaults/exclude.list licenses/zygisk.hpp.txt; do
-            unzip -l "$zip" "$f" >/dev/null || { echo "::error::ZIP is missing $f"; exit 1; }
+          # No standalone companion ZIP any more: scripts/build.sh stages zygisk/<abi>.so and the
+          # config tool into the main module from the same build (scripts/build_zygisk.sh).
+          test ! -e zygisk-native-font/module
+          test ! -e zygisk-native-font/tools/package.sh
+          grep -q 'build_zygisk.sh' scripts/build.sh
+          grep -qx 'common/native_font.sh' scripts/module_payload_manifest.txt
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            grep -q "ZYGISK_ABIS='.*$abi" scripts/build.sh
           done
-          unzip -p "$zip" module.prop | grep -qx 'id=LuoShuNativeFont'
-          ls -l "$RUNNER_TEMP/out"
-          echo "### 洛书 Native 字体伴随模块 ZIP：$(stat -c %s "$zip") 字节" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Main module ZIP stays untouched
-        shell: bash
-        run: |
-          set -euo pipefail
-          ! grep -n 'zygisk-native-font\|LuoShuNativeFont' scripts/module_payload_manifest.txt scripts/build.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-NativeFont-Module
-          path: ${{ runner.temp }}/out/*
-          if-no-files-found: error
-          retention-days: 14
+          sh scripts/native_font_test.sh
+          echo "### 洛书全局字体增强（Zygisk）库：$(stat -c %s "$RUNNER_TEMP/build/arm64-v8a/libluoshu_native_font.so") 字节（arm64-v8a）" >> "$GITHUB_STEP_SUMMARY"
 
   emulator-integration:
     # Feature 1 on real ART: the same hook code, installed via RegisterNatives inside app_process

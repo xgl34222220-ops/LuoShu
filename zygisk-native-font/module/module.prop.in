@@ -1,6 +1,0 @@
-id=LuoShuNativeFont
-name=洛书 Native 字体（实验）
-version=@VERSION@
-versionCode=@VERSION_CODE@
-author=惜故里丶
-description=洛书可选 Zygisk 伴随模块（实验，N1 骨架）：默认关闭；开启后只记录每个进程的判定，不安装任何 Hook，不改变主模块行为

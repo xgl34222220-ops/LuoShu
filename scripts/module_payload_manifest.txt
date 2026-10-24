@@ -115,6 +115,7 @@ common/hyperos_source_xml.py
 common/hyperos_theme_takeover.sh
 common/hyperos_boot_routes.sh
 common/hyperos_coverage_bridge.sh
+common/native_font.sh
 common/font_coverage_locator.py
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4

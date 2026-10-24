@@ -1,6 +1,11 @@
-// LuoShu native font: Zygisk entry.
+// LuoShu native font: Zygisk entry, shipped inside the main LuoShu module as zygisk/<abi>.so.
 //
-// For every app process preAppSpecialize reads runtime/config.bin through the module directory fd
+// The switch is off by default. Without a Zygisk implementation this library is never loaded and
+// nothing changes. With Zygisk, the root companion (same library, zygisk_companion_entry) runs
+// common/native_font.sh prepare once per boot, which compiles the user switch, the exclude lists
+// and the verified LuoShu faces into zygisk/runtime/*.bin stamped with the current boot id.
+//
+// For every app process preAppSpecialize reads zygisk/runtime/config.bin through the module dir fd
 // and decides whether the process is eligible (switch, boot id, exclude list, built-in skips). When
 // it is, and Feature 1 is on (Android 12..16, verified LuoShu faces in runtime/faces.bin), the
 // LuoShu body faces are mapped read-only and Font$Builder.nBuild is replaced through Zygisk's
@@ -8,11 +13,14 @@
 // dlclose it, so the process is left exactly as it was.
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <sys/system_properties.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 
 #include "config.h"
 #include "face_table.h"
@@ -23,12 +31,15 @@
 
 namespace {
 
-constexpr const char *kConfigPath = "runtime/config.bin";
-constexpr const char *kFacesPath = "runtime/faces.bin";
+constexpr const char *kConfigPath = "zygisk/runtime/config.bin";
+constexpr const char *kFacesPath = "zygisk/runtime/faces.bin";
 // Faces are opened through the mounted system path first (what the app itself would see), then
-// relative to this module's directory inside the main module's payload.
+// relative to the module directory (the main module's own payload).
 constexpr const char *kMountedFontDir = "/system/fonts";
-constexpr const char *kPayloadFontRel = "../LuoShu/system/fonts/";
+constexpr const char *kPayloadFontRel = "system/fonts/";
+// Run by the root companion; the module id is fixed (module.prop id=LuoShu).
+constexpr const char *kModuleRoot = "/data/adb/modules/LuoShu";
+constexpr const char *kPrepareScript = "/data/adb/modules/LuoShu/common/native_font.sh";
 
 ssize_t readAll(int fd, uint8_t *buf, size_t cap) {
     size_t got = 0;
@@ -71,6 +82,63 @@ void zygiskRegistrar(void *ctx, JNIEnv *env, const char *cls, JNINativeMethod *m
     static_cast<zygisk::Api *>(ctx)->hookJniNativeMethods(env, cls, methods, count);
 }
 
+// True when zygisk/runtime/config.bin parses and carries the current boot id.
+bool configFresh(int dir, uint64_t boot);
+
+// Asks the root companion to prepare this boot's runtime config. Never waits for the prepare
+// itself: the companion answers before it starts, so app start-up is not delayed. Processes that
+// start before the config exists simply skip (NoConfig / StaleBoot).
+void requestPrepare(zygisk::Api *api) {
+    int fd = api->connectCompanion();
+    if (fd < 0) return;
+    uint8_t req = 1, reply = 0;
+    if (write(fd, &req, 1) == 1) (void)read(fd, &reply, 1);
+    close(fd);
+}
+
+// Root companion: one prepare per boot, started at most once per companion process and boot.
+void companionHandler(int client) {
+    static std::mutex lock;
+    static uint64_t preparedBoot = 0;
+    uint8_t req = 0;
+    if (read(client, &req, 1) != 1) return;
+    uint64_t boot = currentBootHash();
+    bool run = false;
+    {
+        std::lock_guard<std::mutex> guard(lock);
+        if (boot != 0 && preparedBoot != boot) {
+            preparedBoot = boot;
+            run = true;
+        }
+    }
+    struct stat st {};
+    // Only a root-owned, not group/other-writable script inside the module is ever executed.
+    if (run && (stat(kPrepareScript, &st) != 0 || st.st_uid != 0 || (st.st_mode & 022) != 0 ||
+                !S_ISREG(st.st_mode))) {
+        run = false;
+    }
+    uint8_t reply = run ? 1 : 0;
+    (void)write(client, &reply, 1);
+    if (!run) return;
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR | O_CLOEXEC);
+        if (devnull >= 0) {
+            dup2(devnull, 0);
+            dup2(devnull, 1);
+            dup2(devnull, 2);
+        }
+        if (chdir(kModuleRoot) != 0) _exit(126);
+        execl("/system/bin/sh", "sh", kPrepareScript, "prepare", static_cast<char *>(nullptr));
+        _exit(127);
+    }
+    if (pid > 0) {
+        int status = 0;
+        while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+        }
+    }
+}
+
 // Lives for the whole process once the hook is installed (the mappings back the font buffers).
 lsnf::FaceSet g_faces;
 
@@ -95,7 +163,8 @@ public:
             proc.niceName = name;
             ConfigBuffer cfg;
             const lsnf::ConfigView *view = loadConfig(cfg) ? &cfg.view : nullptr;
-            uint64_t boot = view ? currentBootHash() : 0;
+            uint64_t boot = currentBootHash();
+            if (!view || view->bootHash != boot) requestPrepare(api_);
             d = lsnf::decide(proc, view, boot);
             uint32_t flags = view ? view->flags : 0;
             lsnf::InstallSkip gate = lsnf::javaHookGate(d, flags, apiLevel(), 1);
@@ -121,6 +190,8 @@ public:
     }
 
     void preServerSpecialize(zygisk::ServerSpecializeArgs *) override {
+        // system_server forks first after boot: start this boot's prepare as early as possible.
+        if (!configFresh(api_->getModuleDir(), currentBootHash())) requestPrepare(api_);
         api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
     }
 
@@ -148,6 +219,14 @@ private:
     JNIEnv *env_ = nullptr;
 };
 
+bool configFresh(int dir, uint64_t boot) {
+    static uint8_t bytes[64 * 1024];
+    lsnf::ConfigView view;
+    ssize_t n = readModuleFile(dir, kConfigPath, bytes, sizeof(bytes));
+    return n > 0 && lsnf::parseConfig(bytes, size_t(n), &view) && view.bootHash == boot;
+}
+
 }  // namespace
 
 REGISTER_ZYGISK_MODULE(NativeFontModule)
+REGISTER_ZYGISK_COMPANION(companionHandler)
