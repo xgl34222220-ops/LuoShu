@@ -2,11 +2,16 @@
 
 可选的 Zygisk 伴随模块，独立 ZIP（模块 ID `LuoShuNativeFont`），不进入主模块 ZIP，主模块保持零 Hook。
 
-## 当前阶段（N1 骨架 + N2 判定库）
+## 当前阶段（N3：Java 层 Font$Builder.nBuild 替换）
 
-- **不安装任何 Hook。** 每个 App 进程在 `preAppSpecialize` 里只做：快速跳过（系统 uid、隔离进程、子 zygote、DenyList）→ 通过模块目录 fd 读 `runtime/config.bin` → 开关 / boot_id / 排除名单判定 → （开启详细日志时）写一行 logcat → 请求 Zygisk 卸载本库。进程状态与不装本模块时一致。
+- **N3 已包含 Feature 1：Java 层替换。** 在 Android 12–17（API 31–37）上通过 `RegisterNatives` 替换 `android.graphics.fonts.Font$Builder.nBuild`：App 自带的正文字体改用洛书当前已验证生效的正文字体构建；图标 / 等宽 / 彩色 / 判定失败的字体一律保留原样。API 低于 31 或高于 37（未开 `allow_newer_api`）、签名不匹配、`faces.bin` 缺失时不安装，进程保持原状。
+- **默认关闭。** 开启：`touch /data/adb/luoshu_native_font/enabled` 后重启；总开关开启后 Java 层替换随之开启，`touch /data/adb/luoshu_native_font/java_font.off` 可单独关闭。
+- **让出：** 洛书主模块不存在 / 被禁用 / 字体未验证生效（`device-font-load-verification` 非 verified、待重启、payload 待重建）时不写 `faces.bin`，Feature 1 不安装。
+- **日志：** `touch /data/adb/luoshu_native_font/verbose` 后重启，`logcat -s LuoShuNativeFont` 查看每个进程的判定与替换。
+
+N1/N2 基础行为： 每个 App 进程在 `preAppSpecialize` 里只做：快速跳过（系统 uid、隔离进程、子 zygote、DenyList）→ 通过模块目录 fd 读 `runtime/config.bin` → 开关 / boot_id / 排除名单判定 → （开启详细日志时）写一行 logcat → 请求 Zygisk 卸载本库。进程状态与不装本模块时一致。
 - `system_server` 不注入（`preServerSpecialize` 直接卸载）。
-- 图标字体判定库 `src/sfnt_verdict.*` 已就绪并有单测，但 N1 不调用；N3/N4 接入 `Font$Builder.nBuild` 时才生效。
+- 图标字体判定库 `src/sfnt_verdict.*` 由 N3 的 `Font$Builder.nBuild` 替换调用。
 
 ## 开关与名单
 
@@ -16,6 +21,8 @@
 | --- | --- |
 | `enabled` | 存在即开启（默认不存在 = 关闭） |
 | `verbose` | 存在即在 logcat 输出每个进程的判定（tag `LuoShuNativeFont`） |
+| `java_font.off` | 存在即单独关闭 N3 Java 层 `Font$Builder.nBuild` 替换（默认随总开关开启） |
+| `allow_newer_api` | 存在即允许在高于 API 37 的系统上尝试安装（默认不允许） |
 | `exclude.list` | 用户排除名单，一行一个包名，`#` 后为注释；与内置 `defaults/exclude.list` 合并 |
 | `force.list` | 预留给后续「强制生效」名单，当前只解析不生效 |
 

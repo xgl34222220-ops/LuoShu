@@ -14,9 +14,13 @@ esac
 [ -f "$MODPATH/zygisk/$ABI.so" ] || abort "! 缺少 zygisk/$ABI.so"
 [ -x "$MODPATH/bin/$ABI/lsnf-config" ] || chmod 0755 "$MODPATH/bin/$ABI/lsnf-config"
 
-ui_print "- 洛书 Native 字体（实验）：N1 骨架，不安装任何 Hook"
+ui_print "- 洛书 Native 字体（实验）N3：App 自带字体 → 洛书正文字体"
+ui_print "-   Java 层替换 Font\$Builder.nBuild（Android 12–17 / API 31–37）"
+ui_print "-   图标、等宽、彩色字体保留；洛书主模块字体未验证生效时自动让出"
 ui_print "- 需要 Zygisk（Magisk 内置 Zygisk / ZygiskNext / ReZygisk）"
 ui_print "- 默认关闭。开启：touch $DATA_DIR/enabled 后重启"
+ui_print "-   单独关闭 Java 层替换：touch $DATA_DIR/java_font.off"
+ui_print "-   查看日志：touch $DATA_DIR/verbose，然后 logcat -s LuoShuNativeFont"
 
 mkdir -p "$DATA_DIR"
 [ -f "$DATA_DIR/exclude.list" ] || cp "$MODPATH/defaults/exclude.list" "$DATA_DIR/exclude.list"
