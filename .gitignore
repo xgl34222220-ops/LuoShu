@@ -18,4 +18,5 @@ android-app/.gradle/
 android-app/.kotlin/
 android-app/build/
 android-app/app/build/
+android-app/global-font-hook/build/
 android-app/local.properties

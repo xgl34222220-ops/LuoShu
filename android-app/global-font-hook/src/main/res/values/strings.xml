@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gfh_title">全局字体（LSPosed）</string>
+    <string name="gfh_xposed_description">洛书内置全局字体模块：让 App 内置的正文字体与 WebView 网页字体跟随系统字体（洛书替换后的字体）。只 Hook 字体加载入口；图标、符号、表情、公式、时钟、数字、等宽字体保持原样。在 LSPosed 中启用洛书并勾选作用域后生效。</string>
+    <string name="gfh_status_active">状态：LSPosed 已激活本模块。请在 LSPosed 里为洛书勾选需要生效的 App（作用域），并重启这些 App。</string>
+    <string name="gfh_status_inactive">状态：LSPosed 尚未激活本模块。请在 LSPosed 中启用洛书并勾选作用域（需要生效的 App），设置才会同步到目标 App。</string>
+    <string name="gfh_legacy_installed">检测到旧版独立伴随 App「洛书全局字体」。洛书已内置同一模块，可在 LSPosed 中停用并卸载旧伴随 App；两者同时启用时，同一进程只替换一次。</string>
+    <string name="gfh_toggle_enabled">总开关</string>
+    <string name="gfh_toggle_app_fonts">App 内置字体跟随系统（Typeface / Font.Builder / getFont / ResourcesCompat / Compose / 可下载字体）</string>
+    <string name="gfh_toggle_mono_slot">等宽字体换为系统等宽（默认关）</string>
+    <string name="gfh_mono_slot_hint">打开后，App 自带的代码等宽字体（如 JetBrains Mono、Roboto Mono、Source Code Pro）换成系统等宽字体（洛书的 mono 槽）。部分 App 依赖自带等宽字体的宽度对齐，出现错位请关闭。</string>
+    <string name="gfh_mono_slot_unavailable">当前系统等宽字体实测不是严格等宽（洛书 mono 槽字宽不一致），已禁用此开关，等宽字体保持原样。</string>
+    <string name="gfh_toggle_web_fonts">WebView 网页正文字体跟随系统</string>
+    <string name="gfh_toggle_web_unknown">激进模式：拦截无法从文件名判断的网页字体（可能误伤图标）</string>
+    <string name="gfh_toggle_verbose">调试日志（写入 LSPosed 日志）</string>
+    <string name="gfh_explain">原理：在被勾选 App 的进程里，把 App 自带的正文字体换成系统默认字体的对应字重/斜体；把网页正文字体请求回 404，让页面回落到系统字体。图标/符号/表情/公式/时钟/数字字体与无拉丁字母的字体保持不变；等宽字体默认保持不变（可用上面的开关换成系统等宽）。图标与正文混装的字体族整体保持。洛书 App 自身不受影响。修改开关后需重启目标 App。</string>
+    <string name="gfh_scope_title">推荐作用域（在 LSPosed 中为洛书自行勾选）：</string>
+    <string name="gfh_limits">已知限制：Flutter、游戏引擎等自绘引擎不走 Android 字体加载；微信/QQ 的 X5/XWeb 内核不是系统 WebView；Chrome Custom Tabs（X 等 App 的“内置浏览器”）在 Chrome 进程里渲染，本模块无法拦截，可在 App 设置里关闭内置浏览器后改用 WebView 浏览器或接受原字体。名字无法判断的字体首次在主线程加载时保持原样，后台判定后下次启动生效。</string>
+    <string-array name="gfh_recommended_scope">
+        <item>@string/gfh_host_package</item>
+        <item>com.tencent.mm</item>
+        <item>com.tencent.mobileqq</item>
+        <item>com.xingin.xhs</item>
+        <item>com.twitter.android</item>
+        <item>com.anthropic.claude</item>
+        <item>com.google.android.gm</item>
+        <item>com.google.android.youtube</item>
+        <item>com.google.android.apps.bard</item>
+        <item>com.google.android.googlequicksearchbox</item>
+        <item>com.google.android.apps.maps</item>
+        <item>com.google.android.apps.photos</item>
+        <item>com.google.android.apps.translate</item>
+    </string-array>
+</resources>
