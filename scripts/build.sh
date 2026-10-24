@@ -13,7 +13,8 @@ SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
-# 10.5 MiB + 128 KiB: HyperOS coverage (PR #290) + real-device feedback/ColorOS coverage (PR #293/#294).
+# 16 MiB: module size is no longer the priority (owner decision 2026-10-22); leaves room for the
+# static WOFF2 decoder and later feature PRs. Previously 10.5 MiB + 128 KiB.
 MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-16777216}"
 
 sh "$ROOT/scripts/check.sh"
@@ -119,7 +120,8 @@ rm -f "$STAGE/common/stability.sh" "$STAGE/common/fonts_xml_template.sh" \
 sh "$ROOT/scripts/prune_python_runtime.sh" "$STAGE"
 
 find "$STAGE/common" -maxdepth 1 -type f -exec chmod 0755 {} +
-chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python"
+chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python" \
+  "$STAGE/common/python/bin/luoshu-woff2-decode"
 find "$STAGE/system/fonts" -type f -exec chmod 0644 {} + 2>/dev/null || true
 
 # App-only single-package gates: no WebUI and the native App must always be bundled.
