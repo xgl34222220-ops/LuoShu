@@ -14,9 +14,9 @@
 
 ## 行为
 
-- **Java 层替换（Feature 1）：** Android 12–17（API 31–37）上通过 Zygisk `hookJniNativeMethods` 替换 `android.graphics.fonts.Font$Builder.nBuild`：App 自带的正文字体改用洛书当前已验证生效的正文字体构建；图标 / 等宽 / 彩色 / 判定失败的字体一律放行。API 低于 31 或高于 37（未开 `allow_newer_api`）、签名不匹配、`faces.bin` 缺失时不安装，进程保持原状。
-- **每次开机准备：** `system_server` 或第一个 App 进程发现本次开机还没有配置时，向 root companion 请求一次 `common/native_font.sh prepare`（不等待，进程启动不被拖慢；准备完成前启动的进程直接跳过）。prepare 把开关、名单和已验证的洛书正文字体编译成 `zygisk/runtime/config.bin`、`faces.bin`，写入本次 `boot_id`；配置缺失、损坏或 boot_id 不符时一律跳过。
-- **让出：** 洛书模块被禁用 / 待删除时整体关闭；洛书字体未验证生效（`device-font-load-verification` 非 verified、待重启、payload 待重建）时不写 `faces.bin`，替换不安装；进程里已有其它全局字体方案（`System.getProperty("luoshu.gfh.active")`）时让出。
+- **Java 层替换（Feature 1）：** Android 12–17（API 31–37）上通过 Zygisk `hookJniNativeMethods` 替换 `android.graphics.fonts.Font$Builder.nBuild`：App 自带的正文字体改用洛书当前已挂载生效的正文字体构建；图标 / 等宽 / 彩色 / 判定失败的字体一律放行。API 低于 31 或高于 37（未开 `allow_newer_api`）、签名不匹配、`faces.bin` 缺失时不安装，进程保持原状。
+- **每次开机准备：** `system_server` 或第一个 App 进程发现本次开机还没有配置时，向 root companion 请求一次 `common/native_font.sh prepare`（不等待，进程启动不被拖慢；准备完成前启动的进程直接跳过）；配置已就绪但没有可用字体时，后续 App 进程会再请求刷新，companion 每 20 秒最多重跑一次、每次开机最多 30 次。prepare 把开关、名单和已对系统可见的洛书正文字体编译成 `zygisk/runtime/config.bin`、`faces.bin`，写入本次 `boot_id`；配置缺失、损坏或 boot_id 不符时一律跳过。
+- **让出：** 洛书模块被禁用 / 待删除时整体关闭；洛书字体未就绪（当前为默认字体、待重启、payload 待重建、`LuoShu-<weight>` 未挂载到系统——`/system/fonts` 下同名文件或同一字体的 ROM 槽位文件大小不一致——或上一次加载验证明确 failed）时不写 `faces.bin`，替换不安装，原因写入 `runtime/state.conf` 的 `reason=` 并显示在 App；不依赖本次开机尚未完成的加载验证；进程里已有其它全局字体方案（`System.getProperty("luoshu.gfh.active")`）时让出。
 - **跳过：** 系统 uid、隔离进程、子 zygote、DenyList、内置与用户排除名单；`system_server` 不注入。未安装 Hook 的进程会请求 Zygisk 卸载本库。
 
 ## 开关与名单

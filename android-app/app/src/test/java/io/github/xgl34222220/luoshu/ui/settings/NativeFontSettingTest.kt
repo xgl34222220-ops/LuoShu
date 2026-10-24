@@ -40,6 +40,18 @@ class NativeFontSettingTest {
         assertEquals("已关闭", nativeFontStatusText(loaded))
     }
 
+    @Test
+    fun yieldReasonFromBridgeIsShown() {
+        val state = parseNativeFontState(
+            "{\"status\":\"ok\",\"data\":{\"enabled\":true,\"library\":true,\"zygiskLoaded\":true," +
+                "\"activeEnabled\":true,\"faces\":false,\"facesReason\":\"font-not-mounted\"}}",
+        )
+        assertEquals("font-not-mounted", state.facesReason)
+        assertTrue(nativeFontStatusText(state).contains("尚未挂载到系统"))
+        assertTrue(nativeFontStatusText(state.copy(facesReason = "verify-failed")).contains("验证失败"))
+        assertTrue(nativeFontStatusText(state.copy(facesReason = "odd")).contains("odd"))
+    }
+
     @Test(expected = IllegalStateException::class)
     fun bridgeErrorsAreSurfaced() {
         parseNativeFontState("{\"status\":\"error\",\"message\":\"全局字体增强组件不可用\"}")

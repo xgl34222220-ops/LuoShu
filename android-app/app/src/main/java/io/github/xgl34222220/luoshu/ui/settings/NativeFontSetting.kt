@@ -10,6 +10,7 @@ internal data class NativeFontState(
     val zygiskLoaded: Boolean = false,
     val activeEnabled: Boolean = false,
     val faces: Boolean = false,
+    val facesReason: String = "",
     val legacyConfig: Boolean = false,
 )
 
@@ -44,6 +45,7 @@ internal fun parseNativeFontState(raw: String): NativeFontState {
         zygiskLoaded = data.optBoolean("zygiskLoaded", false),
         activeEnabled = data.optBoolean("activeEnabled", false),
         faces = data.optBoolean("faces", false),
+        facesReason = data.optString("facesReason", ""),
         legacyConfig = data.optBoolean("legacyConfig", false),
     )
 }
@@ -55,6 +57,22 @@ internal fun nativeFontStatusText(state: NativeFontState): String = when {
     !state.zygiskLoaded -> "本次开机未检测到 Zygisk 加载（未启用 Zygisk 时对系统没有任何影响）"
     state.enabled != state.activeEnabled -> "设置已保存，重启手机后生效"
     state.activeEnabled && state.faces -> "本次开机已生效"
-    state.activeEnabled -> "已开启，但洛书字体尚未确认生效，本次开机已自动让出"
+    state.activeEnabled -> "已开启，但本次开机已自动让出：${nativeFontYieldReason(state.facesReason)}"
     else -> "已关闭"
+}
+
+/** state.conf reason= written by native_font.sh prepare when no LuoShu face was compiled. */
+internal fun nativeFontYieldReason(reason: String): String = when (reason) {
+    "no-active-font" -> "当前使用系统默认字体"
+    "reboot-required" -> "字体切换待重启生效"
+    "payload-rebuild-pending" -> "字体负载待重建"
+    "verify-failed" -> "上次字体加载验证失败"
+    "no-luoshu-faces" -> "模块内没有洛书正文字体文件"
+    "font-not-mounted" -> "洛书字体尚未挂载到系统（稍后会自动重试）"
+    "faces-build-failed" -> "字体表生成失败"
+    "config-build-failed" -> "排除名单或配置生成失败"
+    "java-font-off" -> "App 字体替换已关闭"
+    "module-disabled" -> "洛书模块已禁用"
+    "" -> "洛书字体尚未确认生效"
+    else -> "洛书字体尚未确认生效（$reason）"
 }

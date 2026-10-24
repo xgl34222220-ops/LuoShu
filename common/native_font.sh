@@ -1,9 +1,10 @@
 #!/system/bin/sh
 # 洛书「全局字体增强（Zygisk）」配置层。默认关闭。
 #
-#   native_font.sh prepare          由 zygisk/<abi>.so 的 root companion 每次开机调用一次：
-#                                   把开关、排除名单和已验证生效的洛书正文字体编译成
-#                                   zygisk/runtime/config.bin、faces.bin（带本次 boot_id）。
+#   native_font.sh prepare          由 zygisk/<abi>.so 的 root companion 每次开机调用（字体未就绪时
+#                                   由后续应用进程节流重新请求）：把开关、排除名单和已挂载可见的
+#                                   洛书正文字体编译成 zygisk/runtime/config.bin、faces.bin（带本次
+#                                   boot_id），让出原因写入 runtime/state.conf 的 reason=。
 #   native_font.sh status           App 读取开关与本次开机的加载状态（一行 JSON）。
 #   native_font.sh set KEY 0|1      App 写开关（KEY: enabled、verbose），重启后生效。
 #
@@ -68,26 +69,90 @@ nf_boot_id() {
     head -n1 "$BOOT_ID_FILE" 2>/dev/null | tr -d '\r\n '
 }
 
-# 洛书当前应用且已验证的正文字体。只有主模块确认字体已生效（active_font 非 default、无待重启、
-# 加载验证 verified）才写 faces.bin；否则不写，替换不安装（全部让出）。
+nf_size() {
+    stat -L -c '%s' "$1" 2>/dev/null || wc -c < "$1" 2>/dev/null | tr -d ' \r\n'
+}
+
+nf_inode() {
+    stat -L -c '%d:%i' "$1" 2>/dev/null
+}
+
+# 洛书正文字体在模块里的位置：公开负载 system/fonts，或私有负载 .luoshu-payload/system/fonts。
+nf_face_dir() {
+    for _nf_d in "$MODDIR/system/fonts" "$MODDIR/.luoshu-payload/system/fonts"; do
+        for _nf_f in "$_nf_d"/LuoShu-[1-9][0-9][0-9]*.ttf "$_nf_d"/LuoShu-[1-9][0-9][0-9]*.otf; do
+            [ -s "$_nf_f" ] && { printf '%s\n' "$_nf_d"; return 0; }
+        done
+    done
+    return 1
+}
+
+# 字体对系统可见：/system/fonts/LuoShu-NNN 与模块文件大小一致；或（逐文件 bind 时附加文件不可见）
+# 模块里指向同一字体的槽位文件（ColorOS SysSans-*、HyperOS MiSans* 等，硬链接或符号链接）
+# 在对应分区的真实路径上可见且大小一致。
+nf_faces_visible() {
+    _nf_dir="$1"
+    _nf_root="${LUOSHU_NATIVE_FONT_SYSROOT:-}"
+    _nf_ids=''
+    for _nf_f in "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.ttf "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.otf; do
+        [ -s "$_nf_f" ] || continue
+        _nf_sz=$(nf_size "$_nf_f")
+        _nf_sys="$_nf_root/system/fonts/${_nf_f##*/}"
+        [ -f "$_nf_sys" ] && [ "$(nf_size "$_nf_sys")" = "$_nf_sz" ] && return 0
+        _nf_ids="$_nf_ids $(nf_inode "$_nf_f")=$_nf_sz"
+    done
+    [ -n "$_nf_ids" ] || return 1
+    _nf_base="${_nf_dir%/system/fonts}"
+    for _nf_pdir in "$_nf_base"/*/fonts; do
+        [ -d "$_nf_pdir" ] || continue
+        _nf_part="${_nf_pdir%/fonts}"
+        _nf_part="${_nf_part##*/}"
+        for _nf_slot in "$_nf_pdir"/*; do
+            [ -f "$_nf_slot" ] || continue
+            case "${_nf_slot##*/}" in LuoShu-*) continue ;; esac
+            _nf_id=$(nf_inode "$_nf_slot")
+            [ -n "$_nf_id" ] || continue
+            case "$_nf_ids " in
+                *" $_nf_id="*) ;;
+                *) continue ;;
+            esac
+            _nf_sz=${_nf_ids#*" $_nf_id="}
+            _nf_sz=${_nf_sz%% *}
+            _nf_sys="$_nf_root/$_nf_part/fonts/${_nf_slot##*/}"
+            [ -f "$_nf_sys" ] && [ "$(nf_size "$_nf_sys")" = "$_nf_sz" ] && return 0
+        done
+    done
+    return 1
+}
+
+# 洛书当前应用的正文字体。不依赖本次开机的加载验证（它在开机后期才完成，而 prepare 在第一个应用
+# 进程时就运行）：active_font 非 default、无待重启/待重建、模块内有 LuoShu-<weight> 字体且已对系统
+# 可见才写 faces.bin；上一次验证明确 failed 时让出。不满足时把原因写到 NF_REASON。
 nf_write_faces() {
     _nf_active=$(head -n1 "$CONF_DIR/active_font.conf" 2>/dev/null | tr -d '\r\n')
-    [ -n "$_nf_active" ] && [ "$_nf_active" != default ] || return 1
-    [ ! -s "$CONF_DIR/text_reboot_required.conf" ] || return 1
-    [ ! -s "$CONF_DIR/font-payload-rebuild-pending.conf" ] || return 1
+    [ -n "$_nf_active" ] && [ "$_nf_active" != default ] || { NF_REASON=no-active-font; return 1; }
+    [ ! -s "$CONF_DIR/text_reboot_required.conf" ] || { NF_REASON=reboot-required; return 1; }
+    [ ! -s "$CONF_DIR/font-payload-rebuild-pending.conf" ] || { NF_REASON=payload-rebuild-pending; return 1; }
     _nf_verify="$CONF_DIR/device-font-load-verification.conf"
-    [ "$(nf_conf_value "$_nf_verify" state)" = verified ] || return 1
-    [ "$(sed -n 's/^activeFont=//p' "$_nf_verify" 2>/dev/null | head -n1 | tr -d '\r\n')" = "$_nf_active" ] || return 1
-    case "$(nf_conf_value "$_nf_verify" mode)" in
-        aligned|mount-verified|mount-confirmed) ;;
-        *) return 1 ;;
-    esac
+    if [ "$(nf_conf_value "$_nf_verify" state)" = failed ] && \
+       [ "$(sed -n 's/^activeFont=//p' "$_nf_verify" 2>/dev/null | head -n1 | tr -d '\r\n')" = "$_nf_active" ]; then
+        NF_REASON=verify-failed
+        return 1
+    fi
+    _nf_dir=$(nf_face_dir) || { NF_REASON=no-luoshu-faces; return 1; }
+    nf_faces_visible "$_nf_dir" || { NF_REASON=font-not-mounted; return 1; }
     set --
-    for _nf_f in "$MODDIR"/system/fonts/LuoShu-[1-9][0-9][0-9]*.ttf "$MODDIR"/system/fonts/LuoShu-[1-9][0-9][0-9]*.otf; do
-        [ -f "$_nf_f" ] && set -- "$@" "$_nf_f"
+    for _nf_f in "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.ttf "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.otf; do
+        [ -s "$_nf_f" ] && set -- "$@" "$_nf_f"
     done
-    [ "$#" -gt 0 ] || return 1
-    "$TOOL" faces --out "$RUNTIME/faces.bin" "$@"
+    rm -f "$RUNTIME/faces.bin.tmp"
+    if "$TOOL" faces --out "$RUNTIME/faces.bin.tmp" "$@" && [ -s "$RUNTIME/faces.bin.tmp" ]; then
+        chmod 0644 "$RUNTIME/faces.bin.tmp" 2>/dev/null
+        mv -f "$RUNTIME/faces.bin.tmp" "$RUNTIME/faces.bin" && return 0
+    fi
+    rm -f "$RUNTIME/faces.bin.tmp"
+    NF_REASON=faces-build-failed
+    return 1
 }
 
 nf_prepare() {
@@ -96,20 +161,25 @@ nf_prepare() {
     LOG="$RUNTIME/config.log"
     mkdir -p "$RUNTIME" || return 0
     [ -x "$TOOL" ] || chmod 0755 "$TOOL" 2>/dev/null
-    rm -f "$OUT" "$RUNTIME/faces.bin" "$RUNTIME/state.conf"
+    # 同一次开机可能由 Zygisk 库重新请求 prepare：其它进程此时仍在读取，所以先写临时文件再替换。
+    rm -f "$OUT.tmp" "$RUNTIME/faces.bin.tmp"
     : > "$LOG.faces"
+    NF_REASON=''
     enabled=$(nf_setting enabled)
     # 洛书模块被禁用或待删除时整体关闭。
-    if [ -f "$MODDIR/disable" ] || [ -f "$MODDIR/remove" ]; then enabled=0; fi
+    if [ -f "$MODDIR/disable" ] || [ -f "$MODDIR/remove" ]; then enabled=0; NF_REASON=module-disabled; fi
     verbose=$(nf_setting verbose)
     java_font=$(nf_setting java_font)
     allow_newer=$(nf_setting allow_newer_api)
 
     if [ "$enabled" = 1 ] && [ "$java_font" = 1 ]; then
-        if nf_write_faces >> "$LOG.faces" 2>&1; then chmod 0644 "$RUNTIME/faces.bin"; else rm -f "$RUNTIME/faces.bin"; fi
+        nf_write_faces >> "$LOG.faces" 2>&1 || rm -f "$RUNTIME/faces.bin"
+    else
+        rm -f "$RUNTIME/faces.bin"
+        [ -n "$NF_REASON" ] || { [ "$enabled" = 1 ] && NF_REASON=java-font-off || NF_REASON=disabled; }
     fi
 
-    set -- build --out "$OUT" --enabled "$enabled" --verbose "$verbose" --java-font "$java_font" \
+    set -- build --out "$OUT.tmp" --enabled "$enabled" --verbose "$verbose" --java-font "$java_font" \
         --allow-newer-api "$allow_newer"
     [ -f "$ZDIR/defaults/exclude.list" ] && set -- "$@" --exclude "$ZDIR/defaults/exclude.list"
     _nf_ex=$(nf_list "$EXCLUDE" exclude.list)
@@ -117,21 +187,30 @@ nf_prepare() {
     _nf_fo=$(nf_list "$FORCE" force.list)
     [ -n "$_nf_fo" ] && set -- "$@" --force "$_nf_fo"
 
-    if "$TOOL" "$@" > "$LOG" 2>&1; then
-        chmod 0644 "$OUT"
+    if "$TOOL" "$@" > "$LOG" 2>&1 && [ -s "$OUT.tmp" ]; then
+        chmod 0644 "$OUT.tmp"
+        mv -f "$OUT.tmp" "$OUT"
     else
-        rm -f "$OUT" "$RUNTIME/faces.bin"
+        rm -f "$OUT.tmp" "$RUNTIME/faces.bin"
         # 名单等出错时仍写一份关闭状态的配置，避免每个进程反复请求 companion。
-        "$TOOL" build --out "$OUT" --enabled 0 --verbose 0 --java-font 0 --allow-newer-api 0 >> "$LOG" 2>&1 \
-            && chmod 0644 "$OUT" || rm -f "$OUT"
+        if "$TOOL" build --out "$OUT.tmp" --enabled 0 --verbose 0 --java-font 0 --allow-newer-api 0 >> "$LOG" 2>&1 \
+            && [ -s "$OUT.tmp" ]; then
+            chmod 0644 "$OUT.tmp"
+            mv -f "$OUT.tmp" "$OUT"
+        else
+            rm -f "$OUT.tmp" "$OUT"
+        fi
         enabled=0
+        NF_REASON=config-build-failed
     fi
     _nf_faces=0
     [ -s "$RUNTIME/faces.bin" ] && _nf_faces=1
+    [ "$_nf_faces" = 0 ] || NF_REASON=''
     {
         printf 'boot_id=%s\n' "$(nf_boot_id)"
         printf 'enabled=%s\n' "$enabled"
         printf 'faces=%s\n' "$_nf_faces"
+        printf 'reason=%s\n' "$NF_REASON"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$RUNTIME/state.conf.tmp" 2>/dev/null && mv -f "$RUNTIME/state.conf.tmp" "$RUNTIME/state.conf"
     chmod 0644 "$RUNTIME/state.conf" 2>/dev/null
@@ -148,18 +227,20 @@ nf_status() {
     _nf_loaded=0
     _nf_faces=0
     _nf_active_enabled=0
+    _nf_reason=''
     _nf_now=$(nf_boot_id)
     if [ -n "$_nf_now" ] && [ "$(nf_conf_value "$RUNTIME/state.conf" boot_id)" = "$_nf_now" ]; then
         _nf_loaded=1
         _nf_faces=$(nf_bool "$(nf_conf_value "$RUNTIME/state.conf" faces)")
         _nf_active_enabled=$(nf_bool "$(nf_conf_value "$RUNTIME/state.conf" enabled)")
+        _nf_reason=$(nf_conf_value "$RUNTIME/state.conf" reason | tr -cd 'a-z0-9-')
     fi
     _nf_legacy=0
     [ ! -f "$CONF" ] && [ -d "$LEGACY_DIR" ] && _nf_legacy=1
-    printf '{"status":"ok","data":{"enabled":%s,"verbose":%s,"library":%s,"zygiskLoaded":%s,"activeEnabled":%s,"faces":%s,"legacyConfig":%s}}\n' \
+    printf '{"status":"ok","data":{"enabled":%s,"verbose":%s,"library":%s,"zygiskLoaded":%s,"activeEnabled":%s,"faces":%s,"facesReason":"%s","legacyConfig":%s}}\n' \
         "$(nf_json_bool "$(nf_setting enabled)")" "$(nf_json_bool "$(nf_setting verbose)")" \
         "$(nf_json_bool "$_nf_lib")" "$(nf_json_bool "$_nf_loaded")" \
-        "$(nf_json_bool "$_nf_active_enabled")" "$(nf_json_bool "$_nf_faces")" \
+        "$(nf_json_bool "$_nf_active_enabled")" "$(nf_json_bool "$_nf_faces")" "$_nf_reason" \
         "$(nf_json_bool "$_nf_legacy")"
 }
 

@@ -65,19 +65,80 @@ run prepare
 grep -q -- '--enabled 1' "$TOOL.calls" || fail 'legacy enabled not compiled'
 grep -q -- "--exclude $LEGACY/exclude.list" "$TOOL.calls" || fail 'legacy exclude list not read'
 
-# 4. 主模块字体未验证生效时让出：不写 faces。
-if grep -q '^faces' "$TOOL.calls"; then fail 'faces built without a verified LuoShu font'; fi
+# 4. 让出条件：不依赖本次开机的加载验证，只看字体是否已挂载对系统可见。
+if grep -q '^faces' "$TOOL.calls"; then fail 'faces built without an active LuoShu font'; fi
+grep -qx 'reason=no-active-font' "$MOD/zygisk/runtime/state.conf" || fail 'no-active-font reason missing'
+SYS="$TMP/sysroot"
+mkdir -p "$SYS/system/fonts"
 printf 'MyFont\n' > "$MOD/config/active_font.conf"
-printf 'state=verified\nactiveFont=MyFont\nmode=aligned\n' > "$MOD/config/device-font-load-verification.conf"
-: > "$MOD/system/fonts/LuoShu-400.ttf"
+# 本次开机验证尚未完成（boot verify 先写 pending/compatibility）。
+printf 'state=pending\nmode=compatibility\nactiveFont=MyFont\n' > "$MOD/config/device-font-load-verification.conf"
+printf 'luoshu-regular' > "$MOD/system/fonts/LuoShu-400.ttf"
+runs() { LUOSHU_NATIVE_FONT_SYSROOT="$SYS" run "$@"; }
+# 4a. 未挂载：让出并记录原因。
 : > "$TOOL.calls"
-run prepare
-grep -q "^faces --out $MOD/zygisk/runtime/faces.bin $MOD/system/fonts/LuoShu-400.ttf" "$TOOL.calls" || fail 'verified faces not built'
+runs prepare
+if grep -q '^faces' "$TOOL.calls"; then fail 'faces built while the font is not mounted'; fi
+grep -qx 'faces=0' "$MOD/zygisk/runtime/state.conf" || fail 'unmounted font reported as faces'
+grep -qx 'reason=font-not-mounted' "$MOD/zygisk/runtime/state.conf" || fail 'font-not-mounted reason missing'
+runs status | grep -q '"facesReason":"font-not-mounted"' || fail 'reason not in status JSON'
+# 4b. 已挂载（/system/fonts 下大小一致）+ 验证 pending → faces=1。
+printf 'luoshu-regular' > "$SYS/system/fonts/LuoShu-400.ttf"
+: > "$TOOL.calls"
+runs prepare
+grep -q "^faces --out $MOD/zygisk/runtime/faces.bin.tmp $MOD/system/fonts/LuoShu-400.ttf" "$TOOL.calls" || fail 'mounted faces not built under pending verification'
+[ -s "$MOD/zygisk/runtime/faces.bin" ] || fail 'faces.bin missing'
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail 'faces=1 not reported'
+grep -qx 'reason=' "$MOD/zygisk/runtime/state.conf" || fail 'stale reason kept'
+runs status | grep -q '"faces":true,"facesReason":""' || fail 'status faces not reported'
+# 4c. 大小不一致视为未挂载。
+printf 'stock' > "$SYS/system/fonts/LuoShu-400.ttf"
+runs prepare
+grep -qx 'reason=font-not-mounted' "$MOD/zygisk/runtime/state.conf" || fail 'size mismatch treated as mounted'
+[ ! -f "$MOD/zygisk/runtime/faces.bin" ] || fail 'stale faces.bin kept'
+rm -f "$SYS/system/fonts/LuoShu-400.ttf"
+# 4d. 逐文件 bind（附加的 LuoShu-400 不可见）：同一字体的 ColorOS 槽位在 /my_product/fonts 可见。
+ln "$MOD/system/fonts/LuoShu-400.ttf" "$MOD/system/fonts/SysSans-Hans-Regular.ttf"
+mkdir -p "$MOD/my_product/fonts" "$SYS/my_product/fonts"
+ln -s ../../system/fonts/LuoShu-400.ttf "$MOD/my_product/fonts/SysFont-Regular.ttf"
+printf 'luoshu-regular' > "$SYS/my_product/fonts/SysFont-Regular.ttf"
+: > "$TOOL.calls"
+runs prepare
+grep -q '^faces' "$TOOL.calls" || fail 'visible slot alias not accepted'
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail 'slot alias faces=0'
+rm -f "$SYS/my_product/fonts/SysFont-Regular.ttf"
+printf 'stockfont' > "$SYS/system/fonts/SysSans-Hans-Regular.ttf"
+runs prepare
+grep -qx 'faces=0' "$MOD/zygisk/runtime/state.conf" || fail 'stock slot taken as mounted'
+printf 'luoshu-regular' > "$SYS/system/fonts/SysSans-Hans-Regular.ttf"
+runs prepare
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail 'system slot alias not accepted'
+rm -rf "$SYS/system/fonts/SysSans-Hans-Regular.ttf" "$MOD/system/fonts/SysSans-Hans-Regular.ttf" "$MOD/my_product"
+printf 'luoshu-regular' > "$SYS/system/fonts/LuoShu-400.ttf"
+# 4e. 私有负载 .luoshu-payload/system/fonts 同样识别。
+mkdir -p "$MOD/.luoshu-payload/system/fonts"
+mv "$MOD/system/fonts/LuoShu-400.ttf" "$MOD/.luoshu-payload/system/fonts/LuoShu-400.ttf"
+: > "$TOOL.calls"
+runs prepare
+grep -q "^faces --out .* $MOD/.luoshu-payload/system/fonts/LuoShu-400.ttf" "$TOOL.calls" || fail 'private payload faces not built'
+mv "$MOD/.luoshu-payload/system/fonts/LuoShu-400.ttf" "$MOD/system/fonts/LuoShu-400.ttf"
+rm -rf "$MOD/.luoshu-payload"
+# 4f. 上次验证明确 failed → 让出。
+printf 'state=failed\nmode=compatibility\nactiveFont=MyFont\n' > "$MOD/config/device-font-load-verification.conf"
+: > "$TOOL.calls"
+runs prepare
+if grep -q '^faces' "$TOOL.calls"; then fail 'faces built after a failed verification'; fi
+grep -qx 'reason=verify-failed' "$MOD/zygisk/runtime/state.conf" || fail 'verify-failed reason missing'
+printf 'state=verified\nactiveFont=MyFont\nmode=aligned\n' > "$MOD/config/device-font-load-verification.conf"
+runs prepare
+grep -qx 'faces=1' "$MOD/zygisk/runtime/state.conf" || fail 'verified mounted font not built'
+# 4g. 待重启时让出。
 printf 'pending\n' > "$MOD/config/text_reboot_required.conf"
 : > "$TOOL.calls"
-run prepare
+runs prepare
 if grep -q '^faces' "$TOOL.calls"; then fail 'faces built while a reboot is pending'; fi
 [ ! -f "$MOD/zygisk/runtime/faces.bin" ] || fail 'stale faces.bin kept'
+grep -qx 'reason=reboot-required' "$MOD/zygisk/runtime/state.conf" || fail 'reboot-required reason missing'
 rm -f "$MOD/config/text_reboot_required.conf"
 
 # 5. App 写开关：迁到主模块 config，带走旧名单；之后只读新配置。
@@ -105,6 +166,8 @@ run prepare
 grep -q -- '--enabled 0 --verbose 0 --java-font 0' "$TOOL.calls" || fail 'no disabled fallback config'
 [ ! -f "$MOD/zygisk/runtime/faces.bin" ] || fail 'faces kept after failure'
 grep -qx 'enabled=0' "$MOD/zygisk/runtime/state.conf" || fail 'failure not reported as disabled'
+grep -qx 'reason=config-build-failed' "$MOD/zygisk/runtime/state.conf" || fail 'config failure reason missing'
+[ -f "$MOD/zygisk/runtime/config.bin" ] || fail 'disabled fallback config.bin missing'
 rm -f "$TOOL.fail"
 
 # 8. App 桥接入口。

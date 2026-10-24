@@ -2,8 +2,9 @@
 //
 // The switch is off by default. Without a Zygisk implementation this library is never loaded and
 // nothing changes. With Zygisk, the root companion (same library, zygisk_companion_entry) runs
-// common/native_font.sh prepare once per boot, which compiles the user switch, the exclude lists
-// and the verified LuoShu faces into zygisk/runtime/*.bin stamped with the current boot id.
+// common/native_font.sh prepare once per boot (and, throttled, again while no LuoShu face was
+// usable), which compiles the user switch, the exclude lists and the mounted LuoShu faces into
+// zygisk/runtime/*.bin stamped with the current boot id.
 //
 // For every app process preAppSpecialize reads zygisk/runtime/config.bin through the module dir fd
 // and decides whether the process is eligible (switch, boot id, exclude list, built-in skips). When
@@ -14,6 +15,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <sys/system_properties.h>
 #include <unistd.h>
 
@@ -37,6 +39,8 @@ constexpr const char *kFacesPath = "zygisk/runtime/faces.bin";
 // relative to the module directory (the main module's own payload).
 constexpr const char *kMountedFontDir = "/system/fonts";
 constexpr const char *kPayloadFontRel = "system/fonts/";
+// Private payload layout (the real partition payload lives under .luoshu-payload).
+constexpr const char *kPrivatePayloadFontRel = ".luoshu-payload/system/fonts/";
 // Run by the root companion; the module id is fixed (module.prop id=LuoShu).
 constexpr const char *kModuleRoot = "/data/adb/modules/LuoShu";
 constexpr const char *kPrepareScript = "/data/adb/modules/LuoShu/common/native_font.sh";
@@ -85,37 +89,62 @@ void zygiskRegistrar(void *ctx, JNIEnv *env, const char *cls, JNINativeMethod *m
 // True when zygisk/runtime/config.bin parses and carries the current boot id.
 bool configFresh(int dir, uint64_t boot);
 
+// Companion requests. Prepare: once per boot. Refresh: the config is fresh but no LuoShu face was
+// usable (fonts not yet confirmed when prepare ran); re-run prepare, throttled by the companion.
+constexpr uint8_t kReqPrepare = 1;
+constexpr uint8_t kReqRefresh = 2;
+constexpr int64_t kRefreshIntervalSec = 20;
+constexpr int kMaxRefreshesPerBoot = 30;
+
+int64_t monotonicSeconds() {
+    struct timespec ts {};
+    if (clock_gettime(CLOCK_BOOTTIME, &ts) != 0 && clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return int64_t(ts.tv_sec);
+}
+
 // Asks the root companion to prepare this boot's runtime config. Never waits for the prepare
 // itself: the companion answers before it starts, so app start-up is not delayed. Processes that
 // start before the config exists simply skip (NoConfig / StaleBoot).
-void requestPrepare(zygisk::Api *api) {
+void requestPrepare(zygisk::Api *api, uint8_t req = kReqPrepare) {
     int fd = api->connectCompanion();
     if (fd < 0) return;
-    uint8_t req = 1, reply = 0;
+    uint8_t reply = 0;
     if (write(fd, &req, 1) == 1) (void)read(fd, &reply, 1);
     close(fd);
 }
 
-// Root companion: one prepare per boot, started at most once per companion process and boot.
+// Root companion: one prepare per boot, plus throttled refreshes (at most one every
+// kRefreshIntervalSec, kMaxRefreshesPerBoot per boot, never two at once) while no face is usable.
 void companionHandler(int client) {
     static std::mutex lock;
     static uint64_t preparedBoot = 0;
+    static int64_t lastRun = 0;
+    static int refreshes = 0;
+    static bool running = false;
     uint8_t req = 0;
     if (read(client, &req, 1) != 1) return;
+    struct stat st {};
+    // Only a root-owned, not group/other-writable script inside the module is ever executed.
+    bool scriptOk = stat(kPrepareScript, &st) == 0 && st.st_uid == 0 && (st.st_mode & 022) == 0 &&
+                    S_ISREG(st.st_mode);
     uint64_t boot = currentBootHash();
+    int64_t now = monotonicSeconds();
     bool run = false;
     {
         std::lock_guard<std::mutex> guard(lock);
         if (boot != 0 && preparedBoot != boot) {
             preparedBoot = boot;
+            refreshes = 0;
+            run = scriptOk && !running;
+        } else if (boot != 0 && req == kReqRefresh && scriptOk && !running && refreshes < kMaxRefreshesPerBoot &&
+                   now - lastRun >= kRefreshIntervalSec) {
+            ++refreshes;
             run = true;
         }
-    }
-    struct stat st {};
-    // Only a root-owned, not group/other-writable script inside the module is ever executed.
-    if (run && (stat(kPrepareScript, &st) != 0 || st.st_uid != 0 || (st.st_mode & 022) != 0 ||
-                !S_ISREG(st.st_mode))) {
-        run = false;
+        if (run) {
+            running = true;
+            lastRun = now;
+        }
     }
     uint8_t reply = run ? 1 : 0;
     (void)write(client, &reply, 1);
@@ -137,6 +166,9 @@ void companionHandler(int client) {
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
         }
     }
+    std::lock_guard<std::mutex> guard(lock);
+    running = false;
+    lastRun = monotonicSeconds();
 }
 
 // Lives for the whole process once the hook is installed (the mappings back the font buffers).
@@ -172,6 +204,11 @@ public:
             if (gate == lsnf::InstallSkip::None) {
                 mapped = mapFacesFor(boot);
                 gate = lsnf::javaHookGate(d, flags, apiLevel(), mapped);
+                // Fonts were not confirmed when this boot's prepare ran: ask for a throttled refresh
+                // so later processes pick the faces up instead of yielding for the whole boot.
+                if (gate == lsnf::InstallSkip::NoFaces && view && view->bootHash == boot) {
+                    requestPrepare(api_, kReqRefresh);
+                }
             }
             if (gate == lsnf::InstallSkip::None) {
                 hooked = lsnf::installJavaFontHook(env_, zygiskRegistrar, api_, &g_faces, d.verbose);
@@ -212,7 +249,9 @@ private:
         ssize_t n = readModuleFile(dir, kFacesPath, buf, sizeof(buf));
         lsnf::FaceTable table;
         if (n <= 0 || !lsnf::parseFaceTable(buf, size_t(n), &table) || table.bootHash != boot) return 0;
-        return lsnf::mapFaces(table, kMountedFontDir, dir, kPayloadFontRel, &g_faces);
+        size_t mapped = lsnf::mapFaces(table, kMountedFontDir, dir, kPayloadFontRel, &g_faces);
+        if (mapped == 0) mapped = lsnf::mapFaces(table, nullptr, dir, kPrivatePayloadFontRel, &g_faces);
+        return mapped;
     }
 
     zygisk::Api *api_ = nullptr;
