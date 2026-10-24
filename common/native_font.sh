@@ -125,9 +125,204 @@ nf_faces_visible() {
     return 1
 }
 
+# ---- ROM 槽位布局：模块里没有 LuoShu-NNN，正文字体直接写成 ROM 的主正文槽位文件 ----------------
+# ColorOS SysSans-Hans-*/SysFont-*（/system、/my_product 等分区）、HyperOS MiSansVF/100..900.ttf/
+# Roboto-*、OriginOS vivo/fonts、通用 AOSP Roboto-*。这些文件在模块里就是洛书写入的正文字体
+# （原厂 fallback 留在下层分区，不会出现在模块里）。
+
+# 模块里会出现字体的目录（公开负载与私有负载）：<part>/fonts、system/<part>/fonts、<part>/vivo/fonts。
+nf_slot_dirs() {
+    for _nf_b in "$MODDIR" "$MODDIR/.luoshu-payload"; do
+        for _nf_d in "$_nf_b"/system/fonts "$_nf_b"/*/fonts "$_nf_b"/system/*/fonts "$_nf_b"/*/vivo/fonts; do
+            [ -d "$_nf_d" ] && printf '%s\n' "$_nf_d"
+        done
+    done
+}
+
+# 主正文槽位的档位与档内顺序（"tier order"，都是 1 最高）；不是正文槽（等宽/时钟/emoji/符号/衬线/
+# 斜体/窄体/数字/叠加层/其它文字体系/字体集合）时失败。ColorOS 的 SysFont-* 原厂是指向 flip-font 目录
+# 的符号链接，所以同档里 SysSans-* 排在 SysFont-* 前面。
+nf_slot_rank() {
+    _nf_n=$(printf '%s' "$1" | tr 'A-Z' 'a-z')
+    case "$_nf_n" in
+        *.ttf|*.otf) ;;
+        *) return 1 ;;
+    esac
+    case "$_nf_n" in
+        luoshu*|*mono*|*code*|*clock*|*emoji*|*symbol*|*serif*|*italic*|*oblique*|*condensed*|*narrow*|\
+        *din*|*overlay*|*myanmar*|*arabic*|*thai*|*hebrew*|*deva*|*bengali*|*tamil*|*khmer*|*lao*|\
+        *georgian*|*armenian*|*ethiopic*|*tibetan*|*mongolian*|*uyghur*|*sinhala*|*korean*) return 1 ;;
+    esac
+    case "$_nf_n" in
+        syssans-hans-*|opposans-hans-*|oplussans*hans*|misansvf.ttf|[1-9]00.ttf|350.ttf|\
+        vivosans*|vivo-sans*|originsans*|origin-sans*|iqoosans*|harmonyos_sans_sc*)
+            echo '1 1' ;;
+        sysfont-hans-*|misansl3.otf) echo '1 2' ;;
+        syssans-hant-*|opposans-*|oplussans*|oplusosui-*|opsans-*|misanstcvf.ttf|harmonyos_sans*) echo '2 1' ;;
+        sysfont-*) echo '2 2' ;;
+        syssans-*|misanslatinvf.ttf|roboto-*|robotostatic-*|robotoflex-*|googlesans*|notosans-regular*|\
+        droidsans*|sourcesanspro-*)
+            echo '3 1' ;;
+        *) return 1 ;;
+    esac
+}
+
+# 存在的最高档位里的全部候选（避免组合字体时混进仅英文的槽位），档内按顺序排好，一行一个路径。
+nf_slot_candidates() {
+    _nf_best=9
+    _nf_list=''
+    for _nf_d in $(nf_slot_dirs); do
+        for _nf_f in "$_nf_d"/*; do
+            [ -s "$_nf_f" ] || continue
+            _nf_r=$(nf_slot_rank "${_nf_f##*/}") || continue
+            _nf_t=${_nf_r% *}
+            [ "$_nf_t" -le "$_nf_best" ] || continue
+            if [ "$_nf_t" -lt "$_nf_best" ]; then _nf_best="$_nf_t"; _nf_list=''; fi
+            _nf_list="$_nf_list${_nf_r#* }	$_nf_f
+"
+        done
+    done
+    [ -n "$_nf_list" ] || return 1
+    printf '%s' "$_nf_list" | sort -s -n -k1,1 | cut -f2-
+}
+
+# OS/2 usWeightClass（单字体 sfnt；读不到时失败）。只用 od，不依赖 awk/python。
+nf_os2_weight() {
+    _nf_file="$1"
+    # shellcheck disable=SC2046
+    set -- $(od -An -tu1 -v -N 6 "$_nf_file" 2>/dev/null)
+    [ $# -eq 6 ] || return 1
+    case "$1.$2.$3.$4" in 0.1.0.0|79.84.84.79|116.114.117.101) ;; *) return 1 ;; esac
+    _nf_nt=$(( $5 * 256 + $6 ))
+    [ "$_nf_nt" -gt 0 ] && [ "$_nf_nt" -le 64 ] || return 1
+    # shellcheck disable=SC2046
+    set -- $(od -An -tu1 -v -j 12 -N $(( _nf_nt * 16 )) "$_nf_file" 2>/dev/null)
+    while [ $# -ge 16 ]; do
+        if [ "$1.$2.$3.$4" = 79.83.47.50 ]; then
+            _nf_off=$(( (($9 * 256 + ${10}) * 256 + ${11}) * 256 + ${12} ))
+            # shellcheck disable=SC2046
+            set -- $(od -An -tu1 -v -j $(( _nf_off + 4 )) -N 2 "$_nf_file" 2>/dev/null)
+            [ $# -eq 2 ] || return 1
+            _nf_w=$(( $1 * 256 + $2 ))
+            [ "$_nf_w" -ge 1 ] && [ "$_nf_w" -le 1000 ] || return 1
+            echo "$_nf_w"
+            return 0
+        fi
+        shift 16
+    done
+    return 1
+}
+
+# 文件名里的字重（HyperOS 100..900.ttf 或 Thin/Light/Regular/Medium/Bold… 后缀）；没有时 400。
+nf_name_weight() {
+    _nf_n=$(printf '%s' "${1%.*}" | tr 'A-Z' 'a-z')
+    case "$_nf_n" in
+        [1-9]00|350) echo "$_nf_n" ;;
+        *extralight*|*ultralight*) echo 200 ;;
+        *semilight*|*demilight*) echo 350 ;;
+        *thin*|*hairline*) echo 100 ;;
+        *light*) echo 300 ;;
+        *semibold*|*demibold*) echo 600 ;;
+        *extrabold*|*ultrabold*) echo 800 ;;
+        *bold*) echo 700 ;;
+        *medium*) echo 500 ;;
+        *black*|*heavy*) echo 900 ;;
+        *) echo 400 ;;
+    esac
+}
+
+# lsnf-config 只认 LuoShu-<三位数字>：限定在 100..900。
+nf_face_weight() {
+    _nf_fw=$(nf_os2_weight "$1") || _nf_fw=$(nf_name_weight "${1##*/}")
+    [ "$_nf_fw" -ge 100 ] 2>/dev/null || _nf_fw=100
+    [ "$_nf_fw" -le 900 ] || _nf_fw=900
+    echo "$_nf_fw"
+}
+
+# 模块实际提供的主正文槽位文件：按字重去重（同字重保留排在前面的），最多 8 个。输出 "weight<TAB>path"。
+nf_slot_faces() {
+    _nf_list=$(nf_slot_candidates) || return 1
+    _nf_seen=' '
+    _nf_count=0
+    _nf_old_ifs=$IFS
+    IFS='
+'
+    for _nf_f in $_nf_list; do
+        IFS=$_nf_old_ifs
+        [ "$_nf_count" -lt 8 ] || break
+        _nf_w=$(nf_face_weight "$_nf_f")
+        case "$_nf_seen" in *" $_nf_w "*) continue ;; esac
+        _nf_seen="$_nf_seen$_nf_w "
+        _nf_count=$((_nf_count + 1))
+        printf '%s\t%s\n' "$_nf_w" "$_nf_f"
+    done
+    IFS=$_nf_old_ifs
+    [ "$_nf_count" -gt 0 ]
+}
+
+# 模块文件在系统上的真实路径：<base>/system/fonts/X → /system/fonts/X；<base>/my_product/fonts/X →
+# /my_product/fonts/X；<base>/system/product/fonts/X → /product/fonts/X（Magisk 式 system/<part>）。
+nf_real_path() {
+    _nf_rel="$1"
+    case "$_nf_rel" in
+        "$MODDIR/.luoshu-payload/"*) _nf_rel=${_nf_rel#"$MODDIR/.luoshu-payload/"} ;;
+        "$MODDIR/"*) _nf_rel=${_nf_rel#"$MODDIR/"} ;;
+        *) return 1 ;;
+    esac
+    case "$_nf_rel" in
+        system/fonts/*) ;;
+        system/*/*) _nf_rel=${_nf_rel#system/} ;;
+    esac
+    printf '/%s\n' "$_nf_rel"
+}
+
+# 槽位文件对系统可见：同档任一候选槽位在对应分区真实路径上大小一致（说明本次负载已挂载）。
+nf_slot_faces_visible() {
+    _nf_root="${LUOSHU_NATIVE_FONT_SYSROOT:-}"
+    for _nf_f in "$@"; do
+        _nf_real=$(nf_real_path "$_nf_f") || continue
+        _nf_sz=$(nf_size "$_nf_f")
+        [ -f "$_nf_root$_nf_real" ] && [ "$(nf_size "$_nf_root$_nf_real")" = "$_nf_sz" ] && return 0
+    done
+    return 1
+}
+
+# Zygisk 库按 LuoShu-<weight> 名字在模块目录 zygisk/runtime/faces/ 下打开槽位字体：硬链接（同一
+# inode，不占空间），不行再用相对符号链接，最后复制。先在临时目录建好再替换。
+nf_link_face() {
+    ln "$1" "$2" 2>/dev/null && return 0
+    _nf_rel=${1#"$MODDIR/"}
+    [ "$_nf_rel" != "$1" ] && ln -s "../../../$_nf_rel" "$2" 2>/dev/null && [ -s "$2" ] && return 0
+    rm -f "$2"
+    cp -f "$1" "$2" 2>/dev/null
+}
+
+nf_write_slot_aliases() {
+    _nf_tmpd="$RUNTIME/faces.tmp"
+    rm -rf "$_nf_tmpd"
+    mkdir -p "$_nf_tmpd" || return 1
+    _nf_old_ifs=$IFS
+    IFS='
+'
+    for _nf_line in $1; do
+        IFS=$_nf_old_ifs
+        _nf_w=${_nf_line%%"	"*}
+        _nf_f=${_nf_line#*"	"}
+        case "$_nf_f" in *.[Oo][Tt][Ff]) _nf_ext=otf ;; *) _nf_ext=ttf ;; esac
+        nf_link_face "$_nf_f" "$_nf_tmpd/LuoShu-$_nf_w.$_nf_ext" || { rm -rf "$_nf_tmpd"; return 1; }
+        chmod 0644 "$_nf_tmpd/LuoShu-$_nf_w.$_nf_ext" 2>/dev/null
+        printf 'face %s <- %s\n' "LuoShu-$_nf_w.$_nf_ext" "$_nf_f"
+    done
+    IFS=$_nf_old_ifs
+    chmod 0755 "$_nf_tmpd" 2>/dev/null
+    rm -rf "$RUNTIME/faces"
+    mv -f "$_nf_tmpd" "$RUNTIME/faces" || return 1
+}
+
 # 洛书当前应用的正文字体。不依赖本次开机的加载验证（它在开机后期才完成，而 prepare 在第一个应用
-# 进程时就运行）：active_font 非 default、无待重启/待重建、模块内有 LuoShu-<weight> 字体且已对系统
-# 可见才写 faces.bin；上一次验证明确 failed 时让出。不满足时把原因写到 NF_REASON。
+# 进程时就运行）：active_font 非 default、无待重启/待重建、模块内有正文字体且已对系统可见才写
+# faces.bin；上一次验证明确 failed 时让出。不满足时把原因写到 NF_REASON（细节写 NF_REASON_DETAIL）。
+# 正文字体来源按优先级：LuoShu-<weight> → ROM 适配写出的主正文槽位文件（含各分区 */fonts 与私有负载）。
 nf_write_faces() {
     _nf_active=$(head -n1 "$CONF_DIR/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_nf_active" ] && [ "$_nf_active" != default ] || { NF_REASON=no-active-font; return 1; }
@@ -139,12 +334,42 @@ nf_write_faces() {
         NF_REASON=verify-failed
         return 1
     fi
-    _nf_dir=$(nf_face_dir) || { NF_REASON=no-luoshu-faces; return 1; }
-    nf_faces_visible "$_nf_dir" || { NF_REASON=font-not-mounted; return 1; }
     set --
-    for _nf_f in "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.ttf "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.otf; do
-        [ -s "$_nf_f" ] && set -- "$@" "$_nf_f"
-    done
+    if _nf_dir=$(nf_face_dir); then
+        rm -rf "$RUNTIME/faces"
+        nf_faces_visible "$_nf_dir" || { NF_REASON=font-not-mounted; return 1; }
+        for _nf_f in "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.ttf "$_nf_dir"/LuoShu-[1-9][0-9][0-9]*.otf; do
+            [ -s "$_nf_f" ] && set -- "$@" "$_nf_f"
+        done
+    elif _nf_slots=$(nf_slot_faces); then
+        _nf_old_ifs=$IFS
+        IFS='
+'
+        for _nf_line in $_nf_slots; do set -- "$@" "${_nf_line#*"	"}"; done
+        IFS=$_nf_old_ifs
+        _nf_cands=$(nf_slot_candidates)
+        IFS='
+'
+        # shellcheck disable=SC2086
+        if ! nf_slot_faces_visible $_nf_cands; then
+            IFS=$_nf_old_ifs
+            NF_REASON=font-not-mounted
+            NF_REASON_DETAIL="槽位未在系统路径可见：$(for _nf_f in "$@"; do nf_real_path "$_nf_f"; done | tr '\n' ' ')"
+            return 1
+        fi
+        IFS=$_nf_old_ifs
+        nf_write_slot_aliases "$_nf_slots" || { NF_REASON=faces-build-failed; return 1; }
+        set --
+        for _nf_f in "$RUNTIME/faces"/LuoShu-*; do
+            [ -s "$_nf_f" ] && set -- "$@" "$_nf_f"
+        done
+    else
+        rm -rf "$RUNTIME/faces"
+        NF_REASON=no-luoshu-faces
+        NF_REASON_DETAIL="未找到 LuoShu-NNN 或主正文槽位：$(nf_slot_dirs | tr '\n' ' ')"
+        [ -n "$(nf_slot_dirs)" ] || NF_REASON_DETAIL="模块内没有字体目录：$MODDIR/{,.luoshu-payload/}{system/fonts,*/fonts,system/*/fonts,*/vivo/fonts}"
+        return 1
+    fi
     rm -f "$RUNTIME/faces.bin.tmp"
     if "$TOOL" faces --out "$RUNTIME/faces.bin.tmp" "$@" && [ -s "$RUNTIME/faces.bin.tmp" ]; then
         chmod 0644 "$RUNTIME/faces.bin.tmp" 2>/dev/null
@@ -165,6 +390,7 @@ nf_prepare() {
     rm -f "$OUT.tmp" "$RUNTIME/faces.bin.tmp"
     : > "$LOG.faces"
     NF_REASON=''
+    NF_REASON_DETAIL=''
     enabled=$(nf_setting enabled)
     # 洛书模块被禁用或待删除时整体关闭。
     if [ -f "$MODDIR/disable" ] || [ -f "$MODDIR/remove" ]; then enabled=0; NF_REASON=module-disabled; fi
@@ -205,12 +431,14 @@ nf_prepare() {
     fi
     _nf_faces=0
     [ -s "$RUNTIME/faces.bin" ] && _nf_faces=1
-    [ "$_nf_faces" = 0 ] || NF_REASON=''
+    [ "$_nf_faces" = 0 ] || { NF_REASON=''; NF_REASON_DETAIL=''; }
+    [ -z "$NF_REASON_DETAIL" ] || printf 'reason_detail: %s\n' "$NF_REASON_DETAIL" >> "$LOG.faces"
     {
         printf 'boot_id=%s\n' "$(nf_boot_id)"
         printf 'enabled=%s\n' "$enabled"
         printf 'faces=%s\n' "$_nf_faces"
         printf 'reason=%s\n' "$NF_REASON"
+        printf 'reason_detail=%s\n' "$(printf '%s' "$NF_REASON_DETAIL" | tr -d '\r\n')"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$RUNTIME/state.conf.tmp" 2>/dev/null && mv -f "$RUNTIME/state.conf.tmp" "$RUNTIME/state.conf"
     chmod 0644 "$RUNTIME/state.conf" 2>/dev/null
@@ -228,19 +456,21 @@ nf_status() {
     _nf_faces=0
     _nf_active_enabled=0
     _nf_reason=''
+    _nf_detail=''
     _nf_now=$(nf_boot_id)
     if [ -n "$_nf_now" ] && [ "$(nf_conf_value "$RUNTIME/state.conf" boot_id)" = "$_nf_now" ]; then
         _nf_loaded=1
         _nf_faces=$(nf_bool "$(nf_conf_value "$RUNTIME/state.conf" faces)")
         _nf_active_enabled=$(nf_bool "$(nf_conf_value "$RUNTIME/state.conf" enabled)")
         _nf_reason=$(nf_conf_value "$RUNTIME/state.conf" reason | tr -cd 'a-z0-9-')
+        _nf_detail=$(sed -n 's/^reason_detail=//p' "$RUNTIME/state.conf" 2>/dev/null | head -n1 | tr -d '"\\\r\n')
     fi
     _nf_legacy=0
     [ ! -f "$CONF" ] && [ -d "$LEGACY_DIR" ] && _nf_legacy=1
-    printf '{"status":"ok","data":{"enabled":%s,"verbose":%s,"library":%s,"zygiskLoaded":%s,"activeEnabled":%s,"faces":%s,"facesReason":"%s","legacyConfig":%s}}\n' \
+    printf '{"status":"ok","data":{"enabled":%s,"verbose":%s,"library":%s,"zygiskLoaded":%s,"activeEnabled":%s,"faces":%s,"facesReason":"%s","facesDetail":"%s","legacyConfig":%s}}\n' \
         "$(nf_json_bool "$(nf_setting enabled)")" "$(nf_json_bool "$(nf_setting verbose)")" \
         "$(nf_json_bool "$_nf_lib")" "$(nf_json_bool "$_nf_loaded")" \
-        "$(nf_json_bool "$_nf_active_enabled")" "$(nf_json_bool "$_nf_faces")" "$_nf_reason" \
+        "$(nf_json_bool "$_nf_active_enabled")" "$(nf_json_bool "$_nf_faces")" "$_nf_reason" "$_nf_detail" \
         "$(nf_json_bool "$_nf_legacy")"
 }
 

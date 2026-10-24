@@ -41,6 +41,9 @@ constexpr const char *kMountedFontDir = "/system/fonts";
 constexpr const char *kPayloadFontRel = "system/fonts/";
 // Private payload layout (the real partition payload lives under .luoshu-payload).
 constexpr const char *kPrivatePayloadFontRel = ".luoshu-payload/system/fonts/";
+// ROM slot layouts (ColorOS SysSans-*, HyperOS MiSans*/100..900.ttf, ...) carry no LuoShu-NNN file:
+// native_font.sh prepare links the module's body slot files here under their LuoShu-<weight> names.
+constexpr const char *kRuntimeFacesRel = "zygisk/runtime/faces/";
 // Run by the root companion; the module id is fixed (module.prop id=LuoShu).
 constexpr const char *kModuleRoot = "/data/adb/modules/LuoShu";
 constexpr const char *kPrepareScript = "/data/adb/modules/LuoShu/common/native_font.sh";
@@ -251,6 +254,7 @@ private:
         if (n <= 0 || !lsnf::parseFaceTable(buf, size_t(n), &table) || table.bootHash != boot) return 0;
         size_t mapped = lsnf::mapFaces(table, kMountedFontDir, dir, kPayloadFontRel, &g_faces);
         if (mapped == 0) mapped = lsnf::mapFaces(table, nullptr, dir, kPrivatePayloadFontRel, &g_faces);
+        if (mapped == 0) mapped = lsnf::mapFaces(table, nullptr, dir, kRuntimeFacesRel, &g_faces);
         return mapped;
     }
 
