@@ -20,6 +20,8 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.varLib.instancer import instantiateVariableFont
 
+from font_space_compat import ensure_space_glyphs
+
 SCHEMA = "device-font-slot-build-v2"
 PLAN_SCHEMA = "device-font-slot-plan-v2"
 DROP_AFTER_OUTLINE_CHANGE = ("DSIG", "LTSH", "VDMX", "hdmx")
@@ -384,6 +386,7 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
         if transform_report["glyphs"] <= 0:
             raise BuildError("没有任何脚本字形通过安全对齐")
         set_slot_identity(font, slot)
+        space_compatibility = ensure_space_glyphs(font)
         for tag in DROP_AFTER_OUTLINE_CHANGE:
             if tag in font:
                 del font[tag]
@@ -407,6 +410,7 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
         "roles": slot.get("roles", []),
         "transformed": transform_report,
         "checks": checks,
+        "spaceCompatibility": space_compatibility,
         "bytes": output.stat().st_size,
     }
 
