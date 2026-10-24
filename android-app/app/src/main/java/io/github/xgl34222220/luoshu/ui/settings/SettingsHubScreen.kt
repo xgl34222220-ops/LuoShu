@@ -74,7 +74,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import io.github.xgl34222220.luoshu.RootShell
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -621,6 +624,7 @@ private fun SafetyPage(model: SystemCenterViewModel) {
             }
         }
         item { SlotCompatCard(model) }
+        item { NativeFontCard() }
         item {
             SettingCard("恢复与保护") {
                 Text("将当前字体恢复为系统默认，完成后需要重启手机。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
@@ -917,5 +921,38 @@ private fun DownloadButton(label: String, url: String, sha: String, onClick: () 
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun NativeFontCard() {
+    var state by remember { mutableStateOf<NativeFontState?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        runCatching { parseNativeFontState(RootShell.exec(nativeFontStatusCommand(), timeoutMs = 20_000L).stdout) }
+            .onSuccess { state = it; error = "" }
+            .onFailure { error = it.message ?: "读取全局字体增强状态失败" }
+    }
+    SettingCard(NATIVE_FONT_TITLE) {
+        val current = state
+        ToggleLine(
+            title = "启用全局字体增强",
+            description = NATIVE_FONT_DESCRIPTION,
+            checked = current?.enabled == true,
+            enabled = current != null && current.library && !busy,
+            onChange = { value ->
+                busy = true
+                scope.launch {
+                    runCatching { parseNativeFontState(RootShell.exec(nativeFontSetCommand(value), timeoutMs = 20_000L).stdout) }
+                        .onSuccess { state = it; error = "" }
+                        .onFailure { error = it.message ?: "保存失败" }
+                    busy = false
+                }
+            },
+        )
+        val line = if (error.isNotBlank()) error else current?.let(::nativeFontStatusText).orEmpty()
+        if (line.isNotBlank()) Text(line, color = if (error.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
     }
 }

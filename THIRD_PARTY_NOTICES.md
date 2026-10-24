@@ -38,6 +38,13 @@
 - 许可证：两者均为 MIT License。
 - 完整文本：[`licenses/WOFF2-LICENSE.txt`](licenses/WOFF2-LICENSE.txt) 与 [`licenses/Brotli-LICENSE.txt`](licenses/Brotli-LICENSE.txt)（构建脚本会与上游原文逐字节比对）。
 
+## zygisk.hpp（Zygisk 模块公开 API 头文件）
+
+- 用途：主模块内置“全局字体增强（Zygisk）”库（源码 `zygisk-native-font/`，产物 `zygisk/<abi>.so`，默认关闭）编译时使用的 Zygisk 公开接口声明；许可全文随模块 ZIP 附于 `licenses/zygisk.hpp.txt`。
+- 来源：[`topjohnwu/zygisk-module-sample`](https://github.com/topjohnwu/zygisk-module-sample) `module/jni/zygisk.hpp`，原样保留、未修改。
+- 许可证：文件头所附的 ISC 风格许可（Copyright 2022-2023 John "topjohnwu" Wu）。
+- 完整文本：[`zygisk-native-font/third_party/zygisk/LICENSE`](zygisk-native-font/third_party/zygisk/LICENSE)。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：
