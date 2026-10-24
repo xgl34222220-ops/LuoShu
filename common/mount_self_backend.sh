@@ -33,6 +33,10 @@ _luoshu_overlay_mount_dir() {
     # placing LuoShu's own layer on the same target.
     _luoshu_mount_cmd -o bind "$_lsomb_target" "$_lsomb_lower" >/dev/null 2>&1 || return 1
 
+    # Casefold rejections already in the kernel log before this attempt are not
+    # evidence about this mount; only a count that grows across it is.
+    _lsomb_casefold_before=$(_luoshu_overlay_casefold_rejections)
+
     # No upperdir/workdir is needed: LuoShu only needs a merged read-only boot view.
     # Changes made by the App are intentionally picked up after the requested reboot.
     if _luoshu_mount_cmd -t overlay KSU \
@@ -46,8 +50,69 @@ _luoshu_overlay_mount_dir() {
         return 0
     fi
 
+    # Only reached after the kernel refused the overlay. When it refused the
+    # payload lower itself (encoding/casefold F2FS), retry once with a
+    # read-only ext4 loop image as that lower; otherwise, or if the retry
+    # fails, fall through to the unchanged per-file bind fallback.
+    if luoshu_overlay_loop_retry "$_lsomb_source" "$_lsomb_target" "$_lsomb_key" "$_lsomb_lower" \
+        "$_lsomb_casefold_before"; then
+        if [ -n "${_lsme_mount_list:-}" ]; then
+            printf '%s\n' "$_lsomb_lower" >> "$_lsme_mount_list" 2>/dev/null || true
+        fi
+        return 0
+    fi
+
     _luoshu_umount_cmd "$_lsomb_lower" >/dev/null 2>&1 || true
     rm -rf "$_lsomb_lower" 2>/dev/null || true
+    return 1
+}
+
+# Number of OverlayFS casefold lower rejections currently in the kernel log.
+# Prints 0 when the log cannot be read, so an unreadable log never triggers
+# the loop fallback.
+_luoshu_overlay_casefold_rejections() {
+    [ "${LUOSHU_OVERLAY_LOOP_DISABLE:-0}" != 1 ] || { printf '0\n'; return 0; }
+    if [ -n "${LUOSHU_OVERLAY_DMESG_FILE:-}" ]; then
+        cat "$LUOSHU_OVERLAY_DMESG_FILE" 2>/dev/null
+    else
+        dmesg 2>/dev/null
+    fi | awk 'tolower($0) ~ /overlayfs:.*case-insensitive.*not supported/ { n++ } END { print n + 0 }'
+}
+
+# Casefold fallback entry: retry SOURCE on TARGET with a read-only ext4 loop
+# lower, but only when the overlay attempt that just failed added a new
+# casefold rejection to the kernel log (BEFORE is the count taken right before
+# it). Sources mount_overlay_layer.sh lazily so the normal overlay and bind
+# paths never load it. Returns 1 without side effects otherwise.
+luoshu_overlay_loop_retry() {
+    _lsolr_source="$1"
+    _lsolr_target="$2"
+    _lsolr_key="$3"
+    _lsolr_lower="$4"
+    _lsolr_before="$5"
+    [ "${LUOSHU_OVERLAY_LOOP_DISABLE:-0}" != 1 ] || return 1
+    case "$_lsolr_before" in ''|*[!0-9]*) return 1 ;; esac
+    _lsolr_after=$(_luoshu_overlay_casefold_rejections)
+    case "$_lsolr_after" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_lsolr_after" -gt "$_lsolr_before" ] || return 1
+    if ! type luoshu_overlay_prepare_ext4_layer >/dev/null 2>&1; then
+        _lsolr_lib="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/mount_overlay_layer.sh"
+        [ -f "$_lsolr_lib" ] || return 1
+        . "$_lsolr_lib" || return 1
+    fi
+    type _luoshu_self_log >/dev/null 2>&1 && \
+        _luoshu_self_log "内核拒绝 casefold F2FS 字体下层，尝试 ext4 loop 兼容层：$_lsolr_target"
+    luoshu_overlay_prepare_ext4_layer "$_lsolr_source" "$_lsolr_target" "$_lsolr_key" || return 1
+    if _luoshu_mount_cmd -t overlay KSU \
+        -o "lowerdir=$LUOSHU_OVERLAY_COMPAT_SOURCE:$_lsolr_lower" \
+        "$_lsolr_target" >/dev/null 2>&1; then
+        type _luoshu_self_log >/dev/null 2>&1 && \
+            _luoshu_self_log "OverlayFS 已通过 ext4 loop 兼容层挂载：$_lsolr_target"
+        return 0
+    fi
+    luoshu_overlay_release_ext4_layer "$_lsolr_key"
+    type _luoshu_self_log >/dev/null 2>&1 && \
+        _luoshu_self_log "ext4 loop 兼容层重试仍失败，回退逐文件 bind：$_lsolr_target"
     return 1
 }
 
