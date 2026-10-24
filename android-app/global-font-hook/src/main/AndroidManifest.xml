@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Merged into the main LuoShu App: the App itself is the LSPosed module. LSPosed reads these
+  meta-data entries and assets/xposed_init; hooks run only in processes ticked in the module scope.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="@string/gfh_xposed_description" />
+        <meta-data android:name="xposedminversion" android:value="93" />
+        <meta-data android:name="xposedsharedprefs" android:value="true" />
+        <meta-data android:name="xposedscope" android:resource="@array/gfh_recommended_scope" />
+
+        <!-- Module settings: opened from LSPosed (MODULE_SETTINGS) or 设置 → 安全与维护. No launcher icon. -->
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="true"
+            android:label="@string/gfh_title"
+            android:theme="@style/Theme.LuoShuGlobalFont">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="de.robv.android.xposed.category.MODULE_SETTINGS" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

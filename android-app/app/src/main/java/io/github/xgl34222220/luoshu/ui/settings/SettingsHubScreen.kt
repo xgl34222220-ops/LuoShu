@@ -77,7 +77,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import io.github.xgl34222220.luoshu.RootShell
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import io.github.xgl34222220.luoshu.globalfont.ModuleStatus
+import io.github.xgl34222220.luoshu.globalfont.SettingsActivity as GlobalFontSettingsActivity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -625,6 +629,7 @@ private fun SafetyPage(model: SystemCenterViewModel) {
         }
         item { SlotCompatCard(model) }
         item { NativeFontCard() }
+        item { LsposedModuleCard() }
         item {
             SettingCard("恢复与保护") {
                 Text("将当前字体恢复为系统默认，完成后需要重启手机。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
@@ -954,5 +959,35 @@ private fun NativeFontCard() {
         )
         val line = if (error.isNotBlank()) error else current?.let(::nativeFontStatusText).orEmpty()
         if (line.isNotBlank()) Text(line, color = if (error.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun LsposedModuleCard() {
+    val context = LocalContext.current
+    var state by remember { mutableStateOf<LsposedModuleState?>(null) }
+    LaunchedEffect(Unit) {
+        state = withContext(Dispatchers.IO) {
+            LsposedModuleState(
+                activated = ModuleStatus.isActivated(context),
+                legacyCompanion = ModuleStatus.legacyCompanionInstalled(context),
+            )
+        }
+    }
+    SettingCard(LSPOSED_MODULE_TITLE) {
+        Text(LSPOSED_MODULE_DESCRIPTION, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+        state?.let { current ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                lsposedModuleStatusText(current),
+                color = if (current.activated) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp,
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = { runCatching { context.startActivity(Intent(context, GlobalFontSettingsActivity::class.java)) } },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Icon(Icons.Rounded.Settings, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("全局字体开关") }
     }
 }

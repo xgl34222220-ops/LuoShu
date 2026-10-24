@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The App package carrying this module (its own scope entry: lets the App show "已激活"). -->
+    <string name="gfh_host_package" translatable="false">io.github.xgl34222220.luoshu.debug</string>
+</resources>
