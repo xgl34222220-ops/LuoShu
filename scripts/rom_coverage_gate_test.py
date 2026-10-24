@@ -67,6 +67,22 @@ class MapperTest(unittest.TestCase):
         self.assertEqual(sorted(set(hyperos['legacyReplaced']) - set(hyperos['replaced'])),
                          ['MiSansL3.otf'])
 
+    def test_oem_private_slots_replaced_and_protected_kept(self):
+        data = gate.load()
+        origin = data['roms']['originos']
+        for name in ('VivoFont.ttf', 'DroidSansFallbackBBK.ttf', 'vivoSansVF.ttf'):
+            self.assertIn(name, origin['replaced'])
+        flyme = data['roms']['flyme']
+        self.assertIn('FlymeSans-Regular.ttf', flyme['replaced'])
+        for rom in ('originos', 'flyme'):
+            entry = data['roms'][rom]
+            for name in ('DroidSansMono.ttf', 'NotoColorEmoji.ttf'):
+                self.assertNotIn(name, entry['replaced'], (rom, name))
+            # Live mapper agrees with the baseline.
+            self.assertEqual(gate.replaced_names(rom, entry['fixture']), entry['replaced'])
+        # Unverified Flyme SysSans names are diagnostic-only.
+        self.assertNotIn('SysSans-Hans-Regular.ttf', flyme['replaced'])
+
     def test_reintroduced_mono_regression_is_caught(self):
         # Re-create the #290 behaviour (every *mono* kept stock) in a copy of the mapper.
         shell = ROOT / 'common/legacy_v14_4/hyperos_full_coverage.sh'

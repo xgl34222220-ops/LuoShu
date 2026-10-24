@@ -131,11 +131,43 @@ _luoshu_oem_protected_filename() {
     return 1
 }
 
+# Exact ROM-private UI slots. These names are the default system text faces documented by the
+# ROM's public font directory (OriginOS: VivoFont.ttf for Latin/UI, DroidSansFallbackBBK.ttf for
+# the CJK UI fallback). They are matched by full filename only, so a lookalike such as
+# DroidSansFallback.ttf or VivoClock.ttf keeps the regular protection rules.
+#   prints: latin | cjk ; returns 1 when the name is not an exact ROM slot
+_luoshu_oem_exact_slot_kind() {
+    _loes_lower=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
+    case "$1:$_loes_lower" in
+        originos:vivofont.ttf) printf 'latin\n' ;;
+        originos:droidsansfallbackbbk.ttf) printf 'cjk\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+# Names that look ROM-private but are not verified as UI text slots. They are reported in
+# config/oem-font-diagnostic.conf and never replaced.
+_luoshu_oem_diagnostic_filename() {
+    _lodf_lower=$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')
+    case "$_lodf_lower" in *.ttf|*.otf|*.ttc) ;; *) return 1 ;; esac
+    case "$1:$_lodf_lower" in
+        originos:*vivo*|originos:*bbk*|originos:*origin*|originos:*iqoo*) return 0 ;;
+        flyme:*flyme*|flyme:*meizu*|flyme:syssans*|flyme:sysfont*) return 0 ;;
+    esac
+    return 1
+}
+
 _luoshu_oem_candidate_filename() {
     _loc_rom="$1"
     _loc_file="$2"
     _loc_lower=$(printf '%s' "$_loc_file" | tr '[:upper:]' '[:lower:]')
     case "$_loc_lower" in *.ttf|*.otf|*.ttc) ;; *) return 1 ;; esac
+    if _loc_kind=$(_luoshu_oem_exact_slot_kind "$_loc_rom" "$_loc_file"); then
+        # A Latin-only user font must not take over the CJK fallback slot.
+        [ "$_loc_kind" != cjk ] || [ "${LUOSHU_FONT_HAS_CJK:-true}" != false ] || return 1
+        [ "$_loc_kind" != latin ] || [ "${LUOSHU_FONT_HAS_LATIN:-true}" != false ] || return 1
+        return 0
+    fi
     _luoshu_oem_protected_filename "$_loc_file" && return 1
     case "$_loc_rom:$_loc_lower" in
         originos:*vivosans*|originos:*vivo-sans*|originos:*originsans*|originos:*origin-sans*|originos:*iqoosans*|originos:*iqoo-sans*) return 0 ;;
@@ -184,6 +216,20 @@ _luoshu_oem_anchor_for_file() {
     printf '%s\n' "$_loaf_regular_anchor"
 }
 
+# Print every file in one real font directory that the ROM mapper would replace. Pure filter: it
+# reads only file names, so the coverage gate can run it over placeholder fixtures.
+luoshu_oem_slot_names_for_root() {
+    _losn_rom="$1"
+    _losn_root="$2"
+    [ -d "$_losn_root" ] || return 0
+    for _losn_file in "$_losn_root"/*; do
+        [ -f "$_losn_file" ] || continue
+        _losn_name=${_losn_file##*/}
+        _luoshu_oem_candidate_filename "$_losn_rom" "$_losn_name" && printf '%s\n' "$_losn_name"
+    done
+    return 0
+}
+
 luoshu_oem_clear_managed_fonts() {
     _locm_module="$(_luoshu_oem_module_dir)"
     _locm_manifest="$_locm_module/config/oem-font-targets.conf"
@@ -212,13 +258,23 @@ _luoshu_oem_copy_existing_slots() {
     _loce_regular=$(_luoshu_oem_pick_regular_source "$_loce_family" "$_loce_src") || return 1
     _loce_regular_anchor=$(_font_anchor "$_loce_regular" "$_loce_store" regular) || return 1
     : > "$_loce_manifest_tmp" 2>/dev/null || return 1
+    _loce_diag_tmp="$_loce_config/oem-font-diagnostic.conf.tmp.$$"
+    : > "$_loce_diag_tmp" 2>/dev/null || true
     _loce_count=0
     while IFS='|' read -r _loce_real_root _loce_overlay_root; do
         [ -d "$_loce_real_root" ] || continue
         for _loce_real_file in "$_loce_real_root"/*; do
             [ -f "$_loce_real_file" ] || continue
             _loce_name=$(basename "$_loce_real_file")
-            _luoshu_oem_candidate_filename "$_loce_rom" "$_loce_name" || continue
+            if ! _luoshu_oem_candidate_filename "$_loce_rom" "$_loce_name"; then
+                if _luoshu_oem_diagnostic_filename "$_loce_rom" "$_loce_name"; then
+                    _loce_why=unverified
+                    _luoshu_oem_protected_filename "$_loce_name" && _loce_why=protected
+                    _luoshu_oem_exact_slot_kind "$_loce_rom" "$_loce_name" >/dev/null 2>&1 && _loce_why=coverage
+                    printf '%s|%s|%s\n' "$_loce_rom" "$_loce_why" "$_loce_real_file" >> "$_loce_diag_tmp" 2>/dev/null || true
+                fi
+                continue
+            fi
             _loce_anchor=$(_luoshu_oem_anchor_for_file "$_loce_regular_anchor" "$_loce_family" "$_loce_store" "$_loce_name")
             [ -s "$_loce_anchor" ] || continue
             case "$_loce_name" in
@@ -245,6 +301,13 @@ _luoshu_oem_copy_existing_slots() {
     done <<EOF_LUOSHU_OEM_ROOTS
 $(_luoshu_oem_root_pairs "$_loce_rom")
 EOF_LUOSHU_OEM_ROOTS
+    if [ -s "$_loce_diag_tmp" ]; then
+        mv -f "$_loce_diag_tmp" "$_loce_config/oem-font-diagnostic.conf" 2>/dev/null || rm -f "$_loce_diag_tmp" 2>/dev/null
+        type _log_step >/dev/null 2>&1 && \
+            _log_step "  $(wc -l < "$_loce_config/oem-font-diagnostic.conf" | tr -d ' ') 个 ROM 专有字体未核实或受保护，仅记录诊断不替换"
+    else
+        rm -f "$_loce_diag_tmp" "$_loce_config/oem-font-diagnostic.conf" 2>/dev/null || true
+    fi
     mv -f "$_loce_manifest_tmp" "$_loce_config/oem-font-targets.conf" 2>/dev/null || return 1
     chmod 0644 "$_loce_config/oem-font-targets.conf" 2>/dev/null || true
     LUOSHU_OEM_SLOT_COUNT="$_loce_count"
