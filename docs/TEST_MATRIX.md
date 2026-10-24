@@ -127,3 +127,7 @@
 ## 3.0.0 的单次发布例外
 
 维护者于 Sun 2026-10-11 1:26 AM CST (UTC+08:00) 明确授权合并组合字体对齐、英数微调、实例缓存与日志修复，并以 3.0.0 正式发布（非预发行）。`config/stable_release_authorization.conf` 仅为 v3.0.0 设置 `allowPendingDeviceMatrix=true`，不改变上方实际测试状态，也不免除源码、签名和最终成品门禁。下一版本须重新完成真机矩阵或取得独立授权。
+
+## 3.3.3 的单次发布例外
+
+维护者于 Sat 2026-10-24 2:08 PM CST (UTC+08:00) 明确授权将整合测试包（#319）合入 main，并以 3.3.3 正式发布（非预发行）。`config/stable_release_authorization.conf` 仅为 v3.3.3 设置 `allowPendingDeviceMatrix=true`，不改变上方实际测试状态，也不免除源码、签名和最终成品门禁。下一版本须重新完成真机矩阵或取得独立授权。
